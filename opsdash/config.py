@@ -53,6 +53,7 @@ DEFAULTS: dict = {
         "model_triage": "sonnet",
         "model_digest": "sonnet",
         "model_ask": "sonnet",
+        "model_briefs": "sonnet",
         "timeout_minutes": 30,
     },
     "schedule": {
@@ -66,6 +67,20 @@ DEFAULTS: dict = {
         "digest_morning": "09:00",
         "digest_evening": "18:30",
         "stale_check": "10:00",
+        "weekly_day": 5,  # итоги недели: день (1 — понедельник … 7 — воскресенье) и время
+        "weekly_time": "18:00",
+        "groups_digest": "19:00",  # сводка рабочих групп Telegram за день; пусто — не делать
+        "briefs_minutes": 60,  # как часто проверять, к каким встречам нужен бриф
+    },
+    "briefs": {
+        "enabled": True,
+        "hours_ahead": 36,  # готовить бриф к встречам на ближайшие N часов
+        # такие встречи не разбираем: это не встречи, а занятое время
+        "ignore": ["тайм-аут", "обед", "фокус", "личное", "дорога", "не беспокоить"],
+    },
+    "reminders": {
+        # напоминание коллеге по задаче «мне должны»: {имя}, {задача}, {срок}
+        "template": "{имя}, привет! Напоминаю про «{задача}» ({срок}). Как продвигается?",
     },
     "recordings": {
         "folders": ["data/recordings"],
@@ -149,6 +164,7 @@ DEFAULTS: dict = {
         "urgent_immediately": True,
         "stale_pings": True,
         "max_stale_in_ping": 10,
+        "groups_digest": False,  # присылать сводку групп в Telegram (в разделе «Дайджесты» она есть всегда)
     },
 }
 

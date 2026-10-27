@@ -120,9 +120,90 @@ def job_digest(when: str | None = None, **_) -> str:
         brain.run(prompt, model=settings["claude"]["model_digest"], job="digest", timeout_min=15)
         return f"{when} дайджест отправлен"
     except Exception as e:  # noqa: BLE001 — без ИИ всё равно пришлём сводку
-        bot.notify(overview.today_text())
+        from opsdash import digests
+
+        text = overview.today_text()
+        digests.save(digests.daily_kind(settings), text)
+        bot.notify(text)
         store.log("digest", f"Claude недоступен, отправлена простая сводка: {e}", "warning")
         return "отправлена простая сводка (Claude недоступен)"
+
+
+def job_weekly(day: str | None = None, **_) -> str:
+    """Итоги недели — в Telegram и в раздел «Дайджесты». day — день той недели, за которую итоги
+    (если компьютер был выключен в пятницу вечером, итоги придут при следующем запуске — за ту же неделю)."""
+    settings = config.load_settings()
+    prompt = (
+        f"Подготовь итоги недели{' (неделя, в которую входит ' + day + ')' if day else ''} строго по навыку weekly "
+        f"(.claude/skills/weekly/SKILL.md){' — данные: ./ops week --date ' + day if day else ''}. "
+        "Это фоновый запуск: директор узнаёт итог только через ./ops notify."
+    )
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="weekly", timeout_min=20)
+    return "итоги недели готовы"
+
+
+def job_groups(**_) -> str:
+    """Сводка рабочих групп Telegram за сутки — в раздел «Дайджесты» (в Telegram — если включено в настройках)."""
+    from opsdash import digests
+
+    settings = config.load_settings()
+    chats = digests.group_messages(24)
+    if not chats:
+        return "в рабочих группах за сутки тихо"
+    n = sum(len(c["messages"]) for c in chats)
+    prompt = (
+        f"Сделай сводку рабочих групп Telegram за сутки ({len(chats)} групп, {n} сообщений) строго по навыку "
+        "groups-digest (.claude/skills/groups-digest/SKILL.md). Это фоновый запуск."
+    )
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="groups", timeout_min=15)
+    return f"групп: {len(chats)}, сообщений: {n}"
+
+
+def job_briefs(uid: str | None = None, **_) -> str:
+    """Брифы к встречам на ближайшие сутки-полтора (или к одной — по кнопке «Собрать бриф»)."""
+    from opsdash import briefs
+
+    settings = config.load_settings()
+    if uid:
+        e = store.row("SELECT * FROM events WHERE uid=?", (uid,))
+        if not e:
+            return "встречи уже нет в календаре"
+        briefs.forget(uid)
+        items = [dict(e)]
+    else:
+        items = briefs.pending(settings)
+    if not items:
+        return "новых встреч для брифа нет"
+    listing = "\n".join(f"- {e['uid']} · {store.local(e['start'], '%d.%m %H:%M')} · {e['title'] or 'без названия'}"
+                         for e in items)
+    prompt = (
+        f"Подготовь брифы к встречам строго по навыку meeting-brief (.claude/skills/meeting-brief/SKILL.md):\n{listing}\n"
+        + ("Директор сама попросила бриф к этой встрече — собери его, даже если тема не очевидна. " if uid else "")
+        + "Это фоновый запуск: директор не видит этот чат."
+    )
+    try:
+        brain.run(prompt, model=settings["claude"].get("model_briefs") or "sonnet", job="briefs", timeout_min=20)
+    finally:
+        for e in items:  # не записал ни бриф, ни причину — помечаем, чтобы не запускать по кругу
+            if not briefs.get(e["uid"]):
+                briefs.fail(e["uid"], "бриф не собрался — нажмите «Собрать бриф», чтобы попробовать ещё раз")
+    ready = sum(1 for e in items if (briefs.get(e["uid"]) or {}).get("status") == "ready")
+    return f"брифов готово: {ready} из {len(items)}"
+
+
+def job_followup(meeting_id: str, **_) -> str:
+    """Текст итогов встречи для участников (followup.md) — по кнопке «Подготовить с Claude» на странице встречи."""
+    settings = config.load_settings()
+    prompt = (
+        f"Подготовь текст итогов встречи `{meeting_id}` для участников по шагу «Текст для участников» навыка "
+        "process-meeting (.claude/skills/process-meeting/SKILL.md): прочитай data/meetings/"
+        f"{meeting_id}/summary.md и задачи встречи, запиши data/meetings/{meeting_id}/followup.md. "
+        "Больше ничего не меняй и директору не пиши. Это фоновый запуск."
+    )
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="followup", timeout_min=10)
+    if not (records.meeting_dir(meeting_id) / "followup.md").exists():
+        raise RuntimeError("Claude не создал followup.md")
+    return "текст итогов готов"
 
 
 def job_anthology(**_) -> str:
@@ -254,6 +335,10 @@ REGISTRY = {
     "triage": job_triage,
     "digest": job_digest,
     "anthology": job_anthology,
+    "weekly": job_weekly,
+    "groups": job_groups,
+    "briefs": job_briefs,
+    "followup": job_followup,
     "company-context": job_company_context,
     "stale": job_stale,
     "ask": job_ask,
@@ -278,6 +363,10 @@ TITLES = {
     "triage": "Разбор сообщений (Claude)",
     "digest": "Дайджест (Claude)",
     "anthology": "База знаний: обзор недели (Claude)",
+    "weekly": "Итоги недели (Claude)",
+    "groups": "Сводка рабочих групп Telegram (Claude)",
+    "briefs": "Брифы к встречам (Claude)",
+    "followup": "Текст итогов встречи (Claude)",
     "company-context": "Сводка «О компании» для Claude",
     "stale": "Напоминания: Kaiten без движения",
     "ask": "Вопрос из Telegram (Claude)",
@@ -400,6 +489,33 @@ def _daily(key: str, at: str, settings: dict, workdays_only: bool = True) -> boo
     return True
 
 
+def _weekly(key: str, weekday: int, at: str, settings: dict) -> str | None:
+    """Еженедельное задание (weekday: 1 — понедельник … 7 — воскресенье). Если в назначенный момент компьютер был
+    выключен — запускается при первом включении после него. Возвращает дату назначенного дня (за какую неделю),
+    None — не пора. Недели до того, как задание появилось, не догоняем."""
+    now = config.now(settings)
+    try:
+        hh, mm = (int(x) for x in config.hhmm(at).split(":"))
+        weekday = int(weekday)
+    except (ValueError, AttributeError, TypeError):
+        return None
+    target = (now - timedelta(days=(now.isoweekday() - weekday) % 7)).replace(hour=hh, minute=mm, second=0,
+                                                                              microsecond=0)
+    if target > now:
+        target -= timedelta(days=7)
+    since = store.get_state(f"weekly:{key}:since")
+    if not since:
+        store.set_state(f"weekly:{key}:since", now.isoformat())
+        since = now.isoformat()
+    if target < datetime.fromisoformat(since):
+        return None
+    stamp = f"weekly:{key}:{target.date().isoformat()}"
+    if store.get_state(stamp):
+        return None
+    store.set_state(stamp, True)
+    return target.date().isoformat()
+
+
 def tick(settings: dict | None = None) -> list[str]:
     """Один проход планировщика: что пора запустить."""
     settings = settings or config.load_settings()
@@ -434,6 +550,15 @@ def tick(settings: dict | None = None) -> list[str]:
         go("digest", "heavy", {"when": "вечерний"})
     if sch.get("stale_check") and settings["kaiten"].get("enabled") and _daily("stale", sch["stale_check"], settings):
         go("stale")
+    if sch.get("weekly_time") and (day := _weekly("summary", sch.get("weekly_day") or 5, sch["weekly_time"], settings)):
+        go("weekly", "heavy", {"day": day})
+    if sch.get("groups_digest") and settings["telegram"].get("enabled") and _daily("groups", sch["groups_digest"], settings):
+        go("groups", "heavy")
+    if settings["briefs"].get("enabled") and in_work_hours(settings) and _due("briefs", sch.get("briefs_minutes") or 60):
+        from opsdash import briefs
+
+        if briefs.pending(settings, limit=1):
+            go("briefs", "heavy")
     if (sch.get("anthology_weekly") and config.now(settings).weekday() == 4  # пятница
             and _daily("anthology", sch["anthology_weekly"], settings)):
         go("anthology", "heavy")

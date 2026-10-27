@@ -21,6 +21,7 @@ claude:
   model_triage: sonnet
   model_digest: sonnet
   model_ask: sonnet
+  model_briefs: sonnet
   timeout_minutes: 30
 schedule:
   collect_minutes: 15
@@ -30,6 +31,16 @@ schedule:
   digest_morning: 09:00
   digest_evening: '18:30'
   stale_check: '10:00'
+  weekly_day: 5
+  weekly_time: '18:00'
+  groups_digest: '19:00'
+  briefs_minutes: 60
+briefs:
+  enabled: true
+  hours_ahead: 36
+  ignore: [тайм-аут, обед, фокус, личное, дорога, не беспокоить]
+reminders:
+  template: '{имя}, привет! Напоминаю про «{задача}» ({срок}). Как продвигается?'
 recordings:
   folders:
   - data/recordings
@@ -102,3 +113,4 @@ notifications:
   urgent_immediately: true
   stale_pings: true
   max_stale_in_ping: 10
+  groups_digest: false

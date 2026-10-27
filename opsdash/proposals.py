@@ -21,6 +21,7 @@ KINDS = {
     "calendar.create": "Создать встречу в календаре",
     "calendar.cancel": "Отменить встречу",
     "task.done": "Закрыть выполненную задачу",
+    "telegram.remind": "Напомнить коллеге в Telegram",
 }
 
 
@@ -216,6 +217,30 @@ def propose_task_done(*, commitment_id: int, quote: str | None = None, batch: st
                    source_ref=source_ref, batch=batch)
 
 
+def propose_reminder(*, commitment_id: int, text: str | None = None, batch: str | None = None,
+                     reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Напомнить исполнителю задачи «мне должны» в Telegram — сообщение уйдёт от имени директора, поэтому
+    только после её «Да» (автономии для этого нет). text — свой текст, иначе по шаблону из настроек."""
+    c = store.row("SELECT * FROM commitments WHERE id=?", (int(commitment_id),))
+    if not c:
+        raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
+    if c["direction"] != "to_me" or c["status"] != "open":
+        raise ProposalError("Напоминать можно только по открытым задачам «мне должны»")
+    to = records.recipient(c)
+    if not to:
+        raise ProposalError(f"Не нашла чат Telegram с «{c['who']}» — укажите его @username в «Людях»")
+    text = (text or "").strip() or records.reminder_text(c, name=to["label"])
+    payload = {"commitment_id": c["id"], "target": to["target"], "to": to["label"], "text": text}
+    dup = store.row("SELECT id FROM proposals WHERE kind='telegram.remind' AND status='pending' "
+                    "AND json_extract(payload, '$.commitment_id')=?", (c["id"],))
+    if dup:
+        store.execute("UPDATE proposals SET payload=? WHERE id=?", (store.json_col(payload), dup["id"]))
+        return get(dup["id"])
+    label = f"Напомнить в Telegram → {to['label']}: «{records.headline(c)}»"
+    return _create("telegram.remind", label, payload, autonomy_key="telegram_send", reason=reason,
+                   source_ref=source_ref, batch=batch)
+
+
 # --- решение ----------------------------------------------------------------
 
 def reject(pid: int) -> dict:
@@ -304,6 +329,12 @@ def execute(p: dict) -> dict:
 
         calendar.cancel_event(pl["uid"])
         return {"uid": pl["uid"]}
+    if kind == "telegram.remind":
+        from opsdash.sources import telegram
+
+        telegram.send(pl["target"], pl["text"])
+        records.mark_reminded(pl["commitment_id"])
+        return {"commitment_id": pl["commitment_id"], "to": pl.get("to")}
     if kind == "task.done":
         c = store.row("SELECT status FROM commitments WHERE id=?", (pl["commitment_id"],))
         if not c:
@@ -365,6 +396,12 @@ def describe(p: dict) -> str:
     """Подробное описание для админки и бота."""
     pl = p["payload"]
     lines = [p["title"]]
+    if p["kind"] == "telegram.remind":
+        lines.append(f"Текст: «{pl.get('text', '')[:600]}»")
+        if p.get("reason"):
+            lines.append(f"Почему: {p['reason']}")
+        lines.append("«Да» — сообщение уйдёт от вашего имени из вашего Telegram.")
+        return "\n".join(lines)
     if p["kind"] == "task.done":
         if p.get("reason"):
             lines.append(f"Почему так думаю: {p['reason']}")
@@ -392,6 +429,8 @@ def describe(p: dict) -> str:
 def result_text(p: dict) -> str:
     if p["status"] == "done" and p["kind"] == "task.done":
         return "✅ Задача закрыта"
+    if p["status"] == "done" and p["kind"] == "telegram.remind":
+        return f"✅ Напоминание отправлено: {(p.get('payload') or {}).get('to') or ''}".rstrip(": ")
     if p["status"] == "done":
         res = p.get("result") or {}
         if isinstance(res, dict) and res.get("warning"):

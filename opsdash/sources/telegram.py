@@ -1,4 +1,4 @@
-"""Telegram: чтение аккаунта директора (только выбранные чаты).
+"""Telegram: чтение аккаунта директора (только выбранные чаты) и напоминания коллегам — только после «Да».
 
 Используется официальный клиентский API Telegram (библиотека Telethon) —
 так же работают десктопные клиенты. Нужны api_id/api_hash с my.telegram.org
@@ -171,6 +171,35 @@ def collect(settings: dict | None = None) -> str:
     settings = settings or config.load_settings()
     with _lock:
         return asyncio.run(_collect(settings))
+
+
+async def _send(settings: dict, target: str, text: str) -> int:
+    client = await _authorized_client(settings)
+    try:
+        entity = target
+        if not target.startswith("@"):
+            # по id: сессия не помнит собеседников — находим чат среди диалогов, как при сборе
+            entity = None
+            async for d in client.iter_dialogs():
+                if str(d.id) == str(target):
+                    entity = d.entity
+                    break
+            if entity is None:
+                raise TelegramError(f"Чат {target} не найден среди диалогов Telegram")
+        msg = await client.send_message(entity, text)
+        return msg.id
+    finally:
+        await client.disconnect()
+
+
+def send(target: str, text: str, settings: dict | None = None) -> int:
+    """Отправить сообщение от имени директора: target — @username или id личного чата. Вызывается только
+    из подтверждённого предложения (proposals.execute, «Напомнить коллеге») — сам Claude не пишет никому."""
+    settings = settings or config.load_settings()
+    if not text.strip():
+        raise TelegramError("Пустое сообщение")
+    with _lock:
+        return asyncio.run(_send(settings, target, text.strip()))
 
 
 async def _check(settings: dict) -> str:

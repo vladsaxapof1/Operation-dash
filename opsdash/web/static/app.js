@@ -226,17 +226,32 @@
     });
   });
 
-  // копировать черновик ответа
-  document.querySelectorAll("[data-copy-btn]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var li = btn.closest("li");
-      var draft = li && li.querySelector("[data-copy]");
-      if (!draft) return;
-      var text = draft.innerText;
-      var done = function () { btn.textContent = "Скопировано ✓"; setTimeout(function () { btn.textContent = "Копировать ответ"; }, 1800); };
-      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done);
-      else { var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done(); }
-    });
+  // «Копировать»: черновик ответа, текст напоминания, бриф, итоги встречи. Текст — в [data-copy] рядом с кнопкой
+  // (в общем [data-copy-scope] или строке списка). Через document: кнопки бывают и в карточке встречи, собранной на лету
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-copy-btn]");
+    if (!btn) return;
+    var scope = btn.closest("[data-copy-scope]") || btn.closest("li");
+    var src = scope && scope.querySelector("[data-copy]");
+    if (!src) return;
+    var text = src.tagName === "TEXTAREA" ? src.value : src.innerText;
+    var label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+    var done = function () { btn.textContent = "Скопировано ✓"; setTimeout(function () { btn.textContent = label; }, 1800); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done);
+    else { var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done(); }
+  });
+
+  // бриф к встрече: «Открыть бриф» в карточке встречи календаря — окно с брифом целиком
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-brief-open]");
+    if (!btn) return;
+    var dlg = document.getElementById("brief-" + btn.dataset.briefOpen);
+    if (!dlg) return;
+    e.stopPropagation();
+    var popup = document.querySelector("[data-ev-pop]");
+    if (popup) popup.hidden = true;
+    dlg.showModal();
+    dlg.querySelector(".dlg-box").focus();
   });
 
   // проверка подключений

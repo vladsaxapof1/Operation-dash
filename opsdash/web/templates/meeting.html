@@ -23,11 +23,24 @@
   <div>
     <div class="tabs">
       <a href="?tab=summary" class="{{ 'active' if tab == 'summary' }}">Разбор</a>
+      <a href="?tab=followup" class="{{ 'active' if tab == 'followup' }}">Текст для отправки</a>
       <a href="?tab=transcript" class="{{ 'active' if tab == 'transcript' }}">Расшифровка</a>
     </div>
     <section class="card">
       <div class="card-b" style="padding-top:14px">
-        {% if tab == 'transcript' %}
+        {% if tab == 'followup' %}
+          {% if followup %}
+          <div data-copy-scope>
+            <p class="muted small">Итоги для участников: что решили, следующие шаги, задачи — кто кому и к какому сроку. Скопируйте и отправьте в чат встречи.</p>
+            <div class="draft followup" data-copy>{{ followup }}</div>
+            <div class="actions" style="margin-top:10px">
+              <button type="button" class="btn primary" data-copy-btn>Копировать текст</button>
+              <form class="inline" method="post" action="/meetings/{{ m.id }}/followup" data-busy="Готовлю…"><button class="btn" title="Claude перепишет текст по разбору и задачам встречи">{{ 'Подготовить с Claude' if followup_auto else 'Переписать заново' }}</button></form>
+            </div>
+            {% if followup_auto %}<p class="hint">Текст собран автоматически из разбора — у встреч, разобранных раньше, его не было. Claude сделает его короче и точнее.</p>{% endif %}
+          </div>
+          {% else %}<div class="muted">Текст появится, когда встреча будет разобрана.</div>{% endif %}
+        {% elif tab == 'transcript' %}
           {% if transcript %}<div class="doc transcript">{{ transcript | md | safe }}</div>{% else %}<div class="muted">Расшифровки ещё нет.</div>{% endif %}
         {% else %}
           {% if summary %}<div class="doc">{{ summary | md | safe }}</div>{% else %}<div class="muted">Разбора ещё нет{% if transcript %} — <a href="?tab=transcript">расшифровка готова</a>{% endif %}.</div>{% endif %}

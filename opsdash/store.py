@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS commitments (
     note TEXT,
     parent_id INTEGER,               -- часть какой задачи: директор передала работу дальше (Пётр → мне, для Тимура)
     seen_at TEXT,                    -- когда директор увидела задачу; пусто — «новая» (добавил Claude)
+    reminded_at TEXT,                -- когда напомнили исполнителю в Telegram (кнопка «Отправить»)
     created TEXT, updated TEXT, closed_at TEXT
 );
 
@@ -211,6 +212,24 @@ CREATE TABLE IF NOT EXISTS meetings (
     headline TEXT,
     error TEXT,
     created TEXT, updated TEXT
+);
+
+CREATE TABLE IF NOT EXISTS briefs (         -- бриф к встрече из календаря (opsdash.briefs)
+    uid TEXT PRIMARY KEY,            -- events.uid (у повторяющихся — своя для каждого раза)
+    title TEXT, start TEXT,
+    status TEXT,                     -- ready | skipped (тема не ясна) | failed
+    topic TEXT,                      -- тема встречи одной строкой
+    text TEXT,                       -- бриф в Markdown
+    why TEXT,                        -- почему не собран
+    fingerprint TEXT,                -- название + описание + время: изменились — бриф устарел
+    created TEXT, updated TEXT
+);
+
+CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раздела «Дайджесты»: что ушло в Telegram и сводки групп
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,              -- morning | evening | weekly | groups
+    text TEXT NOT NULL,              -- разметка Telegram HTML
+    created TEXT
 );
 
 CREATE TABLE IF NOT EXISTS files_seen (
@@ -269,6 +288,7 @@ MIGRATIONS = [
     ("commitments", "parent_id", "INTEGER"),
     # задачи, которые были до появления отметки «новая», — уже просмотрены
     ("commitments", "seen_at", "TEXT", "UPDATE commitments SET seen_at=COALESCE(created, updated, '')"),
+    ("commitments", "reminded_at", "TEXT"),
 ]
 
 
@@ -279,6 +299,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
             for sql in backfill:
                 conn.execute(sql)
+    # раздел «Дайджесты» появился 27.10.2026: уже отправленные дайджесты переносим из ленты бота (один раз)
+    if not conn.execute("SELECT 1 FROM state WHERE key='digests_backfilled'").fetchone():
+        conn.execute("INSERT INTO digests(kind, text, created) SELECT CASE WHEN text LIKE '<b>Итоги дня%' "
+                     "THEN 'evening' ELSE 'morning' END, text, created FROM outbox "
+                     "WHERE text LIKE '<b>Доброе утро%' OR text LIKE '<b>Итоги дня%' ORDER BY id")
+        conn.execute("INSERT INTO state(key, value) VALUES('digests_backfilled', 'true')")
     # до 26.10.2026 для личных чатов Telegram сохранялись ссылки t.me/<человек>/<id> — такие не открываются
     conn.execute("UPDATE messages SET link=NULL WHERE source='telegram' AND chat_id NOT LIKE '-%' AND link IS NOT NULL")
 

@@ -55,20 +55,24 @@
   </div>
 </section>
 
+{{ ui.workload_strip(workload) }}
+
 <section class="card">
   <a class="add-row" href="/people#add">+ Добавить человека</a>
   <div class="card-b flush">
     <div class="table-wrap">
     <table class="t">
-      <thead><tr><th>Имя</th><th>Где найти {{ ui.help('По этим адресам Claude узнаёт человека в Telegram, Я.Мессенджере, почте и Kaiten.', below=True) }}</th><th></th></tr></thead>
+      <thead><tr><th>Имя</th><th>Где найти {{ ui.help('По этим адресам Claude узнаёт человека в Telegram, Я.Мессенджере, почте и Kaiten.', below=True) }}</th><th>Загрузка {{ ui.help('Открытые задачи, где он исполнитель, и его карточки Kaiten в работе.', below=True) }}</th><th></th></tr></thead>
       <tbody>
       {% for p in items %}
         <tr>
           <td><strong>{{ p.name }}</strong>{% if p.role %}<div class="meta">{{ p.role }}</div>{% endif %}{% if p.aliases %}<div class="meta">также: {{ p.aliases | join(', ') }}</div>{% endif %}</td>
           <td class="small">{% if p.telegram %}TG {{ p.telegram }}<br>{% endif %}{% if p.ymessenger %}ЯМ {{ p.ymessenger }}<br>{% endif %}{% if p.email %}{{ p.email }}<br>{% endif %}{% if p.kaiten_user_id %}Kaiten #{{ p.kaiten_user_id }}<br>{% endif %}{% if voices.get(p.id) %}<span title="PULSE узнаёт этот голос в записях встреч">🎙 голос запомнен</span>{% endif %}</td>
+          {% set w = load.get('p' ~ p.id) %}
+          <td class="small nowrap">{% if w %}<a href="/commitments?person={{ w.person_q | urlencode }}">задач {{ w.open }}</a>{% if w.overdue %} · <span class="load-bad">{{ w.overdue }} просроч.</span>{% endif %}{% if w.kaiten %}<br><a href="/tasks?who={{ w.kaiten_q | urlencode }}">Kaiten {{ w.kaiten }}</a>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
           <td class="right nowrap"><a class="btn sm" href="/people?edit={{ p.id }}#add">Изменить</a></td>
         </tr>
-      {% else %}<tr><td colspan="3" class="empty">Справочник пуст — он заполнится после первых разборов встреч и чатов.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="4" class="empty">Справочник пуст — он заполнится после первых разборов встреч и чатов.</td></tr>{% endfor %}
       </tbody>
     </table>
     </div>

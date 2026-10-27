@@ -320,7 +320,138 @@ def add_links(items: list[dict]) -> list[dict]:
         if found:
             c["link"], c["link_title"] = found
             c["link_label"] = "Telegram" if "t.me/" in found[0] or "telegram.org" in found[0] else "Почта"
+    return with_reminders(items, people)
+
+
+# --- напомнить коллеге ---------------------------------------------------------------
+
+REMINDER_TEMPLATE = "{имя}, привет! Напоминаю про «{задача}» ({срок}). Как продвигается?"
+
+
+def _words(text: str | None) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-zа-я0-9]+", (text or "").lower().replace("ё", "е")) if len(w) >= 3}
+
+
+def recipient(c: dict, people: list[dict] | None = None) -> dict | None:
+    """Кому писать напоминание по задаче «мне должны»: личный чат Telegram с исполнителем. target — @username
+    или id чата (для отправки), link — открыть чат. None — чат не нашли: останется «Копировать»."""
+    name = (c.get("who") or "").strip()
+    if not name or c.get("direction") != "to_me":
+        return None
+    people = list_people() if people is None else people
+    person = _person_by_name(name, people)
+    label = person["name"] if person else name
+    username = ((person or {}).get("telegram") or "").strip().lstrip("@")
+    chat = None
+    if not username:
+        chats = store.rows("SELECT chat_id, title, username FROM chats WHERE source='telegram' AND kind='private'")
+        for n in [name, *([person["name"], *person["aliases"]] if person else [])]:
+            hits = [ch for ch in chats if _words(n) and _words(n) <= _words(ch["title"])]
+            if len(hits) == 1:
+                chat = hits[0]
+                break
+        if not chat and c.get("source_type") == "telegram" and str(c.get("source_ref") or "").isdigit():
+            chat = store.row(
+                "SELECT m.chat_id, ch.username FROM messages m JOIN chats ch ON ch.source=m.source AND ch.chat_id=m.chat_id "
+                "WHERE m.id=? AND ch.kind='private'", (int(c["source_ref"]),))
+        username = ((chat or {}).get("username") or "").lstrip("@")
+    if username:
+        return {"target": "@" + username, "link": f"https://t.me/{username}", "label": label}
+    if chat:  # без @имени: отправить можно по id чата, открыть — ссылкой приложения Telegram
+        return {"target": str(chat["chat_id"]), "link": f"tg://user?id={chat['chat_id']}", "label": label}
+    return None
+
+
+def reminder_text(c: dict, settings: dict | None = None, name: str | None = None) -> str:
+    """Готовый текст напоминания по шаблону из настроек: {имя}, {задача}, {срок}."""
+    settings = settings or config.load_settings()
+    due, today = _as_date(c.get("due")), today_local()
+    if not due:
+        when = "без срока"
+    elif due < today:
+        when = f"срок был {due:%d.%m}"
+    elif due == today:
+        when = "договаривались на сегодня"
+    elif due == today + timedelta(days=1):
+        when = "договаривались на завтра"
+    else:
+        when = f"договаривались до {due:%d.%m}"
+    values = {"имя": (name or c.get("who") or "").split(" ")[0], "задача": headline(c), "срок": when}
+    try:
+        return (settings["reminders"].get("template") or REMINDER_TEMPLATE).format(**values)
+    except (KeyError, IndexError, ValueError):  # шаблон с ошибкой — не ломаем страницу
+        return REMINDER_TEMPLATE.format(**values)
+
+
+def with_reminders(items: list[dict], people: list[dict] | None = None) -> list[dict]:
+    """У открытых задач «мне должны» — c["remind"]: текст напоминания и чат исполнителя (to; None — не нашли)."""
+    settings = None
+    for c in items:
+        c["remind"] = None
+        if c.get("direction") == "to_me" and c.get("status") == "open" and c.get("who"):
+            people = list_people() if people is None else people
+            settings = settings or config.load_settings()
+            to = recipient(c, people)
+            c["remind"] = {"to": to, "text": reminder_text(c, settings, to["label"] if to else None)}
     return items
+
+
+def reminders() -> list[dict]:
+    """«Напомните коллегам» на сводке: задачи «мне должны» со сроком сегодня, завтра или уже просроченные.
+    Кому напомнили меньше суток назад — не показываем."""
+    since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(hours=20))
+    items = _mark(store.rows(
+        "SELECT * FROM commitments WHERE status='open' AND direction='to_me' AND due IS NOT NULL AND due <= ? "
+        "AND (reminded_at IS NULL OR reminded_at < ?) ORDER BY due, id",
+        ((today_local() + timedelta(days=1)).isoformat(), since)))
+    return add_links(items)
+
+
+def mark_reminded(cid: int) -> None:
+    store.execute("UPDATE commitments SET reminded_at=?, updated=? WHERE id=?", (store.utcnow(), store.utcnow(), cid))
+
+
+# --- загрузка людей ---------------------------------------------------------------------
+
+def workload() -> list[dict]:
+    """Кто сколько делает: открытые задачи, где человек исполнитель (свои — «Я»), и его карточки Kaiten
+    не в «Готово». Сначала вы, потом самые загруженные. person_q / kaiten_q — для ссылок на доски."""
+    people = list_people()
+    me_kaiten = (store.get_state("kaiten_me") or {}).get("id")
+    out: dict[str, dict] = {}
+
+    def slot(name: str, person: dict | None, me: bool = False) -> dict:
+        key = "me" if me else (f"p{person['id']}" if person else name.lower())
+        return out.setdefault(key, {"key": key, "name": "Я" if me else (person["name"] if person else name), "me": me,
+                                    "raw": set(), "kaiten_names": set(), "open": 0, "overdue": 0, "week": 0,
+                                    "kaiten": 0, "kaiten_overdue": 0})
+
+    for c in list_commitments(status="open"):
+        if c["direction"] == "mine":
+            s = slot("", None, me=True)
+        elif (who := (c.get("who") or "").strip()):
+            s = slot(who, _person_by_name(who, people))
+            s["raw"].add(who)
+        else:
+            continue
+        s["open"] += 1
+        s["overdue"] += int(c["overdue"])
+        s["week"] += int(c["due_days"] is not None and 0 <= c["due_days"] <= 6)
+    today = today_local().isoformat()
+    for k in store.rows("SELECT responsible_id, responsible_name, due_date FROM kaiten_cards "
+                        "WHERE COALESCE(state, 1) != 3 AND COALESCE(condition, 1) = 1 AND responsible_name IS NOT NULL"):
+        me = bool(me_kaiten and k["responsible_id"] == me_kaiten)
+        person = None if me else (next((p for p in people if p.get("kaiten_user_id") == k["responsible_id"]), None)
+                                  or _person_by_name(k["responsible_name"], people))
+        s = slot(k["responsible_name"], person, me)
+        s["kaiten"] += 1
+        s["kaiten_overdue"] += int(bool(k["due_date"]) and k["due_date"][:10] < today)
+        s["kaiten_names"].add(k["responsible_name"])
+    rows = sorted(out.values(), key=lambda s: (not s["me"], -(s["open"] + s["kaiten"]), s["name"]))
+    for s in rows:
+        s["person_q"] = min(s["raw"], key=len) if s["raw"] else s["name"]
+        s["kaiten_q"] = min(s["kaiten_names"], key=len) if s["kaiten_names"] else ""
+    return rows
 
 
 def _person_by_name(name: str, people: list[dict]) -> dict | None:
@@ -549,6 +680,57 @@ def update_meeting(meeting_id: str, **fields) -> None:
 def read_meeting_file(meeting_id: str, name: str) -> str:
     path = meeting_dir(meeting_id) / name
     return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+_TIMECODE = re.compile(r"\s*[\[(]\d{1,2}:\d{2}(?::\d{2})?[\])](?:\s*[–-]\s*[\[(]\d{1,2}:\d{2}(?::\d{2})?[\])])?,?")
+
+
+def _plain(line: str) -> str:
+    """Пункт разбора для текста коллегам: без маркера списка, отметок времени и Markdown-выделения."""
+    line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", line)
+    line = _TIMECODE.sub("", line).replace("**", "").replace("__", "")
+    return re.sub(r"\s{2,}", " ", line).strip(" ,;")
+
+
+def _short_what(c: dict) -> str:
+    what = " ".join((c.get("what") or "").split())
+    cuts = [i for sep in (": ", "; ") if 12 <= (i := what.find(sep))]
+    what = what[:min(cuts)] if cuts else what
+    return what if len(what) <= 160 else what[:157].rsplit(" ", 1)[0] + "…"
+
+
+def followup_text(meeting_id: str) -> tuple[str, bool]:
+    """Текст итогов встречи для участников — что решили, следующие шаги, задачи (кто кому, срок). Готовит Claude
+    при разборе (followup.md); у старых встреч собираем из разбора и задач. Второе значение — собран ли сам."""
+    own = read_meeting_file(meeting_id, "followup.md").strip()
+    if own:
+        return own, False
+    summary = read_meeting_file(meeting_id, "summary.md")
+    if not summary:
+        return "", True
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in summary.splitlines():
+        if line.startswith("## "):
+            current = sections.setdefault(line[3:].strip().lower(), [])
+        elif current is not None and re.match(r"\s*(?:[-*•]|\d+[.)])\s+", line):
+            current.append(_plain(line))
+    pick = lambda *keys: [x for k, v in sections.items() if k.startswith(keys) for x in v if x]  # noqa: E731
+    m = get_meeting(meeting_id) or {}
+    owner = config.load_settings()["owner"].get("name") or "Я"
+    tasks = [c for c in meeting_commitments(meeting_id) if c["source_ref"] == meeting_id and c["status"] != "cancelled"]
+    out = [f"Итоги встречи «{m.get('title') or meeting_id}» {store.local(m.get('started_at'), '%d.%m')}".strip()]
+    for title, items in (("Решили", pick("решени")), ("Следующие шаги", pick("следующие шаги", "открытые вопросы"))):
+        if items:
+            out += ["", f"{title}:", *[f"• {x}" for x in items]]
+    if tasks:
+        out += ["", "Задачи:"]
+        for c in tasks:
+            who = c.get("who") or (owner if c["direction"] == "mine" else "?")
+            whom = c.get("whom") or (owner if c["direction"] == "to_me" else "")
+            due = f" — до {c['due'][8:10]}.{c['due'][5:7]}" if c.get("due") else ""
+            out.append(f"• {who}{' → ' + whom if whom else ''}: {_short_what(c)}{due}")
+    return "\n".join(out), True
 
 
 def meeting_commitments(meeting_id: str) -> list[dict]:

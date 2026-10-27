@@ -466,6 +466,26 @@
   </form>
 </div></section>
 
+<section class="card" id="digests"><div class="card-h"><h2>Брифы, итоги недели, напоминания</h2></div><div class="card-b">
+  <form method="post" action="/settings/digests">
+    <label class="check"><input type="checkbox" name="briefs_enabled" {{ 'checked' if settings.briefs.enabled }}> Готовить брифы к встречам из календаря</label>
+    <div class="form-row">
+      <div><label>За сколько часов до встречи</label><input type="number" name="briefs_hours" value="{{ settings.briefs.hours_ahead }}" min="2" max="168"></div>
+      <div class="wide"><label>Не встречи, а занятое время — без брифа</label><input type="text" name="briefs_ignore" value="{{ settings.briefs.ignore | join(', ') }}"><div class="hint">Слова из названия через запятую.</div></div>
+    </div>
+    <div class="form-row">
+      <div><label>Итоги недели: день</label><select name="weekly_day">{% for d in range(1, 8) %}<option value="{{ d }}" {{ 'selected' if settings.schedule.weekly_day == d }}>{{ ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'][d - 1] }}</option>{% endfor %}</select></div>
+      <div><label>Итоги недели: время</label><input type="time" name="weekly_time" value="{{ settings.schedule.weekly_time | hhmm }}"><div class="hint">Компьютер был выключен — придут при следующем запуске. Пусто — не делать.</div></div>
+      <div><label>Сводка рабочих групп Telegram</label><input type="time" name="groups_digest" value="{{ settings.schedule.groups_digest | hhmm }}"><div class="hint">По рабочим дням. Пусто — не делать.</div></div>
+    </div>
+    <label class="check"><input type="checkbox" name="groups_to_telegram" {{ 'checked' if settings.notifications.groups_digest }}> Присылать сводку групп в Telegram (в разделе «Дайджесты» она есть всегда)</label>
+    <label>Текст напоминания коллеге</label>
+    <input type="text" name="reminder_template" value="{{ settings.reminders.template }}">
+    <div class="hint">{имя} — имя исполнителя, {задача} — заголовок задачи, {срок} — «договаривались до 06.11», «срок был 05.11» и т. п. Перед отправкой текст можно поправить.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
 {% elif tab == 'claude' %}
 <section class="card"><div class="card-b" style="padding-top:12px">
   {% if not claude_path %}

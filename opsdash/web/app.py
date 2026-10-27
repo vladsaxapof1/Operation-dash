@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from opsdash import __version__, config, overview, proposals, records, store
+from opsdash import __version__, briefs, config, digests, overview, proposals, records, store
 from opsdash.web import settings_views
 
 HERE = Path(__file__).parent
@@ -69,6 +69,17 @@ def f_md(text: str) -> str:
     # ссылки на задачи PULSE из разбора встречи (records.link_summary) — значком, а не обычной ссылкой
     out = out.replace('<a href="/commitments?task=', '<a class="task-ref" href="/commitments?task=')
     return UNSAFE_URL.sub(r'\1="#"', out)
+
+
+def f_plain(text: str) -> str:
+    """Markdown → простой текст для кнопки «Копировать» (в мессенджер): без решёток, звёздочек и ссылок-скобок."""
+    out = []
+    for line in (text or "").splitlines():
+        line = re.sub(r"^#{1,6}\s+", "", line)
+        line = re.sub(r"^(\s*)[-*]\s+", r"\1• ", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        out.append(line.replace("**", "").replace("__", ""))
+    return "\n".join(out).strip()
 
 
 def f_ago(value) -> str:
@@ -185,7 +196,7 @@ def f_size(n: int | None) -> str:
 
 templates.env.filters.update(local=f_local, date=f_date, md=f_md, ago=f_ago, tg=f_tg_html, hhmm=config.hhmm,
                              people=f_people, place=f_place, note=f_note, hl=f_hl, size=f_size,
-                             headline=records.headline, route=records.route)
+                             headline=records.headline, route=records.route, plain=f_plain)
 templates.env.globals.update(
     plural=f_plural, version=__version__, SOURCE_TITLES=overview.SOURCE_TITLES,
     # метка для ?v= у app.js/style.css: меняется с файлами, и браузер не берёт старые из кэша
@@ -292,6 +303,29 @@ async def local_only(request: Request, call_next):
     return response
 
 
+# --- дайджесты -------------------------------------------------------------------
+
+DIGEST_TABS = [("daily", "Ежедневные"), ("weekly", "Итоги недели"), ("groups", "Группы Telegram")]
+DIGEST_JOBS = {"daily": "digest", "weekly": "weekly", "groups": "groups"}
+
+
+@app.get("/digests", response_class=HTMLResponse)
+def digests_page(request: Request, tab: str = "daily"):
+    tab = tab if tab in DIGEST_JOBS else "daily"
+    return render(request, "digests.html", nav="digests", tab=tab, tabs=DIGEST_TABS, items=digests.latest(tab),
+                  counts=digests.counts(), weekdays=overview.WEEKDAYS)
+
+
+@app.post("/digests/run")
+def digests_run(request: Request, tab: str = Form("daily")):
+    from opsdash import jobs
+
+    if tab not in DIGEST_JOBS:
+        return back(request, err="Нет такого дайджеста")
+    jobs.submit(DIGEST_JOBS[tab], "heavy")
+    return back(request, "Claude собирает дайджест — обычно 1–3 минуты, обновите страницу позже")
+
+
 # --- служебное ------------------------------------------------------------------
 
 @app.get("/health")
@@ -356,8 +390,10 @@ def home(request: Request):
         batches.setdefault(p["batch"] or "", []).append(p)
     overdue = len([c for c in snap["mine"] + snap["to_me"] if c["overdue"]])
     records.add_links(snap["mine"][:6] + snap["to_me"][:6])  # кнопка «↗ Telegram» у задач на сводке
+    day = overview.day_grid()
+    briefs.for_events(day["events"])
     return render(request, "home.html", nav="home", s=snap, feed=feed, batches=batches, overdue=overdue,
-                  describe=proposals.describe, day=overview.day_grid())
+                  describe=proposals.describe, day=day, reminders=records.reminders())
 
 
 @app.post("/refresh")
@@ -469,7 +505,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
                       due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
                       gantt_w=min(max(gantt_w, 200), 720), sort=sort, sorts=records.SORTS, new=new == "1",
-                      focus=task, extra=extra, parent_task=parent_task)
+                      focus=task, extra=extra, parent_task=parent_task, workload=records.workload())
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
     return response
@@ -511,6 +547,19 @@ def commitment_edit(request: Request, cid: int, title: str = Form(""), what: str
 def task_options():
     """Подсказки поля «Часть задачи»: открытые задачи «#id · заголовок · кто → кому»."""
     return [o["label"] for o in records.task_options()]
+
+
+@app.post("/commitments/{cid}/remind")
+def commitment_remind(request: Request, cid: int, text: str = Form("")):
+    """«Отправить» у напоминания: директор сама нажала и подтвердила — сообщение уходит из её Telegram сразу."""
+    try:
+        p = proposals.propose_reminder(commitment_id=cid, text=text, reason="вы нажали «Отправить»")
+    except proposals.ProposalError as e:
+        return back(request, err=str(e))
+    p = proposals.approve(p["id"])
+    if p["status"] == "failed":
+        return back(request, err=proposals.result_text(p))
+    return back(request, proposals.result_text(p))
 
 
 @app.post("/commitments/{cid}/seen")
@@ -660,6 +709,7 @@ def calendar_page(request: Request, start: str = "", view: str = "week"):
         first -= timedelta(days=first.weekday())
     grid = overview.week_grid(first, settings) if view == "week" else None
     days = overview.calendar_days(first, 7, settings) if view == "list" else None
+    briefs.for_events(grid["events"] if grid else [e for d in days for e in d["events"]])
     sources = [s for s in CALENDAR_SOURCES if settings[s].get("enabled")]
     synced = [(store.row("SELECT last_ok FROM jobs WHERE name=?", (f"collect:{s}",)) or {}).get("last_ok") for s in sources]
     new_at = (now + timedelta(hours=1)).replace(minute=0)  # ближайший целый час
@@ -671,6 +721,17 @@ def calendar_page(request: Request, start: str = "", view: str = "week"):
                   minutes=MEETING_MINUTES, people=[p for p in records.list_people() if p.get("email")],
                   write_calendars=calendar.write_calendar_names(settings),
                   google_calendars=(store.get_state("google_calendar_names") or []) if settings["google_calendar"].get("enabled") else [])
+
+
+@app.post("/briefs/build")
+def brief_build(request: Request, uid: str = Form(...)):
+    """«Собрать бриф» / «Обновить» у встречи — Claude соберёт его в фоне за пару минут."""
+    from opsdash import jobs
+
+    if not store.row("SELECT 1 FROM events WHERE uid=?", (uid,)):
+        return back(request, err="Встречи уже нет в календаре")
+    jobs.submit("briefs", "heavy", {"uid": uid})
+    return back(request, "Собираю бриф — обычно 1–3 минуты, обновите страницу позже")
 
 
 @app.post("/calendar/refresh")
@@ -745,6 +806,7 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
     related = proposals.list_proposals("all", batch=f"meeting:{mid}")
     commitments_ = records.meeting_commitments(mid)
     summary = records.link_summary(summary, commitments_)  # строки задач в разборе — со ссылками на задачи PULSE
+    followup, followup_auto = records.followup_text(mid)
     meta_path = records.meeting_dir(mid) / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     who, how = voice.speaker_map(meta)
@@ -755,6 +817,7 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
     guesses = {k: g for k, g in voice.guesses(mid, meta).items() if k not in who} if speakers else {}
     return render(request, "meeting.html", nav="meetings", m=m, summary=summary, transcript=transcript, tab=tab,
                   related=related, commitments=commitments_, folder=str(records.meeting_dir(mid)),
+                  followup=followup, followup_auto=followup_auto,
                   # обрывки (меньше 10 с речи) сворачиваем, только когда спикеров много
                   describe=proposals.describe, speakers=[s for s in speakers if len(speakers) <= 4 or not s["short"] or s["who"]],
                   short_speakers=[s for s in speakers if len(speakers) > 4 and s["short"] and not s["who"]], guesses=guesses,
@@ -847,6 +910,14 @@ def meeting_rerun(request: Request, mid: str, step: str = Form("process")):
         return back(request, "Расшифровка поставлена в очередь")
     jobs.submit("process-meeting", "heavy", {"meeting_id": mid})
     return back(request, "Разбор поставлен в очередь")
+
+
+@app.post("/meetings/{mid}/followup")
+def meeting_followup(request: Request, mid: str):
+    from opsdash import jobs
+
+    jobs.submit("followup", "heavy", {"meeting_id": mid})
+    return back(request, "Claude готовит текст итогов — обновите страницу через минуту", to=f"/meetings/{mid}?tab=followup")
 
 
 @app.post("/meetings/{mid}/title")
@@ -942,8 +1013,10 @@ def people(request: Request, edit: int = 0):
     items = records.list_people()
     kusers = store.rows("SELECT * FROM kaiten_users ORDER BY full_name")
     current = next((p for p in items if p["id"] == edit), None)
+    load = records.workload()
+    by_person = {w["key"]: w for w in load}
     return render(request, "people.html", nav="people", items=items, kusers=kusers, current=current,
-                  voices=voice.voice_counts())
+                  voices=voice.voice_counts(), load=by_person, workload=load)
 
 
 @app.post("/people/{pid}/voice/forget")

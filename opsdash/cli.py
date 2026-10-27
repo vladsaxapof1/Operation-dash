@@ -301,6 +301,16 @@ def cmd_messages(a) -> None:
         out(f"{m['source']} · «{m['chat_title']}»" + (f" · {m['link']}" if m["link"] else ""))
         for x in around:
             out(_msg_line(x, " ◀" if x["id"] == m["id"] else "", limit=6000))
+    elif a.action == "groups":
+        from opsdash import digests
+
+        chats = digests.group_messages(a.hours)
+        if not chats:
+            return out(f"В рабочих группах за {a.hours} ч сообщений нет.")
+        for c in chats:
+            out(f"\n## «{c['title']}» ({c['source']}) — сообщений: {len(c['messages'])}")
+            for m in c["messages"][-a.limit:]:
+                out(_msg_line(m))
     elif a.action == "chat":
         sql = "SELECT * FROM messages WHERE chat_title LIKE ? AND ts >= ? ORDER BY ts DESC LIMIT ?"
         since = store.to_utc_iso(config.now() - timedelta(days=a.days))
@@ -309,6 +319,50 @@ def cmd_messages(a) -> None:
             return out("Сообщений нет.")
         for m in items:
             out(f"«{m['chat_title']}» " + _msg_line(m))
+
+
+def cmd_briefs(a) -> None:
+    from opsdash import briefs
+
+    try:
+        if a.action == "pending":
+            items = briefs.pending(limit=a.limit)
+            if not items:
+                return out("Новых встреч для брифа нет.")
+            for e in items:
+                out(f"- {e['uid']} · {store.local(e['start'], '%d.%m %H:%M')} · {e['title']} · файл: {briefs.file_for(e)}")
+        elif a.action == "context":
+            out(briefs.context(a.uid))
+        elif a.action == "set":
+            path = Path(a.file)
+            if not path.is_absolute():  # Claude пишет от папки программы; данные обычно там же
+                path = next((base / path for base in (config.ROOT, config.APP_DIR) if (base / path).exists()),
+                            config.ROOT / path)
+            briefs.save(a.uid, path.read_text(encoding="utf-8"), topic=a.topic)
+            out(f"Бриф сохранён: {a.uid}")
+        elif a.action == "skip":
+            briefs.skip(a.uid, a.why)
+            out(f"Без брифа: {a.uid} — {a.why}")
+        elif a.action == "show":
+            b = briefs.get(a.uid)
+            if not b:
+                return out("Брифа нет.")
+            out(f"{b['title']} · {b['status']}" + (f" · тема: {b['topic']}" if b["topic"] else ""))
+            out(b["text"] or b["why"] or "")
+    except (ValueError, OSError) as e:
+        fail(str(e))
+
+
+def cmd_week(a) -> None:
+    from datetime import date
+
+    from opsdash import digests
+
+    try:
+        day = date.fromisoformat(a.date) if a.date else None
+    except ValueError:
+        fail("дата — в виде ГГГГ-ММ-ДД")
+    out(digests.week_stats(day))
 
 
 def cmd_chats(a) -> None:
@@ -709,6 +763,9 @@ def cmd_propose(a) -> None:
         elif a.kind == "done":
             p = proposals.propose_task_done(commitment_id=a.commitment, quote=a.quote, batch=a.batch, reason=a.reason,
                                             source_ref=source_ref)
+        elif a.kind == "remind":
+            p = proposals.propose_reminder(commitment_id=a.commitment, text=a.text, batch=a.batch, reason=a.reason,
+                                           source_ref=source_ref)
         else:
             fail("неизвестный тип")
     except proposals.ProposalError as e:
@@ -752,6 +809,12 @@ def cmd_notify(a) -> None:
     if a.kind == "urgent" and not prefs.get("urgent_immediately", True):
         return out("Не отправлено: срочные уведомления выключены — попадёт в дайджест")
     text = a.text.replace("\\n", "\n")  # «\n» из командной строки — перенос строки
+    if a.kind in ("digest", "weekly", "groups"):  # дайджесты — ещё и в раздел «Дайджесты»
+        from opsdash import digests
+
+        digests.save(digests.daily_kind() if a.kind == "digest" else a.kind, text)
+        if a.kind == "groups" and not prefs.get("groups_digest"):
+            return out("Сохранено в разделе «Дайджесты» (в Telegram сводка групп не отправляется — так в настройках)")
     oid = bot.notify(text, batch=a.batch, urgent=a.urgent or a.kind == "urgent")
     row = store.row("SELECT sent_at, error FROM outbox WHERE id=?", (oid,))
     if row and row["sent_at"]:
@@ -856,11 +919,35 @@ def build_parser() -> argparse.ArgumentParser:
     x = ms.add_parser("show", help="сообщение с контекстом")
     x.add_argument("id", type=int)
     x.add_argument("--context", type=int, default=8)
+    x = ms.add_parser("groups", help="сообщения рабочих групп за последние часы — для сводки групп")
+    x.add_argument("--hours", type=int, default=24)
+    x.add_argument("--limit", type=int, default=150, help="не больше стольких последних сообщений на группу")
     x = ms.add_parser("chat", help="последние сообщения чата по названию")
     x.add_argument("title")
     x.add_argument("--days", type=int, default=7)
     x.add_argument("--limit", type=int, default=100)
     s.set_defaults(fn=cmd_messages)
+
+    s = sub.add_parser("briefs", help="брифы к встречам из календаря")
+    ms = s.add_subparsers(dest="action", required=True)
+    x = ms.add_parser("pending", help="встречи, к которым нужен бриф")
+    x.add_argument("--limit", type=int, default=5)
+    x = ms.add_parser("context", help="что известно к встрече: участники, прошлые встречи, задачи, решения, файлы")
+    x.add_argument("uid")
+    x = ms.add_parser("set", help="сохранить бриф из файла (Markdown)")
+    x.add_argument("uid")
+    x.add_argument("--file", required=True, help="файл с текстом брифа (путь из ./ops briefs pending)")
+    x.add_argument("--topic", help="тема встречи одной строкой")
+    x = ms.add_parser("skip", help="бриф не нужен: тема не ясна или это не встреча")
+    x.add_argument("uid")
+    x.add_argument("--why", required=True)
+    x = ms.add_parser("show")
+    x.add_argument("uid")
+    s.set_defaults(fn=cmd_briefs)
+
+    s = sub.add_parser("week", help="данные для итогов недели: встречи, задачи, решения, загрузка")
+    s.add_argument("--date", help="любой день нужной недели, ГГГГ-ММ-ДД (по умолчанию — эта неделя)")
+    s.set_defaults(fn=cmd_week)
 
     s = sub.add_parser("chats", help="список чатов")
     s.add_argument("--source")
@@ -1065,6 +1152,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--calendar", help="название календаря Яндекса (по умолчанию — из настроек)")
     x = ps.add_parser("cancel-meeting", parents=[common], help="отменить встречу")
     x.add_argument("--uid", required=True)
+    x = ps.add_parser("remind", parents=[common], help="напомнить исполнителю задачи «мне должны» в Telegram (после «Да»)")
+    x.add_argument("--commitment", type=int, required=True, help="id задачи «мне должны»")
+    x.add_argument("--text", help="свой текст; без него — по шаблону из настроек")
     x = ps.add_parser("done", parents=[common], help="закрыть задачу PULSE, которая выглядит выполненной")
     x.add_argument("--commitment", type=int, required=True, help="id задачи (./ops commitments list)")
     x.add_argument("--quote", help="дословно, откуда видно, что сделано ([чч:мм:сс] для встречи)")
@@ -1086,8 +1176,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("text", help="HTML-разметка Telegram: <b>, <i>, <a href>")
     s.add_argument("--batch", help="приложить предложения этой пачки с кнопками")
     s.add_argument("--urgent", action="store_true", help="отправить даже в тихие часы")
-    s.add_argument("--kind", choices=["meeting", "urgent", "digest", "info"], default="info",
-                   help="тип: учитываются настройки уведомлений")
+    s.add_argument("--kind", choices=["meeting", "urgent", "digest", "weekly", "groups", "info"], default="info",
+                   help="тип: учитываются настройки уведомлений; digest, weekly и groups сохраняются в «Дайджестах»")
     s.set_defaults(fn=cmd_notify)
 
     s = sub.add_parser("demo", help="демо-данные для знакомства с дашбордом")

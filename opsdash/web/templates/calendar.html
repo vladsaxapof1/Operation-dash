@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import ev_time, ev_detail %}
+{% from "_macros.html" import ev_time, ev_detail, brief_mark, brief_dialog %}
 {% block title %}Календарь{% endblock %}
 
 {% block content %}
@@ -78,7 +78,7 @@
         <button type="button" class="ev{{ ' google' if g.ev.google }}{{ ' past' if g.ev.past }}{{ ' short' if g.short }}" data-ev="{{ g.ev.n }}"
                 style="top: {{ g.top }}px; height: {{ g.height }}px; left: calc({{ '%.4f' % (g.left * 100) }}% + 1px); width: calc({{ '%.4f' % (g.width * 100) }}% - 3px)"
                 title="{{ g.ev.title or 'Без названия' }} · {{ ev_time(g.ev) }}">
-          <span class="ev-t">{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time">, {{ g.ev.start | local('%H:%M') }}</span>{% endif %}</span>
+          <span class="ev-t">{{ brief_mark(g.ev) }}{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time">, {{ g.ev.start | local('%H:%M') }}</span>{% endif %}</span>
           {% if not g.short %}<span class="ev-time">{{ ev_time(g.ev) }}</span>{% endif %}
         </button>
         {% endfor %}
@@ -88,7 +88,7 @@
     </div>
   </div>
 </div>
-{% for e in grid.events %}{{ ev_detail(e) }}{% endfor %}
+{% for e in grid.events %}{{ ev_detail(e) }}{{ brief_dialog(e) }}{% endfor %}
 <div class="ev-pop" hidden data-ev-pop></div>
 
 {% else %}
@@ -103,6 +103,7 @@
         <strong class="nowrap">{{ ev_time(e) }}</strong>
         {% if e.url %}<a href="{{ e.url }}" target="_blank">{{ e.title or 'Без названия' }}</a>{% else %}{{ e.title or 'Без названия' }}{% endif %}
         {% if e.uid.startswith('google:') %}<span class="chip" title="{{ e.calendar }}">Google</span>{% endif %}
+        {% if e.brief and e.brief.status == 'ready' %}<button type="button" class="chip ok" data-brief-open="{{ e.brief_key }}" title="{{ e.brief.topic or '' }}">✓ бриф</button>{{ brief_dialog(e) }}{% endif %}
         {% set who = e.attendees | people %}
         {% if e.location or who %}<div class="meta">
           {%- if e.location %}{{ e.location | place }}{% endif %}

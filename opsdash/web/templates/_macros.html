@@ -152,6 +152,12 @@
         {% if c.note %}<dt>Заметка</dt><dd>{{ c.note }}</dd>{% endif %}
       </dl>
       {% if c.quote %}<blockquote class="dlg-quote">{{ c.quote }}</blockquote>{% endif %}
+      {% if c.remind %}
+      <details class="dlg-remind"{{ ' open' if c.overdue or c.due_today or c.due_tomorrow }}>
+        <summary>Напоминание в Telegram{% if c.remind.to %} · {{ c.remind.to.label }}{% endif %}{% if c.reminded_at %} <span class="muted small">· напоминали {{ c.reminded_at | local }}</span>{% endif %}</summary>
+        {{ remind_form(c) }}
+      </details>
+      {% endif %}
       <div class="dlg-actions">
         {% if c.status == 'open' %}
         <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn primary">✓ Готово</button></form>
@@ -321,7 +327,90 @@
   {% set who = e.attendees | people(12) %}{% if who %}<div class="small"><span class="muted">Участники:</span> {{ who }}</div>{% endif %}
   {% if e.description %}<div class="small muted ev-desc">{{ e.description | note }}</div>{% endif %}
   {% if e.url %}<a class="small" href="{{ e.url }}" target="_blank">Открыть в календаре →</a>{% endif %}
+  {{ ev_brief(e) }}
 </div>
+{% endmacro %}
+
+{% macro ev_brief(e) %}
+{#- бриф к встрече (opsdash.briefs): готов — открыть и скопировать, нет — собрать по кнопке #}
+{% set b = e.brief %}
+<div class="ev-brief" data-copy-scope>
+{% if b and b.status == 'ready' %}
+  <div class="ev-brief-h">✓ Бриф готов{% if e.brief_stale %} <span class="chip warn" title="Название, описание или время поменялись — бриф пересоберётся сам">встреча изменилась</span>{% endif %}</div>
+  {% if b.topic %}<div class="small">{{ b.topic }}</div>{% endif %}
+  <div class="actions">
+    <button type="button" class="btn sm primary" data-brief-open="{{ e.brief_key }}">Открыть бриф</button>
+    <button type="button" class="btn sm" data-copy-btn>Копировать</button>
+  </div>
+  <textarea hidden data-copy>{{ b.text | plain }}</textarea>
+{% elif b %}
+  <div class="small muted">Бриф не собран: {{ b.why }}</div>
+  <form method="post" action="/briefs/build"><input type="hidden" name="uid" value="{{ e.uid }}"><button class="btn sm">Собрать бриф</button></form>
+{% elif not e.past %}
+  <div class="small muted">Бриф соберётся сам за сутки до встречи.</div>
+  <form method="post" action="/briefs/build"><input type="hidden" name="uid" value="{{ e.uid }}"><button class="btn sm">Собрать сейчас</button></form>
+{% endif %}
+</div>
+{% endmacro %}
+
+{% macro brief_mark(e) -%}
+{%- if e.brief and e.brief.status == 'ready' %}<span class="ev-ok" title="Бриф готов">✓</span>{% endif -%}
+{%- endmacro %}
+
+{% macro brief_dialog(e) %}
+{#- бриф целиком — окно по центру экрана, кнопка «Открыть бриф» в карточке встречи (app.js) #}
+{% set b = e.brief %}
+{% if b and b.status == 'ready' %}
+<dialog class="dlg dlg-brief" id="brief-{{ e.brief_key }}" aria-label="Бриф: {{ e.title }}">
+  <div class="dlg-box" tabindex="-1" data-copy-scope>
+    <div class="dlg-top">
+      <span class="chip ok">бриф</span>
+      <span class="muted small">{{ e.start | local('%d.%m, %H:%M') }}</span>
+      <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
+    </div>
+    <h2 class="dlg-title">{{ e.title }}</h2>
+    {% if b.topic %}<div class="muted">{{ b.topic }}</div>{% endif %}
+    <div class="doc brief-doc">{{ b.text | md | safe }}</div>
+    <textarea hidden data-copy>{{ b.text | plain }}</textarea>
+    <div class="dlg-actions">
+      <button type="button" class="btn primary" data-copy-btn>Копировать бриф</button>
+      <form class="inline" method="post" action="/briefs/build"><input type="hidden" name="uid" value="{{ e.uid }}"><button class="btn" title="Собрать заново с учётом свежих встреч и задач">Обновить</button></form>
+      <span class="grow"></span><span class="muted small">собран {{ b.updated | ago }}</span>
+    </div>
+  </div>
+</dialog>
+{% endif %}
+{% endmacro %}
+
+{% macro remind_form(c, compact=False) %}
+{#- напоминание исполнителю: готовый текст (можно поправить), копировать, открыть чат, отправить от вашего имени #}
+{% set r = c.remind %}
+<form class="remind" method="post" action="/commitments/{{ c.id }}/remind" data-copy-scope
+      data-confirm="Отправить в Telegram от вашего имени{{ ' — ' ~ r.to.label if r.to }}?">
+  <textarea name="text" rows="{{ 2 if compact else 3 }}" data-copy>{{ r.text }}</textarea>
+  <div class="actions">
+    <button type="button" class="btn sm" data-copy-btn>Копировать</button>
+    {% if r.to and r.to.link %}<a class="btn sm" href="{{ r.to.link }}" target="_blank" rel="noopener" title="Открыть чат с {{ r.to.label }}">↗ Telegram</a>{% endif %}
+    {% if r.to %}<button class="btn sm primary" title="Сообщение уйдёт из вашего Telegram">Отправить</button>
+    {% else %}<span class="muted small">Чат не найден — укажите @username в <a href="/people">«Людях»</a></span>{% endif %}
+  </div>
+</form>
+{% endmacro %}
+
+{% macro workload_strip(items) %}
+{#- загрузка людей: открытые задачи PULSE (исполнитель) и карточки Kaiten в работе; клик — его задачи #}
+{% if items %}
+<div class="load">
+  <span class="load-h">Загрузка {{ help('Открытые задачи, где человек исполнитель, и его карточки Kaiten в работе. Нажмите на имя — откроются его задачи, на «Kaiten» — его карточки.') }}</span>
+  {% for w in items %}
+  <span class="load-i{{ ' me' if w.me }}{{ ' hot' if w.overdue or w.kaiten_overdue }}">
+    <a href="{{ '/commitments?view=list&direction=mine' if w.me else '/commitments?person=' ~ (w.person_q | urlencode) }}"
+       title="Задачи: {{ w.open }}{% if w.overdue %}, просрочено {{ w.overdue }}{% endif %}{% if w.week %}, срок на этой неделе — {{ w.week }}{% endif %}"><b>{{ w.name }}</b> {{ w.open }}{% if w.overdue %} <span class="load-bad">{{ w.overdue }} просроч.</span>{% endif %}</a>
+    {%- if w.kaiten %}<a class="load-k" href="{{ '/tasks?mine=1' if w.me else '/tasks?who=' ~ (w.kaiten_q | urlencode) }}" title="Карточки Kaiten в работе{% if w.kaiten_overdue %}, просрочено {{ w.kaiten_overdue }}{% endif %}">Kaiten {{ w.kaiten }}</a>{% endif %}
+  </span>
+  {% endfor %}
+</div>
+{% endif %}
 {% endmacro %}
 
 {% macro meeting_status(m) %}

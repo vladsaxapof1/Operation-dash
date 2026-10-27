@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Дайджесты{% endblock %}
+{% block content %}
+<div class="topline">
+  <div><h1>Дайджесты</h1><div class="muted">Утренний и вечерний дайджест, итоги недели и сводка рабочих групп Telegram — всё, что собирает Claude, в одном месте.</div></div>
+  <div class="actions">
+    <form class="inline" method="post" action="/digests/run" data-busy="Запускаю…"><input type="hidden" name="tab" value="{{ tab }}"><button class="btn">Собрать сейчас</button></form>
+    <a class="btn ghost" href="/settings?tab=schedule#digests" title="Когда собирать">Расписание</a>
+  </div>
+</div>
+<div class="tabs">
+  {% for key, title in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}">{{ title }}{% if counts[key] %} <span class="muted small">{{ counts[key] }}</span>{% endif %}</a>{% endfor %}
+</div>
+{% if tab == 'weekly' %}<p class="muted small">Приходят {{ ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'][(settings.schedule.weekly_day or 5) - 1] }} в {{ settings.schedule.weekly_time | hhmm }}{% if not settings.schedule.weekly_time %} (выключено){% endif %}. Если компьютер был выключен — при следующем запуске.</p>
+{% elif tab == 'groups' %}<p class="muted small">Что решали в рабочих группах Telegram за день и где ждут вас. Собирается {% if settings.schedule.groups_digest %}по рабочим дням в {{ settings.schedule.groups_digest | hhmm }}{% else %}только по кнопке (в расписании выключено){% endif %}{% if not settings.notifications.groups_digest %}, в Telegram не присылается{% endif %}.</p>
+{% else %}<p class="muted small">То же, что приходит в Telegram: утром в {{ settings.schedule.digest_morning | hhmm or '—' }}, вечером в {{ settings.schedule.digest_evening | hhmm or '—' }}.</p>{% endif %}
+{% for d in items %}
+<section class="card digest">
+  <div class="card-h"><h2>{{ d.title }}</h2><span class="muted small">{{ d.created | local('%d.%m.%Y, %H:%M') }}</span></div>
+  <div class="card-b digest-text">{{ d.text | tg }}</div>
+</section>
+{% else %}
+<section class="card"><div class="card-b empty">{% if tab == 'weekly' %}Итогов недели пока не было.{% elif tab == 'groups' %}Сводок групп пока не было — нужны рабочие группы, которые PULSE читает (Настройки → Telegram).{% else %}Дайджестов пока не было.{% endif %}</div></section>
+{% endfor %}
+{% endblock %}

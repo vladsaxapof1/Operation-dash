@@ -48,6 +48,21 @@
       </div>
     </section>
 
+    <section class="card" id="remind">
+      <div class="card-h"><h2>Напомните коллегам</h2>{% if reminders %}<span class="chip warn">{{ reminders | length }}</span>{% endif %}<span class="grow"></span><span class="muted small">вам должны: срок сегодня, завтра или прошёл</span></div>
+      <div class="card-b flush">
+        <ul class="list">
+        {% for c in reminders %}
+          <li class="rem">
+            <div class="rem-h"><strong>{{ c.remind.to.label if c.remind.to else c.who }}</strong>
+              <a href="/commitments?task={{ c.id }}" title="{{ c.what }}">{{ c | headline }}</a>{{ ui.due_badge(c) }}</div>
+            {{ ui.remind_form(c, compact=True) }}
+          </li>
+        {% else %}<li class="empty">Напоминать некому: сроков по задачам «мне должны» на сегодня и завтра нет.</li>{% endfor %}
+        </ul>
+      </div>
+    </section>
+
     <div class="grid-2">
       <section class="card">
         <div class="card-h"><h2>Мои задачи</h2><span class="chip">{{ s.mine|length }}</span><span class="grow"></span><a class="small" href="/commitments">доска →</a></div>
@@ -83,7 +98,7 @@
           <button type="button" class="ev{{ ' google' if g.ev.google }}{{ ' past' if g.ev.past }}{{ ' now' if g.ev.now }}{{ ' short' if g.short }}" data-ev="{{ g.ev.n }}"
                   style="top: {{ g.top }}px; height: {{ g.height }}px; left: calc({{ '%.4f' % (g.left * 100) }}% + 4px); width: calc({{ '%.4f' % (g.width * 100) }}% - 6px)"
                   title="{{ g.ev.title or 'Без названия' }} · {{ ui.ev_time(g.ev) }}">
-            <span class="ev-t">{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time">, {{ g.ev.start | local('%H:%M') }}</span>{% endif %}</span>
+            <span class="ev-t">{{ ui.brief_mark(g.ev) }}{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time">, {{ g.ev.start | local('%H:%M') }}</span>{% endif %}</span>
             {% if not g.short %}<span class="ev-time">{{ ui.ev_time(g.ev) }}{% if g.ev.now %} · идёт{% endif %}</span>{% endif %}
             {% if g.tall and who %}<span class="ev-time">{{ who }}</span>{% endif %}
           </button>
@@ -94,7 +109,7 @@
       {% elif not day.allday %}
       <div class="empty">{% if settings.calendar.enabled or settings.google_calendar.enabled %}Встреч нет.{% else %}Календарь не подключён.{% endif %}</div>
       {% endif %}
-      {% for e in day.events %}{{ ui.ev_detail(e) }}{% endfor %}
+      {% for e in day.events %}{{ ui.ev_detail(e) }}{{ ui.brief_dialog(e) }}{% endfor %}
       <div class="ev-pop" hidden data-ev-pop></div>
     </section>
 

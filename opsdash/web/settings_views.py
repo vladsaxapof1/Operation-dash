@@ -567,6 +567,27 @@ def register(app: FastAPI, render, back) -> None:
         })
         return back(request, "Сохранено")
 
+    @app.post("/settings/digests")
+    def digests_save(request: Request, weekly_day: int = Form(5), weekly_time: str = Form(""),
+                     groups_digest: str = Form(""), groups_to_telegram: str = Form(None), briefs_enabled: str = Form(None),
+                     briefs_hours: int = Form(36), briefs_ignore: str = Form(""), reminder_template: str = Form("")):
+        """Брифы к встречам, итоги недели, сводка групп и текст напоминаний коллегам."""
+        template = reminder_template.strip() or config.DEFAULTS["reminders"]["template"]
+        try:
+            template.format(**{"имя": "Пётр", "задача": "отчёт", "срок": "до 30.10"})
+        except (KeyError, IndexError, ValueError):
+            return back(request, err="В тексте напоминания можно использовать только {имя}, {задача} и {срок}")
+        config.update_settings("schedule", {"weekly_day": min(7, max(1, weekly_day)), "weekly_time": weekly_time,
+                                            "groups_digest": groups_digest})
+        config.update_settings("notifications", {"groups_digest": checkbox(groups_to_telegram)})
+        settings = config.load_settings()
+        settings["briefs"] = {**settings["briefs"], "enabled": checkbox(briefs_enabled),
+                              "hours_ahead": min(168, max(2, briefs_hours)),
+                              "ignore": [w.strip() for w in briefs_ignore.split(",") if w.strip()]}
+        settings["reminders"] = {**settings["reminders"], "template": template}
+        config.save_settings(settings)
+        return back(request, "Сохранено")
+
     # --- Claude ---
 
     @app.post("/settings/claude")
