@@ -31,6 +31,11 @@
   </form>
 </div></section>
 
+<section class="card" id="theme"><div class="card-b theme-row">
+  <div><b>Оформление</b><div class="muted small">«Как в системе» — PULSE повторяет светлое или тёмное оформление компьютера.</div></div>
+  <form method="post" action="/settings/theme" class="seg">{% for key, title in themes.items() %}<button name="theme" value="{{ key }}" class="{{ 'active' if theme == key }}">{{ title }}</button>{% endfor %}</form>
+</div></section>
+
 <section class="card" id="updates"><div class="card-h"><h2>Обновления PULSE</h2>
   {% if upd.checked_at %}<span class="muted small">проверено {{ upd.checked_at | ago }}</span>{% endif %}</div>
 <div class="card-b">

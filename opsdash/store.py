@@ -159,7 +159,8 @@ CREATE TABLE IF NOT EXISTS commitments (
     direction TEXT NOT NULL,         -- mine (обещала я) | to_me (обещали мне) | other (между коллегами)
     who TEXT,                        -- кто должен сделать
     whom TEXT,                       -- кому
-    what TEXT NOT NULL,
+    what TEXT NOT NULL,              -- суть: что именно сделать, подробно
+    title TEXT,                      -- короткий заголовок для карточки (2–6 слов); пусто — сокращаем what
     due TEXT,                        -- YYYY-MM-DD
     status TEXT DEFAULT 'open',      -- open | done | cancelled
     source_type TEXT,                -- meeting | telegram | ymessenger | mail | manual
@@ -262,6 +263,7 @@ MIGRATIONS = [
     ("outbox", "sending_at", "TEXT"),
     ("outbox", "dead", "INTEGER DEFAULT 0"),
     ("chats", "username", "TEXT"),
+    ("commitments", "title", "TEXT"),
 ]
 
 

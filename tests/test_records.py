@@ -27,6 +27,21 @@ def test_commitment_rejects_bad_direction_and_date():
         records.add_commitment(direction="mine", what="x", due="30.10.2026")
 
 
+def test_headline_short_title_or_trimmed_what():
+    assert records.headline({"title": " Прогноз по клиентам ", "what": "длинно"}) == "Прогноз по клиентам"
+    assert records.headline({"what": "Обновить записку к WBR"}) == "Обновить записку к WBR"
+    # без заголовка — до первой скобки, двоеточия, тире или запятой
+    assert records.headline({"what": "Исправить своды по продажам (и по допродажам): тянуть только квалифицированные лиды, "
+                                     "а не все"}) == "Исправить своды по продажам"
+    assert records.headline({"what": "Собрать по банку раскладку в том формате, который запросил коллега "
+                                     "(ответ на его сообщение с образцом)"}) == "Собрать по банку раскладку в том формате"
+    long = records.headline({"what": "Протестировать проставление оценок звонков через браузерное расширение и отписаться "
+                                     "коллеге получилось или нет"})
+    assert long.endswith("…") and len(long) <= records.HEADLINE_MAX and " " not in long[-2:]
+    cid = records.add_commitment(direction="mine", what="Подробно: что и как", title="Коротко")
+    assert store.row("SELECT title FROM commitments WHERE id=?", (cid,))["title"] == "Коротко"
+
+
 def test_people_upsert_merges_aliases_and_find():
     pid = records.upsert_person("Пётр Иванов", aliases=["Петя"], telegram="@p_ivanov")
     same = records.upsert_person("Пётр Иванов", aliases=["Иванов"], role="продажи")

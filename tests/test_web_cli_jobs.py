@@ -59,6 +59,15 @@ def test_settings_forms_save(client):
     assert s["owner"]["name"] == "Анна" and s["owner"]["work_hours"]["days"] == [1, 2, 3]
     r = client.post("/settings/general", data={"timezone": "Mars/Base"}, follow_redirects=False)
     assert "err=" in r.headers["location"]
+    # оформление: по умолчанию — как в системе (dark.css по media), светлая — без dark.css, тёмная — всегда
+    assert 'dark.css?v=' in (page := client.get("/").text) and 'media="(prefers-color-scheme: dark)"' in page
+    client.post("/settings/theme", data={"theme": "light"})
+    assert config.load_settings()["web"]["theme"] == "light" and "dark.css" not in client.get("/").text
+    client.post("/settings/theme", data={"theme": "dark"})
+    page = client.get("/settings").text
+    assert "dark.css?v=" in page and "prefers-color-scheme" not in page and 'value="dark" class="active"' in page
+    client.post("/settings/theme", data={"theme": "neon"})
+    assert config.load_settings()["web"]["theme"] == "dark"
     client.post("/settings/mail", data={"email": "a@x.ru", "password": "abcd efgh", "enabled": "on",
                                         "folders": "INBOX\r\nРабота", "ignore_senders": "noreply"})
     assert config.get_secret("MAIL_APP_PASSWORD") == "abcdefgh"
@@ -430,7 +439,9 @@ def test_tasks_board_and_list(client):
     assert "<h1>Задачи</h1>" in page and 'class="kb"' in page
     assert "просрочено на 2 дня" in page and "осталось " in page and "без срока" in page  # срок и сколько осталось
     assert "<b>Я</b> → Тимур" in page and "<b>Пётр</b> → мне" in page and "<b>Олег</b> → Ирина" in page
-    assert ">Анна / Тимур</a>" in page and "[00:02:43] 15 минут" in page
+    assert ">встреча «Анна / Тимур»</a>" in page
+    # клик по карточке — окно задачи по центру: суть, кто и кому, цитата, правка
+    assert '<dialog class="dlg" id="task-' in page and "[00:02:43] 15 минут" in page and 'name="title"' in page
     assert "Старое дело" not in page and "Отменённое" not in page
     assert "Прислать прогноз" not in client.get("/commitments?q=сценарий").text
     assert "Согласовать бюджет" in client.get("/commitments?person=Ирина").text
@@ -463,6 +474,16 @@ def test_tasks_board_and_list(client):
     assert (c["what"], c["direction"], c["who"], c["whom"], c["due"]) == ("Собрать сценарий запуска", "to_me", "Тимур", "Анна", None)
     bad = client.post(f"/commitments/{late}/edit", data={"what": " ", "direction": "mine"}, follow_redirects=False)
     assert "err=" in bad.headers["location"]
+    # короткий заголовок — на карточке, суть — в окне задачи
+    client.post(f"/commitments/{late}/edit", data={"title": "Сценарий запуска", "what": "Собрать сценарий запуска: этапы и сроки",
+                                                   "direction": "to_me", "who": "Тимур"})
+    c = store.row("SELECT * FROM commitments WHERE id=?", (late,))
+    assert (c["title"], c["what"]) == ("Сценарий запуска", "Собрать сценарий запуска: этапы и сроки")
+    page = client.get("/commitments").text
+    assert ">Сценарий запуска</button>" in page and '<p class="dlg-what">Собрать сценарий запуска: этапы и сроки</p>' in page
+    assert "Сценарий запуска" in client.get("/commitments?q=Сценарий запуска").text  # поиск — и по заголовку
+    client.post("/commitments", data={"direction": "mine", "title": "Ответ банку", "what": ""})
+    assert store.row("SELECT what FROM commitments WHERE title='Ответ банку'")["what"] == "Ответ банку"
 
     # «↗ Telegram»: задача со встречи — личный чат с этим человеком из справочника
     records.upsert_person("Тимур", telegram="@timur_k")

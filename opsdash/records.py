@@ -103,7 +103,8 @@ def delete_person(person_id: int) -> None:
 
 def add_commitment(*, direction: str, what: str, who: str | None = None, whom: str | None = None,
                    due: str | None = None, source_type: str = "manual", source_ref: str | None = None,
-                   quote: str | None = None, kaiten_card_id: int | None = None, note: str | None = None) -> int:
+                   quote: str | None = None, kaiten_card_id: int | None = None, note: str | None = None,
+                   title: str | None = None) -> int:
     if direction not in DIRECTIONS:
         raise ValueError(f"direction должен быть одним из: {', '.join(DIRECTIONS)}")
     if due:
@@ -117,14 +118,15 @@ def add_commitment(*, direction: str, what: str, who: str | None = None, whom: s
         return dup["id"]
     now = store.utcnow()
     return store.execute(
-        """INSERT INTO commitments(direction, who, whom, what, due, status, source_type, source_ref, quote,
-           kaiten_card_id, note, created, updated) VALUES(?,?,?,?,?,'open',?,?,?,?,?,?,?)""",
-        (direction, who, whom, what, due, source_type, source_ref, quote, kaiten_card_id, note, now, now),
+        """INSERT INTO commitments(direction, who, whom, what, title, due, status, source_type, source_ref, quote,
+           kaiten_card_id, note, created, updated) VALUES(?,?,?,?,?,?,'open',?,?,?,?,?,?,?)""",
+        (direction, who, whom, what, (title or "").strip() or None, due, source_type, source_ref, quote, kaiten_card_id,
+         note, now, now),
     )
 
 
 def update_commitment(cid: int, **fields) -> None:
-    allowed = {"status", "due", "kaiten_card_id", "note", "what", "who", "whom", "direction"}
+    allowed = {"status", "due", "kaiten_card_id", "note", "what", "title", "who", "whom", "direction"}
     sets, params = [], []
     for k, v in fields.items():
         if k in allowed and v is not None:
@@ -150,8 +152,8 @@ def _filters(person: str | None, q: str | None, created: Period | None, due: Per
     """Общие условия списка и доски: человек, поиск, дата создания, срок."""
     sql, params = "", []
     if q:
-        sql += " AND (what LIKE ? OR who LIKE ? OR whom LIKE ? OR quote LIKE ?)"
-        params += [f"%{q}%"] * 4
+        sql += " AND (what LIKE ? OR title LIKE ? OR who LIKE ? OR whom LIKE ? OR quote LIKE ?)"
+        params += [f"%{q}%"] * 5
     if person:
         sql += " AND (who LIKE ? OR whom LIKE ?)"
         params += [f"%{person}%", f"%{person}%"]
@@ -174,17 +176,37 @@ def _filters(person: str | None, q: str | None, created: Period | None, due: Per
     return sql, params
 
 
-def edit_commitment(cid: int, *, what: str, direction: str, who: str | None, whom: str | None, due: str | None) -> None:
-    """Изменить задачу с карточки: формулировку, тип, кто и кому, срок (пустой срок — без срока)."""
+def edit_commitment(cid: int, *, title: str, what: str, direction: str, who: str | None, whom: str | None,
+                    due: str | None) -> None:
+    """Изменить задачу из её карточки: заголовок, суть, тип, кто и кому, срок (пустой срок — без срока).
+    Без сути заголовок становится и сутью."""
     if direction not in DIRECTIONS:
         raise ValueError(f"direction должен быть одним из: {', '.join(DIRECTIONS)}")
-    if not what.strip():
+    title, what = title.strip(), what.strip() or title.strip()
+    if not what:
         raise ValueError("Напишите, что сделать")
     if due and not _as_date(due):
         raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
-    store.execute("UPDATE commitments SET what=?, direction=?, who=?, whom=?, due=?, updated=? WHERE id=?",
-                  (what.strip(), direction, (who or "").strip() or None, (whom or "").strip() or None, due or None,
-                   store.utcnow(), cid))
+    store.execute("UPDATE commitments SET title=?, what=?, direction=?, who=?, whom=?, due=?, updated=? WHERE id=?",
+                  (title or None, what, direction, (who or "").strip() or None, (whom or "").strip() or None,
+                   due or None, store.utcnow(), cid))
+
+
+def headline(c: dict) -> str:
+    """Заголовок задачи для карточек и Ганта. Если Claude или директор не дали короткий заголовок — сокращаем суть:
+    до первой скобки, двоеточия, тире или запятой, а длинное без них — по словам."""
+    if (c.get("title") or "").strip():
+        return c["title"].strip()
+    what = " ".join((c.get("what") or "").split())
+    if len(what) <= HEADLINE_MAX:
+        return what
+    cuts = [i for sep in (" (", ": ", " — ", " – ", "; ", ", ") if 15 <= (i := what.find(sep)) <= HEADLINE_MAX]
+    if cuts:
+        return what[:min(cuts)]
+    return what[:HEADLINE_MAX - 3].rsplit(" ", 1)[0].rstrip(",.;:—–- ") + "…"
+
+
+HEADLINE_MAX = 60
 
 
 def counterpart(c: dict) -> str | None:

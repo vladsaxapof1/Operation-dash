@@ -51,11 +51,11 @@
     <div class="grid-2">
       <section class="card">
         <div class="card-h"><h2>Мои задачи</h2><span class="chip">{{ s.mine|length }}</span><span class="grow"></span><a class="small" href="/commitments">доска →</a></div>
-        <div class="card-b flush"><ul class="list">{% for c in s.mine[:6] %}{{ ui.commitment(c) }}{% else %}<li class="empty">Открытых задач нет.</li>{% endfor %}</ul></div>
+        <div class="card-b flush"><ul class="list">{% for c in s.mine[:6] %}{{ ui.commitment(c, compact=True) }}{% else %}<li class="empty">Открытых задач нет.</li>{% endfor %}</ul></div>
       </section>
       <section class="card">
         <div class="card-h"><h2>Мне должны</h2><span class="chip">{{ s.to_me|length }}</span></div>
-        <div class="card-b flush"><ul class="list">{% for c in s.to_me[:6] %}{{ ui.commitment(c) }}{% else %}<li class="empty">Открытых задач нет.</li>{% endfor %}</ul></div>
+        <div class="card-b flush"><ul class="list">{% for c in s.to_me[:6] %}{{ ui.commitment(c, compact=True) }}{% else %}<li class="empty">Открытых задач нет.</li>{% endfor %}</ul></div>
       </section>
     </div>
   </div>

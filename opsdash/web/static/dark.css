@@ -1,0 +1,21 @@
+/* Тёмная тема. base.html подключает файл по настройке «Оформление»: всегда, по системе (media) или никогда */
+:root {
+  --bg: #12151b;
+  --panel: #1a1e26;
+  --panel-2: #20252f;
+  --text: #e6e9ef;
+  --muted: #98a1b2;
+  --line: #2c323d;
+  --accent: #7b93ff;
+  --accent-soft: #232b45;
+  --ok: #51cf66;
+  --ok-soft: #1b2e21;
+  --warn: #ffa94d;
+  --warn-soft: #33281a;
+  --bad: #ff6b6b;
+  --bad-soft: #351f22;
+  --shadow: none;
+  --ev-bg: #2b3b73; --ev-fg: #e3e8ff; --ev-line: #7b93ff;
+  --evg-bg: #3b2f6b; --evg-fg: #ece6ff; --evg-line: #b197fc;
+  color-scheme: dark;
+}

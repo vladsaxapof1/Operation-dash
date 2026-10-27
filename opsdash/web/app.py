@@ -182,7 +182,8 @@ def f_size(n: int | None) -> str:
 
 
 templates.env.filters.update(local=f_local, date=f_date, md=f_md, ago=f_ago, tg=f_tg_html, hhmm=config.hhmm,
-                             people=f_people, place=f_place, note=f_note, hl=f_hl, size=f_size)
+                             people=f_people, place=f_place, note=f_note, hl=f_hl, size=f_size,
+                             headline=records.headline)
 templates.env.globals.update(
     plural=f_plural, version=__version__, SOURCE_TITLES=overview.SOURCE_TITLES,
     # метка для ?v= у app.js/style.css: меняется с файлами, и браузер не берёт старые из кэша
@@ -205,6 +206,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["voice_tip"] = None if ctx["nav"] == "meetings" else _voice_tip(request)
     ctx["build"] = build()
     ctx["nav_collapsed"] = request.cookies.get("nav") == "collapsed"  # меню свёрнуто в иконки (app.js)
+    ctx["theme"] = settings["web"].get("theme") or "system"  # system / light / dark — подключение dark.css
     ctx["update_available"] = bool((store.get_state("update_check") or {}).get("available"))
     return templates.TemplateResponse(request, name, ctx)
 
@@ -443,20 +445,25 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
         f"SELECT id, title FROM meetings WHERE id IN ({','.join('?' * len(meeting_ids))})", list(meeting_ids))} if meeting_ids else {}
     # свёрнутые колонки доски (и группы на таймлайне) запоминает браузер — cookie из app.js, чтобы не мелькали
     folded = {k for k in request.cookies.get("kb_folded", "").split(".") if k in BOARD_COLUMNS}
+    # ширина колонки с названиями на таймлайне — её тянут мышкой, запоминает cookie (app.js)
+    gantt_w = int(request.cookies["gantt_w"]) if request.cookies.get("gantt_w", "").isdigit() else 300
     timeline = gantt.layout([(key, title, board[key]) for key, title in BOARD_TITLES], scale) if view == "gantt" else None
     return render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
                   direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
                   add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
                   folded=folded, created=created, created_from=created_from, created_to=created_to, due=due,
                   due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
-                  due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale)
+                  due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
+                  gantt_w=min(max(gantt_w, 200), 720))
 
 
 @app.post("/commitments")
-def commitment_add(request: Request, direction: str = Form(...), what: str = Form(...), who: str = Form(""),
-                   whom: str = Form(""), due: str = Form("")):
-    records.add_commitment(direction=direction, what=what.strip(), who=who.strip() or None, whom=whom.strip() or None,
-                           due=due or None, source_type="manual")
+def commitment_add(request: Request, direction: str = Form(...), title: str = Form(""), what: str = Form(""),
+                   who: str = Form(""), whom: str = Form(""), due: str = Form("")):
+    if not (title.strip() or what.strip()):
+        return back(request, err="Напишите, что сделать")
+    records.add_commitment(direction=direction, title=title.strip(), what=what.strip() or title.strip(),
+                           who=who.strip() or None, whom=whom.strip() or None, due=due or None, source_type="manual")
     return back(request, "Задача добавлена")
 
 
@@ -467,10 +474,10 @@ def commitment_update(request: Request, cid: int, status: str = Form(None), due:
 
 
 @app.post("/commitments/{cid}/edit")
-def commitment_edit(request: Request, cid: int, what: str = Form(""), direction: str = Form("mine"),
-                    who: str = Form(""), whom: str = Form(""), due: str = Form("")):
+def commitment_edit(request: Request, cid: int, title: str = Form(""), what: str = Form(""),
+                    direction: str = Form("mine"), who: str = Form(""), whom: str = Form(""), due: str = Form("")):
     try:
-        records.edit_commitment(cid, what=what, direction=direction, who=who, whom=whom, due=due or None)
+        records.edit_commitment(cid, title=title, what=what, direction=direction, who=who, whom=whom, due=due or None)
     except ValueError as e:
         return back(request, err=str(e))
     return back(request, "Задача изменена")

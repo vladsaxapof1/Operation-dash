@@ -43,7 +43,8 @@ description: Разбор расшифрованной встречи — сам
 4. **Напиши `data/meetings/<id>/summary.md`** по шаблону ниже. Отметки времени `[чч:мм:сс]`
    бери из расшифровки — по ним директор найдёт место в записи.
 5. **Обещания.** Каждое явное обещание с исполнителем:
-   `./ops commitments add --direction mine|to_me|other --who "…" --whom "…" --what "…" --due YYYY-MM-DD --source meeting:<id> --quote "[чч:мм:сс] дословно"`.
+   `./ops commitments add --direction mine|to_me|other --who "…" --whom "…" --title "…" --what "…" --due YYYY-MM-DD --source meeting:<id> --quote "[чч:мм:сс] дословно"`.
+   `--title` — заголовок карточки, 2–6 слов («Прогноз по ключевым клиентам»); подробности — в `--what`.
    Если встреча показывает, что старое обещание выполнено, —
    `./ops commitments set <id> --status done --note "встреча <id>"`.
 5а. **База знаний.** Каждое решение из раздела «Решения» —

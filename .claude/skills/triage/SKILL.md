@@ -41,8 +41,9 @@ description: Разбор новых сообщений из Telegram, Янде�
 - Ей пообещали → `--direction to_me`.
 - Её поручение сотруднику («Петя, подготовь к пятнице») → `--direction to_me`, кто — Петя.
 ```
-./ops commitments add --direction … --who "…" --whom "…" --what "…" --due YYYY-MM-DD --source <telegram|ymessenger|mail>:<id сообщения> --quote "<цитата>"
+./ops commitments add --direction … --who "…" --whom "…" --title "…" --what "…" --due YYYY-MM-DD --source <telegram|ymessenger|mail>:<id сообщения> --quote "<цитата>"
 ```
+`--title` — заголовок карточки, 2–6 слов; подробности — в `--what`.
 
 **В. Выполнено.** «Сделал», «отправил», «готово» по открытому обещанию →
 `./ops commitments set <id> --status done --note "сообщение <id>"`. Если это карточка

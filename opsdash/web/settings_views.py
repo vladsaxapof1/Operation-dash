@@ -25,6 +25,7 @@ TABS = [
     ("claude", "Claude"),
 ]
 TAB_NOTES = {"telegram": "личный аккаунт", "bot": "уведомления"}  # приписка серым — чтобы не путать два Telegram
+THEMES = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}  # оформление (dark.css, base.html)
 CHAT_KINDS = {"private": "Личные", "group": "Группы", "channel": "Каналы", "bot": "Боты"}
 
 WHISPER_MODELS = [
@@ -62,7 +63,7 @@ def register(app: FastAPI, render, back) -> None:
         settings = config.load_settings()
         secrets = config.load_secrets()
         ctx = {"tab": tab, "tabs": TABS, "tab_notes": TAB_NOTES, "secrets": {k: config.mask(v) for k, v in secrets.items()},
-               "whisper_models": WHISPER_MODELS}
+               "whisper_models": WHISPER_MODELS, "themes": THEMES}
         if tab == "general":
             from opsdash import updates
 
@@ -150,6 +151,13 @@ def register(app: FastAPI, render, back) -> None:
         })
         config.update_settings("web", {"port": int(port)})
         return back(request, "Сохранено")
+
+    @app.post("/settings/theme")
+    def save_theme(request: Request, theme: str = Form("system")):
+        if theme not in THEMES:
+            return back(request, err="Неизвестная тема")
+        config.update_settings("web", {"theme": theme})
+        return back(request, to="/settings?tab=general#theme")
 
     @app.post("/settings/updates")
     def save_updates(request: Request, repo: str = Form(""), branch: str = Form(""), token: str = Form(""),

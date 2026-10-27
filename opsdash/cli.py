@@ -520,7 +520,8 @@ def cmd_people(a) -> None:
 
 def _commitment_line(c: dict) -> str:
     d = {"mine": "я →", "to_me": "мне ←", "other": "между"}[c["direction"]]
-    line = f"[{c['id']}] {d} {c['who'] or '?'} → {c['whom'] or '?'}: {c['what']}"
+    title = f"«{c['title']}» " if c.get("title") else ""
+    line = f"[{c['id']}] {d} {c['who'] or '?'} → {c['whom'] or '?'}: {title}{c['what']}"
     if c["due"]:
         line += f" · до {c['due']}" + (" (ПРОСРОЧЕНО)" if c.get("overdue") else "")
     if c["status"] != "open":
@@ -545,12 +546,12 @@ def cmd_commitments(a) -> None:
         st, ref = parse_source(a.source)
         cid = records.add_commitment(
             direction=a.direction, what=a.what, who=a.who, whom=a.whom, due=a.due, source_type=st, source_ref=ref,
-            quote=a.quote, kaiten_card_id=a.card, note=a.note,
+            quote=a.quote, kaiten_card_id=a.card, note=a.note, title=a.title,
         )
         out(f"Обещание [{cid}] сохранено")
     elif a.action == "set":
         records.update_commitment(a.id, status=a.status, due=a.due, kaiten_card_id=a.card, note=a.note, what=a.what,
-                                  who=a.who, whom=a.whom)
+                                  title=a.title, who=a.who, whom=a.whom)
         out("Сохранено")
 
 
@@ -953,7 +954,8 @@ def build_parser() -> argparse.ArgumentParser:
     x = ms.add_parser("add")
     x.add_argument("--direction", required=True, choices=["mine", "to_me", "other"],
                    help="mine — обещала директор; to_me — обещали директору; other — между коллегами")
-    x.add_argument("--what", required=True)
+    x.add_argument("--title", help="короткий заголовок для карточки, 2–6 слов: «Прогноз по ключевым клиентам»")
+    x.add_argument("--what", required=True, help="суть: что именно сделать, с подробностями")
     x.add_argument("--who", help="кто должен сделать")
     x.add_argument("--whom", help="кому обещано")
     x.add_argument("--due", help="YYYY-MM-DD")
@@ -967,6 +969,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--due")
     x.add_argument("--card", type=int)
     x.add_argument("--note")
+    x.add_argument("--title")
     x.add_argument("--what")
     x.add_argument("--who")
     x.add_argument("--whom")

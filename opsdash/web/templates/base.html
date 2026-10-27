@@ -6,6 +6,7 @@
   <title>{% block title %}Сводка{% endblock %} · PULSE</title>
   <link rel="icon" type="image/png" href="/static/icon.png">
   <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
+  {% if theme != 'light' %}<link rel="stylesheet" href="/static/dark.css?v={{ static_v }}"{% if theme != 'dark' %} media="(prefers-color-scheme: dark)"{% endif %}>{% endif %}
 </head>
 <body class="{{ 'nav-collapsed' if nav_collapsed }}">
 {% import "_icons.html" as icons %}

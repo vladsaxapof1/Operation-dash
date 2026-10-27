@@ -24,7 +24,8 @@
         <div><label>Кому</label><input type="text" name="whom" list="people-list"></div>
         <div><label>Срок</label><input type="date" name="due"></div>
       </div>
-      <label>Что сделать</label><input type="text" name="what" required placeholder="Например, прислать прогноз по ключевым клиентам">
+      <label>Задача</label><input type="text" name="title" required maxlength="120" placeholder="Коротко, например: прогноз по ключевым клиентам">
+      <label>Подробности <span class="muted small">— необязательно</span></label><textarea name="what" rows="2" placeholder="Что именно сделать, в каком виде, кому прислать"></textarea>
       <div class="form-actions"><button class="btn primary">Добавить</button></div>
     </form>
   </div>
@@ -84,13 +85,15 @@
 {# таймлайн: полоса — от появления задачи до срока; группы сворачиваются так же, как колонки доски #}
 <div class="gantt-tools">
   <div class="seg">{% for key, title in [('day', 'День'), ('week', 'Неделя'), ('month', 'Месяц')] %}<a href="?view=gantt&scale={{ key }}{{ keep }}" class="{{ 'active' if gantt.scale == key }}">{{ title }}</a>{% endfor %}</div>
-  <span class="muted small">Полоса — от появления задачи до срока, без срока — до сегодня. Выходные — серым, пунктир — сейчас.</span>
+  <span class="muted small">Полоса — от появления задачи до срока, без срока — до сегодня. Выходные — серым, пунктир — сейчас.
+    Ширину колонки с задачами можно потянуть мышкой за край.</span>
 </div>
 <div class="card gantt">
-  <div class="gantt-scroll" data-gantt data-now-x="{{ gantt.now_x }}">
-    <div class="gantt-inner" style="width: {{ 300 + gantt.width }}px">
+  <div class="gantt-scroll" data-gantt data-now-x="{{ gantt.now_x }}" style="--gl: {{ gantt_w }}px">
+    <div class="gantt-inner" style="width: calc(var(--gl) + {{ gantt.width }}px)">
       <div class="gantt-head">
-        <div class="gantt-label gantt-corner">Задача</div>
+        <div class="gantt-label gantt-corner">Задача
+          <span class="gantt-resize" data-gantt-resize title="Потяните, чтобы изменить ширину; двойной щелчок — по самому длинному названию"></span></div>
         <div class="gantt-axis" style="width: {{ gantt.width }}px">
           <div class="gantt-top">{% for t in gantt.top %}<span style="left: {{ t.left }}px">{{ t.text }}</span>{% endfor %}</div>
           {% if gantt.bottom %}<div class="gantt-bottom">{% for b in gantt.bottom %}<span class="{{ 'today' if b.today }}" style="left: {{ b.left }}px; width: {{ gantt.px }}px">{{ b.text }}</span>{% endfor %}</div>{% endif %}
@@ -112,14 +115,16 @@
           <div class="gantt-rows">
             {% for c in g['items'] %}
             <div class="gantt-row">
+              {% set title = c | headline %}
               <div class="gantt-label">
-                <div class="gantt-what" title="{{ c.what }}">{{ c.what }}</div>
+                <button type="button" class="gantt-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ title }}</button>
                 <div class="muted small">{% if c.direction == 'mine' %}Я → {{ c.whom or '—' }}{% elif c.direction == 'to_me' %}{{ c.who or '?' }} → мне{% else %}{{ c.who or '?' }} → {{ c.whom or '—' }}{% endif %}</div>
+                {{ ui.task_dialog(c, meetings) }}
               </div>
               <div class="gantt-track" style="width: {{ gantt.width }}px">
                 <div class="gantt-bar {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' nodue' if not c.bar.due }}"
-                     style="left: {{ c.bar.left }}px; width: {{ c.bar.width }}px"
-                     title="{{ c.what }} · {{ c.bar.start.strftime('%d.%m') }} → {{ c.bar.end.strftime('%d.%m') if c.bar.due else 'срок не указан' }}">{% if c.bar.width >= 60 %}<span>{{ c.what }}</span>{% endif %}</div>
+                     style="left: {{ c.bar.left }}px; width: {{ c.bar.width }}px" data-task-open="{{ c.id }}" role="button" tabindex="0"
+                     title="{{ title }} · {{ c.bar.start.strftime('%d.%m') }} → {{ c.bar.end.strftime('%d.%m') if c.bar.due else 'срок не указан' }}">{% if c.bar.width >= 60 %}<span>{{ title }}</span>{% endif %}</div>
               </div>
             </div>
             {% else %}<div class="gantt-empty">Пусто</div>{% endfor %}

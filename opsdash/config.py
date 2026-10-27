@@ -44,7 +44,7 @@ DEFAULTS: dict = {
         "timezone": "Europe/Moscow",
         "work_hours": {"start": "09:00", "end": "20:00", "days": [1, 2, 3, 4, 5]},
     },
-    "web": {"port": 8765},
+    "web": {"port": 8765, "theme": "system"},  # theme: system / light / dark
     # откуда брать новые версии PULSE (opsdash.updates); закрытый репозиторий — с токеном GITHUB_TOKEN в secrets
     "updates": {"repo": "vladsaxapof1/Operation-dash", "branch": "claude/pult-v1", "auto_check": True},
     "claude": {

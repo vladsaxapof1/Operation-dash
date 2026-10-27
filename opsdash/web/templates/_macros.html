@@ -69,37 +69,88 @@
 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13H3v-3z M9 4l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
 {%- endmacro %}
 
-{% macro task_link(c) -%}
-{#- где договорились: сообщение в Telegram или письмо; для задач со встреч — чат с человеком из справочника #}
-{%- if c.link %}<a class="btn sm ghost" href="{{ c.link }}" target="_blank" rel="noopener" title="{{ c.link_title }}">↗ {{ c.link_label }}</a>{% endif -%}
+{% macro task_link(c, compact=False) -%}
+{#- где договорились: сообщение в Telegram или письмо; для задач со встреч — чат с человеком из справочника.
+    compact — только иконка (узкая карточка на доске) #}
+{%- if c.link %}<a class="btn sm ghost{{ ' icon' if compact }}" href="{{ c.link }}" target="_blank" rel="noopener" title="{{ c.link_title }}">
+  {%- if compact %}{% if c.link_label == 'Почта' %}<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5l8.5 6.5 8.5-6.5"/></svg>
+  {%- else %}<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M21.5 3.5L2.5 11l7 2.5 2.5 7.5z"/><path d="M21.5 3.5L9.5 13.5"/></svg>{% endif %}
+  {%- else %}↗ {{ c.link_label }}{% endif %}</a>{% endif -%}
 {%- endmacro %}
 
-{% macro edit_task(c) %}
-{#- карандаш: поменять формулировку, тип, кто и кому, срок; там же — отменить задачу #}
-<details class="task-more"><summary class="btn sm ghost" title="Изменить задачу">{{ pencil() }}</summary>
-  <div class="task-menu task-edit">
-    <form method="post" action="/commitments/{{ c.id }}/edit">
-      <label class="small">Что сделать</label><textarea name="what" rows="3" required>{{ c.what }}</textarea>
-      <label class="small">Тип</label>
-      <select name="direction">{% for key, title in [('mine', 'Моя задача'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}<option value="{{ key }}" {{ 'selected' if c.direction == key }}>{{ title }}</option>{% endfor %}</select>
-      <div class="task-edit-row">
-        <div><label class="small">Кто делает</label><input type="text" name="who" value="{{ c.who or '' }}" list="people-list"></div>
-        <div><label class="small">Кому</label><input type="text" name="whom" value="{{ c.whom or '' }}" list="people-list"></div>
+{% macro edit_button(c) -%}
+<button type="button" class="btn sm ghost icon" data-task-open="{{ c.id }}" data-edit title="Изменить задачу">{{ pencil() }}</button>
+{%- endmacro %}
+
+{% macro task_source(c, meetings={}) -%}
+{%- if c.source_type == 'meeting' and c.source_ref %}<a href="/meetings/{{ c.source_ref }}">{{ ('встреча «' ~ meetings[c.source_ref] ~ '»') if meetings.get(c.source_ref) else 'встреча' }}</a>
+{%- elif c.source_type and c.source_type != 'manual' %}{{ SOURCE_TITLES.get(c.source_type, c.source_type) }}
+{%- else %}добавлено вручную{% endif -%}
+{%- endmacro %}
+
+{% macro task_dialog(c, meetings={}) %}
+{#- карточка задачи — окно по центру экрана: всё о задаче и правка. Открывается кликом по задаче, карандаш —
+    сразу правка (app.js). Закрыть — ✕, Esc или клик мимо окна #}
+{% set title = c | headline %}
+<dialog class="dlg" id="task-{{ c.id }}" aria-label="{{ title }}">
+  <div class="dlg-box" tabindex="-1">
+    <div class="dlg-top">
+      <span class="chip {{ 'acc' if c.direction == 'mine' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>
+      {% if c.status != 'open' %}<span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
+      {{ due_badge(c) }}
+      <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="dlg-view">
+      <h2 class="dlg-title">{{ title }}</h2>
+      {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
+      <dl class="dlg-facts">
+        <dt>Кто делает</dt><dd>{{ 'Я' if c.direction == 'mine' else (c.who or '—') }}</dd>
+        <dt>Кому</dt><dd>{{ 'мне' if c.direction == 'to_me' else (c.whom or '—') }}</dd>
+        <dt>Срок</dt><dd>{{ c.due | date if c.due else 'не указан' }}</dd>
+        {% if c.created %}<dt>Появилась</dt><dd>{{ c.created | local('%d.%m.%Y') }}</dd>{% endif %}
+        {% if c.closed_at and c.status != 'open' %}<dt>{{ 'Выполнена' if c.status == 'done' else 'Отменена' }}</dt><dd>{{ c.closed_at | local('%d.%m.%Y') }}</dd>{% endif %}
+        <dt>Откуда</dt><dd>{{ task_source(c, meetings) }}</dd>
+        {% if c.kaiten_card_id %}<dt>Kaiten</dt><dd>карточка #{{ c.kaiten_card_id }}</dd>{% endif %}
+        {% if c.note %}<dt>Заметка</dt><dd>{{ c.note }}</dd>{% endif %}
+      </dl>
+      {% if c.quote %}<blockquote class="dlg-quote">{{ c.quote }}</blockquote>{% endif %}
+      <div class="dlg-actions">
+        {% if c.status == 'open' %}
+        <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn primary">✓ Готово</button></form>
+        {% else %}
+        <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn">Вернуть в работу</button></form>
+        {% endif %}
+        {% if c.link %}<a class="btn" href="{{ c.link }}" target="_blank" rel="noopener" title="{{ c.link_title }}">↗ {{ c.link_label }}</a>{% endif %}
+        <button type="button" class="btn" data-dlg-edit>{{ pencil() }} Изменить</button>
+        <span class="grow"></span>
+        {% if c.status == 'open' %}<form class="inline" method="post" action="/commitments/{{ c.id }}" data-confirm="Отменить задачу «{{ title }}»?"><input type="hidden" name="status" value="cancelled"><button class="btn ghost danger">Отменить задачу</button></form>{% endif %}
       </div>
-      <label class="small">Срок</label><input type="date" name="due" value="{{ c.due or '' }}">
-      <div class="form-actions"><button class="btn sm primary">Сохранить</button></div>
+    </div>
+    <form class="dlg-edit" method="post" action="/commitments/{{ c.id }}/edit" hidden>
+      <h2 class="dlg-title">Изменить задачу</h2>
+      <label>Заголовок</label><input type="text" name="title" value="{{ c.title or title }}" maxlength="120" required placeholder="Коротко, 2–6 слов">
+      <label>Суть</label><textarea name="what" rows="4" placeholder="Что именно сделать, подробности">{{ c.what }}</textarea>
+      <div class="form-row">
+        <div><label>Тип</label><select name="direction">{% for key, t in [('mine', 'Моя задача'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}<option value="{{ key }}" {{ 'selected' if c.direction == key }}>{{ t }}</option>{% endfor %}</select></div>
+        <div><label>Срок</label><input type="date" name="due" value="{{ c.due or '' }}"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Кто делает</label><input type="text" name="who" value="{{ c.who or '' }}" list="people-list"></div>
+        <div><label>Кому</label><input type="text" name="whom" value="{{ c.whom or '' }}" list="people-list"></div>
+      </div>
+      <div class="dlg-actions"><button class="btn primary">Сохранить</button><button type="button" class="btn ghost" data-dlg-view>Отмена</button></div>
     </form>
-    {% if c.status == 'open' %}<form method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="cancelled"><button class="btn sm ghost danger">Отменить задачу</button></form>{% endif %}
   </div>
-</details>
+</dialog>
 {% endmacro %}
 
-{% macro commitment(c, show_dir=False) %}
-{#- кнопки — строкой под текстом: справа они сжимали задачу в узкую колонку #}
-<li class="cm">
+{% macro commitment(c, show_dir=False, compact=False) %}
+{#- строка списка: заголовок, кто и срок, кнопки под текстом. Клик по строке — карточка задачи.
+    compact — узкая колонка (сводка): Telegram — иконкой #}
+<li class="cm" data-task="{{ c.id }}">
   <div>
     {% if show_dir %}<span class="chip {{ 'acc' if c.direction == 'mine' else '' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>{% endif %}
-    {{ c.what }}
+    <button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
   </div>
   <div class="meta">
     {% if c.direction == 'mine' %}{% if c.whom %}кому: {{ c.whom }}{% endif %}{% else %}{{ c.who or '' }}{% if c.direction == 'other' and c.whom %} → {{ c.whom }}{% endif %}{% endif %}
@@ -114,14 +165,16 @@
     {% else %}
     <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
     {% endif %}
-    {{ task_link(c) }}
-    {{ edit_task(c) }}
+    {{ task_link(c, compact) }}
+    {{ edit_button(c) }}
   </div>
+  {{ task_dialog(c) }}
 </li>
 {% endmacro %}
 
 {% macro task_card(c, meetings={}) %}
-<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}">
+{#- карточка на доске: только главное. Подробности, цитата и правка — в окне задачи (клик по карточке) #}
+<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}" data-task="{{ c.id }}">
   <div class="task-top">
     <span class="task-chips">
       {% if c.status == 'done' %}<span class="chip ok">✓ готово{% if c.closed_at %} {{ c.closed_at | local('%d.%m') }}{% endif %}</span>{% endif %}
@@ -130,29 +183,25 @@
     </span>
     {{ due_badge(c) }}
   </div>
-  <div class="task-what">{{ c.what }}</div>
+  <button type="button" class="task-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
   <div class="task-who">
     {%- if c.direction == 'mine' %}<b>Я</b> → {{ c.whom or '—' }}
     {%- elif c.direction == 'to_me' %}<b>{{ c.who or '?' }}</b> → мне
     {%- else %}<b>{{ c.who or '?' }}</b> → {{ c.whom or '—' }}{% endif -%}
   </div>
-  {% if c.quote %}<div class="task-quote" title="{{ c.quote }}">{{ c.quote }}</div>{% endif %}
   <div class="task-foot">
-    <span class="muted small">
-      {%- if c.source_type == 'meeting' and c.source_ref %}<a href="/meetings/{{ c.source_ref }}">{{ meetings.get(c.source_ref) or 'встреча' }}</a>
-      {%- elif c.source_type and c.source_type != 'manual' %}{{ SOURCE_TITLES.get(c.source_type, c.source_type) }}
-      {%- else %}добавлено вручную{% endif -%}
-    </span>
+    <span class="muted small task-src">{{ task_source(c, meetings) }}</span>
     <span class="actions">
-      {{ task_link(c) }}
       {% if c.status == 'open' %}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненной">✓ Готово</button></form>
       {% else %}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
       {% endif %}
-      {{ edit_task(c) }}
+      {{ task_link(c, compact=True) }}
+      {{ edit_button(c) }}
     </span>
   </div>
+  {{ task_dialog(c, meetings) }}
 </div>
 {% endmacro %}
 

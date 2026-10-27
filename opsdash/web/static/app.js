@@ -20,14 +20,110 @@
     });
   });
 
-  // таймлайн задач: сразу показать «сейчас» (на трети ширины, чтобы было видно и прошлое)
-  // (после загрузки: иначе браузер восстанавливает прежнюю прокрутку поверх нашей)
+  // после действия (Готово, Сохранить…) страница перезагружается — возвращаем прокрутку туда, где была,
+  // а не в начало страницы. Только для той же страницы и только сразу после отправки
+  var kept = null;
+  try { kept = JSON.parse(sessionStorage.getItem("keep_scroll") || "null"); sessionStorage.removeItem("keep_scroll"); } catch (e) { kept = null; }
+  if (kept && (kept.path !== location.pathname || Date.now() - kept.t > 20000)) kept = null;
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (e.defaultPrevented || (form.method || "").toLowerCase() !== "post") return;
+    var box = document.querySelector("[data-gantt]");
+    try {
+      sessionStorage.setItem("keep_scroll", JSON.stringify({ path: location.pathname, t: Date.now(), y: window.scrollY,
+        gx: box ? box.scrollLeft : null }));
+    } catch (err) { /* приватный режим — просто без возврата прокрутки */ }
+  });
+  if (kept) {
+    window.scrollTo(0, kept.y);
+    window.addEventListener("load", function () { window.scrollTo(0, kept.y); });
+  }
+
+  // таймлайн задач: сразу показать «сейчас» (на трети ширины, чтобы было видно и прошлое), а после сохранения —
+  // то же место, что было. После загрузки ещё раз: иначе браузер восстанавливает прежнюю прокрутку поверх нашей
   var ganttBox = document.querySelector("[data-gantt]");
   if (ganttBox) {
-    var toNow = function () { ganttBox.scrollLeft = Math.max(0, Number(ganttBox.dataset.nowX) - (ganttBox.clientWidth - 300) / 3); };
+    var labelW = function () { return ganttBox.querySelector(".gantt-corner").offsetWidth; };
+    var toNow = function () {
+      if (kept && kept.gx !== null) { ganttBox.scrollLeft = kept.gx; window.scrollTo(0, kept.y); return; }
+      ganttBox.scrollLeft = Math.max(0, Number(ganttBox.dataset.nowX) - (ganttBox.clientWidth - labelW()) / 3);
+    };
     toNow();
     window.addEventListener("load", function () { requestAnimationFrame(toNow); });
+
+    // шкала дат едет вместе со страницей: таблица во всю высоту (без своей прокрутки), а шапку сдвигаем вниз,
+    // пока таблица на экране (position: sticky тут не работает — таблица листается вбок)
+    var head = ganttBox.querySelector(".gantt-head");
+    var stick = function () {
+      var r = ganttBox.getBoundingClientRect();
+      var y = Math.min(Math.max(0, -r.top), Math.max(0, r.height - head.offsetHeight - 46));
+      head.style.transform = y ? "translateY(" + y + "px)" : "";
+      head.classList.toggle("stuck", y > 0);
+    };
+    window.addEventListener("scroll", stick, { passive: true });
+    window.addEventListener("resize", stick);
+    stick();
+
+    // ширина колонки с задачами: тянем за край, двойной щелчок — по самому длинному названию. Помним в cookie
+    var grip = ganttBox.querySelector("[data-gantt-resize]");
+    var setW = function (w, save) {
+      w = Math.round(Math.min(720, Math.max(200, w)));
+      ganttBox.style.setProperty("--gl", w + "px");
+      if (save) document.cookie = "gantt_w=" + w + "; path=/; max-age=31536000; samesite=lax";
+    };
+    grip.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      var x0 = e.clientX, w0 = labelW();
+      grip.setPointerCapture(e.pointerId);
+      document.body.classList.add("resizing");
+      var move = function (ev) { setW(w0 + ev.clientX - x0, false); };
+      var up = function () {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        document.body.classList.remove("resizing");
+        setW(labelW(), true);
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+    });
+    grip.addEventListener("dblclick", function () {
+      var widest = 0;
+      ganttBox.querySelectorAll(".gantt-what").forEach(function (el) { widest = Math.max(widest, el.scrollWidth); });
+      setW(widest + 32, true);  // + поля ячейки
+    });
   }
+
+  // карточка задачи — окно по центру экрана: клик по задаче (на доске, в списке, на таймлайне) — просмотр,
+  // карандаш — сразу правка. Закрыть — ✕, Esc (сам браузер) или клик мимо окна
+  var showTask = function (dlg, edit) {
+    dlg.querySelector(".dlg-view").hidden = edit;
+    dlg.querySelector(".dlg-edit").hidden = !edit;
+    if (!dlg.open) dlg.showModal();
+    // фокус — на поле заголовка, а при просмотре на само окно (иначе браузер обводит рамкой ✕)
+    (edit ? dlg.querySelector(".dlg-edit [name=title]") : dlg.querySelector(".dlg-box")).focus();
+  };
+  var pressedOn = null;  // нажали внутри окна, а отпустили снаружи (выделяли текст) — не закрываем
+  document.addEventListener("mousedown", function (e) { pressedOn = e.target; });
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    var dlg = t.closest("dialog.dlg");
+    if (dlg) {
+      if ((t === dlg && pressedOn === dlg) || t.closest("[data-dlg-close]")) dlg.close();
+      else if (t.closest("[data-dlg-edit]")) showTask(dlg, true);
+      else if (t.closest("[data-dlg-view]")) showTask(dlg, false);
+      return;
+    }
+    var opener = t.closest("[data-task-open]");
+    var card = t.closest("[data-task]");
+    if (!opener && (!card || t.closest("a, button, form, input, select, textarea, label, summary"))) return;
+    var target = document.getElementById("task-" + (opener ? opener.dataset.taskOpen : card.dataset.task));
+    if (!target) return;
+    e.preventDefault();
+    showTask(target, !!(opener && opener.hasAttribute("data-edit")));
+  });
+  document.addEventListener("keydown", function (e) {  // полоса на таймлайне — с клавиатуры тоже
+    if (e.key === "Enter" && e.target.matches("[data-task-open][role=button]")) e.target.click();
+  });
 
   // доска задач: свернуть колонку. Помним в cookie — сервер сразу отдаёт её свёрнутой
   document.querySelectorAll("[data-kb-fold]").forEach(function (btn) {
