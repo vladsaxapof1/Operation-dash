@@ -106,6 +106,7 @@ DEFAULTS: dict = {
         "quiet_hours": {"start": "21:00", "end": "08:30"},
     },
     "ymessenger": {"enabled": False, "my_login": ""},
+    "pachca": {"enabled": False},  # персональный токен — в secrets (PACHCA_TOKEN)
     "mail": {
         "enabled": False,
         "email": "",
@@ -174,6 +175,7 @@ SECRET_KEYS = {
     "TELEGRAM_SESSION": "Telegram: сессия аккаунта",
     "TELEGRAM_BOT_TOKEN": "Telegram-бот: токен",
     "YM_BOT_TOKEN": "Яндекс Мессенджер: токен бота",
+    "PACHCA_TOKEN": "Пачка: персональный токен",
     "MAIL_APP_PASSWORD": "Яндекс Почта: пароль приложения",
     "GMAIL_APP_PASSWORD": "Gmail: пароль приложения",
     "CALDAV_APP_PASSWORD": "Яндекс Календарь: пароль приложения",

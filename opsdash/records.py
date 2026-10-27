@@ -323,7 +323,7 @@ def task_options() -> list[dict]:
 
 
 def add_links(items: list[dict]) -> list[dict]:
-    """Кнопка «открыть в Telegram / почте» у задачи: сообщение, из которого она взялась, а если задача
+    """Кнопка «открыть в Telegram / Пачке / почте» у задачи: сообщение, из которого она взялась, а если задача
     со встречи или добавлена вручную — личный чат с человеком из справочника."""
     from opsdash import links
 
@@ -331,7 +331,8 @@ def add_links(items: list[dict]) -> list[dict]:
     for c in items:
         c["link"] = c["link_label"] = None
         msg = None
-        if c.get("source_type") in ("telegram", "mail", "ymessenger") and str(c.get("source_ref") or "").isdigit():
+        if (c.get("source_type") in ("telegram", "mail", "ymessenger", "pachca")
+                and str(c.get("source_ref") or "").isdigit()):
             msg = store.row("SELECT source, chat_id, msg_id, sender_id FROM messages WHERE id=?", (int(c["source_ref"]),))
         found = links.original(msg["source"], msg["chat_id"], msg["msg_id"], msg["sender_id"]) if msg else None
         if not found and (name := counterpart(c)):
@@ -341,7 +342,8 @@ def add_links(items: list[dict]) -> list[dict]:
                 found = (f"https://t.me/{username}", "Telegram")
         if found:
             c["link"], c["link_title"] = found
-            c["link_label"] = "Telegram" if "t.me/" in found[0] or "telegram.org" in found[0] else "Почта"
+            c["link_label"] = ("Telegram" if "t.me/" in found[0] or "telegram.org" in found[0]
+                               else "Пачка" if "pachca.com" in found[0] else "Почта")
     return with_reminders(items, people)
 
 

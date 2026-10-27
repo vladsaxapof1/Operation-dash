@@ -1,4 +1,4 @@
-"""Ссылки «открыть в оригинале»: сообщение или чат в Telegram, письмо в Gmail, поиск в Яндекс Почте.
+"""Ссылки «открыть в оригинале»: сообщение или чат в Telegram и Пачке, письмо в Gmail, поиск в Яндекс Почте.
 
 Telegram даёт ссылку на конкретное сообщение только в супергруппах и каналах. На личную переписку —
 только ссылку на человека, а у обычных групп ссылок нет совсем: их открываем в Telegram Web по id.
@@ -21,6 +21,8 @@ def original(source: str | None, chat_id, msg_id=None, sender_id: str | None = N
         return _telegram(str(chat_id), msg_id)
     if source == "mail":
         return _mail(str(chat_id), msg_id, sender_id)
+    if source == "pachca":
+        return _pachca(str(chat_id), msg_id)
     return None
 
 
@@ -51,3 +53,12 @@ def _mail(chat_id: str, msg_id, sender_id: str | None) -> tuple[str, str]:
     if sender_id and "@" in sender_id:
         return f"https://mail.yandex.ru/#search?request={quote(sender_id)}", "В Яндекс Почте"
     return "https://mail.yandex.ru/", "Открыть Яндекс Почту"
+
+
+def _pachca(chat_id: str, msg_id) -> tuple[str, str]:
+    # Пачка сама отдаёт ссылку на сообщение (у ответа в треде она ведёт в тред) — берём сохранённую
+    if msg_id:
+        saved = store.scalar("SELECT link FROM messages WHERE source='pachca' AND chat_id=? AND msg_id=?",
+                             (chat_id, str(msg_id)))
+        return saved or f"https://app.pachca.com/chats/{chat_id}?message={msg_id}", "К сообщению"
+    return f"https://app.pachca.com/chats/{chat_id}", "Открыть в Пачке"

@@ -165,12 +165,12 @@ def cmd_status(a) -> None:
 
 def cmd_check(a) -> None:
     from opsdash import bot, brain
-    from opsdash.sources import calendar, kaiten, mail, telegram, ymessenger
+    from opsdash.sources import calendar, kaiten, mail, pachca, telegram, ymessenger
 
     checks = {
-        "claude": brain.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "mail": mail.check,
-        "gmail": mail.check_gmail, "calendar": calendar.check, "google_calendar": calendar.google_check,
-        "kaiten": kaiten.check,
+        "claude": brain.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "pachca": pachca.check,
+        "mail": mail.check, "gmail": mail.check_gmail, "calendar": calendar.check,
+        "google_calendar": calendar.google_check, "kaiten": kaiten.check,
         "bot": lambda: "бот @" + bot.get_bot().me().get("username", "?"),
     }
     names = list(checks) if a.what == "all" else [a.what]
@@ -189,7 +189,7 @@ def cmd_collect(a) -> None:
     from opsdash import jobs
 
     settings = config.load_settings()
-    names = (["telegram", "ymessenger", "mail", "gmail", "calendar", "google_calendar", "kaiten"]
+    names = (["telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten"]
              if a.what == "all" else [a.what])
     for n in names:
         if a.what == "all" and not settings[n].get("enabled"):
@@ -907,12 +907,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="состояние источников и заданий").set_defaults(fn=cmd_status)
     s = sub.add_parser("check", help="проверить подключения")
     s.add_argument("what", nargs="?", default="all",
-                   choices=["all", "claude", "telegram", "ymessenger", "mail", "gmail", "calendar", "google_calendar",
-                            "kaiten", "bot"])
+                   choices=["all", "claude", "telegram", "ymessenger", "pachca", "mail", "gmail", "calendar",
+                            "google_calendar", "kaiten", "bot"])
     s.set_defaults(fn=cmd_check)
     s = sub.add_parser("collect", help="собрать данные сейчас")
     s.add_argument("what", nargs="?", default="all",
-                   choices=["all", "telegram", "ymessenger", "mail", "gmail", "calendar", "google_calendar", "kaiten"])
+                   choices=["all", "telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar",
+                            "kaiten"])
     s.set_defaults(fn=cmd_collect)
     s = sub.add_parser("run", help="выполнить задание сейчас")
     s.add_argument("job", choices=["triage", "digest", "stale", "recordings", "transcribe", "process-meeting", "housekeeping",
@@ -921,11 +922,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_run)
     sub.add_parser("overview", help="сводка: что сейчас важно").set_defaults(fn=cmd_overview)
 
-    s = sub.add_parser("messages", help="сообщения из Telegram, Я.Мессенджера и почты")
+    s = sub.add_parser("messages", help="сообщения из Telegram, Я.Мессенджера, Пачки и почты")
     ms = s.add_subparsers(dest="action", required=True)
     x = ms.add_parser("pending", help="новые (неразобранные) сообщения")
     x.add_argument("--limit", type=int, default=200)
-    x.add_argument("--source", choices=["telegram", "ymessenger", "mail"])
+    x.add_argument("--source", choices=["telegram", "ymessenger", "pachca", "mail"])
     x.add_argument("--context", type=int, default=3, help="сколько прежних сообщений чата показать для контекста")
     x = ms.add_parser("done", help="отметить разобранными")
     x.add_argument("--shown", action="store_true", help="все, что показала последняя команда pending")
@@ -1084,7 +1085,8 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--who", help="кто должен сделать")
     x.add_argument("--whom", help="кому обещано")
     x.add_argument("--due", help="YYYY-MM-DD")
-    x.add_argument("--source", help="meeting:<id> | telegram:<message id> | ymessenger:<id> | mail:<id> | manual")
+    x.add_argument("--source",
+                   help="meeting:<id> | telegram:<message id> | ymessenger:<id> | pachca:<id> | mail:<id> | manual")
     x.add_argument("--quote", help="дословная цитата")
     x.add_argument("--card", type=int, help="карточка Kaiten")
     x.add_argument("--note")

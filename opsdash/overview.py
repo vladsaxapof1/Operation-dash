@@ -11,6 +11,7 @@ from opsdash.sources import kaiten
 SOURCE_TITLES = {
     "telegram": "Telegram",
     "ymessenger": "Я.Мессенджер",
+    "pachca": "Пачка",
     "mail": "Почта",
     "gmail": "Gmail",
     "calendar": "Календарь",
@@ -190,7 +191,7 @@ def sources_health(settings: dict | None = None) -> list[dict]:
     settings = settings or config.load_settings()
     jobs = {j["name"]: j for j in store.rows("SELECT * FROM jobs")}
     out = []
-    for key in ("telegram", "ymessenger", "mail", "gmail", "calendar", "google_calendar", "kaiten"):
+    for key in ("telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten"):
         enabled = settings.get(key, {}).get("enabled")
         job = jobs.get(f"collect:{key}") or {}
         if not enabled:

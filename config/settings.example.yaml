@@ -66,6 +66,8 @@ telegram_bot:
 ymessenger:
   enabled: false
   my_login: ''
+pachca:
+  enabled: false
 mail:
   enabled: false
   email: ''

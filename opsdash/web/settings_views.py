@@ -15,6 +15,7 @@ TABS = [
     ("telegram", "Telegram"),
     ("bot", "Telegram-бот"),
     ("ymessenger", "Я.Мессенджер"),
+    ("pachca", "Пачка"),
     ("mail", "Почта"),
     ("calendar", "Календарь"),
     ("kaiten", "Kaiten"),
@@ -53,6 +54,20 @@ def collect_soon(source: str) -> None:
         jobs.submit(f"collect:{source}")
 
 
+def chat_list(source: str, sort: str) -> dict:
+    """Чаты для выбора в настройках (Telegram, Пачка): по умолчанию — по последнему сообщению,
+    кто писал недавно, тот и сверху; счётчики для фильтров «Читаю / Не читаю» и по типу чата."""
+    chats = store.rows("SELECT * FROM chats WHERE source=? ORDER BY last_ts IS NULL, last_ts DESC, title", (source,))
+    if sort == "title":  # по алфавиту без учёта кавычек и эмодзи в начале названия
+        chats.sort(key=lambda c: re.sub(r"^[\W_]+", "", c["title"] or "").casefold())
+    return {
+        "sort": "title" if sort == "title" else "recent",
+        "chats": chats,
+        "chat_counts": {v: sum(c["enabled"] == v for c in chats) for v in (1, 0, -1)},
+        "chat_kinds": [(k, title, n) for k, title in CHAT_KINDS.items() if (n := sum(c["kind"] == k for c in chats))],
+    }
+
+
 def register(app: FastAPI, render, back) -> None:
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -74,20 +89,15 @@ def register(app: FastAPI, render, back) -> None:
             ctx["tg_login_state"] = ("qr" if flow.qr_state else "code" if flow.client and flow.phone_code_hash else "")
             ctx["tg_qr"] = flow
             ctx["tg_me"] = store.get_state("telegram_me")
-            # по умолчанию — по последнему сообщению: кто писал недавно, тот и сверху
-            ctx["sort"] = "title" if sort == "title" else "recent"
-            chats = store.rows("SELECT * FROM chats WHERE source='telegram' ORDER BY last_ts IS NULL, last_ts DESC, title")
-            if sort == "title":  # по алфавиту без учёта кавычек и эмодзи в начале названия
-                chats.sort(key=lambda c: re.sub(r"^[\W_]+", "", c["title"] or "").casefold())
-            ctx["chats"] = chats
-            ctx["chat_counts"] = {v: sum(c["enabled"] == v for c in chats) for v in (1, 0, -1)}
-            ctx["chat_kinds"] = [(k, title, n) for k, title in CHAT_KINDS.items()
-                                 if (n := sum(c["kind"] == k for c in chats))]
+            ctx.update(chat_list("telegram", sort))
         elif tab == "bot":
             ctx["pair_code"] = bot.pair_code() if not settings["telegram_bot"].get("owner_chat_id") else ""
             ctx["bot_username"] = store.get_state("bot_username")
         elif tab == "ymessenger":
             ctx["chats"] = store.rows("SELECT * FROM chats WHERE source='ymessenger' ORDER BY title")
+        elif tab == "pachca":
+            ctx["pachca_me"] = store.get_state("pachca_me")
+            ctx.update(chat_list("pachca", sort))
         elif tab == "kaiten":
             ctx["boards"] = store.rows("SELECT * FROM kaiten_boards ORDER BY title")
             ctx["kaiten_me"] = store.get_state("kaiten_me")
@@ -113,7 +123,7 @@ def register(app: FastAPI, render, back) -> None:
     @app.post("/settings/check/{what}")
     async def settings_check(what: str):
         from opsdash import bot, brain
-        from opsdash.sources import calendar, kaiten, mail, telegram, ymessenger
+        from opsdash.sources import calendar, kaiten, mail, pachca, telegram, ymessenger
 
         def bot_check():
             me = bot.get_bot().me()
@@ -121,8 +131,8 @@ def register(app: FastAPI, render, back) -> None:
             return f"бот @{me.get('username')}"
 
         checks = {
-            "claude": brain.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "mail": mail.check,
-            "gmail": mail.check_gmail, "google_calendar": calendar.google_check,
+            "claude": brain.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "pachca": pachca.check,
+            "mail": mail.check, "gmail": mail.check_gmail, "google_calendar": calendar.google_check,
             "calendar": calendar.check, "kaiten": kaiten.check, "bot": bot_check,
         }
         if what not in checks:
@@ -354,6 +364,34 @@ def register(app: FastAPI, render, back) -> None:
         config.update_settings("ymessenger", {"enabled": checkbox(enabled), "my_login": my_login.strip()})
         collect_soon("ymessenger")
         return back(request, "Сохранено")
+
+    # --- Пачка ---
+
+    @app.post("/settings/pachca")
+    async def pachca_save(request: Request, token: str = Form(""), enabled: str = Form(None)):
+        from opsdash.sources import pachca
+
+        config.update_settings("pachca", {"enabled": checkbox(enabled)})
+        msg = "Сохранено"
+        if token.strip():
+            config.set_secret("PACHCA_TOKEN", token.strip())
+            try:  # сразу показать чаты для выбора
+                n = await run_in_threadpool(pachca.refresh_chats)
+            except Exception as e:  # noqa: BLE001
+                return back(request, err=f"Токен сохранён, но список чатов не получен: {e}")
+            msg = f"Сохранено. Чатов в Пачке: {n} — отметьте, какие читать"
+        collect_soon("pachca")
+        return back(request, msg)
+
+    @app.post("/settings/pachca/chats")
+    async def pachca_chats(request: Request):
+        from opsdash.sources import pachca
+
+        try:
+            n = await run_in_threadpool(pachca.refresh_chats)
+        except Exception as e:  # noqa: BLE001
+            return back(request, err=f"Не получилось: {e}")
+        return back(request, f"Список чатов обновлён: {n}")
 
     # --- почта ---
 

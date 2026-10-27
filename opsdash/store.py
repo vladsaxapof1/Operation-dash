@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS anthology (      -- решения, уроки, уд�
     happened TEXT,                   -- YYYY-MM-DD: когда решили / случилось
     project TEXT,                    -- тема или направление: «ОРК», «Автоворонка»
     people TEXT DEFAULT '[]',        -- JSON: кто участвовал
-    source_type TEXT,                -- meeting | document | telegram | ymessenger | mail | kaiten | manual
+    source_type TEXT,                -- meeting | document | telegram | ymessenger | pachca | mail | kaiten | manual
     source_ref TEXT,
     quote TEXT,
     status TEXT DEFAULT 'accepted',  -- accepted | proposed (предложено Claude) | outdated | rejected
@@ -58,7 +58,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS anthology_fts USING fts5(
 );
 
 CREATE TABLE IF NOT EXISTS chats (
-    source TEXT NOT NULL,            -- telegram | ymessenger | mail
+    source TEXT NOT NULL,            -- telegram | ymessenger | pachca | mail
     chat_id TEXT NOT NULL,
     title TEXT,
     kind TEXT,                       -- private | group | channel | mail
@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS commitments (
     title TEXT,                      -- короткий заголовок для карточки (2–6 слов); пусто — сокращаем what
     due TEXT,                        -- YYYY-MM-DD
     status TEXT DEFAULT 'open',      -- open | done | cancelled
-    source_type TEXT,                -- meeting | telegram | ymessenger | mail | manual
+    source_type TEXT,                -- meeting | telegram | ymessenger | pachca | mail | manual
     source_ref TEXT,
     quote TEXT,
     kaiten_card_id INTEGER,

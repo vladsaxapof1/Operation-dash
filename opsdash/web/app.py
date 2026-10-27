@@ -217,7 +217,8 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["attention_count"] = store.scalar("SELECT COUNT(*) FROM attention WHERE status='open'") or 0
     ctx["new_tasks_count"] = records.unseen_count()
     ctx["needs_setup"] = not any(settings[s].get("enabled")
-                                 for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten", "ymessenger"))
+                                 for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten",
+                                           "ymessenger", "pachca"))
     ctx["voice_tip"] = None if ctx["nav"] == "meetings" else _voice_tip(request)
     ctx["build"] = build()
     ctx["nav_collapsed"] = request.cookies.get("nav") == "collapsed"  # меню свёрнуто в иконки (app.js)
@@ -401,7 +402,7 @@ def refresh(request: Request):
     from opsdash import jobs
 
     settings = config.load_settings()
-    for src in ("telegram", "ymessenger", "mail", "gmail", "calendar", "google_calendar", "kaiten"):
+    for src in ("telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten"):
         if settings[src].get("enabled"):
             jobs.submit(f"collect:{src}")
     jobs.submit("recordings")
@@ -1086,8 +1087,8 @@ def journal(request: Request, level: str = ""):
     sql = "SELECT * FROM log" + (" WHERE level=?" if level else "") + " ORDER BY id DESC LIMIT 300"
     logs = store.rows(sql, [level] if level else [])
     job_rows = {j["name"]: j for j in store.rows("SELECT * FROM jobs")}
-    runnable = ["collect:telegram", "collect:ymessenger", "collect:mail", "collect:gmail", "collect:calendar",
-                "collect:google_calendar", "collect:kaiten", "docs-index", "anthology", "company-context",
+    runnable = ["collect:telegram", "collect:ymessenger", "collect:pachca", "collect:mail", "collect:gmail",
+                "collect:calendar", "collect:google_calendar", "collect:kaiten", "docs-index", "anthology", "company-context",
                 "recordings", "triage", "digest", "stale"]
     return render(request, "journal.html", nav="journal", logs=logs, jobs=job_rows, runnable=runnable,
                   titles=jobs.TITLES, queued=jobs.queued(), level=level)

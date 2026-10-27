@@ -24,11 +24,11 @@ _pending_lock = threading.Lock()
 # --- задания ------------------------------------------------------------------
 
 def collect_source(name: str) -> str:
-    from opsdash.sources import calendar, kaiten, mail, telegram, ymessenger
+    from opsdash.sources import calendar, kaiten, mail, pachca, telegram, ymessenger
 
-    fn = {"telegram": telegram.collect, "ymessenger": ymessenger.collect, "mail": mail.collect,
-          "gmail": mail.collect_gmail, "calendar": calendar.collect, "google_calendar": calendar.google_collect,
-          "kaiten": kaiten.collect}[name]
+    fn = {"telegram": telegram.collect, "ymessenger": ymessenger.collect, "pachca": pachca.collect,
+          "mail": mail.collect, "gmail": mail.collect_gmail, "calendar": calendar.collect,
+          "google_calendar": calendar.google_collect, "kaiten": kaiten.collect}[name]
     return fn()
 
 
@@ -92,7 +92,7 @@ def job_process_meeting(meeting_id: str, **_) -> str:
     return "готово"
 
 
-MESSAGE_SOURCES = ("telegram", "ymessenger", "mail", "gmail")
+MESSAGE_SOURCES = ("telegram", "ymessenger", "pachca", "mail", "gmail")
 
 
 def collect_messages_now(settings: dict, timeout: float = 180) -> None:
@@ -342,6 +342,7 @@ def job_update(**_) -> str:
 REGISTRY = {
     "collect:telegram": lambda **kw: collect_source("telegram"),
     "collect:ymessenger": lambda **kw: collect_source("ymessenger"),
+    "collect:pachca": lambda **kw: collect_source("pachca"),
     "collect:mail": lambda **kw: collect_source("mail"),
     "collect:gmail": lambda **kw: collect_source("gmail"),
     "collect:calendar": lambda **kw: collect_source("calendar"),
@@ -370,6 +371,7 @@ REGISTRY = {
 TITLES = {
     "collect:telegram": "Сбор: Telegram",
     "collect:ymessenger": "Сбор: Я.Мессенджер",
+    "collect:pachca": "Сбор: Пачка",
     "collect:mail": "Сбор: почта",
     "collect:gmail": "Сбор: Gmail",
     "collect:calendar": "Сбор: календарь",
@@ -546,6 +548,7 @@ def tick(settings: dict | None = None) -> list[str]:
             started.append(name)
 
     for src, minutes in (("telegram", sch["collect_minutes"]), ("ymessenger", sch["collect_minutes"]),
+                         ("pachca", sch["collect_minutes"]),
                          ("mail", sch["collect_minutes"]), ("gmail", sch["collect_minutes"]),
                          ("calendar", sch["calendar_minutes"]), ("google_calendar", sch["calendar_minutes"]),
                          ("kaiten", sch["kaiten_minutes"])):

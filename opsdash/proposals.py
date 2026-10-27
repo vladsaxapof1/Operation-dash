@@ -392,7 +392,7 @@ def _source_text(source_ref: str | None) -> str:
     if kind == "meeting":
         m = store.row("SELECT title, started_at FROM meetings WHERE id=?", (ref,))
         return f"встреча «{m['title'] or ref}» {store.local(m['started_at'], '%d.%m')}" if m else f"встреча {ref}"
-    if kind in ("telegram", "ymessenger", "mail") and ref.isdigit():
+    if kind in ("telegram", "ymessenger", "pachca", "mail") and ref.isdigit():
         msg = store.row("SELECT chat_title, sender_name, ts FROM messages WHERE id=?", (int(ref),))
         from opsdash import overview
 
@@ -416,11 +416,12 @@ def links(p: dict) -> list[tuple[str, str]]:
     kind, _, ref = (p.get("source_ref") or "").partition(":")
     if kind == "meeting" and ref:
         out.append(("Встреча", f"/meetings/{ref}?tab=transcript" if p["kind"] == "task.done" else f"/meetings/{ref}"))
-    elif kind in ("telegram", "ymessenger", "mail") and ref.isdigit():
+    elif kind in ("telegram", "ymessenger", "pachca", "mail") and ref.isdigit():
         msg = store.row("SELECT source, chat_id, msg_id, sender_id FROM messages WHERE id=?", (int(ref),))
         found = orig.original(msg["source"], msg["chat_id"], msg["msg_id"], msg["sender_id"]) if msg else None
         if found:
-            out.append(("Сообщение в Telegram" if kind == "telegram" else "Письмо" if kind == "mail" else "Сообщение",
+            out.append(("Сообщение в Telegram" if kind == "telegram" else "Сообщение в Пачке" if kind == "pachca"
+                        else "Письмо" if kind == "mail" else "Сообщение",
                         found[0]))
     card_id = pl.get("card_id")
     if not card_id and cid:

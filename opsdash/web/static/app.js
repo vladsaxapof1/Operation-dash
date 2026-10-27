@@ -288,7 +288,7 @@
     });
   });
 
-  // --- настройки Telegram: чат читается / нет / никогда — сохраняем сразу по нажатию;
+  // --- настройки Telegram и Пачки: чат читается / нет / никогда — сохраняем сразу по нажатию;
   // фильтры по выбору и по типу (личные, группы, каналы, боты) работают вместе ---
   var chatForm = document.querySelector("form[data-chats]");
   if (chatForm) {
@@ -325,7 +325,7 @@
       row.dataset.state = input.value;
       row.classList.toggle("dim", input.value !== "1");
       recount();
-      var body = new URLSearchParams({ source: "telegram", ajax: "1" });
+      var body = new URLSearchParams({ source: chatForm.elements.source.value, ajax: "1" });
       body.append(input.name, input.value);
       fetch(chatForm.getAttribute("action"), { method: "POST", body: body })
         .then(function (r) { if (!r.ok) throw new Error(r.status); savedNote.textContent = "Сохранено ✓"; })

@@ -7,6 +7,41 @@
 {% endmacro %}
 {% macro check_btn(what) %}<button type="button" class="btn" data-check="{{ what }}">Проверить подключение</button><span class="check-result" data-check-result="{{ what }}"></span>{% endmacro %}
 {% macro enabled_box(section, text='Включено') %}<label class="check"><input type="checkbox" name="enabled" {{ 'checked' if settings[section].enabled }}> {{ text }}</label>{% endmacro %}
+{% macro chat_picker(source, never=False) %}
+{# список чатов для выбора (Telegram, Пачка): переключатель «✓ / —» (у Telegram ещё «✕ никогда») сохраняет выбор
+   сразу (app.js); без скриптов — кнопкой внизу #}
+<form method="post" action="/settings/chats" style="margin-top:16px" data-changed-only data-chats>
+  <input type="hidden" name="source" value="{{ source }}">
+  <div class="filters chat-tools">
+    <input type="text" placeholder="Найти чат…" data-chat-search>
+    <div class="seg" data-chat-show>
+      <a href="#" class="active" data-show="">Все <span class="muted" data-count="">{{ chats | length }}</span></a><a href="#" data-show="1">Читаю <span class="muted" data-count="1">{{ chat_counts[1] }}</span></a><a href="#" data-show="0">Не читаю <span class="muted" data-count="0">{{ chat_counts[0] }}</span></a>{% if never %}<a href="#" data-show="-1">Никогда <span class="muted" data-count="-1">{{ chat_counts[-1] }}</span></a>{% endif %}
+    </div>
+    <div class="seg" data-chat-kinds>
+      <a href="#" class="active" data-kind="">Все типы</a>{% for k, title, n in chat_kinds %}<a href="#" data-kind="{{ k }}">{{ title }} <span class="muted" data-kind-count="{{ k }}">{{ n }}</span></a>{% endfor %}
+    </div>
+    <div class="seg">
+      <a href="?tab={{ source }}&sort=recent" class="{{ 'active' if sort == 'recent' }}">Свежие сверху</a><a href="?tab={{ source }}&sort=title" class="{{ 'active' if sort == 'title' }}">По алфавиту</a>
+    </div>
+    <span class="muted small" data-chat-saved></span>
+  </div>
+  <div class="table-wrap"><table class="t" id="{{ source }}-chats">
+    <thead><tr><th>Чат</th><th>Тип</th><th>Последнее сообщение</th><th>Читать {{ ui.help('✓ — читать этот чат. Прочерк — не читать.' ~ (' ✕ — никогда: не читать, даже когда включено «Читать все личные переписки».' if never else '') ~ ' Выбор сохраняется сразу.', below=True) }}</th></tr></thead>
+    <tbody>
+    {% for c in chats %}
+      <tr class="{{ 'dim' if c.enabled != 1 }}" data-state="{{ c.enabled }}" data-kind="{{ c.kind }}"><td>{{ c.title }}{% if c.username %} <span class="small muted">@{{ c.username }}</span>{% endif %}</td><td class="small muted">{{ {'group':'группа','private':'личный','channel':'канал','bot':'бот'}.get(c.kind, c.kind) }}</td>
+      <td class="small muted nowrap">{{ c.last_ts | ago if c.last_ts else '—' }}</td>
+      <td><div class="tri" role="radiogroup" aria-label="Читать «{{ c.title }}»">
+        {% for v, sign, tip in [(1, '✓', 'Читать'), (0, '—', 'Не читать'), (-1, '✕', 'Никогда — даже среди «всех личных»')] if never or v >= 0 %}
+        <label title="{{ tip }}"><input type="radio" name="chat__{{ c.chat_id }}" value="{{ v }}" {{ 'checked' if c.enabled == v }}><span>{{ sign }}</span></label>
+        {% endfor %}
+      </div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="form-actions" data-chats-submit><button class="btn primary">Сохранить выбор чатов</button></div>
+</form>
+{% endmacro %}
 {% block content %}
 <div class="topline"><div><h1>Настройки</h1><div class="muted">Подключения и правила работы. Всё хранится на этом компьютере.</div></div></div>
 <div class="tabs">{% for key, title in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}">{{ title }}{% if tab_notes.get(key) %} <span class="tab-note">({{ tab_notes[key] }})</span>{% endif %}</a>{% endfor %}</div>
@@ -148,38 +183,7 @@
     <div class="form-actions"><button class="btn">Сохранить</button></div>
   </form>
   {% if chats %}
-  {# переключатель «✓ / — / ✕» сохраняет выбор сразу (app.js); без скриптов — кнопкой внизу #}
-  <form method="post" action="/settings/chats" style="margin-top:16px" data-changed-only data-chats>
-    <input type="hidden" name="source" value="telegram">
-    <div class="filters chat-tools">
-      <input type="text" placeholder="Найти чат…" data-chat-search>
-      <div class="seg" data-chat-show>
-        <a href="#" class="active" data-show="">Все <span class="muted" data-count="">{{ chats | length }}</span></a><a href="#" data-show="1">Читаю <span class="muted" data-count="1">{{ chat_counts[1] }}</span></a><a href="#" data-show="0">Не читаю <span class="muted" data-count="0">{{ chat_counts[0] }}</span></a><a href="#" data-show="-1">Никогда <span class="muted" data-count="-1">{{ chat_counts[-1] }}</span></a>
-      </div>
-      <div class="seg" data-chat-kinds>
-        <a href="#" class="active" data-kind="">Все типы</a>{% for k, title, n in chat_kinds %}<a href="#" data-kind="{{ k }}">{{ title }} <span class="muted" data-kind-count="{{ k }}">{{ n }}</span></a>{% endfor %}
-      </div>
-      <div class="seg">
-        <a href="?tab=telegram&sort=recent" class="{{ 'active' if sort == 'recent' }}">Свежие сверху</a><a href="?tab=telegram&sort=title" class="{{ 'active' if sort == 'title' }}">По алфавиту</a>
-      </div>
-      <span class="muted small" data-chat-saved></span>
-    </div>
-    <div class="table-wrap"><table class="t" id="tg-chats">
-      <thead><tr><th>Чат</th><th>Тип</th><th>Последнее сообщение</th><th>Читать {{ ui.help('✓ — читать этот чат. Прочерк — не читать. ✕ — никогда: не читать, даже когда включено «Читать все личные переписки». Выбор сохраняется сразу.', below=True) }}</th></tr></thead>
-      <tbody>
-      {% for c in chats %}
-        <tr class="{{ 'dim' if c.enabled != 1 }}" data-state="{{ c.enabled }}" data-kind="{{ c.kind }}"><td>{{ c.title }}{% if c.username %} <span class="small muted">@{{ c.username }}</span>{% endif %}</td><td class="small muted">{{ {'group':'группа','private':'личный','channel':'канал','bot':'бот'}.get(c.kind, c.kind) }}</td>
-        <td class="small muted nowrap">{{ c.last_ts | ago if c.last_ts else '—' }}</td>
-        <td><div class="tri" role="radiogroup" aria-label="Читать «{{ c.title }}»">
-          {% for v, sign, tip in [(1, '✓', 'Читать'), (0, '—', 'Не читать'), (-1, '✕', 'Никогда — даже среди «всех личных»')] %}
-          <label title="{{ tip }}"><input type="radio" name="chat__{{ c.chat_id }}" value="{{ v }}" {{ 'checked' if c.enabled == v }}><span>{{ sign }}</span></label>
-          {% endfor %}
-        </div></td></tr>
-      {% endfor %}
-      </tbody>
-    </table></div>
-    <div class="form-actions" data-chats-submit><button class="btn primary">Сохранить выбор чатов</button></div>
-  </form>
+  {{ chat_picker('telegram', never=True) }}
   {% else %}<p class="muted">Список чатов появится после входа.</p>{% endif %}
 </div></section>
 
@@ -234,6 +238,30 @@
     <div class="form-actions"><button class="btn primary">Сохранить</button></div>
   </form>
   {% else %}<p class="muted">Чаты появятся после первого сообщения в чате, куда добавлен бот.</p>{% endif %}
+</div></section>
+
+{% elif tab == 'pachca' %}
+<div class="alert info">PULSE читает Пачку вашим персональным токеном — видит то же, что вы, но берёт <b>только отмеченные чаты</b> (и треды в них) и ничего не пишет от вашего имени. По умолчанию персональные токены в Пачке выпускают только администраторы — <a href="/help/02-подключения#пачка">что попросить у администратора</a>.</div>
+<section class="card"><div class="card-h"><h2>1. Токен</h2></div><div class="card-b">
+  {% if pachca_me %}<p>✅ Токен принят: <b>{{ pachca_me.name or ('сотрудник #' ~ pachca_me.id) }}</b></p>{% endif %}
+  <form method="post" action="/settings/pachca">
+    {{ enabled_box('pachca', 'Читать Пачку') }}
+    <label>Персональный токен</label>{{ secret_input('token', 'PACHCA_TOKEN') }}
+    <div class="hint">Пачка → <b>Интеграции → API</b> → «Создать токен». Отметьте только права на чтение:
+      <code class="nowrap">chats:read</code>, <code class="nowrap">messages:read</code>, <code class="nowrap">threads:read</code>,
+      <code class="nowrap">users:read</code>.
+      Токен показывается один раз — скопируйте его сразу. Если страницы «API» нет, токены в вашем пространстве
+      выпускают только администраторы: администратор может разрешить это всем сотрудникам
+      (настройка «Кто может создавать персональные токены»).</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('pachca') }}</div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>2. Какие чаты читать</h2>
+  <form class="inline" method="post" action="/settings/pachca/chats"><button class="btn sm" {{ 'disabled' if not secrets.get('PACHCA_TOKEN') }}>↻ Обновить список</button></form></div>
+<div class="card-b">
+  {% if chats %}{{ chat_picker('pachca') }}
+  {% else %}<p class="muted">Список чатов появится после сохранения токена.</p>{% endif %}
 </div></section>
 
 {% elif tab == 'mail' %}
