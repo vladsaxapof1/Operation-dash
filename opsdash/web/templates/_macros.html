@@ -220,7 +220,9 @@
 {% macro task_card(c, meetings={}) %}
 {#- карточка на доске: только главное. Подробности, цитата и правка — в окне задачи (клик по карточке) #}
 {% set is_new = c.status == 'open' and not c.seen_at %}
-<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' new' if is_new }}" data-task="{{ c.id }}"{% if is_new %} data-new="{{ c.id }}"{% endif %}>
+{#- data-rel — связанные задачи: при наведении они подсвечиваются на доске (app.js) #}
+{% set rel = (c.children or []) | map(attribute='id') | list + ([c.parent.id] if c.parent else []) %}
+<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' new' if is_new }}" data-task="{{ c.id }}"{% if is_new %} data-new="{{ c.id }}"{% endif %}{% if rel %} data-rel="{{ rel | join(' ') }}"{% endif %}>
   <div class="task-top">
     <span class="task-chips">
       {{ new_chip(c) }}
@@ -234,11 +236,13 @@
   <button type="button" class="task-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
   <div class="task-who">{{ task_people(c) }}</div>
   {% if c.parent or c.children %}
+  {#- связи — заметным блоком: для какой задачи эта работа и кому передана часть этой #}
   <div class="task-rel">
-    {%- if c.parent %}<span title="Часть задачи «{{ c.parent.headline }}» ({{ c.parent.route }})">↳ часть {{ task_ref(c.parent) }}</span>{% endif %}
-    {%- if c.late_vs_parent %} <span class="chip warn" title="Срок основной задачи — {{ c.parent.due | date }}">позже срока задачи</span>{% endif %}
-    {%- if c.children %}{% set ready = c.children | selectattr('status', 'equalto', 'done') | list | length %}
-    <span class="chip {{ 'ok' if c.kids_done }}" title="{% for k in c.children %}{{ k.headline }} — {{ k.route }}{{ ' (готово)' if k.status == 'done' }}{{ '\n' if not loop.last }}{% endfor %}">подзадачи {{ ready }}/{{ c.children | length }}</span>{% endif -%}
+    {% if c.parent %}<div class="rel-line" title="Часть задачи «{{ c.parent.headline }}» ({{ c.parent.route }})"><span class="rel-k">для задачи</span> {{ task_ref(c.parent) }} <span class="muted">· {{ c.parent.route }}</span></div>
+    {% if c.late_vs_parent %}<div><span class="chip warn" title="Срок основной задачи — {{ c.parent.due | date }}">срок позже, чем у задачи ({{ c.parent.due | date }})</span></div>{% endif %}{% endif %}
+    {% if c.children %}<div class="rel-k">{{ 'подзадачи готовы' if c.kids_done else 'передано' }}</div>
+    {% for k in c.children[:3] %}<div class="rel-line{{ ' done' if k.status == 'done' }}">↳ {{ task_ref(k) }} <span class="muted">· {{ 'Я' if k.direction == 'mine' else (k.who or '?') }}{% if k.due %} · до {{ k.due | date }}{% endif %}{{ ' · готово' if k.status == 'done' }}</span></div>{% endfor %}
+    {% if c.children | length > 3 %}<div class="muted">и ещё {{ c.children | length - 3 }}</div>{% endif %}{% endif %}
   </div>
   {% endif %}
   <div class="task-foot">

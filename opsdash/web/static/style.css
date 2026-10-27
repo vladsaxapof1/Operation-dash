@@ -347,10 +347,17 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .chip.new { background: var(--accent); color: #fff; border-color: transparent; }
 .task.new { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
 .list > li.cm.new { box-shadow: inset 3px 0 0 var(--accent); }
-/* связи задач: часть какой задачи, подзадачи */
-.task-rel { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; color: var(--muted); }
-.task-rel a, .gantt-label .muted a { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
-.task-rel a:hover, .gantt-label .muted a:hover { color: var(--accent); }
+/* связи задач: для какой задачи эта работа, кому передана часть — блоком на карточке */
+.task-rel { display: grid; gap: 3px; padding: 6px 8px; border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; line-height: 1.35; }
+.task-rel a { color: var(--text); font-weight: 600; }
+.task-rel a:hover { color: var(--accent); }
+.rel-k { color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.rel-line { overflow-wrap: anywhere; }
+.rel-line.done { opacity: .65; }
+.gantt-label .muted a { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
+.gantt-label .muted a:hover { color: var(--accent); }
+/* навели на задачу — связанные с ней подсвечиваются, даже если они в другой колонке (app.js) */
+.task.rel-hl { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dlg-kids { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
 .warn-text { color: var(--warn); }
 /* Claude думает, что задача выполнена: доводы и кнопки «Да, закрыть / Нет» в окне задачи */

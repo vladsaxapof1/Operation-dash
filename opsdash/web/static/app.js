@@ -191,6 +191,17 @@
     history.replaceState(null, "", location.pathname + query + location.hash);
   }
 
+  // связанные задачи (основная и подзадачи) подсвечиваются вместе: навели на одну — видно остальные на доске
+  document.querySelectorAll(".task[data-rel]").forEach(function (card) {
+    var light = function (on) {
+      card.dataset.rel.split(" ").forEach(function (id) {
+        document.querySelectorAll('.task[data-task="' + id + '"]').forEach(function (el) { el.classList.toggle("rel-hl", on); });
+      });
+    };
+    card.addEventListener("mouseenter", function () { light(true); });
+    card.addEventListener("mouseleave", function () { light(false); });
+  });
+
   // доска задач: свернуть колонку. Помним в cookie — сервер сразу отдаёт её свёрнутой
   document.querySelectorAll("[data-kb-fold]").forEach(function (btn) {
     btn.addEventListener("click", function () {
