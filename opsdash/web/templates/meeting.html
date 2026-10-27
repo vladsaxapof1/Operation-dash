@@ -97,7 +97,7 @@
       </div>
     </section>
     <section class="card">
-      <div class="card-h"><h2>Задачи и договорённости</h2></div>
+      <div class="card-h"><h2>Задачи</h2></div>
       <div class="card-b flush"><ul class="list">{% for c in commitments %}<li>{{ c.what }}<div class="meta">{{ c.who }}{% if c.due %} · до {{ c.due | date }}{% endif %} · {{ {'open': 'открыто', 'done': 'выполнено', 'cancelled': 'отменено'}[c.status] }}</div></li>{% else %}<li class="empty">Нет.</li>{% endfor %}</ul></div>
     </section>
     <section class="card">

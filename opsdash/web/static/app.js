@@ -11,6 +11,24 @@
     });
   });
 
+  // боковое меню: свернуть в иконки / закрепить. Помним в cookie — сервер сразу отдаёт нужный вид
+  document.querySelectorAll("[data-nav-toggle]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var collapsed = document.body.classList.toggle("nav-collapsed");
+      btn.title = collapsed ? "Закрепить меню" : "Свернуть меню";
+      document.cookie = "nav=" + (collapsed ? "collapsed" : "") + "; path=/; max-age=31536000; samesite=lax";
+    });
+  });
+
+  // таймлайн задач: сразу показать «сейчас» (на трети ширины, чтобы было видно и прошлое)
+  // (после загрузки: иначе браузер восстанавливает прежнюю прокрутку поверх нашей)
+  var ganttBox = document.querySelector("[data-gantt]");
+  if (ganttBox) {
+    var toNow = function () { ganttBox.scrollLeft = Math.max(0, Number(ganttBox.dataset.nowX) - (ganttBox.clientWidth - 300) / 3); };
+    toNow();
+    window.addEventListener("load", function () { requestAnimationFrame(toNow); });
+  }
+
   // доска задач: свернуть колонку. Помним в cookie — сервер сразу отдаёт её свёрнутой
   document.querySelectorAll("[data-kb-fold]").forEach(function (btn) {
     btn.addEventListener("click", function () {

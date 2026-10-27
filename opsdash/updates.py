@@ -201,7 +201,8 @@ def sync_libraries(root: Path) -> None:
     uv = find_uv()
     if not uv:
         raise UpdateError("не найден uv — запустите установку (INSTALL) заново")
-    cmd = [uv, "sync", "--no-dev"]
+    # в папке из git (у разработчика) оставляем и инструменты разработки: тесты, проверку кода
+    cmd = [uv, "sync"] if (root / ".git").exists() else [uv, "sync", "--no-dev"]
     mac = platform.mac_ver()[0]
     if sys.platform == "darwin" and platform.machine() == "arm64" and mac and int(mac.split(".")[0]) >= 14:
         cmd += ["--extra", "mlx"]

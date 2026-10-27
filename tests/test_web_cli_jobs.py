@@ -427,7 +427,7 @@ def test_tasks_board_and_list(client):
     assert board["to_me"][0]["due_today"] and [c["what"] for c in board["done"]] == ["Отправить отчёт"]
 
     page = client.get("/commitments").text  # доска — вид по умолчанию
-    assert "Задачи и договорённости" in page and 'class="kb"' in page
+    assert "<h1>Задачи</h1>" in page and 'class="kb"' in page
     assert "просрочено на 2 дня" in page and "осталось " in page and "без срока" in page  # срок и сколько осталось
     assert "<b>Я</b> → Тимур" in page and "<b>Пётр</b> → мне" in page and "<b>Олег</b> → Ирина" in page
     assert ">Анна / Тимур</a>" in page and "[00:02:43] 15 минут" in page
@@ -455,6 +455,22 @@ def test_tasks_board_and_list(client):
 
     client.post(f"/commitments/{late}", data={"due": (today + timedelta(days=3)).isoformat()})
     assert not records.commitments_board()["mine"][0]["overdue"]
+
+    # карандаш: поменять формулировку, тип, кто и кому, убрать срок
+    r = client.post(f"/commitments/{late}/edit", data={"what": "Собрать сценарий запуска", "direction": "to_me",
+                                                       "who": "Тимур", "whom": "Анна", "due": ""}, follow_redirects=False)
+    c = store.row("SELECT * FROM commitments WHERE id=?", (late,))
+    assert (c["what"], c["direction"], c["who"], c["whom"], c["due"]) == ("Собрать сценарий запуска", "to_me", "Тимур", "Анна", None)
+    bad = client.post(f"/commitments/{late}/edit", data={"what": " ", "direction": "mine"}, follow_redirects=False)
+    assert "err=" in bad.headers["location"]
+
+    # «↗ Telegram»: задача со встречи — личный чат с этим человеком из справочника
+    records.upsert_person("Тимур", telegram="@timur_k")
+    assert 'href="https://t.me/timur_k"' in client.get("/commitments").text
+
+    # таймлайн: группы как колонки доски, полосы задач, линия «сейчас»
+    gantt = client.get("/commitments?view=gantt&scale=day").text
+    assert "gantt-bar to_me" in gantt and "Между коллегами" in gantt and "gantt-now" in gantt and 'value="day"' in gantt
 
 
 def test_kaiten_tasks_boards_view(client, settings_with):

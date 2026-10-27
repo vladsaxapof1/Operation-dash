@@ -204,6 +204,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
                                  for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten", "ymessenger"))
     ctx["voice_tip"] = None if ctx["nav"] == "meetings" else _voice_tip(request)
     ctx["build"] = build()
+    ctx["nav_collapsed"] = request.cookies.get("nav") == "collapsed"  # меню свёрнуто в иконки (app.js)
     ctx["update_available"] = bool((store.get_state("update_check") or {}).get("available"))
     return templates.TemplateResponse(request, name, ctx)
 
@@ -348,6 +349,7 @@ def home(request: Request):
     for p in snap["proposals"]:
         batches.setdefault(p["batch"] or "", []).append(p)
     overdue = len([c for c in snap["mine"] + snap["to_me"] if c["overdue"]])
+    records.add_links(snap["mine"][:6] + snap["to_me"][:6])  # кнопка «↗ Telegram» у задач на сводке
     return render(request, "home.html", nav="home", s=snap, feed=feed, batches=batches, overdue=overdue,
                   describe=proposals.describe, day=overview.day_grid())
 
@@ -415,35 +417,39 @@ def attention_action(request: Request, aid: int, action: str):
     return back(request, "Отмечено")
 
 
-# --- задачи и договорённости (в коде — commitments) ----------------------------------
+# --- задачи (в коде — commitments) --------------------------------------------------
 
-BOARD_COLUMNS = ("mine", "to_me", "other", "done")
+BOARD_TITLES = [("mine", "Мои задачи"), ("to_me", "Мне должны"), ("other", "Между коллегами"), ("done", "Готово")]
+BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
 
 
 @app.get("/commitments", response_class=HTMLResponse)
 def commitments(request: Request, view: str = "board", status: str = "open", direction: str = "", person: str = "",
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
-                due: str = "", due_from: str = "", due_to: str = ""):
-    view = "list" if view == "list" else "board"
+                due: str = "", due_from: str = "", due_to: str = "", scale: str = "week"):
+    from opsdash import gantt
+
+    view = view if view in ("list", "gantt") else "board"
     person, q = person.strip(), q.strip()
     dates = {"created": records.period(created, created_from, created_to) if created else None,
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
              "no_due": due == "none"}
-    board = records.commitments_board(person=person or None, q=q or None, **dates) if view == "board" else None
+    board = records.commitments_board(person=person or None, q=q or None, **dates) if view != "list" else None
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
                                       **dates) if view == "list" else None)
-    shown = [c for col in board.values() for c in col] if board else items
+    shown = records.add_links([c for col in board.values() for c in col] if board else items)
     meeting_ids = {c["source_ref"] for c in shown if c["source_type"] == "meeting" and c["source_ref"]}
     meetings = {m["id"]: m["title"] for m in store.rows(
         f"SELECT id, title FROM meetings WHERE id IN ({','.join('?' * len(meeting_ids))})", list(meeting_ids))} if meeting_ids else {}
-    # свёрнутые колонки доски запоминает браузер (cookie из app.js), чтобы они не мелькали при загрузке
+    # свёрнутые колонки доски (и группы на таймлайне) запоминает браузер — cookie из app.js, чтобы не мелькали
     folded = {k for k in request.cookies.get("kb_folded", "").split(".") if k in BOARD_COLUMNS}
+    timeline = gantt.layout([(key, title, board[key]) for key, title in BOARD_TITLES], scale) if view == "gantt" else None
     return render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
                   direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
                   add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
                   folded=folded, created=created, created_from=created_from, created_to=created_to, due=due,
                   due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
-                  due_periods=records.DUE_PERIODS)
+                  due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale)
 
 
 @app.post("/commitments")
@@ -458,6 +464,16 @@ def commitment_add(request: Request, direction: str = Form(...), what: str = For
 def commitment_update(request: Request, cid: int, status: str = Form(None), due: str = Form(None)):
     records.update_commitment(cid, status=status or None, due=due or None)
     return back(request, "Сохранено")
+
+
+@app.post("/commitments/{cid}/edit")
+def commitment_edit(request: Request, cid: int, what: str = Form(""), direction: str = Form("mine"),
+                    who: str = Form(""), whom: str = Form(""), due: str = Form("")):
+    try:
+        records.edit_commitment(cid, what=what, direction=direction, who=who, whom=whom, due=due or None)
+    except ValueError as e:
+        return back(request, err=str(e))
+    return back(request, "Задача изменена")
 
 
 # --- база знаний: антология решений, уроков и удач ----------------------------------

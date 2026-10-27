@@ -51,6 +51,7 @@
   <div class="form-actions">
     {% if upd.available and not updating %}<form class="inline" method="post" action="/updates/apply" data-confirm="PULSE скачает новую версию и перезапустится — это 1–3 минуты. Данные, настройки и пароли не меняются. Обновить?"><button class="btn primary">Обновить</button></form>{% endif %}
     <form class="inline" method="post" action="/updates/check" data-busy="Проверяю…"><button class="btn">Проверить обновления</button></form>
+    <a class="small" href="/help/06-история-изменений">История изменений →</a>
   </div>
   <details class="update-src"{{ ' open' if upd.error }}><summary class="small muted">Откуда обновлять</summary>
     <form method="post" action="/settings/updates">

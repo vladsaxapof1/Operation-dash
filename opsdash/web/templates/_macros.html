@@ -65,29 +65,57 @@
 <span class="help{{ ' below' if below }}" tabindex="0" role="note" aria-label="{{ text }}" data-tip="{{ text }}">?</span>
 {%- endmacro %}
 
+{% macro pencil() -%}
+<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13H3v-3z M9 4l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+{%- endmacro %}
+
+{% macro task_link(c) -%}
+{#- где договорились: сообщение в Telegram или письмо; для задач со встреч — чат с человеком из справочника #}
+{%- if c.link %}<a class="btn sm ghost" href="{{ c.link }}" target="_blank" rel="noopener" title="{{ c.link_title }}">↗ {{ c.link_label }}</a>{% endif -%}
+{%- endmacro %}
+
+{% macro edit_task(c) %}
+{#- карандаш: поменять формулировку, тип, кто и кому, срок; там же — отменить задачу #}
+<details class="task-more"><summary class="btn sm ghost" title="Изменить задачу">{{ pencil() }}</summary>
+  <div class="task-menu task-edit">
+    <form method="post" action="/commitments/{{ c.id }}/edit">
+      <label class="small">Что сделать</label><textarea name="what" rows="3" required>{{ c.what }}</textarea>
+      <label class="small">Тип</label>
+      <select name="direction">{% for key, title in [('mine', 'Моя задача'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}<option value="{{ key }}" {{ 'selected' if c.direction == key }}>{{ title }}</option>{% endfor %}</select>
+      <div class="task-edit-row">
+        <div><label class="small">Кто делает</label><input type="text" name="who" value="{{ c.who or '' }}" list="people-list"></div>
+        <div><label class="small">Кому</label><input type="text" name="whom" value="{{ c.whom or '' }}" list="people-list"></div>
+      </div>
+      <label class="small">Срок</label><input type="date" name="due" value="{{ c.due or '' }}">
+      <div class="form-actions"><button class="btn sm primary">Сохранить</button></div>
+    </form>
+    {% if c.status == 'open' %}<form method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="cancelled"><button class="btn sm ghost danger">Отменить задачу</button></form>{% endif %}
+  </div>
+</details>
+{% endmacro %}
+
 {% macro commitment(c, show_dir=False) %}
-<li>
-  <div class="row">
-    <div class="grow">
-      <div>
-        {% if show_dir %}<span class="chip {{ 'acc' if c.direction == 'mine' else '' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>{% endif %}
-        {{ c.what }}
-      </div>
-      <div class="meta">
-        {% if c.direction == 'mine' %}{% if c.whom %}кому: {{ c.whom }}{% endif %}{% else %}{{ c.who or '' }}{% if c.direction == 'other' and c.whom %} → {{ c.whom }}{% endif %}{% endif %}
-        {% if c.due and c.status == 'open' %} · {{ due_badge(c) }}{% elif c.due %} · до {{ c.due | date }}{% endif %}
-        {% if c.kaiten_card_id %} · Kaiten #{{ c.kaiten_card_id }}{% endif %}
-        {% if c.source_type == 'meeting' and c.source_ref %} · <a href="/meetings/{{ c.source_ref }}">встреча</a>{% elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif %}
-        {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
-      </div>
-    </div>
-    <div class="actions">
-      {% if c.status == 'open' %}
-      <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненным">✓ Готово</button></form>
-      {% else %}
-      <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
-      {% endif %}
-    </div>
+{#- кнопки — строкой под текстом: справа они сжимали задачу в узкую колонку #}
+<li class="cm">
+  <div>
+    {% if show_dir %}<span class="chip {{ 'acc' if c.direction == 'mine' else '' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>{% endif %}
+    {{ c.what }}
+  </div>
+  <div class="meta">
+    {% if c.direction == 'mine' %}{% if c.whom %}кому: {{ c.whom }}{% endif %}{% else %}{{ c.who or '' }}{% if c.direction == 'other' and c.whom %} → {{ c.whom }}{% endif %}{% endif %}
+    {% if c.due and c.status == 'open' %} · {{ due_badge(c) }}{% elif c.due %} · до {{ c.due | date }}{% endif %}
+    {% if c.kaiten_card_id %} · Kaiten #{{ c.kaiten_card_id }}{% endif %}
+    {% if c.source_type == 'meeting' and c.source_ref %} · <a href="/meetings/{{ c.source_ref }}">встреча</a>{% elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif %}
+    {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
+  </div>
+  <div class="actions cm-actions">
+    {% if c.status == 'open' %}
+    <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненным">✓ Готово</button></form>
+    {% else %}
+    <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
+    {% endif %}
+    {{ task_link(c) }}
+    {{ edit_task(c) }}
   </div>
 </li>
 {% endmacro %}
@@ -116,17 +144,13 @@
       {%- else %}добавлено вручную{% endif -%}
     </span>
     <span class="actions">
+      {{ task_link(c) }}
       {% if c.status == 'open' %}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненной">✓ Готово</button></form>
-      <details class="task-more"><summary class="btn sm ghost" title="Срок, отмена">⋯</summary>
-        <div class="task-menu">
-          <form method="post" action="/commitments/{{ c.id }}"><label class="small">Новый срок</label><input type="date" name="due" value="{{ c.due or '' }}" data-autosubmit></form>
-          <form method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="cancelled"><button class="btn sm ghost danger">Отменить задачу</button></form>
-        </div>
-      </details>
       {% else %}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
       {% endif %}
+      {{ edit_task(c) }}
     </span>
   </div>
 </div>

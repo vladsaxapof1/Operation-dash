@@ -7,11 +7,12 @@
   <link rel="icon" type="image/png" href="/static/icon.png">
   <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
 </head>
-<body>
+<body class="{{ 'nav-collapsed' if nav_collapsed }}">
+{% import "_icons.html" as icons %}
 {% set nav_items = [
   ("home", "/", "Сводка", pending_count),
   ("inbox", "/inbox", "Нужен ответ", attention_count),
-  ("commitments", "/commitments", "Задачи и договорённости", 0),
+  ("commitments", "/commitments", "Задачи", 0),
   ("calendar", "/calendar", "Календарь", 0),
   ("meetings", "/meetings", "Встречи", 0),
   ("docs", "/docs", "Документы", 0),
@@ -27,17 +28,15 @@
 </nav>
 <div class="layout">
   <aside class="sidebar">
-    <div class="brand"><span class="brand-mark">P</span> PULSE</div>
+    <div class="brand"><span class="brand-mark">P</span><span class="lbl">PULSE</span>
+      <button type="button" class="nav-toggle" data-nav-toggle title="{{ 'Закрепить меню' if nav_collapsed else 'Свернуть меню' }}">{{ icons.icon('panel') }}</button></div>
     <div class="nav">
-      {% for key, href, title, n in nav_items %}
-      <a href="{{ href }}" class="{{ 'active' if nav == key }}"><span>{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'inbox' }}">{{ n }}</span>{% endif %}</a>
+      {% for key, href, title, n in nav_items + [("settings", "/settings", "Настройки", 0), ("journal", "/journal", "Журнал", 0), ("help", "/help", "Справка", 0)] %}
+      {% if key == 'settings' %}<div class="sep"></div>{% endif %}
+      <a href="{{ href }}" class="{{ 'active' if nav == key }}" title="{{ title }}">{{ icons.icon(key) }}<span class="lbl">{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'inbox' }}">{{ n }}</span>{% endif %}</a>
       {% endfor %}
-      <div class="sep"></div>
-      <a href="/settings" class="{{ 'active' if nav == 'settings' }}"><span>Настройки</span></a>
-      <a href="/journal" class="{{ 'active' if nav == 'journal' }}"><span>Журнал</span></a>
-      <a href="/help" class="{{ 'active' if nav == 'help' }}"><span>Справка</span></a>
     </div>
-    <p class="muted small" style="padding: 18px 10px 0">Версия {{ version }}{% if build %} · {{ build }}{% endif %}<br>Работает на этом компьютере
+    <p class="muted small side-foot">Версия {{ version }}{% if build %} · {{ build }}{% endif %}<br>Работает на этом компьютере
       {% if update_available %}<br><a class="update-link" href="/settings?tab=general#updates">● Доступно обновление</a>{% endif %}</p>
   </aside>
   <main class="main">

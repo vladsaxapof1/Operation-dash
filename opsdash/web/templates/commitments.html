@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
-{% block title %}Задачи и договорённости{% endblock %}
+{% block title %}Задачи{% endblock %}
 {% block content %}
 <div class="topline">
-  <div><h1>Задачи и договорённости</h1><div class="muted">Собираются из встреч, чатов и почты. Источник каждой — по ссылке.</div></div>
+  <div><h1>Задачи</h1><div class="muted">Собираются из встреч, чатов и почты. Источник каждой — по ссылке.</div></div>
   <div class="actions">
+    {% set keep = '&person=' ~ (person | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&created=' ~ created ~ '&created_from=' ~ created_from
+       ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to %}
     <div class="seg">
-      <a href="?view=board&person={{ person | urlencode }}&q={{ q | urlencode }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list&person={{ person | urlencode }}&q={{ q | urlencode }}" class="{{ 'active' if view == 'list' }}">Список</a>
+      <a href="?view=board{{ keep }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list{{ keep }}" class="{{ 'active' if view == 'list' }}">Список</a><a href="?view=gantt&scale={{ scale }}{{ keep }}" class="{{ 'active' if view == 'gantt' }}">Гант</a>
     </div>
     <a class="btn primary" href="#add">+ Новая задача</a>
   </div>
@@ -29,7 +31,7 @@
 </section>
 
 <form method="get" class="filters">
-  <input type="hidden" name="view" value="{{ view }}">
+  <input type="hidden" name="view" value="{{ view }}">{% if view == 'gantt' %}<input type="hidden" name="scale" value="{{ scale }}">{% endif %}
   {% if view == 'list' %}
   <select name="direction" data-autosubmit>
     <option value="" {{ 'selected' if not direction }}>Все</option>
@@ -77,6 +79,56 @@
     </button>
   </section>
   {% endfor %}
+</div>
+{% elif view == 'gantt' %}
+{# таймлайн: полоса — от появления задачи до срока; группы сворачиваются так же, как колонки доски #}
+<div class="gantt-tools">
+  <div class="seg">{% for key, title in [('day', 'День'), ('week', 'Неделя'), ('month', 'Месяц')] %}<a href="?view=gantt&scale={{ key }}{{ keep }}" class="{{ 'active' if gantt.scale == key }}">{{ title }}</a>{% endfor %}</div>
+  <span class="muted small">Полоса — от появления задачи до срока, без срока — до сегодня. Выходные — серым, пунктир — сейчас.</span>
+</div>
+<div class="card gantt">
+  <div class="gantt-scroll" data-gantt data-now-x="{{ gantt.now_x }}">
+    <div class="gantt-inner" style="width: {{ 300 + gantt.width }}px">
+      <div class="gantt-head">
+        <div class="gantt-label gantt-corner">Задача</div>
+        <div class="gantt-axis" style="width: {{ gantt.width }}px">
+          <div class="gantt-top">{% for t in gantt.top %}<span style="left: {{ t.left }}px">{{ t.text }}</span>{% endfor %}</div>
+          {% if gantt.bottom %}<div class="gantt-bottom">{% for b in gantt.bottom %}<span class="{{ 'today' if b.today }}" style="left: {{ b.left }}px; width: {{ gantt.px }}px">{{ b.text }}</span>{% endfor %}</div>{% endif %}
+          <span class="gantt-now-label" style="left: {{ gantt.now_x }}px">{{ gantt.now.strftime('%H:%M') }}</span>
+        </div>
+      </div>
+      <div class="gantt-body">
+        <div class="gantt-bg" style="width: {{ gantt.width }}px">
+          {% for x in gantt.weekends %}<i style="left: {{ x }}px; width: {{ gantt.px }}px"></i>{% endfor %}
+          <b class="gantt-now" style="left: {{ gantt.now_x }}px"></b>
+        </div>
+        {% for g in gantt.groups %}
+        {% set late = g['items'] | selectattr('overdue') | list | length %}
+        <section class="gantt-group{{ ' folded' if g.key in folded }}" data-kb-col="{{ g.key }}">
+          <div class="gantt-group-h">
+            <button type="button" class="kb-fold" data-kb-fold title="Свернуть или развернуть"><svg class="kb-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="kb-title">{{ g.title }}</span></button>
+            <span class="chip">{{ g['items'] | length }}</span>{% if late %}<span class="chip bad">{{ late }} просроч.</span>{% endif %}
+          </div>
+          <div class="gantt-rows">
+            {% for c in g['items'] %}
+            <div class="gantt-row">
+              <div class="gantt-label">
+                <div class="gantt-what" title="{{ c.what }}">{{ c.what }}</div>
+                <div class="muted small">{% if c.direction == 'mine' %}Я → {{ c.whom or '—' }}{% elif c.direction == 'to_me' %}{{ c.who or '?' }} → мне{% else %}{{ c.who or '?' }} → {{ c.whom or '—' }}{% endif %}</div>
+              </div>
+              <div class="gantt-track" style="width: {{ gantt.width }}px">
+                <div class="gantt-bar {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' nodue' if not c.bar.due }}"
+                     style="left: {{ c.bar.left }}px; width: {{ c.bar.width }}px"
+                     title="{{ c.what }} · {{ c.bar.start.strftime('%d.%m') }} → {{ c.bar.end.strftime('%d.%m') if c.bar.due else 'срок не указан' }}">{% if c.bar.width >= 60 %}<span>{{ c.what }}</span>{% endif %}</div>
+              </div>
+            </div>
+            {% else %}<div class="gantt-empty">Пусто</div>{% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
 </div>
 {% else %}
 <section class="card">

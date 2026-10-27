@@ -174,6 +174,56 @@ def _filters(person: str | None, q: str | None, created: Period | None, due: Per
     return sql, params
 
 
+def edit_commitment(cid: int, *, what: str, direction: str, who: str | None, whom: str | None, due: str | None) -> None:
+    """Изменить задачу с карточки: формулировку, тип, кто и кому, срок (пустой срок — без срока)."""
+    if direction not in DIRECTIONS:
+        raise ValueError(f"direction должен быть одним из: {', '.join(DIRECTIONS)}")
+    if not what.strip():
+        raise ValueError("Напишите, что сделать")
+    if due and not _as_date(due):
+        raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
+    store.execute("UPDATE commitments SET what=?, direction=?, who=?, whom=?, due=?, updated=? WHERE id=?",
+                  (what.strip(), direction, (who or "").strip() or None, (whom or "").strip() or None, due or None,
+                   store.utcnow(), cid))
+
+
+def counterpart(c: dict) -> str | None:
+    """С кем эта задача: кому обещала директор, кто обещал ей, а между коллегами — исполнитель."""
+    return c.get("whom") if c.get("direction") == "mine" else c.get("who")
+
+
+def add_links(items: list[dict]) -> list[dict]:
+    """Кнопка «открыть в Telegram / почте» у задачи: сообщение, из которого она взялась, а если задача
+    со встречи или добавлена вручную — личный чат с человеком из справочника."""
+    from opsdash import links
+
+    people = list_people()
+    for c in items:
+        c["link"] = c["link_label"] = None
+        msg = None
+        if c.get("source_type") in ("telegram", "mail", "ymessenger") and str(c.get("source_ref") or "").isdigit():
+            msg = store.row("SELECT source, chat_id, msg_id, sender_id FROM messages WHERE id=?", (int(c["source_ref"]),))
+        found = links.original(msg["source"], msg["chat_id"], msg["msg_id"], msg["sender_id"]) if msg else None
+        if not found and (name := counterpart(c)):
+            person = _person_by_name(name, people)
+            username = ((person or {}).get("telegram") or "").strip().lstrip("@")
+            if username:
+                found = (f"https://t.me/{username}", "Telegram")
+        if found:
+            c["link"], c["link_title"] = found
+            c["link_label"] = "Telegram" if "t.me/" in found[0] or "telegram.org" in found[0] else "Почта"
+    return items
+
+
+def _person_by_name(name: str, people: list[dict]) -> dict | None:
+    q = name.strip().lower()
+    for p in people:
+        if q in (p["name"].lower(), *(a.lower() for a in p["aliases"] or [])):
+            return p
+    hits = [p for p in people if q and (q in p["name"].lower() or p["name"].lower() in q)]
+    return hits[0] if len(hits) == 1 else None
+
+
 def list_commitments(*, status: str | None = "open", direction: str | None = None, person: str | None = None,
                      overdue: bool = False, q: str | None = None, limit: int = 500, created: Period | None = None,
                      due: Period | None = None, no_due: bool = False) -> list[dict]:
