@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ev_time, ev_detail %}
+{% block title %}Календарь{% endblock %}
+
+{% block content %}
+<div class="cal-top">
+  <a class="btn" href="/calendar{{ '?view=list' if view == 'list' }}">Сегодня</a>
+  <a class="btn ghost cal-arrow" href="?start={{ prev }}&view={{ view }}" title="Неделя назад">‹</a>
+  <a class="btn ghost cal-arrow" href="?start={{ next }}&view={{ view }}" title="Неделя вперёд">›</a>
+  <h1 class="cal-title">{{ grid.title if grid else first.isoformat() | date ~ ' – ' ~ last.isoformat() | date }}</h1>
+  {% if grid %}<span class="chip">Неделя {{ grid.week }}</span>{% endif %}
+  <div class="grow"></div>
+  {% if updated %}<span class="muted small">обновлён {{ updated | ago }}</span>{% endif %}
+  {% if can_refresh %}<form class="inline" method="post" action="/calendar/refresh" data-busy="Обновляю…"><button class="btn ghost" title="Обновить Яндекс и Google Календарь сейчас">↻ Обновить</button></form>{% endif %}
+  <div class="seg">
+    <a href="?start={{ first }}&view=week" class="{{ 'active' if view == 'week' }}">Неделя</a><a href="?start={{ first }}&view=list" class="{{ 'active' if view == 'list' }}">Список</a>
+  </div>
+  {% if settings.calendar.enabled %}<a class="btn primary" href="#new">+ Новая встреча</a>{% else %}<button type="button" class="btn primary" disabled>+ Новая встреча</button>{% endif %}
+</div>
+
+{% if not settings.calendar.enabled %}
+<div class="alert info">Календарь не подключён — <a href="/settings?tab=calendar">подключить</a>.</div>
+{% endif %}
+
+<section class="card new-meeting" id="new">
+  <div class="card-h"><h2>Новая встреча</h2><a class="small" href="#">свернуть</a></div>
+  <div class="card-b">
+    <form method="post" action="/calendar/new">
+      <div class="form-row">
+        <div class="wide"><label>Название</label><input type="text" name="title" required placeholder="Например, Планёрка по складу" data-new-title></div>
+        <div><label>Дата</label><input type="date" name="day" value="{{ new_day.isoformat() }}" required data-new-day></div>
+        <div><label>Начало</label><input type="time" name="at" value="{{ new_time }}" required data-new-time></div>
+        <div><label>Длительность</label><select name="minutes">{% for m in minutes %}<option value="{{ m }}" {{ 'selected' if m == 60 }}>{{ m }} мин</option>{% endfor %}</select></div>
+        {% set names, default = write_calendars %}
+        {% if names or google_calendars %}
+        <div><label>Календарь</label>
+          <select name="calendar">
+            {% for n in names %}<option value="{{ n }}" {{ 'selected' if n == default }}>{{ n }}</option>{% endfor %}
+            {% for n in google_calendars %}<option disabled>{{ n }} — только чтение</option>{% endfor %}
+          </select></div>
+        {% endif %}
+      </div>
+      <div class="form-row">
+        <div><label>Участники</label>
+          <textarea name="attendees" rows="2" placeholder="ivanov@company.ru, petrova@company.ru" data-attendees></textarea>
+          <div class="hint">Адреса почты через запятую или с новой строки. Можно оставить пустым.</div>
+          {% if people %}<div class="actions" style="margin-top:6px">{% for p in people[:20] %}<button type="button" class="chip" data-add-attendee="{{ p.email }}" title="{{ p.email }}">+ {{ p.name }}</button>{% endfor %}</div>{% endif %}
+        </div>
+        <div><label>Описание</label><textarea name="description" rows="2" placeholder="Повестка, ссылка на звонок"></textarea></div>
+      </div>
+      <div class="form-actions"><button class="btn primary" {{ 'disabled' if not settings.calendar.enabled }}>Создать встречу</button>
+        <span class="hint">Встреча сразу появится в выбранном календаре Яндекса{% if default %} (по умолчанию — «{{ default }}», меняется в <a href="/settings?tab=calendar">настройках</a>){% endif %}. В неделе можно просто нажать на свободное время.</span></div>
+    </form>
+  </div>
+</section>
+
+{% if grid %}
+<div class="card wk-wrap">
+  <div class="wk" style="--hour: {{ grid.hour_px }}px">
+    <div class="wk-head">
+      <div class="wk-gutter"></div>
+      {% for d in grid.days %}<div class="wk-day-h{{ ' today' if d.today }}"><div class="wk-dow">{{ d.weekday }}</div><div class="wk-num">{{ d.date.day }}</div></div>{% endfor %}
+    </div>
+    {% if grid.allday %}
+    <div class="wk-allday">
+      <div class="wk-gutter wk-allday-label" style="grid-row: 1 / span {{ grid.allday_rows }}">весь день</div>
+      {% for a in grid.allday %}
+      <button type="button" class="ev ev-allday{{ ' google' if a.ev.google }}{{ ' past' if a.ev.past }}" data-ev="{{ a.ev.n }}"
+              style="grid-column: {{ a.col + 2 }} / span {{ a.span }}; grid-row: {{ a.row + 1 }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="wk-body">
+      <div class="wk-hours">{% for h in grid.hours %}<div class="wk-hour"><span>{{ '%02d:00' % h }}</span></div>{% endfor %}</div>
+      {% for d in grid.days %}
+      <div class="wk-col{{ ' today' if d.today }}" data-day="{{ d.date.isoformat() }}" data-hour-from="{{ grid.hour_from }}" style="height: {{ grid.height }}px">
+        {% for g in d.events %}
+        <button type="button" class="ev{{ ' google' if g.ev.google }}{{ ' past' if g.ev.past }}{{ ' short' if g.short }}" data-ev="{{ g.ev.n }}"
+                style="top: {{ g.top }}px; height: {{ g.height }}px; left: calc({{ '%.4f' % (g.left * 100) }}% + 1px); width: calc({{ '%.4f' % (g.width * 100) }}% - 3px)"
+                title="{{ g.ev.title or 'Без названия' }} · {{ ev_time(g.ev) }}">
+          <span class="ev-t">{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time">, {{ g.ev.start | local('%H:%M') }}</span>{% endif %}</span>
+          {% if not g.short %}<span class="ev-time">{{ ev_time(g.ev) }}</span>{% endif %}
+        </button>
+        {% endfor %}
+        {% if d.today and grid.now_top is not none %}<div class="wk-now" style="top: {{ grid.now_top }}px" data-now="{{ grid.now_top }}"></div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% for e in grid.events %}{{ ev_detail(e) }}{% endfor %}
+<div class="ev-pop" hidden data-ev-pop></div>
+
+{% else %}
+<section class="card">
+  <div class="card-b flush">
+    <ul class="list">
+    {% for d in days %}
+      <li class="day-h{{ ' today' if d.today }}">{{ d.weekday }}, {{ d.date.isoformat() | date }}
+        {% if d.today %}<span class="chip acc">сегодня</span>{% elif d.tomorrow %}<span class="chip">завтра</span>{% endif %}</li>
+      {% for e in d.events %}
+      <li><div class="row"><div class="grow">
+        <strong class="nowrap">{{ ev_time(e) }}</strong>
+        {% if e.url %}<a href="{{ e.url }}" target="_blank">{{ e.title or 'Без названия' }}</a>{% else %}{{ e.title or 'Без названия' }}{% endif %}
+        {% if e.uid.startswith('google:') %}<span class="chip" title="{{ e.calendar }}">Google</span>{% endif %}
+        {% set who = e.attendees | people %}
+        {% if e.location or who %}<div class="meta">
+          {%- if e.location %}{{ e.location | place }}{% endif %}
+          {%- if e.location and who %} · {% endif %}
+          {{- who }}
+        </div>{% endif %}
+      </div></div></li>
+      {% else %}<li class="empty small">Встреч нет</li>{% endfor %}
+    {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

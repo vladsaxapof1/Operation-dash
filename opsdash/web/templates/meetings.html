@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Встречи{% endblock %}
+{% block content %}
+<div class="topline">
+  <div><h1>Встречи</h1><div class="muted">Записи расшифровываются на этом компьютере, затем Claude разбирает решения, задачи и обещания</div></div>
+</div>
+
+<div class="grid">
+  <section class="card">
+    <div class="card-b flush">
+      <div class="table-wrap">
+      <table class="t">
+        <thead><tr><th>Когда</th><th>Встреча</th><th>Статус</th></tr></thead>
+        <tbody>
+        {% for m in items %}
+          <tr>
+            <td class="nowrap">{{ m.started_at | local('%d.%m.%Y %H:%M') }}{% if m.duration_sec %}<div class="meta">{{ (m.duration_sec / 60) | round | int }} мин</div>{% endif %}</td>
+            <td><a href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>{% if m.headline %}<div class="meta">{{ m.headline }}</div>{% endif %}
+              {% if m.status == 'failed' and m.error %}<div class="meta" style="color:var(--bad)">{{ m.error[:200] }}</div>{% endif %}</td>
+            <td>{{ ui.meeting_status(m) }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="empty">Записей пока нет.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </section>
+
+  <div>
+    <section class="card">
+      <div class="card-h"><h2>Загрузить запись</h2></div>
+      <div class="card-b">
+        <form method="post" action="/meetings/upload" enctype="multipart/form-data">
+          <input type="file" name="file" required accept="audio/*,video/*,.txt,.vtt,.srt,.docx,.md">
+          <label>Название (необязательно)</label>
+          <input type="text" name="title" placeholder="Подставится из календаря">
+          <div class="form-actions"><button class="btn primary">Загрузить и разобрать</button></div>
+          <div class="hint">Подходят аудио и видео (m4a, mp3, mp4, webm…) и готовые расшифровки (.txt, .vtt, .srt, .docx).</div>
+        </form>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-h"><h2>Папки, за которыми я слежу</h2></div>
+      <div class="card-b">
+        {% for f in folders %}<div><code>{{ f }}</code></div>{% else %}<div class="muted">Папки не найдены.</div>{% endfor %}
+        <div class="hint" style="margin-top:8px">Новые файлы из этих папок разбираются автоматически (через минуту после окончания записи). Изменить — <a href="/settings?tab=recordings">Настройки → Записи встреч</a>.</div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

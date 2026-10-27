@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Журнал{% endblock %}
+{% block content %}
+<div class="topline">
+  <div><h1>Журнал</h1><div class="muted">Что и когда делал PULSE. Здесь же — ручной запуск заданий.</div></div>
+</div>
+<section class="card">
+  <div class="card-h"><h2>Задания</h2>{% if queued %}<span class="chip warn">в очереди: {{ queued|length }}</span>{% endif %}</div>
+  <div class="card-b flush">
+    <div class="table-wrap">
+    <table class="t">
+      <thead><tr><th>Задание</th><th>Последний запуск</th><th>Результат</th><th></th></tr></thead>
+      <tbody>
+      {% for name in runnable %}
+        {% set j = jobs.get(name) %}
+        <tr>
+          <td>{{ titles.get(name, name) }}</td>
+          <td class="nowrap">{{ j.last_run | local if j else '—' }}{% if j and j.last_duration %}<div class="meta">{{ j.last_duration }} с</div>{% endif %}</td>
+          <td>{% if j and j.running %}<span class="chip warn">идёт</span>{% elif j and j.last_error and (not j.last_ok or j.last_ok < j.last_run) %}<span class="chip bad">ошибка</span> <span class="small">{{ j.last_error[:200] }}</span>{% elif j and j.last_ok %}<span class="chip ok">ок</span>{% else %}—{% endif %}</td>
+          <td class="right"><form class="inline" method="post" action="/jobs/run"><input type="hidden" name="name" value="{{ name }}"><button class="btn sm">Запустить</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+<section class="card">
+  <div class="card-h"><h2>События</h2>
+    <form method="get" class="inline"><select name="level" data-autosubmit style="width:auto"><option value="">все</option><option value="error" {{ 'selected' if level == 'error' }}>только ошибки</option><option value="warning" {{ 'selected' if level == 'warning' }}>предупреждения</option></select></form>
+  </div>
+  <div class="card-b flush">
+    <div class="table-wrap">
+    <table class="t">
+      <tbody>
+      {% for l in logs %}
+        <tr><td class="nowrap small muted">{{ l.ts | local('%d.%m %H:%M:%S') }}</td><td class="small nowrap">{{ titles.get(l.job, l.job) }}</td>
+          <td class="small">{% if l.level == 'error' %}<span class="chip bad">ошибка</span> {% elif l.level == 'warning' %}<span class="chip warn">!</span> {% endif %}<span style="white-space:pre-wrap">{{ l.message[:600] }}</span></td></tr>
+      {% else %}<tr><td class="empty">Пусто.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}База знаний{% endblock %}
+
+{% macro entry(r) %}
+<div class="kb-entry {{ r.kind }}{{ ' outdated' if r.status == 'outdated' }}{{ ' proposed' if r.status == 'proposed' }}">
+  <div class="task-top">
+    <span class="chip kb-kind">{{ r.kind_title }}</span>
+    {% if r.project %}<a class="chip ghost" href="?project={{ r.project | urlencode }}">{{ r.project }}</a>{% endif %}
+    {% if r.status != 'accepted' %}<span class="chip {{ 'warn' if r.status == 'proposed' }}">{{ r.status_title }}</span>{% endif %}
+    <span class="grow"></span>
+    {% if r.happened %}<span class="muted small">{{ r.happened | date }}{{ '.' ~ r.happened[:4] if r.happened[:4] != today[:4] }}</span>{% endif %}
+  </div>
+  <div class="kb-title">{{ r.title }}</div>
+  {% if r.details %}
+  <details class="kb-details"><summary>{{ r.details | truncate(220, true, '…') }}</summary><div class="kb-full">{{ r.details }}</div></details>
+  {% endif %}
+  <div class="task-foot">
+    <span class="muted small">
+      {%- if r.source_type == 'meeting' and r.source_ref %}встреча <a href="/meetings/{{ r.source_ref }}">{{ meetings.get(r.source_ref) or r.source_ref }}</a>
+      {%- elif r.source_type == 'document' and r.source_ref %}заметка <a href="/docs/view?path={{ r.source_ref | urlencode }}">{{ r.source_ref.split('/')[-1] | replace('.md', '') | truncate(60, true, '…') }}</a>
+      {%- elif r.source_type and r.source_type != 'manual' %}{{ SOURCE_TITLES.get(r.source_type, r.source_type) }}
+      {%- else %}добавлено вручную{% endif %}
+      {%- if r.people %} · {{ r.people | join(', ') }}{% endif %}
+      {%- if r.quote %} · <span title="{{ r.quote }}">«{{ r.quote | truncate(60, true, '…') }}»</span>{% endif %}
+    </span>
+    <span class="actions">
+      {% if r.status == 'proposed' %}
+      <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="accepted"><button class="btn sm ok">Принять</button></form>
+      <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="rejected"><button class="btn sm ghost">Отклонить</button></form>
+      {% elif r.status == 'accepted' %}
+      <form class="inline" method="post" action="/kb/{{ r.id }}" data-confirm="Отметить как устаревшее? Запись останется в истории, но Claude не будет на неё опираться."><input type="hidden" name="status" value="outdated"><button class="btn sm ghost" title="Решение пересмотрели или оно больше не действует">Устарело</button></form>
+      {% else %}
+      <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="accepted"><button class="btn sm ghost">Вернуть</button></form>
+      {% endif %}
+    </span>
+  </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="topline">
+  <div><h1>База знаний</h1><div class="muted">Что решили, на чём обожглись и что сработало — из заметок, встреч и недельных обзоров Claude. Claude опирается на неё в ответах.</div></div>
+  <div class="actions"><a class="btn" href="/kb/context">Что знает Claude</a><a class="btn primary" href="#add">+ Добавить</a></div>
+</div>
+
+<section class="card add-panel" id="add">
+  <div class="card-h"><h2>Новая запись</h2><a class="small" href="#">свернуть</a></div>
+  <div class="card-b">
+    <form method="post" action="/kb">
+      <div class="form-row">
+        <div><label>Вид</label><select name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == (kind or 'decision') }}>{{ t }}</option>{% endfor %}</select></div>
+        <div><label>Тема</label><input type="text" name="project" list="kb-projects" value="{{ project }}" placeholder="ОРК, Автоворонка…"></div>
+        <div><label>Когда</label><input type="date" name="happened" value="{{ today }}"></div>
+      </div>
+      <label>Суть одной строкой</label><input type="text" name="title" required placeholder="Например: средний чек апсейла ОРК в плане — 15 тыс.">
+      <label>Почему, контекст, цифры</label><textarea name="details" rows="3"></textarea>
+      <div class="form-actions"><button class="btn primary">Добавить</button></div>
+    </form>
+  </div>
+</section>
+<datalist id="kb-projects">{% for p in projects %}<option value="{{ p }}">{% endfor %}</datalist>
+
+<div class="tiles">
+  {% for k, t, n in [('decision', 'решений', counts.decision), ('lesson', 'уроков', counts.lesson), ('win', 'удач', counts.win)] %}
+  <a class="tile {{ 'active' if kind == k }}" href="?kind={{ '' if kind == k else k }}&project={{ project | urlencode }}"><div class="n">{{ n }}</div><div class="l">{{ t }}</div></a>
+  {% endfor %}
+  <a class="tile {{ 'warn' if counts.proposed }}" href="#proposed"><div class="n">{{ counts.proposed }}</div><div class="l">предложено Claude</div></a>
+</div>
+
+<form method="get" class="filters">
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <select name="project" data-autosubmit><option value="">Все темы</option>{% for p in projects %}<option {{ 'selected' if p == project }}>{{ p }}</option>{% endfor %}</select>
+  <select name="status" data-autosubmit>
+    <option value="current" {{ 'selected' if status == 'current' }}>Актуальные</option>
+    <option value="outdated" {{ 'selected' if status == 'outdated' }}>Устаревшие</option>
+    <option value="all" {{ 'selected' if status == 'all' }}>Все</option>
+  </select>
+  <input type="search" name="q" value="{{ q }}" placeholder="Поиск: «чек апсейла», «конверсия розницы»…">
+  <button class="btn">Найти</button>
+  {% if kind or project or q or status != 'current' %}<a class="btn ghost" href="/kb">Сбросить</a>{% endif %}
+</form>
+
+{% if proposed %}
+<section class="card" id="proposed">
+  <div class="card-h"><h2>Предложено Claude</h2><span class="muted small">примите, что верно, — остальное отклоните</span></div>
+  <div class="card-b kb-grid">{% for r in proposed %}{{ entry(r) }}{% endfor %}</div>
+</section>
+{% endif %}
+
+{% for month, rows in months %}
+<section class="kb-month">
+  <h2 class="kb-month-h">{{ month }} <span class="chip">{{ rows | length }}</span></h2>
+  <div class="kb-grid">{% for r in rows %}{{ entry(r) }}{% endfor %}</div>
+</section>
+{% else %}
+<section class="card"><div class="card-b"><p class="muted">{% if q or kind or project or status != 'current' %}Ничего не найдено — попробуйте сбросить фильтры.{% else %}Пока пусто. Решения появятся из заметок в папках с документами (md с <code>type: решение</code>) и из разборов встреч, уроки и удачи раз в неделю предложит Claude.{% endif %}</p></div></section>
+{% endfor %}
+{% endblock %}

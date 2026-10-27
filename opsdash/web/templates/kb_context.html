@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Что знает Claude{% endblock %}
+{% block content %}
+<div class="topline">
+  <div>
+    <div class="small"><a href="/kb">← База знаний</a></div>
+    <h1>Что знает Claude</h1>
+    <div class="muted">Эта сводка добавляется к каждому запуску Claude в PULSE: в боте, в разборе встреч и сообщений, в дайджестах. Сейчас {{ chars }} {{ plural(chars, 'знак', 'знака', 'знаков') }} — около {{ (chars / 4) | round | int }} токенов на запуск.</div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/jobs/run" data-busy="Claude пишет…"><input type="hidden" name="name" value="company-context"><button class="btn {{ 'primary' if not has_company }}" {{ 'disabled' if job.running }}>{{ 'Собрать «О компании»' if not has_company else 'Обновить «О компании»' }}</button></form>
+  </div>
+</div>
+{% if job.running %}<div class="alert info">Claude обновляет раздел «О компании» — это несколько минут. Обновите страницу позже.</div>
+{% elif job.last_error %}<div class="alert bad">Последнее обновление «О компании» не удалось: {{ job.last_error }}</div>{% endif %}
+<div class="hint" style="margin-bottom:10px">«О компании» Claude пишет сам по рабочим документам — по понедельникам или по кнопке. Решения, задачи и люди подставляются из PULSE при каждом запуске, поэтому всегда свежие.</div>
+<section class="card"><div class="card-b" style="padding-top:14px"><div class="doc">{{ text | md | safe }}</div></div></section>
+{% endblock %}

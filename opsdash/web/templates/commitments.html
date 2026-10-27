@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Задачи и договорённости{% endblock %}
+{% block content %}
+<div class="topline">
+  <div><h1>Задачи и договорённости</h1><div class="muted">Собираются из встреч, чатов и почты. Источник каждой — по ссылке.</div></div>
+  <div class="actions">
+    <div class="seg">
+      <a href="?view=board&person={{ person | urlencode }}&q={{ q | urlencode }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list&person={{ person | urlencode }}&q={{ q | urlencode }}" class="{{ 'active' if view == 'list' }}">Список</a>
+    </div>
+    <a class="btn primary" href="#add">+ Новая задача</a>
+  </div>
+</div>
+
+<section class="card add-panel" id="add">
+  <div class="card-h"><h2>Новая задача или договорённость</h2><a class="small" href="#">свернуть</a></div>
+  <div class="card-b">
+    <form method="post" action="/commitments">
+      <div class="form-row">
+        <div><label>Тип</label><select name="direction">{% for key, title in [('mine', 'Моя задача'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}<option value="{{ key }}" {{ 'selected' if add == key }}>{{ title }}</option>{% endfor %}</select></div>
+        <div><label>Кто делает</label><input type="text" name="who" list="people-list" placeholder="Например, Пётр Иванов"></div>
+        <div><label>Кому</label><input type="text" name="whom" list="people-list"></div>
+        <div><label>Срок</label><input type="date" name="due"></div>
+      </div>
+      <label>Что сделать</label><input type="text" name="what" required placeholder="Например, прислать прогноз по ключевым клиентам">
+      <div class="form-actions"><button class="btn primary">Добавить</button></div>
+    </form>
+  </div>
+</section>
+
+<form method="get" class="filters">
+  <input type="hidden" name="view" value="{{ view }}">
+  {% if view == 'list' %}
+  <select name="direction" data-autosubmit>
+    <option value="" {{ 'selected' if not direction }}>Все</option>
+    <option value="mine" {{ 'selected' if direction == 'mine' }}>Мои задачи</option>
+    <option value="to_me" {{ 'selected' if direction == 'to_me' }}>Мне должны</option>
+    <option value="other" {{ 'selected' if direction == 'other' }}>Между коллегами</option>
+  </select>
+  <select name="status" data-autosubmit>
+    <option value="open" {{ 'selected' if status == 'open' }}>Открытые</option>
+    <option value="done" {{ 'selected' if status == 'done' }}>Выполненные</option>
+    <option value="all" {{ 'selected' if status == 'all' }}>Все</option>
+  </select>
+  {% endif %}
+  <input type="text" name="person" value="{{ person }}" placeholder="Человек" list="people-list">
+  {{ ui.period_filter('created', 'Создана', created, created_periods, created_from, created_to) }}
+  {{ ui.period_filter('due', 'Срок', due, due_periods, due_from, due_to) }}
+  <input type="search" name="q" value="{{ q }}" placeholder="Поиск по задачам">
+  <datalist id="people-list">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>
+  <button class="btn">Показать</button>
+  {% if person or q or direction or status != 'open' or created or due %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
+</form>
+
+{% if view == 'board' %}
+<div class="kb">
+  {% for key, title, hint in [('mine', 'Мои задачи', 'что пообещали вы'), ('to_me', 'Мне должны', 'что пообещали вам'), ('other', 'Между коллегами', 'важные вам договорённости'), ('done', 'Готово', 'за последние 2 недели')] %}
+  {% set col = board[key] %}
+  {% set late = col | selectattr('overdue') | list | length %}
+  <section class="kb-col kb-{{ key }}{{ ' folded' if key in folded }}" data-kb-col="{{ key }}">
+    <div class="kb-h">
+      <button type="button" class="kb-fold" data-kb-fold title="Свернуть или развернуть колонку"><svg class="kb-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="kb-title">{{ title }}</span></button>
+      <span class="chip">{{ col | length }}</span>
+      {% if late %}<span class="chip bad">{{ late }} просроч.</span>{% endif %}
+      <span class="grow"></span>
+      {% if key != 'done' %}<a class="kb-add" href="?view=board&add={{ key }}#add" title="Добавить в «{{ title }}»">+</a>{% endif %}
+    </div>
+    <div class="kb-hint">{{ hint }}</div>
+    <div class="kb-cards">
+      {% for c in col %}{{ ui.task_card(c, meetings) }}{% else %}<div class="kb-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endfor %}
+    </div>
+    <button type="button" class="kb-summary" data-kb-fold title="Показать задачи">
+      <span class="kb-summary-n">{{ col | length }}</span>
+      <span>{{ plural(col | length, 'задача скрыта', 'задачи скрыты', 'задач скрыто') }}</span>
+      {% if late %}<span class="chip bad">{{ late }} просроч.</span>{% endif %}
+      <span class="kb-summary-show">Показать</span>
+    </button>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<section class="card">
+  <div class="card-b flush"><ul class="list">{% for c in items %}{{ ui.commitment(c, show_dir=True) }}{% else %}<li class="empty">Ничего не найдено.</li>{% endfor %}</ul></div>
+</section>
+{% endif %}
+{% endblock %}

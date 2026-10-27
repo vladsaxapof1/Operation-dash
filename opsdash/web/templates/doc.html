@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }}{% endblock %}
+{% block content %}
+<div class="topline">
+  <div>
+    <div class="small"><a href="/docs{{ ('?q=' ~ (q | urlencode)) if q }}">← {{ 'К результатам' if q else 'Документы' }}</a></div>
+    <h1>{{ d.title }}</h1>
+    <div class="muted"><span class="chip">{{ d.type }}</span> {{ d.rel }} · изм. {{ d.modified | local('%d.%m.%Y %H:%M') }}</div>
+  </div>
+  <div class="actions">
+    <form class="inline" method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><button class="btn primary">Открыть файл</button></form>
+    <form class="inline" method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><input type="hidden" name="reveal" value="1"><button class="btn">{{ 'Показать в Finder' if is_mac else 'Показать в папке' }}</button></form>
+  </div>
+</div>
+
+{% if d.status == 'error' %}<div class="alert bad">Текст не прочитан: {{ d.error }}</div>{% endif %}
+<p class="hint">Это текст, который видит поиск и Claude. Оформление, картинки и графики — в самом файле.</p>
+
+{% for p in parts %}
+<section class="card doc-part" id="r{{ p.rid }}">
+  {% if p.part %}<div class="card-h"><h2>{{ p.part }}</h2></div>{% endif %}
+  <div class="card-b"><div class="doc-text">{{ p.body }}</div></div>
+</section>
+{% else %}
+<section class="card"><div class="card-b"><p class="muted">Текста в файле не нашлось — возможно, это сканы или картинки.</p></div></section>
+{% endfor %}
+{% endblock %}

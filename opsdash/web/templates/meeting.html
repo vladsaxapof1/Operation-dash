@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}{{ m.title or m.id }}{% endblock %}
+{% block content %}
+<div class="topline">
+  <div>
+    <div class="small"><a href="/meetings">← Встречи</a></div>
+    <h1>{{ m.title or m.id }}</h1>
+    <div class="muted">{{ m.started_at | local('%d.%m.%Y %H:%M') }}{% if m.duration_sec %} · {{ (m.duration_sec / 60) | round | int }} мин{% endif %}{% if m.participants %} · {{ m.participants | join(', ') }}{% endif %}</div>
+  </div>
+  <div class="actions">
+    {{ ui.meeting_status(m) }}
+    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn sm" {{ 'disabled' if m.status in ('new', 'transcribing') }}>Разобрать заново</button></form>
+    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="btn sm ghost">Расшифровать заново</button></form>
+  </div>
+</div>
+
+{% if m.status == 'transcribing' %}<div class="card"><div class="card-b" style="padding-top:14px">Идёт расшифровка… <div class="progress"><div style="width: {{ ((m.progress or 0) * 100) | round }}%" data-meeting-progress="{{ m.id }}"></div></div><div class="hint">Страница обновится сама. Расшифровка идёт на этом компьютере — можно закрыть браузер.</div></div></div>{% endif %}
+{% if m.status == 'processing' %}<div class="alert info">Claude разбирает встречу — обычно это 2–5 минут. Итог придёт в Telegram.</div>{% endif %}
+{% if m.status == 'failed' %}<div class="alert bad">Ошибка: {{ m.error }}</div>{% endif %}
+
+<div class="grid">
+  <div>
+    <div class="tabs">
+      <a href="?tab=summary" class="{{ 'active' if tab == 'summary' }}">Разбор</a>
+      <a href="?tab=transcript" class="{{ 'active' if tab == 'transcript' }}">Расшифровка</a>
+    </div>
+    <section class="card">
+      <div class="card-b" style="padding-top:14px">
+        {% if tab == 'transcript' %}
+          {% if transcript %}<div class="doc transcript">{{ transcript | md | safe }}</div>{% else %}<div class="muted">Расшифровки ещё нет.</div>{% endif %}
+        {% else %}
+          {% if summary %}<div class="doc">{{ summary | md | safe }}</div>{% else %}<div class="muted">Разбора ещё нет{% if transcript %} — <a href="?tab=transcript">расшифровка готова</a>{% endif %}.</div>{% endif %}
+        {% endif %}
+      </div>
+    </section>
+    <p class="muted small">Файлы встречи: <code>{{ folder }}</code></p>
+  </div>
+  <div>
+    {% if speakers or short_speakers %}
+    {% macro spk_form(s, value='', primary=False) %}
+    {#- кто это: имя из справочника или новое (тогда человек добавится); «Это я» — отдельно, оно ещё и разбирает встречу заново #}
+    <div class="spk-forms">
+      <form class="spk-form" method="post" action="/meetings/{{ m.id }}/speaker" data-busy="Запоминаю…">
+        <input type="hidden" name="speaker" value="{{ s.label }}">
+        <input type="text" name="name" list="people-names" value="{{ value }}" placeholder="Кто это?" required>
+        <button class="btn sm {{ 'ok' if primary }}">{{ 'Да, это ' ~ value.split(' ')[0] if primary else 'Запомнить' }}</button>
+      </form>
+      {% if s.who != 'me' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/me" data-busy="Запоминаю голос…"><input type="hidden" name="speaker" value="{{ s.label }}"><button class="btn sm ghost">Это я</button></form>{% endif %}
+    </div>
+    {% endmacro %}
+    <section class="card" id="who">
+      <div class="card-h"><h2>Кто в записи</h2>
+        {% if can_tidy %}<form class="inline" method="post" action="/meetings/{{ m.id }}/speakers/tidy" data-busy="Сравниваю голоса…"><button class="btn sm" title="Склеить части одного голоса и узнать знакомых — без новой расшифровки">Уточнить спикеров</button></form>{% endif %}
+      </div>
+      <div class="card-b flush">
+        <ul class="list">
+        {% for s in speakers %}
+          {% set guess = guesses.get(s.label) %}
+          <li class="spk{{ ' known' if s.who }}">
+            <div class="spk-h">
+              <b>{{ s.name or s.label }}</b>{% if s.name %} <span class="muted small">{{ s.label }}</span>{% endif %}
+              {% if s.who == 'me' %}<span class="chip acc">вы</span>{% elif s.who %}<span class="chip ok" title="{{ s.how }}">{{ 'по голосу' if s.how.startswith('узнан') else 'подтверждено' }}</span>{% endif %}
+              <span class="muted small">· {{ (s.seconds / 60) | round(1) if s.seconds >= 60 else s.seconds | round | int }} {{ 'мин' if s.seconds >= 60 else 'с' }}</span>
+            </div>
+            {% if s.sample %}<div class="meta">[{{ s.at }}] «{{ s.sample }}»</div>{% endif %}
+            {% if s.who %}
+            <details class="spk-fix"><summary class="small muted">не {{ 'вы' if s.who == 'me' else s.name.split(' ')[0] }}?</summary>{{ spk_form(s) }}</details>
+            {% else %}
+            {% if guess %}<div class="spk-guess">Claude думает, это <b>{{ guess.name }}</b>{% if guess.why %} — {{ guess.why }}{% endif %}. Подтвердите — и PULSE запомнит голос.</div>{% endif %}
+            {{ spk_form(s, guess.name if guess else '', primary=guess) }}
+            {% endif %}
+          </li>
+        {% endfor %}
+        </ul>
+        {% if short_speakers %}
+        <details class="spk-short"><summary class="small muted">Ещё {{ short_speakers | length }} {{ plural(short_speakers | length, 'спикер', 'спикера', 'спикеров') }} с короткими репликами — обычно это обрывки чужих голосов</summary>
+          <ul class="list">{% for s in short_speakers %}<li><b>{{ s.label }}</b> <span class="muted small">· {{ s.seconds | round | int }} с</span>{% if s.sample %}<div class="meta">[{{ s.at }}] «{{ s.sample }}»</div>{% endif %}</li>{% endfor %}</ul>
+        </details>
+        {% endif %}
+        <datalist id="people-names">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>
+        <p class="hint" style="padding: 0 16px 12px">Подтвердите, кто говорит: PULSE запомнит голоса и в следующих записях подпишет знакомых сам. «Это я» ещё и разбирает встречу заново.</p>
+      </div>
+    </section>
+    {% endif %}
+    <section class="card">
+      <div class="card-h"><h2>Предложения по встрече</h2></div>
+      <div class="card-b flush">
+        {% set pending = related | selectattr('status', 'equalto', 'pending') | list %}
+        {% if pending|length > 1 %}<div style="padding:10px 16px 0"><form method="post" action="/proposals/batch"><input type="hidden" name="batch" value="meeting:{{ m.id }}"><input type="hidden" name="top" value="{{ pending | map(attribute='id') | max }}"><button class="btn sm ok">Да — все {{ pending|length }}</button></form></div>{% endif %}
+        <ul class="list">
+        {% for p in related %}
+          {% if p.status == 'pending' %}{{ ui.proposal(p, describe) }}
+          {% else %}<li><div>{{ p.title }}</div><div class="meta">{% if p.status == 'done' %}<span class="chip ok">выполнено</span>{% if p.result and p.result.url %} <a href="{{ p.result.url }}" target="_blank">открыть</a>{% endif %}{% elif p.status == 'rejected' %}<span class="chip">отклонено</span>{% else %}<span class="chip bad">{{ p.status }}</span> {{ p.result.error if p.result and p.result.error }}{% endif %}</div></li>{% endif %}
+        {% else %}<li class="empty">Предложений нет.</li>{% endfor %}
+        </ul>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-h"><h2>Задачи и договорённости</h2></div>
+      <div class="card-b flush"><ul class="list">{% for c in commitments %}<li>{{ c.what }}<div class="meta">{{ c.who }}{% if c.due %} · до {{ c.due | date }}{% endif %} · {{ {'open': 'открыто', 'done': 'выполнено', 'cancelled': 'отменено'}[c.status] }}</div></li>{% else %}<li class="empty">Нет.</li>{% endfor %}</ul></div>
+    </section>
+    <section class="card">
+      <div class="card-h"><h2>Название</h2></div>
+      <div class="card-b"><form method="post" action="/meetings/{{ m.id }}/title"><input type="text" name="title" value="{{ m.title }}"><div class="form-actions"><button class="btn sm">Сохранить</button></div></form></div>
+    </section>
+  </div>
+</div>
+{% endblock %}

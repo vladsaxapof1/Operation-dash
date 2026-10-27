@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Справка{% endblock %}
+{% block content %}
+<div class="tabs">
+  {% for d in docs %}<a href="/help/{{ d.slug }}" class="{{ 'active' if d.slug == slug }}">{{ d.title }}</a>{% endfor %}
+</div>
+<section class="card"><div class="card-b" style="padding-top:16px"><div class="doc">{{ body | safe }}</div></div></section>
+{% endblock %}

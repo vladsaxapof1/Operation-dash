@@ -1,0 +1,430 @@
+// Небольшие улучшения интерфейса. Без JS всё тоже работает (кроме выбора доски Kaiten).
+(function () {
+  "use strict";
+
+  // выпадающие списки фильтров отправляют форму сразу (без inline-скриптов — их запрещает CSP).
+  // Дату, которую набирают с клавиатуры, отправляем, только когда год уже введён целиком
+  document.querySelectorAll("select[data-autosubmit], input[data-autosubmit]").forEach(function (sel) {
+    sel.addEventListener("change", function () {
+      if (sel.type === "date" && sel.value && Number(sel.value.slice(0, 4)) < 2000) return;
+      sel.form.submit();
+    });
+  });
+
+  // доска задач: свернуть колонку. Помним в cookie — сервер сразу отдаёт её свёрнутой
+  document.querySelectorAll("[data-kb-fold]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      btn.closest("[data-kb-col]").classList.toggle("folded");
+      var folded = Array.prototype.map.call(document.querySelectorAll("[data-kb-col].folded"), function (col) { return col.dataset.kbCol; });
+      document.cookie = "kb_folded=" + folded.join(".") + "; path=/; max-age=31536000; samesite=lax";
+    });
+  });
+
+  // долгие действия: кнопка показывает, что работа идёт, и не нажимается второй раз
+  document.querySelectorAll("form[data-busy]").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var btn = form.querySelector("button");
+      if (btn) { btn.disabled = true; btn.textContent = form.dataset.busy; }
+    });
+  });
+
+  // подтверждение перед отправкой формы
+  document.querySelectorAll("form[data-confirm]").forEach(function (form) {
+    form.addEventListener("submit", function (e) {
+      if (!window.confirm(form.dataset.confirm)) e.preventDefault();
+    });
+  });
+
+  // копировать черновик ответа
+  document.querySelectorAll("[data-copy-btn]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var li = btn.closest("li");
+      var draft = li && li.querySelector("[data-copy]");
+      if (!draft) return;
+      var text = draft.innerText;
+      var done = function () { btn.textContent = "Скопировано ✓"; setTimeout(function () { btn.textContent = "Копировать ответ"; }, 1800); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done);
+      else { var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done(); }
+    });
+  });
+
+  // проверка подключений
+  document.querySelectorAll("[data-check]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var what = btn.dataset.check;
+      var out = document.querySelector('[data-check-result="' + what + '"]');
+      out.className = "check-result"; out.textContent = "проверяю…";
+      btn.disabled = true;
+      fetch("/settings/check/" + what, { method: "POST" })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          out.className = "check-result " + (res.ok ? "ok" : "bad");
+          out.textContent = (res.ok ? "✓ " : "✗ ") + res.message;
+        })
+        .catch(function (e) { out.className = "check-result bad"; out.textContent = "✗ " + e; })
+        .finally(function () { btn.disabled = false; });
+    });
+  });
+
+  // большие списки (чаты): отправляем только изменённые строки — тысяча полей упирается в лимит формы
+  document.querySelectorAll("form[data-changed-only]").forEach(function (form) {
+    var selects = form.querySelectorAll("select");
+    selects.forEach(function (sel) { sel.dataset.initial = sel.value; });
+    var radios = form.querySelectorAll("input[type=radio]");
+    radios.forEach(function (r) { r.dataset.initial = r.checked ? "1" : ""; });
+    form.addEventListener("submit", function () {
+      selects.forEach(function (sel) { if (sel.value === sel.dataset.initial) sel.disabled = true; });
+      radios.forEach(function (r) {
+        var group = form.querySelectorAll('input[name="' + r.name + '"]');
+        var same = Array.prototype.every.call(group, function (x) { return x.checked === !!x.dataset.initial; });
+        if (same) r.disabled = true;
+      });
+    });
+  });
+
+  // --- настройки Telegram: чат читается / нет / никогда — сохраняем сразу по нажатию;
+  // фильтры по выбору и по типу (личные, группы, каналы, боты) работают вместе ---
+  var chatForm = document.querySelector("form[data-chats]");
+  if (chatForm) {
+    var savedNote = chatForm.querySelector("[data-chat-saved]"), savedTimer = null;
+    var chatRows = Array.prototype.map.call(chatForm.querySelectorAll("tbody tr"), function (row) {
+      return { row: row, text: row.cells[0].textContent.toLowerCase() };
+    });
+    var chatShow = "", chatKind = "", chatQuery = "";
+    var applyChatFilter = function () {
+      chatRows.forEach(function (r) {
+        var show = (!chatShow || r.row.dataset.state === chatShow) && (!chatKind || r.row.dataset.kind === chatKind)
+          && (!chatQuery || r.text.indexOf(chatQuery) >= 0);
+        r.row.style.display = show ? "" : "none";
+      });
+    };
+    // счётчики считаем с учётом второго фильтра: «Читаю» среди личных, «Группы» среди нечитаемых
+    var recount = function () {
+      chatForm.querySelectorAll("[data-count]").forEach(function (n) {
+        n.textContent = chatRows.filter(function (r) {
+          return (!chatKind || r.row.dataset.kind === chatKind) && (!n.dataset.count || r.row.dataset.state === n.dataset.count);
+        }).length;
+      });
+      chatForm.querySelectorAll("[data-kind-count]").forEach(function (n) {
+        n.textContent = chatRows.filter(function (r) {
+          return (!chatShow || r.row.dataset.state === chatShow) && r.row.dataset.kind === n.dataset.kindCount;
+        }).length;
+      });
+    };
+    chatForm.querySelector("[data-chats-submit]").hidden = true;  // со скриптом кнопка не нужна
+    chatForm.addEventListener("change", function (e) {
+      var input = e.target;
+      if (input.type !== "radio") return;
+      var row = input.closest("tr");
+      row.dataset.state = input.value;
+      row.classList.toggle("dim", input.value !== "1");
+      recount();
+      var body = new URLSearchParams({ source: "telegram", ajax: "1" });
+      body.append(input.name, input.value);
+      fetch(chatForm.getAttribute("action"), { method: "POST", body: body })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); savedNote.textContent = "Сохранено ✓"; })
+        .catch(function () { savedNote.textContent = "Не сохранилось — обновите страницу"; })
+        .finally(function () { clearTimeout(savedTimer); savedTimer = setTimeout(function () { savedNote.textContent = ""; }, 2000); });
+    });
+    var searchTimer = null;
+    chatForm.querySelector("[data-chat-search]").addEventListener("input", function (e) {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { chatQuery = e.target.value.trim().toLowerCase(); applyChatFilter(); }, 80);
+    });
+    chatForm.querySelectorAll("[data-show]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.preventDefault();
+        chatShow = a.dataset.show;
+        chatForm.querySelectorAll("[data-show]").forEach(function (x) { x.classList.toggle("active", x === a); });
+        applyChatFilter();
+        recount();
+      });
+    });
+    chatForm.querySelectorAll("[data-chat-kinds] [data-kind]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.preventDefault();
+        chatKind = a.dataset.kind;
+        chatForm.querySelectorAll("[data-chat-kinds] [data-kind]").forEach(function (x) { x.classList.toggle("active", x === a); });
+        applyChatFilter();
+        recount();
+      });
+    });
+    chatForm.addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.matches("[data-chat-search]")) e.preventDefault(); });
+  }
+
+  // фильтр строк таблицы. Текст строк собираем один раз: innerText на каждую букву пересчитывал
+  // раскладку всей таблицы, и с тысячей чатов ввод заметно тормозил
+  function rowText(row) {
+    var cells = row.cells ? Array.prototype.filter.call(row.cells, function (c) { return !c.querySelector("select, input, button"); }) : [row];
+    return cells.map(function (c) { return c.textContent; }).join(" ").toLowerCase();
+  }
+  document.querySelectorAll("[data-filter]").forEach(function (input) {
+    var rows = null, timer = null;
+    input.addEventListener("input", function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        rows = rows || Array.prototype.map.call(document.querySelectorAll(input.dataset.filter), function (row) {
+          return { row: row, text: rowText(row), shown: true };
+        });
+        var q = input.value.trim().toLowerCase();
+        rows.forEach(function (r) {
+          var show = !q || r.text.indexOf(q) >= 0;
+          if (show !== r.shown) { r.row.style.display = show ? "" : "none"; r.shown = show; }
+        });
+      }, 80);
+    });
+  });
+
+  // --- документы: поиск на лету и типы одним нажатием — страницу не перезагружаем, поле ввода не теряет фокус ---
+  var liveForm = document.querySelector("[data-live-search]");
+  if (liveForm) {
+    var liveBox = document.querySelector("[data-live-results]"), liveTimer = null, liveSeq = 0;
+    var liveRun = function () {
+      if (liveForm.elements.q.value.trim().length === 1) return;  // одна буква — ещё не запрос
+      var url = liveForm.getAttribute("action") + "?" + new URLSearchParams(new FormData(liveForm)).toString();
+      var my = ++liveSeq;
+      fetch(url).then(function (r) { return r.text(); }).then(function (html) {
+        if (my !== liveSeq) return;  // пока ждали ответа, запрос уже поменялся
+        var fresh = new DOMParser().parseFromString(html, "text/html").querySelector("[data-live-results]");
+        if (!fresh) return;
+        liveBox.replaceWith(fresh);
+        liveBox = fresh;
+        history.replaceState(null, "", url);
+      });
+    };
+    liveForm.elements.q.addEventListener("input", function () { clearTimeout(liveTimer); liveTimer = setTimeout(liveRun, 250); });
+    liveForm.addEventListener("submit", function (e) { e.preventDefault(); clearTimeout(liveTimer); liveRun(); });
+    document.addEventListener("click", function (e) {
+      var chip = e.target.closest("[data-live-results] [data-type]");
+      if (!chip || e.metaKey || e.ctrlKey) return;
+      e.preventDefault();
+      liveForm.elements.type.value = chip.dataset.type;
+      liveRun();
+    });
+  }
+
+  // --- Kaiten: пространства и направления ---
+  function el(tag, attrs, text) {
+    var n = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function option(value, text) { return el("option", { value: value }, text); }
+
+  var spacesBox = document.getElementById("kaiten-spaces");
+  var spaceSel = document.querySelector("[data-kaiten-space]");
+  var boardSel = document.querySelector("[data-kaiten-board]");
+  var columnSel = document.querySelector("[data-kaiten-column]");
+  var laneSel = document.querySelector("[data-kaiten-lane]");
+  var pathInput = document.querySelector("[data-kaiten-path]");
+  var boardsCache = [];
+
+  if (spacesBox) {
+    var tracked = {};
+    try { JSON.parse(spacesBox.dataset.tracked || "[]").forEach(function (s) { if (s.track !== false) tracked[s.id] = true; }); } catch (e) {}
+    fetch("/api/kaiten/spaces").then(function (r) { return r.json(); }).then(function (res) {
+      spacesBox.innerHTML = "";
+      if (!res.ok) { spacesBox.appendChild(el("p", { class: "muted small" }, "Не удалось загрузить: " + res.message + ". Сохраните адрес и токен выше.")); return; }
+      var form = el("form", { method: "post", action: "/settings/kaiten/spaces" });
+      res.spaces.forEach(function (s) {
+        var label = el("label", { class: "check" });
+        var cb = el("input", { type: "checkbox", name: "track", value: String(s.id) });
+        if (tracked[s.id]) cb.checked = true;
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(" " + s.title));
+        form.appendChild(label);
+        form.appendChild(el("input", { type: "hidden", name: "title__" + s.id, value: s.title }));
+        if (spaceSel) spaceSel.appendChild(option(s.id, s.title));
+      });
+      var actions = el("div", { class: "form-actions" });
+      actions.appendChild(el("button", { class: "btn primary" }, "Сохранить пространства"));
+      form.appendChild(actions);
+      spacesBox.appendChild(form);
+    });
+  }
+
+  function updatePath() {
+    if (!pathInput) return;
+    var parts = [spaceSel, boardSel, columnSel, laneSel].filter(function (s) { return s && s.value; })
+      .map(function (s) { return s.options[s.selectedIndex].text; });
+    pathInput.value = parts.join(" / ");
+  }
+
+  if (spaceSel) {
+    spaceSel.addEventListener("change", function () {
+      boardSel.innerHTML = ""; boardSel.appendChild(option("", "загрузка…"));
+      columnSel.innerHTML = ""; columnSel.appendChild(option("", "первая"));
+      laneSel.innerHTML = ""; laneSel.appendChild(option("", "по умолчанию"));
+      if (!spaceSel.value) return;
+      fetch("/api/kaiten/boards?space=" + encodeURIComponent(spaceSel.value)).then(function (r) { return r.json(); }).then(function (res) {
+        boardSel.innerHTML = ""; boardSel.appendChild(option("", "—"));
+        boardsCache = res.ok ? res.boards : [];
+        boardsCache.forEach(function (b) { boardSel.appendChild(option(b.id, b.title)); });
+        updatePath();
+      });
+    });
+    boardSel.addEventListener("change", function () {
+      var b = boardsCache.filter(function (x) { return String(x.id) === boardSel.value; })[0];
+      columnSel.innerHTML = ""; columnSel.appendChild(option("", "первая"));
+      laneSel.innerHTML = ""; laneSel.appendChild(option("", "по умолчанию"));
+      if (b) {
+        b.columns.forEach(function (c) { columnSel.appendChild(option(c.id, c.title)); });
+        b.lanes.forEach(function (l) { laneSel.appendChild(option(l.id, l.title)); });
+      }
+      updatePath();
+    });
+    columnSel.addEventListener("change", updatePath);
+    laneSel.addEventListener("change", updatePath);
+  }
+
+  // календарь: добавить участника из справочника одним нажатием
+  document.querySelectorAll("[data-add-attendee]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var box = document.querySelector("[data-attendees]");
+      var list = box.value.split(/[\s,;]+/).filter(Boolean);
+      if (list.indexOf(btn.dataset.addAttendee) < 0) list.push(btn.dataset.addAttendee);
+      box.value = list.join(", ");
+    });
+  });
+
+  // --- календарь-неделя и расписание на сводке: карточка встречи, новая встреча по клику на свободное время, линия «сейчас» ---
+  var pop = document.querySelector("[data-ev-pop]");
+  if (pop) {
+    var closePop = function () { pop.hidden = true; };
+    document.querySelectorAll("[data-ev]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var detail = document.getElementById("ev-" + btn.dataset.ev);
+        if (!detail) return;
+        pop.innerHTML = detail.innerHTML;  // разметка уже экранирована на сервере
+        pop.hidden = false;
+        var r = btn.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+        var left = r.right + 8 + w > window.innerWidth ? r.left - w - 8 : r.right + 8;
+        pop.style.left = Math.max(12, Math.min(left, window.innerWidth - w - 12)) + "px";
+        pop.style.top = Math.max(12, Math.min(r.top, window.innerHeight - h - 12)) + "px";
+      });
+    });
+    document.addEventListener("click", function (e) { if (!pop.contains(e.target)) closePop(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePop(); });
+    window.addEventListener("scroll", closePop, { passive: true });
+  }
+  document.querySelectorAll(".wk-col").forEach(function (col) {
+    col.addEventListener("click", function (e) {
+      if (e.target !== col) return;  // нажали на встречу, а не на свободное время
+      var hourPx = parseFloat(getComputedStyle(col).getPropertyValue("--hour")) || 48;
+      var minutes = Number(col.dataset.hourFrom) * 60 + Math.floor((e.clientY - col.getBoundingClientRect().top) / hourPx * 2) * 30;
+      document.querySelector("[data-new-day]").value = col.dataset.day;
+      document.querySelector("[data-new-time]").value = ("0" + Math.floor(minutes / 60)).slice(-2) + ":" + ("0" + minutes % 60).slice(-2);
+      window.location.hash = "new";
+      setTimeout(function () { document.querySelector("[data-new-title]").focus(); }, 0);
+    });
+  });
+  // время считаем от серверного (часовой пояс из настроек), а не от часов браузера
+  var nowLine = document.querySelector("[data-now]");
+  if (nowLine) {
+    var t0 = Date.now(), top0 = Number(nowLine.dataset.now), min0 = Number(nowLine.dataset.nowMin);
+    var nowHourPx = parseFloat(getComputedStyle(nowLine).getPropertyValue("--hour")) || 48;
+    var nowLabel = nowLine.querySelector("[data-now-label]");
+    setInterval(function () {
+      var passed = (Date.now() - t0) / 60000;
+      nowLine.style.top = top0 + passed / 60 * nowHourPx + "px";
+      if (nowLabel) {
+        var m = Math.floor(min0 + passed) % 1440;
+        nowLabel.textContent = ("0" + Math.floor(m / 60)).slice(-2) + ":" + ("0" + m % 60).slice(-2);
+      }
+    }, 30000);
+  }
+
+  // «?» у поля: подсказка раскрывается вправо, а у правого края карточки или таблицы — влево,
+  // иначе её обрезает (таблица листается вбок и прячет всё, что за её краем)
+  document.querySelectorAll(".help").forEach(function (h) {
+    var place = function () {
+      var box = h.closest(".table-wrap, .card");
+      var right = Math.min(box ? box.getBoundingClientRect().right : window.innerWidth, window.innerWidth) - 8;
+      h.classList.toggle("flip", h.getBoundingClientRect().left + 290 > right);
+    };
+    h.addEventListener("mouseenter", place);
+    h.addEventListener("focus", place);
+  });
+
+  // идёт обновление: ждём, пока PULSE перезапустится с другой версией, и открываем настройки заново
+  var waitBuild = document.querySelector("[data-wait-build]");
+  if (waitBuild) {
+    var started = Date.now(), idle = 0;
+    var poll = setInterval(function () {
+      fetch("/health", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res.build && res.build !== waitBuild.dataset.waitBuild) {
+          clearInterval(poll);
+          window.location.href = "/settings?tab=general&msg=" + encodeURIComponent("PULSE обновлён: версия " + res.build) + "#updates";
+          return;
+        }
+        // задание закончилось, а PULSE так и не перезапустился — значит, обновление не удалось
+        return fetch("/api/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
+          var busy = st.running.indexOf("update") >= 0 || st.queued.indexOf("update") >= 0;
+          idle = busy ? 0 : idle + 1;
+          if (idle >= 4) {
+            clearInterval(poll);
+            waitBuild.className = "alert bad";
+            waitBuild.textContent = "Обновление не удалось — подробности в «Журнале» (задание «Обновление PULSE»).";
+          }
+        });
+      }).catch(function () { idle = 0; /* перезапускается — подождём */ });
+      if (Date.now() - started > 10 * 60000) {
+        clearInterval(poll);
+        waitBuild.textContent = "Обновление идёт дольше обычного — загляните в «Журнал».";
+      }
+    }, 3000);
+  }
+
+  // подсказка справа внизу: «Позже» прячет её на неделю
+  document.querySelectorAll("[data-toast-close]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var toast = btn.closest("[data-toast]");
+      toast.hidden = true;
+      document.cookie = "voice_tip=" + encodeURIComponent(toast.dataset.toast) + "; path=/; max-age=604800; samesite=lax";
+    });
+  });
+
+  // --- вход в Telegram по QR: меняем картинку при смене токена, после сканирования завершаем вход ---
+  var qrBox = document.querySelector("[data-tg-qr]");
+  if (qrBox) {
+    var qrVersion = qrBox.dataset.version;
+    var qrTimer = setInterval(function () {
+      fetch("/settings/telegram/qr/status").then(function (r) { return r.json(); }).then(function (res) {
+        if (res.state === "waiting") {
+          if (String(res.version) !== qrVersion) {
+            qrVersion = String(res.version);
+            var img = qrBox.querySelector("img");
+            if (img) img.src = "/settings/telegram/qr.svg?v=" + qrVersion;
+          }
+          return;
+        }
+        clearInterval(qrTimer);
+        if (res.state === "ok") document.getElementById("tg-qr-done").submit();
+        else if (res.state === "password") window.location.href = "/settings?tab=telegram&need=password";
+        else if (res.state !== qrBox.dataset.tgQr) window.location.reload();
+      });
+    }, 2000);
+  }
+
+  // --- обновлять страницу, пока идёт расшифровка/разбор ---
+  var watching = Array.prototype.map.call(document.querySelectorAll("[data-meeting-status]"), function (n) { return n.dataset.meetingStatus; });
+  var busy = Array.prototype.some.call(document.querySelectorAll("[data-meeting-status]"), function (n) {
+    return /очеред|расшифровка|разбор/.test(n.textContent);
+  });
+  if (watching.length && busy) {
+    var last = null;
+    setInterval(function () {
+      fetch("/api/status").then(function (r) { return r.json(); }).then(function (res) {
+        var state = JSON.stringify(res.meetings.map(function (m) { return [m.id, m.status, Math.round((m.progress || 0) * 20)]; }));
+        if (last !== null && state !== last) window.location.reload();
+        last = state;
+        res.meetings.forEach(function (m) {
+          var bar = document.querySelector('[data-meeting-progress="' + m.id + '"]');
+          if (bar) bar.style.width = Math.round((m.progress || 0) * 100) + "%";
+        });
+      });
+    }, 5000);
+  }
+})();

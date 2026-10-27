@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Люди{% endblock %}
+{% block content %}
+<div class="topline">
+  <div><h1>Справочник людей</h1><div class="muted">Связывает одного человека в Telegram, почте и Kaiten. Claude пополняет его сам, вы — поправляете.</div></div>
+</div>
+
+{# форма открывается строкой «+ Добавить человека» (#add) или кнопкой «Изменить» — без скриптов #}
+<section class="card add-panel{{ ' open' if current }}" id="add">
+  <div class="card-h"><h2>{{ 'Изменить: ' ~ current.name if current else 'Новый человек' }}</h2><a class="small" href="/people">свернуть</a></div>
+  <div class="card-b">
+    <form method="post" action="/people">
+      <input type="hidden" name="pid" value="{{ current.id if current else 0 }}">
+      <div class="form-row">
+        <div><label>Имя и фамилия {{ ui.help('Так человек будет называться в задачах, карточках Kaiten и сводках.') }}</label>
+          <input type="text" name="name" required value="{{ current.name if current }}" placeholder="Пётр Иванов"></div>
+        <div><label>Роль {{ ui.help('Кто он в компании. Claude учитывает роль, когда разбирает встречи и решает, кому адресована задача.') }}</label>
+          <input type="text" name="role" value="{{ current.role or '' if current }}" placeholder="например, руководитель продаж"></div>
+      </div>
+      <label>Другие написания {{ ui.help('Как его называют в расшифровках встреч и в чатах: «Петя», «Иванов», «П. Иванов». По ним Claude понимает, что это один и тот же человек. Через запятую.') }}</label>
+      <input type="text" name="aliases" value="{{ current.aliases | join(', ') if current }}" placeholder="Петя, Иванов, П. Иванов">
+      <div class="form-row">
+        <div><label>Telegram {{ ui.help('@username. По нему Claude узнаёт сообщения этого человека в Telegram и связывает их с его задачами.') }}</label>
+          <input type="text" name="telegram" value="{{ current.telegram or '' if current }}" placeholder="@username"></div>
+        <div><label>Я.Мессенджер {{ ui.help('Логин в Яндекс Мессенджере — чтобы узнавать сообщения этого человека там.') }}</label>
+          <input type="text" name="ymessenger" value="{{ current.ymessenger or '' if current }}" placeholder="логин"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Почта {{ ui.help('Чтобы узнавать его письма и звать на встречи: в форме новой встречи в «Календаре» он появится кнопкой «+ Имя».') }}</label>
+          <input type="email" name="email" value="{{ current.email or '' if current }}" placeholder="name@company.ru"></div>
+        <div><label>Пользователь Kaiten {{ ui.help('Кого ставить исполнителем, когда Claude предлагает карточку в Kaiten на этого человека.') }}</label>
+          <select name="kaiten_user_id">
+            <option value="">—</option>
+            {% for u in kusers %}<option value="{{ u.id }}" {{ 'selected' if current and current.kaiten_user_id == u.id }}>{{ u.full_name }} (@{{ u.username }})</option>{% endfor %}
+          </select></div>
+      </div>
+      <label>Заметки {{ ui.help('Всё, что поможет Claude: зона ответственности, с кем работает, как лучше обращаться.') }}</label>
+      <textarea name="notes" rows="2">{{ current.notes or '' if current }}</textarea>
+      {% if current %}
+      <label>Голос {{ ui.help('Запоминается, когда вы подтверждаете на странице встречи, какой спикер — этот человек. Дальше PULSE подписывает его речь в записях сам.') }}</label>
+      <div class="small">{% if voices.get(current.id) %}🎙 Запомнен по {{ voices[current.id] }} {{ plural(voices[current.id], 'записи', 'записям', 'записям') }}{% else %}<span class="muted">Ещё не запомнен — подтвердите его спикера на странице любой встречи.</span>{% endif %}</div>
+      {% endif %}
+      <div class="form-actions">
+        <button class="btn primary">{{ 'Сохранить' if current else 'Добавить' }}</button>
+        <a class="btn ghost" href="/people">Отмена</a>
+      </div>
+    </form>
+    {% if current %}
+    <div class="actions" style="margin-top:10px">
+      {% if voices.get(current.id) %}<form method="post" action="/people/{{ current.id }}/voice/forget" data-confirm="Забыть голос {{ current.name }}?"><button class="btn sm ghost">Забыть голос</button></form>{% endif %}
+      <form method="post" action="/people/{{ current.id }}/delete" data-confirm="Удалить {{ current.name }} из справочника?"><button class="btn sm danger">Удалить из справочника</button></form>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <a class="add-row" href="/people#add">+ Добавить человека</a>
+  <div class="card-b flush">
+    <div class="table-wrap">
+    <table class="t">
+      <thead><tr><th>Имя</th><th>Где найти {{ ui.help('По этим адресам Claude узнаёт человека в Telegram, Я.Мессенджере, почте и Kaiten.', below=True) }}</th><th></th></tr></thead>
+      <tbody>
+      {% for p in items %}
+        <tr>
+          <td><strong>{{ p.name }}</strong>{% if p.role %}<div class="meta">{{ p.role }}</div>{% endif %}{% if p.aliases %}<div class="meta">также: {{ p.aliases | join(', ') }}</div>{% endif %}</td>
+          <td class="small">{% if p.telegram %}TG {{ p.telegram }}<br>{% endif %}{% if p.ymessenger %}ЯМ {{ p.ymessenger }}<br>{% endif %}{% if p.email %}{{ p.email }}<br>{% endif %}{% if p.kaiten_user_id %}Kaiten #{{ p.kaiten_user_id }}<br>{% endif %}{% if voices.get(p.id) %}<span title="PULSE узнаёт этот голос в записях встреч">🎙 голос запомнен</span>{% endif %}</td>
+          <td class="right nowrap"><a class="btn sm" href="/people?edit={{ p.id }}#add">Изменить</a></td>
+        </tr>
+      {% else %}<tr><td colspan="3" class="empty">Справочник пуст — он заполнится после первых разборов встреч и чатов.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

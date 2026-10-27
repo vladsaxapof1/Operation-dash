@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Задачи Kaiten{% endblock %}
+{% block content %}
+{% set keep = '&space=' ~ (space | urlencode) ~ '&who=' ~ (who | urlencode) ~ '&q=' ~ (q | urlencode)
+   ~ '&created=' ~ created ~ '&created_from=' ~ created_from ~ '&created_to=' ~ created_to
+   ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to %}
+<div class="topline">
+  <div><h1>Задачи Kaiten</h1><div class="muted">Зеркало отслеживаемых пространств{% if synced %} · обновлено {{ synced | ago }}{% endif %} · «без движения» — {{ settings.kaiten.stale_days }}+ дн. без перемещения</div></div>
+  <div class="actions">
+    <div class="seg">
+      <a href="?view=boards{{ keep }}&mine={{ mine }}&only={{ only }}" class="{{ 'active' if view == 'boards' }}">Доски</a><a href="?view=list{{ keep }}&mine={{ mine }}&only={{ only }}" class="{{ 'active' if view == 'list' }}">Список</a>
+    </div>
+    <form method="post" action="/jobs/run" data-busy="Обновляю…"><input type="hidden" name="name" value="collect:kaiten"><button class="btn">↻ Обновить из Kaiten</button></form>
+  </div>
+</div>
+
+{% if not settings.kaiten.enabled and not cards %}<div class="alert info">Kaiten не подключён — <a href="/settings?tab=kaiten">подключить</a>.</div>{% endif %}
+
+<div class="tiles">
+  <a class="tile {{ 'active' if only == 'work' }}" href="?view={{ view }}{{ keep }}&mine={{ mine }}&only={{ '' if only == 'work' else 'work' }}"><div class="n">{{ counts.work }}</div><div class="l">в работе</div></a>
+  <a class="tile {{ 'active' if only == 'queue' }}" href="?view={{ view }}{{ keep }}&mine={{ mine }}&only={{ '' if only == 'queue' else 'queue' }}"><div class="n">{{ counts.queue }}</div><div class="l">в очереди</div></a>
+  <a class="tile {{ 'active' if mine }}" href="?view={{ view }}{{ keep }}&only={{ only }}&mine={{ '' if mine else '1' }}"><div class="n">{{ counts.mine }}</div><div class="l">ваших</div></a>
+  <a class="tile {{ 'warn' if counts.stale }} {{ 'active' if only == 'stale' }}" href="?view={{ view }}{{ keep }}&mine={{ mine }}&only={{ '' if only == 'stale' else 'stale' }}"><div class="n">{{ counts.stale }}</div><div class="l">без движения</div></a>
+</div>
+
+<form method="get" class="filters">
+  <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="only" value="{{ only }}">
+  <select name="space" data-autosubmit><option value="">Все пространства</option>{% for s in spaces %}<option {{ 'selected' if s == space }}>{{ s }}</option>{% endfor %}</select>
+  <select name="who" data-autosubmit><option value="">Все исполнители</option>{% for p in people %}<option {{ 'selected' if p == who }}>{{ p }}</option>{% endfor %}</select>
+  {{ ui.period_filter('created', 'Создана', created, created_periods, created_from, created_to) }}
+  {{ ui.period_filter('due', 'Срок', due, due_periods, due_from, due_to) }}
+  <label class="check"><input type="checkbox" name="mine" value="1" {{ 'checked' if mine }} data-autosubmit> Только мои</label>
+  <input type="search" name="q" value="{{ q }}" placeholder="Поиск по названию">
+  <button class="btn">Найти</button>
+  {% if space or who or q or mine or only or created or due %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
+</form>
+
+{% if view == 'boards' %}
+  {% for b in boards %}
+  <section class="card kboard">
+    <div class="card-h">
+      <div><div class="muted small">{% if kaiten_base and b.space_id %}<a href="{{ kaiten_base }}/space/{{ b.space_id }}" target="_blank" rel="noopener">{{ b.space_title }}</a>{% else %}{{ b.space_title }}{% endif %}</div>
+        <h2>{{ b.title }}</h2></div>
+      <div class="actions"><span class="chip">{{ b.count }} {{ plural(b.count, 'карточка', 'карточки', 'карточек') }}</span>{% if b.stale %}<span class="chip warn">{{ b.stale }} без движения</span>{% endif %}</div>
+    </div>
+    <div class="kboard-cols">
+      {% for col in b.columns %}
+      <div class="kb-col">
+        <div class="kb-h"><span class="kb-title">{{ col.title }}</span><span class="chip">{{ col.cards | length }}</span></div>
+        {% for c in col.cards %}{{ ui.kaiten_card(c) }}{% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <section class="card"><div class="card-b"><p class="muted">Карточек нет{% if space or who or q or mine or only %} — попробуйте сбросить фильтры{% endif %}.</p></div></section>
+  {% endfor %}
+{% else %}
+<section class="card">
+  <div class="card-b flush">
+    <div class="table-wrap">
+    <table class="t">
+      <thead><tr><th>Карточка</th><th>Исполнитель</th><th>Колонка</th><th>Срок</th></tr></thead>
+      <tbody>
+      {% for c in cards %}
+        <tr>
+          <td><a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.title }}</a>
+            <div class="meta"><span class="chip {{ 'acc' if c.state == 2 }}">{{ c.state_title }}</span>{% if c.mine %} <span class="chip ok">вы</span>{% endif %} #{{ c.id }} · {{ c.space_title }} / {{ c.board_title }}{% if c.lane_title %} · {{ c.lane_title }}{% endif %}
+              {% if c.idle_days is not none %} · <span class="chip warn">{{ c.idle_days }} дн. без движения</span>{% elif c.in_column_days is not none %} · в колонке {{ c.in_column_days }} дн.{% endif %}</div></td>
+          <td class="nowrap"><span class="avatar">{{ c.initials }}</span> {{ c.responsible_name or '—' }}</td>
+          <td>{{ c.column_title }}</td>
+          <td class="nowrap">{% if c.due_date %}<span class="{{ 'chip bad' if c.overdue }}">{{ c.due_date | date }}</span>{% else %}—{% endif %}</td>
+        </tr>
+      {% else %}<tr><td colspan="4" class="empty">Карточек нет.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

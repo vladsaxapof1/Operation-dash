@@ -1,0 +1,103 @@
+# Пример настроек Пульта. INSTALL.bat копирует его в config/settings.yaml.
+# Всё это удобнее менять в админке: http://localhost:8765/settings
+# Пароли и токены здесь НЕ хранятся — они в secrets/.env (заполняются из админки).
+owner:
+  name: ''
+  timezone: Europe/Moscow
+  work_hours:
+    start: 09:00
+    end: '20:00'
+    days:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+web:
+  port: 8765
+claude:
+  path: ''
+  model_meetings: opus
+  model_triage: sonnet
+  model_digest: sonnet
+  model_ask: sonnet
+  timeout_minutes: 30
+schedule:
+  collect_minutes: 15
+  triage_minutes: 120
+  kaiten_minutes: 30
+  calendar_minutes: 30
+  digest_morning: 09:00
+  digest_evening: '18:30'
+  stale_check: '10:00'
+recordings:
+  folders:
+  - data/recordings
+  whisper_model: large-v3-turbo
+  device: auto
+  language: ru
+  diarization: true
+  diarization_threshold: 0.9
+  auto_process: true
+  hf_endpoint: ''
+telegram:
+  enabled: false
+  api_id: ''
+  phone: ''
+  include_all_private: false
+  backfill_days: 3
+telegram_bot:
+  enabled: false
+  owner_chat_id: ''
+  quiet_hours:
+    start: '21:00'
+    end: 08:30
+ymessenger:
+  enabled: false
+  my_login: ''
+mail:
+  enabled: false
+  email: ''
+  host: imap.yandex.ru
+  folders:
+  - INBOX
+  include_sent: true
+  backfill_days: 3
+  ignore_senders:
+  - noreply
+  - no-reply
+  - mailer-daemon
+  - notifications
+calendar:
+  enabled: false
+  login: ''
+  url: https://caldav.yandex.ru
+  calendars: []
+  write_calendar: ''
+  days_back: 2
+  days_ahead: 14
+kaiten:
+  enabled: false
+  domain: ''
+  spaces: []
+  exclude_boards: []
+  stale_days: 3
+  stale_states:
+  - 2
+  stale_basis: moved
+  targets: []
+  default_target: ''
+  nudge_text: '@{username}, карточка без движения {days} дн. Как продвигается? Есть ли блокеры?'
+knowledge:
+  folders: []
+autonomy:
+  kaiten_create_for_me: confirm
+  kaiten_create_for_others: confirm
+  kaiten_comment: confirm
+  kaiten_update: confirm
+  calendar: confirm
+notifications:
+  meeting_processed: true
+  urgent_immediately: true
+  stale_pings: true
+  max_stale_in_ping: 10

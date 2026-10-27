@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Нужен ответ{% endblock %}
+{% block content %}
+<div class="topline">
+  <div><h1>Нужен ваш ответ</h1><div class="muted">Claude отмечает сообщения, где от вас ждут решения или ответа, и готовит черновик</div></div>
+  <form method="post" action="/jobs/run"><input type="hidden" name="name" value="triage"><button class="btn">Разобрать новые сейчас</button></form>
+</div>
+
+<section class="card">
+  <div class="card-b flush">
+    <ul class="list">{% for a in items %}{{ ui.attention(a, full=True) }}{% else %}<li class="empty">Никто не ждёт ответа 👌</li>{% endfor %}</ul>
+  </div>
+</section>
+
+<div class="grid">
+  <section class="card">
+    <div class="card-h"><h2>Переписка</h2><span class="muted small">только чаты, которые вы разрешили читать</span></div>
+    <div class="card-b">
+      <form method="get" class="filters">
+        <select name="chat" data-autosubmit>
+          <option value="">— выберите чат —</option>
+          {% for c in chats %}<option value="{{ c.source }}|{{ c.chat_id }}" {{ 'selected' if chat == c.source ~ '|' ~ c.chat_id }}>{{ SOURCE_TITLES.get(c.source, c.source) }} · {{ c.title }} ({{ c.n }})</option>{% endfor %}
+        </select>
+        {% if chat_link %}<a class="btn" href="{{ chat_link[0] }}" target="_blank" rel="noopener">↗ {{ chat_link[1] }}</a>{% endif %}
+      </form>
+      {% for m in messages %}
+        <div class="chat-msg {{ 'out' if m.is_outgoing }}"><span class="meta">{{ m.ts | local }}</span> <strong>{{ m.sender_name }}</strong>: {{ m.text }}</div>
+      {% else %}
+        <div class="muted small">{% if chat %}Сообщений нет.{% else %}Выберите чат, чтобы посмотреть последние сообщения.{% endif %}</div>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-h"><h2>Недавно закрытые</h2></div>
+    <div class="card-b flush">
+      <ul class="list">
+      {% for a in closed %}
+        <li><div class="row"><div class="grow"><strong>{{ a.sender_name or a.chat_title }}</strong>: {{ a.summary }}<div class="meta">{{ 'ответила' if a.status == 'done' else 'скрыто' }} · {{ a.updated | ago }}</div></div>
+        <form class="inline" method="post" action="/attention/{{ a.id }}/reopen"><button class="btn sm ghost">Вернуть</button></form></div></li>
+      {% else %}<li class="empty">Пока пусто.</li>{% endfor %}
+      </ul>
+    </div>
+  </section>
+</div>
+{% endblock %}

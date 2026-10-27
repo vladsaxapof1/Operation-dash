@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./ops *)",
+      "Bash(ops *)",
+      "Read",
+      "Glob",
+      "Grep",
+      "Skill",
+      "Edit(data/**)",
+      "Write(data/**)"
+    ],
+    "ask": [
+      "Bash(./ops proposals approve *)",
+      "Bash(ops proposals approve *)"
+    ],
+    "deny": [
+      "Read(secrets/**)",
+      "Edit(secrets/**)",
+      "Write(secrets/**)",
+      "Edit(config/**)",
+      "Write(config/**)"
+    ]
+  }
+}

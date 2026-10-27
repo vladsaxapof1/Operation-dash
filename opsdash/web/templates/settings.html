@@ -1,0 +1,504 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Настройки{% endblock %}
+{% macro secret_input(name, key, placeholder='') %}
+<input type="password" name="{{ name }}" autocomplete="off" placeholder="{{ ('сохранён: ' ~ secrets[key]) if secrets.get(key) else placeholder }}">
+<div class="hint">{% if secrets.get(key) %}Оставьте пустым, чтобы не менять.{% endif %} Хранится только на этом компьютере (secrets/.env).</div>
+{% endmacro %}
+{% macro check_btn(what) %}<button type="button" class="btn" data-check="{{ what }}">Проверить подключение</button><span class="check-result" data-check-result="{{ what }}"></span>{% endmacro %}
+{% macro enabled_box(section, text='Включено') %}<label class="check"><input type="checkbox" name="enabled" {{ 'checked' if settings[section].enabled }}> {{ text }}</label>{% endmacro %}
+{% block content %}
+<div class="topline"><div><h1>Настройки</h1><div class="muted">Подключения и правила работы. Всё хранится на этом компьютере.</div></div></div>
+<div class="tabs">{% for key, title in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}">{{ title }}{% if tab_notes.get(key) %} <span class="tab-note">({{ tab_notes[key] }})</span>{% endif %}</a>{% endfor %}</div>
+
+{% if tab == 'general' %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/general">
+    <label>Как вас зовут</label><input type="text" name="name" value="{{ settings.owner.name }}" placeholder="Анна Смирнова">
+    <div class="hint">Claude будет знать, чьи это задачи и сообщения.</div>
+    <label>Часовой пояс</label><input type="text" name="timezone" value="{{ settings.owner.timezone }}">
+    <div class="hint">Например Europe/Moscow, Asia/Yekaterinburg.</div>
+    <div class="form-row">
+      <div><label>Рабочий день с</label><input type="time" name="work_start" value="{{ settings.owner.work_hours.start | hhmm }}"></div>
+      <div><label>до</label><input type="time" name="work_end" value="{{ settings.owner.work_hours.end | hhmm }}"></div>
+    </div>
+    <label>Рабочие дни</label>
+    <div class="actions">{% for d, n in [(1,'Пн'),(2,'Вт'),(3,'Ср'),(4,'Чт'),(5,'Пт'),(6,'Сб'),(7,'Вс')] %}<label class="check"><input type="checkbox" name="days" value="{{ d }}" {{ 'checked' if d in settings.owner.work_hours.days }}> {{ n }}</label>{% endfor %}</div>
+    <div class="hint">В рабочее время Claude разбирает сообщения; дайджесты и напоминания — только в рабочие дни.</div>
+    <label>Порт админки</label><input type="number" name="port" value="{{ settings.web.port }}" style="max-width:140px">
+    <div class="hint">Менять, только если 8765 занят другой программой. Вступит в силу после перезапуска PULSE.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
+<section class="card" id="updates"><div class="card-h"><h2>Обновления PULSE</h2>
+  {% if upd.checked_at %}<span class="muted small">проверено {{ upd.checked_at | ago }}</span>{% endif %}</div>
+<div class="card-b">
+  {% if updating %}
+  {# после «Обновить»: страница ждёт, пока PULSE перезапустится с новой версией (app.js), и обновляется сама #}
+  <div class="alert info" data-wait-build="{{ build }}">Обновляю PULSE: скачиваю новую версию и ставлю библиотеки, затем он перезапустится.
+    Обычно это 1–3 минуты — страница обновится сама.</div>
+  {% endif %}
+  <div>Стоит версия <b>{{ installed.sha[:7] or 'неизвестно' }}</b>{% if installed.date %} от {{ installed.date | local('%d.%m.%Y') }}{% endif %}
+    <span class="muted small">{{ '· из git' if installed.how == 'git' }}</span></div>
+  {% if upd.error %}<div class="alert bad" style="margin-top:10px">Не удалось проверить: {{ upd.error }}</div>
+  {% elif upd.available and not updating %}
+  <div class="update-box">
+    <div><b>Доступна новая версия {{ upd.latest.sha[:7] }}</b> от {{ upd.latest.date | local('%d.%m %H:%M') }}</div>
+    {% if upd.changes %}<ul>{% for c in upd.changes %}<li>{{ c }}</li>{% endfor %}</ul>{% else %}<div class="muted small">«{{ upd.latest.message }}»</div>{% endif %}
+  </div>
+  {% elif upd.latest and not updating %}<div class="muted small" style="margin-top:6px">Это последняя версия.</div>{% endif %}
+  <div class="form-actions">
+    {% if upd.available and not updating %}<form class="inline" method="post" action="/updates/apply" data-confirm="PULSE скачает новую версию и перезапустится — это 1–3 минуты. Данные, настройки и пароли не меняются. Обновить?"><button class="btn primary">Обновить</button></form>{% endif %}
+    <form class="inline" method="post" action="/updates/check" data-busy="Проверяю…"><button class="btn">Проверить обновления</button></form>
+  </div>
+  <details class="update-src"{{ ' open' if upd.error }}><summary class="small muted">Откуда обновлять</summary>
+    <form method="post" action="/settings/updates">
+      <div class="form-row">
+        <div><label>Репозиторий GitHub</label><input type="text" name="repo" value="{{ settings.updates.repo }}" placeholder="владелец/название"></div>
+        <div><label>Ветка</label><input type="text" name="branch" value="{{ settings.updates.branch }}"></div>
+      </div>
+      <label>Токен GitHub {{ ui.help('Нужен, если репозиторий закрытый. Создаётся на GitHub: Settings → Developer settings → Fine-grained tokens — доступ только к этому репозиторию, Contents: Read-only.') }}</label>
+      {{ secret_input('token', 'GITHUB_TOKEN', 'github_pat_…') }}
+      <label class="check"><input type="checkbox" name="auto_check" {{ 'checked' if settings.updates.auto_check }}> Проверять раз в день</label>
+      <div class="form-actions"><button class="btn">Сохранить</button></div>
+    </form>
+  </details>
+</div></section>
+
+{% elif tab == 'telegram' %}
+<div class="alert info">PULSE читает ваш аккаунт Telegram <b>только в отмеченных чатах</b> и ничего не пишет от вашего имени. Инструкция — <a href="/help/02-подключения#telegram">справка</a>.</div>
+<section class="card"><div class="card-h"><h2>1. Ключи приложения</h2></div><div class="card-b">
+  <form method="post" action="/settings/telegram/api">
+    <div class="form-row">
+      <div><label>api_id</label><input type="text" name="api_id" value="{{ settings.telegram.api_id }}" placeholder="1234567"></div>
+      <div><label>api_hash</label>{{ secret_input('api_hash', 'TELEGRAM_API_HASH', '32 символа') }}</div>
+    </div>
+    <div class="hint">Берутся на <a href="https://my.telegram.org/apps" target="_blank">my.telegram.org → API development tools</a>.</div>
+    <div class="form-actions"><button class="btn">Сохранить ключи</button></div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>2. Вход в аккаунт</h2></div><div class="card-b">
+  {% if tg_me %}
+    <p>✅ Вход выполнен: <b>{{ tg_me.name }}</b>{% if tg_me.username %} (@{{ tg_me.username }}){% endif %}</p>
+    <div class="actions">{{ check_btn('telegram') }}
+      <form class="inline" method="post" action="/settings/telegram/logout" data-confirm="Удалить сессию Telegram с этого компьютера?"><button class="btn danger">Выйти</button></form></div>
+  {% elif request.query_params.get('need') == 'password' or tg_qr.qr_state == 'password' %}
+    <form method="post" action="/settings/telegram/password">
+      <label>Облачный пароль Telegram</label><input type="password" name="password" required autocomplete="off">
+      <div class="hint">Включена двухэтапная проверка — это пароль, который вы задавали в Telegram (Настройки → Конфиденциальность → Облачный пароль).</div>
+      <div class="form-actions"><button class="btn primary">Войти</button></div>
+    </form>
+    <form method="post" action="/settings/telegram/cancel" style="margin-top:8px"><button class="btn sm ghost">Отменить</button></form>
+  {% elif tg_login_state == 'qr' %}
+    <div data-tg-qr="{{ tg_qr.qr_state }}" data-version="{{ tg_qr.qr_version }}">
+    {% if tg_qr.qr_state == 'waiting' %}
+      <img src="/settings/telegram/qr.svg?v={{ tg_qr.qr_version }}" alt="QR-код для входа в Telegram" width="220" height="220" style="display:block;background:#fff;border-radius:10px">
+      <ol class="small">
+        <li>Откройте Telegram на телефоне → <b>Настройки → Устройства</b>.</li>
+        <li>Нажмите <b>«Подключить устройство»</b> и наведите камеру на QR-код.</li>
+      </ol>
+      <div class="hint">Код сам обновляется каждые полминуты — перезагружать страницу не нужно.</div>
+    {% elif tg_qr.qr_state == 'ok' %}
+      <p>✅ QR-код отсканирован — завершаю вход…</p>
+    {% else %}
+      <p>{{ 'Не получилось: ' ~ tg_qr.qr_error if tg_qr.qr_state == 'error' else 'QR-код устарел.' }}</p>
+      <form method="post" action="/settings/telegram/qr"><button class="btn primary">Показать новый QR-код</button></form>
+    {% endif %}
+      <form id="tg-qr-done" method="post" action="/settings/telegram/qr/done" hidden></form>
+    </div>
+    <form method="post" action="/settings/telegram/cancel" style="margin-top:8px"><button class="btn sm ghost">Отменить</button></form>
+  {% elif tg_login_state == 'code' %}
+    <form method="post" action="/settings/telegram/code">
+      <label>Код из Telegram</label><input type="text" name="code" required autocomplete="one-time-code" style="max-width:200px">
+      <div class="hint">Код пришёл в приложение Telegram (чат «Telegram»), не по SMS.</div>
+      <div class="form-actions"><button class="btn primary">Подтвердить</button></div>
+    </form>
+    <form method="post" action="/settings/telegram/cancel" style="margin-top:8px"><button class="btn sm ghost">Отменить</button></form>
+  {% else %}
+    <form method="post" action="/settings/telegram/qr">
+      <div class="hint" style="margin-top:0">Проще всего — отсканировать QR-код телефоном, на котором открыт Telegram.</div>
+      <div class="form-actions"><button class="btn primary" {{ 'disabled' if not settings.telegram.api_id }}>Войти по QR-коду</button></div>
+      {% if not settings.telegram.api_id %}<div class="hint">Сначала сохраните ключи (шаг 1).</div>{% endif %}
+    </form>
+    <details style="margin-top:14px">
+      <summary class="small muted">Войти по номеру телефона и коду</summary>
+      <form method="post" action="/settings/telegram/login">
+        <label>Номер телефона аккаунта</label><input type="text" name="phone" value="{{ settings.telegram.phone }}" placeholder="+79991234567" required>
+        <div class="form-actions"><button class="btn" {{ 'disabled' if not settings.telegram.api_id }}>Получить код</button></div>
+      </form>
+    </details>
+  {% endif %}
+</div></section>
+
+<section class="card"><div class="card-h"><h2>3. Какие чаты читать</h2>
+  <form class="inline" method="post" action="/settings/telegram/dialogs"><button class="btn sm" {{ 'disabled' if not tg_me }}>↻ Обновить список</button></form></div>
+<div class="card-b">
+  <form method="post" action="/settings/telegram/options">
+    <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if settings.telegram.enabled }}> Читать Telegram</label>
+    <label class="check"><input type="checkbox" name="include_all_private" {{ 'checked' if settings.telegram.include_all_private }}> Читать все личные переписки (кроме ботов и помеченных «никогда»)</label>
+    <label>При первом подключении загрузить сообщения за, дней</label><input type="number" name="backfill_days" value="{{ settings.telegram.backfill_days }}" min="0" max="30" style="max-width:120px">
+    <div class="form-actions"><button class="btn">Сохранить</button></div>
+  </form>
+  {% if chats %}
+  {# переключатель «✓ / — / ✕» сохраняет выбор сразу (app.js); без скриптов — кнопкой внизу #}
+  <form method="post" action="/settings/chats" style="margin-top:16px" data-changed-only data-chats>
+    <input type="hidden" name="source" value="telegram">
+    <div class="filters chat-tools">
+      <input type="text" placeholder="Найти чат…" data-chat-search>
+      <div class="seg" data-chat-show>
+        <a href="#" class="active" data-show="">Все <span class="muted" data-count="">{{ chats | length }}</span></a><a href="#" data-show="1">Читаю <span class="muted" data-count="1">{{ chat_counts[1] }}</span></a><a href="#" data-show="0">Не читаю <span class="muted" data-count="0">{{ chat_counts[0] }}</span></a><a href="#" data-show="-1">Никогда <span class="muted" data-count="-1">{{ chat_counts[-1] }}</span></a>
+      </div>
+      <div class="seg" data-chat-kinds>
+        <a href="#" class="active" data-kind="">Все типы</a>{% for k, title, n in chat_kinds %}<a href="#" data-kind="{{ k }}">{{ title }} <span class="muted" data-kind-count="{{ k }}">{{ n }}</span></a>{% endfor %}
+      </div>
+      <div class="seg">
+        <a href="?tab=telegram&sort=recent" class="{{ 'active' if sort == 'recent' }}">Свежие сверху</a><a href="?tab=telegram&sort=title" class="{{ 'active' if sort == 'title' }}">По алфавиту</a>
+      </div>
+      <span class="muted small" data-chat-saved></span>
+    </div>
+    <div class="table-wrap"><table class="t" id="tg-chats">
+      <thead><tr><th>Чат</th><th>Тип</th><th>Последнее сообщение</th><th>Читать {{ ui.help('✓ — читать этот чат. Прочерк — не читать. ✕ — никогда: не читать, даже когда включено «Читать все личные переписки». Выбор сохраняется сразу.', below=True) }}</th></tr></thead>
+      <tbody>
+      {% for c in chats %}
+        <tr class="{{ 'dim' if c.enabled != 1 }}" data-state="{{ c.enabled }}" data-kind="{{ c.kind }}"><td>{{ c.title }}{% if c.username %} <span class="small muted">@{{ c.username }}</span>{% endif %}</td><td class="small muted">{{ {'group':'группа','private':'личный','channel':'канал','bot':'бот'}.get(c.kind, c.kind) }}</td>
+        <td class="small muted nowrap">{{ c.last_ts | ago if c.last_ts else '—' }}</td>
+        <td><div class="tri" role="radiogroup" aria-label="Читать «{{ c.title }}»">
+          {% for v, sign, tip in [(1, '✓', 'Читать'), (0, '—', 'Не читать'), (-1, '✕', 'Никогда — даже среди «всех личных»')] %}
+          <label title="{{ tip }}"><input type="radio" name="chat__{{ c.chat_id }}" value="{{ v }}" {{ 'checked' if c.enabled == v }}><span>{{ sign }}</span></label>
+          {% endfor %}
+        </div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <div class="form-actions" data-chats-submit><button class="btn primary">Сохранить выбор чатов</button></div>
+  </form>
+  {% else %}<p class="muted">Список чатов появится после входа.</p>{% endif %}
+</div></section>
+
+{% elif tab == 'bot' %}
+<div class="alert info">Через бота приходят сводки, итоги встреч и кнопки «Да/Нет». Ему же можно писать и наговаривать вопросы с телефона. <a href="/help/02-подключения#telegram-бот">Как создать бота</a>.</div>
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/bot">
+    {{ enabled_box('telegram_bot', 'Бот включён') }}
+    <label>Токен бота от @BotFather</label>{{ secret_input('token', 'TELEGRAM_BOT_TOKEN', '123456:ABC-DEF…') }}
+    <div class="form-row">
+      <div><label>Тихие часы с</label><input type="time" name="quiet_start" value="{{ settings.telegram_bot.quiet_hours.start | hhmm }}"></div>
+      <div><label>до</label><input type="time" name="quiet_end" value="{{ settings.telegram_bot.quiet_hours.end | hhmm }}"></div>
+    </div>
+    <div class="hint">В тихие часы приходят только срочные сообщения, остальное — утром.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('bot') }}</div>
+  </form>
+</div></section>
+<section class="card"><div class="card-h"><h2>Привязка к вам</h2></div><div class="card-b">
+  {% if settings.telegram_bot.owner_chat_id %}
+    <p>✅ Бот привязан к вашему Telegram.</p>
+    <div class="actions">
+      <form class="inline" method="post" action="/settings/bot/test"><button class="btn">Отправить проверочное сообщение</button></form>
+      <form class="inline" method="post" action="/settings/bot/unpair" data-confirm="Отвязать бота?"><button class="btn ghost danger">Отвязать</button></form>
+    </div>
+  {% else %}
+    <p>Откройте бота в Telegram и отправьте ему команду:</p>
+    <p style="font-size:20px"><code>/start {{ pair_code }}</code></p>
+    {% if bot_username %}<p><a class="btn primary" href="https://t.me/{{ bot_username }}?start={{ pair_code }}" target="_blank">Открыть @{{ bot_username }} в Telegram</a></p>{% endif %}
+    <div class="hint">Бот будет отвечать только вам. PULSE должен быть запущен. После привязки обновите страницу.</div>
+  {% endif %}
+</div></section>
+
+{% elif tab == 'ymessenger' %}
+<div class="alert info"><b>Важно:</b> бот Яндекс Мессенджера видит только те чаты, куда его добавили. Ваши личные переписки он читать не может — это ограничение Яндекса. Бота создаёт администратор Яндекс 360 — <a href="/help/02-подключения#яндекс-мессенджер">что ему написать</a>.</div>
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/ymessenger">
+    {{ enabled_box('ymessenger', 'Читать Яндекс Мессенджер') }}
+    <label>OAuth-токен бота</label>{{ secret_input('token', 'YM_BOT_TOKEN') }}
+    <label>Ваш логин в Яндекс 360</label><input type="text" name="my_login" value="{{ settings.ymessenger.my_login }}" placeholder="anna@company.ru">
+    <div class="hint">Чтобы отличать ваши сообщения от чужих.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('ymessenger') }}</div>
+  </form>
+</div></section>
+<section class="card"><div class="card-h"><h2>Чаты с ботом</h2></div><div class="card-b">
+  {% if chats %}
+  <form method="post" action="/settings/chats">
+    <input type="hidden" name="source" value="ymessenger">
+    <div class="table-wrap"><table class="t"><thead><tr><th>Название (можно переименовать)</th><th>Читать</th></tr></thead><tbody>
+    {% for c in chats %}<tr><td><input type="text" name="title__{{ c.chat_id }}" value="{{ c.title }}"></td>
+      <td><select name="chat__{{ c.chat_id }}" style="width:auto"><option value="1" {{ 'selected' if c.enabled == 1 }}>читать</option><option value="0" {{ 'selected' if c.enabled != 1 }}>нет</option></select></td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+  {% else %}<p class="muted">Чаты появятся после первого сообщения в чате, куда добавлен бот.</p>{% endif %}
+</div></section>
+
+{% elif tab == 'mail' %}
+<section class="card"><div class="card-h"><h2>Яндекс Почта</h2></div><div class="card-b">
+  <form method="post" action="/settings/mail">
+    {{ enabled_box('mail', 'Читать почту') }}
+    <label>Адрес почты</label><input type="email" name="email" value="{{ settings.mail.email }}" placeholder="anna@company.ru">
+    <label>Пароль приложения (тип «Почта»)</label>{{ secret_input('password', 'MAIL_APP_PASSWORD', 'не обычный пароль, а пароль приложения') }}
+    <div class="hint"><a href="https://id.yandex.ru/security/app-passwords" target="_blank">Яндекс ID → Безопасность → Пароли приложений</a>. В настройках почты должен быть включён доступ по IMAP. <a href="/help/02-подключения#яндекс-почта">Подробно</a>.</div>
+    <label>Папки</label><textarea name="folders" rows="2">{{ settings.mail.folders | join('\n') }}</textarea>
+    <label class="check"><input type="checkbox" name="include_sent" {{ 'checked' if settings.mail.include_sent }}> Читать «Отправленные» — чтобы видеть, что вы обещали в письмах</label>
+    <label>Не обращать внимания на отправителей (части адреса, по одной в строке)</label><textarea name="ignore_senders" rows="3">{{ settings.mail.ignore_senders | join('\n') }}</textarea>
+    <div class="form-row">
+      <div><label>IMAP-сервер</label><input type="text" name="host" value="{{ settings.mail.host }}"></div>
+      <div><label>Загрузить письма за, дней</label><input type="number" name="backfill_days" value="{{ settings.mail.backfill_days }}" min="0" max="30"></div>
+    </div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('mail') }}</div>
+  </form>
+  <p class="hint">PULSE только читает письма и не помечает их прочитанными.</p>
+</div></section>
+
+<section class="card" id="gmail"><div class="card-h"><h2>Gmail</h2></div><div class="card-b">
+  <form method="post" action="/settings/gmail">
+    {{ enabled_box('gmail', 'Читать Gmail') }}
+    <label>Адрес Gmail</label><input type="email" name="email" value="{{ settings.gmail.email }}" placeholder="anna@gmail.com">
+    <label>Пароль приложения Google</label>{{ secret_input('password', 'GMAIL_APP_PASSWORD', '16 букв, не обычный пароль') }}
+    <ol class="small">
+      <li>Включите двухэтапную аутентификацию: <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank">Аккаунт Google → Безопасность</a>.</li>
+      <li>Создайте пароль приложения: <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a> → название «PULSE» → «Создать».</li>
+      <li>Скопируйте 16 букв сюда (пробелы можно оставить) и нажмите «Сохранить».</li>
+    </ol>
+    <div class="hint">Если пункта «Пароли приложений» нет — у рабочего Google-аккаунта их может запрещать администратор.</div>
+    <label class="check"><input type="checkbox" name="primary_only" {{ 'checked' if settings.gmail.primary_only }}> Только «Основные» входящие — без «Промоакций», «Соцсетей» и «Оповещений»</label>
+    <label class="check"><input type="checkbox" name="include_sent" {{ 'checked' if settings.gmail.include_sent }}> Читать «Отправленные»</label>
+    <div class="form-row">
+      <div><label>Папки</label><textarea name="folders" rows="2">{{ settings.gmail.folders | join('\n') }}</textarea></div>
+      <div><label>Загрузить письма за, дней</label><input type="number" name="backfill_days" value="{{ settings.gmail.backfill_days }}" min="0" max="30"></div>
+    </div>
+    <div class="hint">Отправители из списка «Не обращать внимания» выше пропускаются и здесь.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('gmail') }}</div>
+  </form>
+</div></section>
+
+{% elif tab == 'calendar' %}
+<section class="card"><div class="card-h"><h2>Яндекс Календарь</h2></div><div class="card-b">
+  <form method="post" action="/settings/calendar">
+    {{ enabled_box('calendar', 'Подключить календарь') }}
+    <label>Логин (адрес почты)</label><input type="text" name="login" value="{{ settings.calendar.login }}">
+    <label>Пароль приложения (тип «Календарь CalDAV»)</label>{{ secret_input('password', 'CALDAV_APP_PASSWORD') }}
+    <div class="hint">Отдельный пароль приложения, не тот, что для почты. <a href="/help/02-подключения#яндекс-календарь">Подробно</a>.</div>
+    <label>Какие календари читать (названия, пусто = все)</label><textarea name="calendars" rows="2">{{ settings.calendar.calendars | join('\n') }}</textarea>
+    <div class="form-row">
+      <div><label>Календарь для новых встреч (по умолчанию)</label>
+        {% if calendar_names %}<select name="write_calendar"><option value="">первый в списке</option>{% for n in calendar_names %}<option {{ 'selected' if n == settings.calendar.write_calendar }}>{{ n }}</option>{% endfor %}</select>
+        {% else %}<input type="text" name="write_calendar" value="{{ settings.calendar.write_calendar }}" placeholder="пусто = первый">{% endif %}</div>
+      <div><label>Смотреть вперёд, дней</label><input type="number" name="days_ahead" value="{{ settings.calendar.days_ahead }}" min="1" max="60"></div>
+    </div>
+    <label>Адрес CalDAV</label><input type="text" name="url" value="{{ settings.calendar.url }}">
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('calendar') }}</div>
+  </form>
+</div></section>
+
+<section class="card" id="google"><div class="card-h"><h2>Google Календарь</h2></div><div class="card-b">
+  <form method="post" action="/settings/google_calendar">
+    {{ enabled_box('google_calendar', 'Читать Google Календарь') }}
+    <label>Секретные адреса в формате iCal (по одному в строке)</label>
+    <textarea name="urls" rows="2" autocomplete="off" placeholder="{{ ('сохранено адресов: ' ~ google_urls ~ ' — оставьте пустым, чтобы не менять') if google_urls else 'https://calendar.google.com/calendar/ical/…/private-…/basic.ics' }}"></textarea>
+    <ol class="small">
+      <li>Откройте <a href="https://calendar.google.com/calendar/r/settings" target="_blank">Google Календарь → ⚙ Настройки</a>.</li>
+      <li>Слева в «Настройки моих календарей» выберите календарь → <b>«Интеграция календаря»</b>.</li>
+      <li>Скопируйте <b>«Секретный адрес в формате iCal»</b> и вставьте сюда. Для нескольких календарей — по адресу в строке.</li>
+    </ol>
+    <div class="hint">Адрес даёт доступ к вашим встречам — храните его как пароль: он сохраняется только на этом компьютере. Если пункта нет — в рабочем аккаунте Google его мог отключить администратор.</div>
+    {% if google_urls %}<label class="check"><input type="checkbox" name="forget"> Забыть сохранённые адреса</label>{% endif %}
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('google_calendar') }}</div>
+  </form>
+  <p class="hint">PULSE только читает Google Календарь: новые встречи создаются в Яндекс Календаре, а отменить встречу из Google можно только в самом Google.</p>
+</div></section>
+
+{% elif tab == 'kaiten' %}
+<section class="card"><div class="card-h"><h2>Подключение и «без движения»</h2></div><div class="card-b">
+  <form method="post" action="/settings/kaiten">
+    {{ enabled_box('kaiten', 'Подключить Kaiten') }}
+    <div class="form-row">
+      <div><label>Адрес вашего Kaiten</label><input type="text" name="domain" value="{{ settings.kaiten.domain }}" placeholder="company.kaiten.ru"></div>
+      <div><label>API-токен</label>{{ secret_input('token', 'KAITEN_TOKEN') }}</div>
+    </div>
+    <div class="hint">Токен: Kaiten → профиль → API-ключ. <a href="/help/02-подключения#kaiten">Подробно</a>.{% if kaiten_me %} Вход как <b>{{ kaiten_me.name }}</b>.{% endif %}</div>
+    <div class="form-row">
+      <div><label>«Без движения» — дней</label><input type="number" name="stale_days" value="{{ settings.kaiten.stale_days }}" min="1" max="60"></div>
+      <div><label>Считать от</label><select name="stale_basis"><option value="moved" {{ 'selected' if settings.kaiten.stale_basis == 'moved' }}>последнего перемещения по доске</option><option value="updated" {{ 'selected' if settings.kaiten.stale_basis == 'updated' }}>любого изменения карточки</option></select></div>
+    </div>
+    <label>Какие карточки проверять</label>
+    <div class="actions"><label class="check"><input type="checkbox" name="stale_states" value="2" {{ 'checked' if 2 in settings.kaiten.stale_states }}> в работе</label><label class="check"><input type="checkbox" name="stale_states" value="1" {{ 'checked' if 1 in settings.kaiten.stale_states }}> в очереди</label></div>
+    {% if boards %}
+    <label>Не проверять доски</label>
+    <select name="exclude_boards" multiple size="{{ [boards|length, 6]|min }}">{% for b in boards %}<option value="{{ b.id }}" {{ 'selected' if b.id in settings.kaiten.exclude_boards }}>{{ b.title }}</option>{% endfor %}</select>
+    <div class="hint">Ctrl+клик — выбрать несколько.</div>
+    {% endif %}
+    <label>Текст напоминания в карточке</label><input type="text" name="nudge_text" value="{{ settings.kaiten.nudge_text }}">
+    <div class="hint">{username} — исполнитель, {days} — сколько дней без движения.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('kaiten') }}</div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>Какие пространства отслеживать</h2></div><div class="card-b" id="kaiten-spaces" data-tracked='{{ settings.kaiten.spaces | tojson }}'>
+  <p class="muted small">Загружаю список пространств…</p>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>Куда создавать карточки</h2></div><div class="card-b">
+  <p class="hint" style="margin-top:0">«Направление» — место на доске, куда Claude предлагает новые карточки. Например: «Операционка» → доска «Проекты», колонка «Очередь». Claude выбирает направление по смыслу задачи.</p>
+  {% if settings.kaiten.targets %}
+  <div class="table-wrap"><table class="t"><thead><tr><th>Направление</th><th>Куда</th><th></th></tr></thead><tbody>
+  {% for t in settings.kaiten.targets %}
+    <tr><td><b>{{ t.name }}</b>{% if t.name == settings.kaiten.default_target %} <span class="chip acc">по умолчанию</span>{% endif %}</td><td class="small">{{ t.path or ('доска ' ~ t.board_id) }}</td>
+    <td class="right nowrap">{% if t.name != settings.kaiten.default_target %}<form class="inline" method="post" action="/settings/kaiten/targets/default"><input type="hidden" name="name" value="{{ t.name }}"><button class="btn sm ghost">По умолчанию</button></form>{% endif %}
+      <form class="inline" method="post" action="/settings/kaiten/targets/delete"><input type="hidden" name="name" value="{{ t.name }}"><button class="btn sm danger">Удалить</button></form></td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% endif %}
+  <form method="post" action="/settings/kaiten/targets/add" id="target-form" style="margin-top:12px">
+    <div class="form-row">
+      <div><label>Название направления</label><input type="text" name="name" required placeholder="Операционка"></div>
+      <div><label>Пространство</label><select name="space_id" data-kaiten-space required><option value="">—</option></select></div>
+    </div>
+    <div class="form-row">
+      <div><label>Доска</label><select name="board_id" data-kaiten-board required><option value="">—</option></select></div>
+      <div><label>Колонка</label><select name="column_id" data-kaiten-column><option value="">первая</option></select></div>
+      <div><label>Дорожка</label><select name="lane_id" data-kaiten-lane><option value="">по умолчанию</option></select></div>
+    </div>
+    <input type="hidden" name="path" data-kaiten-path>
+    <div class="form-actions"><button class="btn">Добавить направление</button></div>
+  </form>
+</div></section>
+
+{% elif tab == 'recordings' %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/recordings">
+    <label>Папки с записями (по одной в строке)</label>
+    <textarea name="folders" rows="4">{{ settings.recordings.folders | join('\n') }}</textarea>
+    {% if is_mac %}
+    <div class="hint">По умолчанию — data/recordings в папке PULSE. Добавьте папку Zoom (обычно <code>~/Documents/Zoom</code>) и папку Яндекс Диска, куда Телемост сохраняет записи (обычно внутри <code>~/Yandex.Disk.localized</code>). Путь можно скопировать в Finder: правый клик по папке, зажать Option → «Скопировать путь до…». Старые файлы из папок не разбираются — только новые.</div>
+    <div class="hint">Для папок в «Документах», на «Рабочем столе» и в «Загрузках» macOS один раз спросит разрешение — нажмите «Разрешить». Не спросила — см. <a href="/help/05-обслуживание#macos-нет-доступа-к-папкам">справку</a>.</div>
+    {% else %}
+    <div class="hint">По умолчанию — data/recordings в папке PULSE. Добавьте папку Zoom (обычно <code>C:\Users\…\Documents\Zoom</code>) и папку Яндекс Диска, куда Телемост сохраняет записи. Путь можно скопировать в Проводнике: Shift + правый клик → «Копировать как путь». Старые файлы из папок не разбираются — только новые.</div>
+    {% endif %}
+    {% if existing %}<div class="hint">Найдены: {% for f in existing %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+    <label>Модель распознавания речи</label>
+    <select name="whisper_model">{% for v, t in whisper_models %}<option value="{{ v }}" {{ 'selected' if settings.recordings.whisper_model == v }}>{{ t }}</option>{% endfor %}</select>
+    <div class="hint">Первый запуск скачает модель (~1,5 ГБ для turbo). Час записи на обычном ноутбуке расшифровывается примерно за 15–40 минут.</div>
+    <div class="form-row">
+      {% if is_apple_silicon %}
+      <div><label>Движок</label><select name="engine"><option value="auto" {{ 'selected' if settings.recordings.engine != 'faster-whisper' }}>видеоядра Apple Silicon (MLX) — быстро</option><option value="faster-whisper" {{ 'selected' if settings.recordings.engine == 'faster-whisper' }}>процессор (faster-whisper)</option></select></div>
+      <input type="hidden" name="device" value="cpu">
+      {% elif is_mac %}
+      <input type="hidden" name="device" value="cpu">
+      {% else %}
+      <div><label>Где считать</label><select name="device"><option value="auto" {{ 'selected' if settings.recordings.device == 'auto' }}>видеокарта, если получится</option><option value="cpu" {{ 'selected' if settings.recordings.device == 'cpu' }}>процессор</option><option value="cuda" {{ 'selected' if settings.recordings.device == 'cuda' }}>видеокарта NVIDIA (нужны библиотеки CUDA)</option></select></div>
+      {% endif %}
+      <div><label>Язык</label><input type="text" name="language" value="{{ settings.recordings.language }}"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="diarization" {{ 'checked' if settings.recordings.diarization }}> Размечать, кто говорит (Спикер 1, 2…; имена подставит Claude)</label>
+    <label>Чувствительность разметки спикеров</label><input type="number" step="0.05" min="0.5" max="1.2" name="diarization_threshold" value="{{ settings.recordings.diarization_threshold }}" style="max-width:120px">
+    <div class="hint">Больше — меньше спикеров. Если один человек делится на двух — увеличьте до 1.0; если двое сливаются — уменьшите до 0.8.</div>
+    <label class="check"><input type="checkbox" name="auto_process" {{ 'checked' if settings.recordings.auto_process }}> Сразу после расшифровки отдавать встречу на разбор Claude</label>
+    <label>Зеркало HuggingFace (если модели не скачиваются)</label><input type="text" name="hf_endpoint" value="{{ settings.recordings.hf_endpoint }}" placeholder="например https://hf-mirror.com">
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>Ваш голос</h2></div><div class="card-b">
+  {% if voice_samples %}
+  <p>✅ PULSE знает ваш голос (по {{ voice_samples }} {{ plural(voice_samples, 'записи', 'записям', 'записям') }}) и сам подписывает вашу речь в новых расшифровках.</p>
+  <form class="inline" method="post" action="/settings/voice/forget" data-confirm="Забыть ваш голос? Подписывать вас в записях PULSE перестанет, пока вы снова не отметите «Это я»."><button class="btn sm ghost danger">Забыть голос</button></form>
+  {% else %}
+  <p class="muted">PULSE ещё не знает ваш голос. Откройте любую встречу и в блоке «Кто в записи» нажмите «Это я» у своего спикера — дальше PULSE будет узнавать вас сам.</p>
+  {% endif %}
+</div></section>
+
+{% elif tab == 'knowledge' %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/knowledge">
+    <label>Папки с рабочими документами (по одной в строке)</label>
+    <textarea name="folders" rows="3">{{ settings.knowledge.folders | join('\n') }}</textarea>
+    <div class="hint">PULSE раз в полчаса собирает из них текст презентаций, таблиц Excel, документов Word, PDF и заметок — для <a href="/docs">поиска</a> и для Claude. Только чтение — файлы не меняются. Подойдут и папки Яндекс Диска, синхронизированные на компьютер.</div>
+    <label>Не заглядывать в папки (имена, по одному в строке)</label>
+    <textarea name="exclude" rows="3">{{ settings.knowledge.exclude | join('\n') }}</textarea>
+    <div class="hint">Служебные папки (начинаются с точки: .git, .obsidian) пропускаются всегда. Код, картинки, аудио и видео не индексируются.</div>
+    {% if is_mac %}<div class="hint">Для папок в «Документах», на «Рабочем столе» и в iCloud macOS один раз спросит разрешение — нажмите «Разрешить».</div>{% endif %}
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
+{% elif tab == 'autonomy' %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <p>Что Claude может делать сам, а что — только после вашего «Да» в боте или на сводке.</p>
+  <form method="post" action="/settings/autonomy">
+    {% for key, title in [('kaiten_create_for_me', 'Создавать карточки в Kaiten на вас'), ('kaiten_create_for_others', 'Создавать карточки в Kaiten на коллег'), ('kaiten_comment', 'Писать комментарии в карточки Kaiten'), ('kaiten_update', 'Менять сроки и исполнителей в Kaiten'), ('calendar', 'Создавать и отменять встречи в календаре')] %}
+      <label>{{ title }}</label>
+      <select name="{{ key }}" style="max-width:320px"><option value="confirm" {{ 'selected' if settings.autonomy[key] != 'auto' }}>только после подтверждения</option><option value="auto" {{ 'selected' if settings.autonomy[key] == 'auto' }}>сам, без вопросов</option></select>
+    {% endfor %}
+    <div class="hint" style="margin-top:12px">Писать коллегам от вашего имени PULSE не умеет — это сделано намеренно.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
+{% elif tab == 'schedule' %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/schedule">
+    <div class="form-row">
+      <div><label>Собирать сообщения и почту, каждые … мин</label><input type="number" name="collect_minutes" value="{{ settings.schedule.collect_minutes }}" min="5"></div>
+      <div><label>Разбирать сообщения (Claude), каждые … мин</label><input type="number" name="triage_minutes" value="{{ settings.schedule.triage_minutes }}" min="15"></div>
+    </div>
+    <div class="form-row">
+      <div><label>Обновлять Kaiten, каждые … мин</label><input type="number" name="kaiten_minutes" value="{{ settings.schedule.kaiten_minutes }}" min="10"></div>
+      <div><label>Обновлять календарь, каждые … мин</label><input type="number" name="calendar_minutes" value="{{ settings.schedule.calendar_minutes }}" min="10"></div>
+    </div>
+    <div class="form-row">
+      <div><label>Утренний дайджест</label><input type="time" name="digest_morning" value="{{ settings.schedule.digest_morning | hhmm }}"></div>
+      <div><label>Вечерний дайджест</label><input type="time" name="digest_evening" value="{{ settings.schedule.digest_evening | hhmm }}"></div>
+      <div><label>Напоминание о задачах без движения</label><input type="time" name="stale_check" value="{{ settings.schedule.stale_check | hhmm }}"></div>
+      <div><label>База знаний: обзор недели, по пятницам</label><input type="time" name="anthology_weekly" value="{{ settings.schedule.anthology_weekly | hhmm }}"><div class="hint">Пусто — не делать.</div></div>
+      <div><label>Сводка «О компании» для Claude, по понедельникам</label><input type="time" name="context_weekly" value="{{ settings.schedule.context_weekly | hhmm }}"><div class="hint">Пусто — не обновлять.</div></div>
+    </div>
+    <div class="hint">Пустое время — не отправлять. Если компьютер был выключен, дайджест придёт после включения (в пределах 4 часов).</div>
+    <label class="check"><input type="checkbox" name="meeting_processed" {{ 'checked' if settings.notifications.meeting_processed }}> Присылать итог каждой разобранной встречи</label>
+    <label class="check"><input type="checkbox" name="urgent_immediately" {{ 'checked' if settings.notifications.urgent_immediately }}> Срочное — сразу, не дожидаясь дайджеста</label>
+    <label class="check"><input type="checkbox" name="stale_pings" {{ 'checked' if settings.notifications.stale_pings }}> Напоминать о задачах без движения</label>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
+{% elif tab == 'claude' %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  {% if not claude_path %}
+    <p>⚠ Claude Code не найден.</p>
+    <ol class="small">
+      {% if is_mac %}
+      <li>Откройте <b>Терминал</b> (Программы → Утилиты) и вставьте команду установки:<br><code>curl -fsSL https://claude.ai/install.sh | bash</code></li>
+      {% else %}
+      <li>Откройте <b>PowerShell</b> и вставьте команду установки:<br><code>irm https://claude.ai/install.ps1 | iex</code></li>
+      {% endif %}
+      <li>Когда установка закончится, обновите эту страницу — PULSE найдёт Claude Code сам.</li>
+    </ol>
+    <div class="hint">Подробно — в <a href="/help/01-установка">инструкции по установке</a>.</div>
+  {% elif claude_login and not claude_login.loggedIn %}
+    <p>⚠ Claude Code найден, но <b>вход не выполнен</b> — без него PULSE не сможет разбирать встречи и сообщения.</p>
+    {% if is_mac %}
+    <form method="post" action="/settings/claude/login"><button class="btn primary">Войти в Claude</button></form>
+    <div class="hint">Откроется Терминал, а за ним браузер: войдите тем же аккаунтом, что в приложении Claude, и обновите эту страницу.</div>
+    {% else %}
+    <div class="hint">Откройте PowerShell, выполните <code>&amp; "{{ claude_path }}" auth login</code>, войдите в браузере и обновите эту страницу.</div>
+    {% endif %}
+  {% else %}
+    <p>✅ Claude Code найден{% if claude_login and claude_login.email %}, вход: <b>{{ claude_login.email }}</b>{% endif %}.</p>
+  {% endif %}
+  <div class="hint">Где лежит: <code>{{ claude_path or 'не найден' }}</code></div>
+  <form method="post" action="/settings/claude">
+    <label>Путь к claude (если не находится сам)</label><input type="text" name="path" value="{{ settings.claude.path }}" placeholder="{{ '~/.local/bin/claude' if is_mac else 'C:\\Users\\…\\.local\\bin\\claude.exe' }}">
+    <div class="hint">Обычно не нужен: PULSE сам находит и установленный командой Claude Code, и тот, что скачало приложение Claude.</div>
+    {% if is_mac %}<input type="hidden" name="git_bash_path" value="">{% else %}
+    <label>Путь к bash.exe из Git for Windows (если Claude его не видит)</label><input type="text" name="git_bash_path" value="{{ settings.claude.git_bash_path or '' }}" placeholder="C:\Program Files\Git\bin\bash.exe">{% endif %}
+    <div class="form-row">
+      {% for key, title in [('model_meetings', 'Разбор встреч'), ('model_triage', 'Разбор сообщений'), ('model_digest', 'Дайджесты'), ('model_ask', 'Вопросы из Telegram')] %}
+      <div><label>{{ title }}</label><select name="{{ key }}">{% for m in ['opus', 'sonnet', 'haiku'] %}<option {{ 'selected' if settings.claude[key] == m }}>{{ m }}</option>{% endfor %}</select></div>
+      {% endfor %}
+    </div>
+    <div class="hint">opus — самый вдумчивый (встречи), sonnet — быстрый и экономный, haiku — самый лёгкий. Всё идёт в рамках вашей подписки Claude.</div>
+    <label>Ограничение по времени на один запуск, мин</label><input type="number" name="timeout_minutes" value="{{ settings.claude.timeout_minutes }}" min="5" style="max-width:120px">
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('claude') }}</div>
+  </form>
+</div></section>
+{% endif %}
+{% endblock %}

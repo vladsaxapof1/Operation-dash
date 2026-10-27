@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Команда PULSE для Claude Code и терминала (Git Bash / macOS / Linux).
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x "$DIR/.venv/Scripts/python.exe" ]; then
+  PY="$DIR/.venv/Scripts/python.exe"
+else
+  PY="$DIR/.venv/bin/python"
+fi
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
+exec "$PY" -m opsdash "$@"

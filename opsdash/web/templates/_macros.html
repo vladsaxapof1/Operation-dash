@@ -1,0 +1,202 @@
+{% macro proposal(p, describe) %}
+<li>
+  <div class="row">
+    <div class="grow">
+      <div><strong>{{ p.title }}</strong></div>
+      {% set d = describe(p).split('\n')[1:] %}
+      {% if d %}<div class="meta">{% for line in d %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+    </div>
+    <div class="actions">
+      <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm ok" title="Выполнить">Да</button></form>
+      <form class="inline" method="post" action="/proposals/{{ p.id }}/reject"><button class="btn sm" title="Отклонить">Нет</button></form>
+    </div>
+  </div>
+</li>
+{% endmacro %}
+
+{% macro attention(a, full=False) %}
+{#- кнопки — строкой под черновиком: справа от текста они сжимали его в узкую колонку #}
+<li class="att">
+  <div class="att-h">
+    {% if a.priority == 'high' %}<span class="chip bad">срочно</span>{% elif a.priority == 'low' %}<span class="chip">не к спеху</span>{% endif %}
+    <strong>{{ a.sender_name or a.chat_title }}</strong>
+    <span class="meta">· {{ SOURCE_TITLES.get(a.source, a.source or '') }}{% if a.chat_title and a.chat_title != a.sender_name %} · {{ a.chat_title }}{% endif %} · {{ a.msg_ts | ago if a.msg_ts else a.created | ago }}</span>
+  </div>
+  <div>{{ a.summary }}</div>
+  {% if full and a.why %}<div class="meta">Почему важно: {{ a.why }}</div>{% endif %}
+  {% if full and a.msg_text %}<div class="meta">«{{ a.msg_text[:400] }}{% if a.msg_text|length > 400 %}…{% endif %}»</div>{% endif %}
+  {% if a.draft %}<div class="draft" data-copy>{{ a.draft }}</div>{% endif %}
+  <div class="att-actions">
+    <span class="actions">
+      {% if a.draft %}<button class="btn sm" data-copy-btn>Копировать ответ</button>{% endif %}
+      {% if a.orig_url %}<a class="btn sm" href="{{ a.orig_url }}" target="_blank" rel="noopener" title="{{ a.orig_url }}">↗ {{ a.orig_label }}</a>{% endif %}
+    </span>
+    <span class="actions">
+      <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">Ответила</button></form>
+      <form class="inline" method="post" action="/attention/{{ a.id }}/dismiss"><button class="btn sm ghost">Скрыть</button></form>
+    </span>
+  </div>
+</li>
+{% endmacro %}
+
+{% macro due_badge(c) -%}
+{#- срок задачи и сколько осталось: «28.10 · 2 дня», в день срока — часы до конца дня -#}
+{%- if c.status == 'open' and c.due_days is not none -%}
+{%- set d = c.due_days -%}
+<span class="due {{ 'bad' if d < 0 else 'warn' if d <= 1 else 'soon' if d <= 3 else '' }}" title="Срок: {{ c.due | date }}">
+  <b>{{ c.due | date }}</b>
+  <span>{% if d < 0 %}просрочено на {{ -d }} {{ plural(-d, 'день', 'дня', 'дней') }}{% elif d == 0 %}осталось {{ c.due_hours }} ч{% else %}{{ d }} {{ plural(d, 'день', 'дня', 'дней') }}{% endif %}</span>
+</span>
+{%- elif c.status == 'open' -%}<span class="due none">без срока</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro period_filter(name, label, value, options, frm='', to='') %}
+{#- фильтр по дате: готовые периоды и «свой период» — тогда появляются даты «с» и «по» #}
+<select name="{{ name }}" data-autosubmit class="{{ 'on' if value }}">
+  <option value="">{{ label }}: {{ 'любой' if name == 'due' else 'когда угодно' }}</option>
+  {% for key, title in options %}<option value="{{ key }}" {{ 'selected' if value == key }}>{{ label }}: {{ title }}</option>{% endfor %}
+</select>
+{% if value == 'custom' %}<span class="period"><input type="date" name="{{ name }}_from" value="{{ frm }}" title="{{ label }} — с" data-autosubmit>–<input type="date" name="{{ name }}_to" value="{{ to }}" title="{{ label }} — по" data-autosubmit></span>{% endif %}
+{% endmacro %}
+
+{% macro help(text, below=False) -%}
+{#- below — подсказка вниз: в таблице (она листается вбок) верх обрезается #}
+<span class="help{{ ' below' if below }}" tabindex="0" role="note" aria-label="{{ text }}" data-tip="{{ text }}">?</span>
+{%- endmacro %}
+
+{% macro commitment(c, show_dir=False) %}
+<li>
+  <div class="row">
+    <div class="grow">
+      <div>
+        {% if show_dir %}<span class="chip {{ 'acc' if c.direction == 'mine' else '' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>{% endif %}
+        {{ c.what }}
+      </div>
+      <div class="meta">
+        {% if c.direction == 'mine' %}{% if c.whom %}кому: {{ c.whom }}{% endif %}{% else %}{{ c.who or '' }}{% if c.direction == 'other' and c.whom %} → {{ c.whom }}{% endif %}{% endif %}
+        {% if c.due and c.status == 'open' %} · {{ due_badge(c) }}{% elif c.due %} · до {{ c.due | date }}{% endif %}
+        {% if c.kaiten_card_id %} · Kaiten #{{ c.kaiten_card_id }}{% endif %}
+        {% if c.source_type == 'meeting' and c.source_ref %} · <a href="/meetings/{{ c.source_ref }}">встреча</a>{% elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif %}
+        {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="actions">
+      {% if c.status == 'open' %}
+      <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненным">✓ Готово</button></form>
+      {% else %}
+      <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
+      {% endif %}
+    </div>
+  </div>
+</li>
+{% endmacro %}
+
+{% macro task_card(c, meetings={}) %}
+<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}">
+  <div class="task-top">
+    <span class="task-chips">
+      {% if c.status == 'done' %}<span class="chip ok">✓ готово{% if c.closed_at %} {{ c.closed_at | local('%d.%m') }}{% endif %}</span>{% endif %}
+      {% if c.kaiten_card_id %}<span class="chip" title="Есть карточка в Kaiten">Kaiten #{{ c.kaiten_card_id }}</span>{% endif %}
+      {% if c.created and c.status == 'open' %}<span class="muted small" title="Когда задача появилась в PULSE">от {{ c.created | local('%d.%m') }}</span>{% endif %}
+    </span>
+    {{ due_badge(c) }}
+  </div>
+  <div class="task-what">{{ c.what }}</div>
+  <div class="task-who">
+    {%- if c.direction == 'mine' %}<b>Я</b> → {{ c.whom or '—' }}
+    {%- elif c.direction == 'to_me' %}<b>{{ c.who or '?' }}</b> → мне
+    {%- else %}<b>{{ c.who or '?' }}</b> → {{ c.whom or '—' }}{% endif -%}
+  </div>
+  {% if c.quote %}<div class="task-quote" title="{{ c.quote }}">{{ c.quote }}</div>{% endif %}
+  <div class="task-foot">
+    <span class="muted small">
+      {%- if c.source_type == 'meeting' and c.source_ref %}<a href="/meetings/{{ c.source_ref }}">{{ meetings.get(c.source_ref) or 'встреча' }}</a>
+      {%- elif c.source_type and c.source_type != 'manual' %}{{ SOURCE_TITLES.get(c.source_type, c.source_type) }}
+      {%- else %}добавлено вручную{% endif -%}
+    </span>
+    <span class="actions">
+      {% if c.status == 'open' %}
+      <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненной">✓ Готово</button></form>
+      <details class="task-more"><summary class="btn sm ghost" title="Срок, отмена">⋯</summary>
+        <div class="task-menu">
+          <form method="post" action="/commitments/{{ c.id }}"><label class="small">Новый срок</label><input type="date" name="due" value="{{ c.due or '' }}" data-autosubmit></form>
+          <form method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="cancelled"><button class="btn sm ghost danger">Отменить задачу</button></form>
+        </div>
+      </details>
+      {% else %}
+      <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
+      {% endif %}
+    </span>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro kaiten_card(c, show_place=False) %}
+<div class="kcard{{ ' stale' if c.idle_days is not none }}{{ ' overdue' if c.overdue }}{{ ' work' if c.state == 2 }}">
+  <div class="task-top">
+    <span class="chip {{ 'acc' if c.state == 2 }}">{{ c.state_title }}</span>
+    {% if c.mine %}<span class="chip ok">вы</span>{% endif %}
+    {% if c.due_date %}<span class="chip {{ 'bad' if c.overdue }}">{{ 'просрочено · ' if c.overdue else 'до ' }}{{ c.due_date | date }}</span>{% endif %}
+    {% if c.lane_title %}<span class="chip ghost" title="Дорожка">{{ c.lane_title }}</span>{% endif %}
+  </div>
+  <a class="kcard-title" href="{{ c.url }}" target="_blank" rel="noopener">{{ c.title }}</a>
+  {% if show_place %}<div class="muted small">{{ c.space_title }} / {{ c.board_title }} · «{{ c.column_title }}»</div>{% endif %}
+  <div class="kcard-who">
+    <span class="avatar" title="{{ c.responsible_name or c.owner_name or '' }}">{{ c.initials }}</span>
+    {% if c.responsible_name %}{{ c.responsible_name }}{% else %}<span class="muted">без исполнителя{% if c.owner_name %} · автор {{ c.owner_name }}{% endif %}</span>{% endif %}
+  </div>
+  <div class="task-foot">
+    <span class="muted small">
+      {%- if c.idle_days is not none %}<span class="chip warn">{{ c.idle_days }} дн. без движения</span>{% if c.snoozed %} <span class="chip">отложено</span>{% endif %}
+      {%- elif c.in_column_days is not none %}в колонке {{ c.in_column_days }} дн.{% endif %} · #{{ c.id }}
+      {%- if c.created %} · <span title="Создана в Kaiten">созд. {{ c.created | local('%d.%m.%y') }}</span>{% endif %}
+    </span>
+    {% if c.idle_days is not none %}
+    <span class="actions">
+      <form class="inline" method="post" action="/tasks/{{ c.id }}/nudge" data-confirm="Оставить в карточке комментарий-напоминание для исполнителя?"><button class="btn sm">Напомнить</button></form>
+      <form class="inline" method="post" action="/tasks/{{ c.id }}/snooze"><input type="hidden" name="days" value="3"><button class="btn sm ghost" title="Не напоминать 3 дня">Отложить</button></form>
+    </span>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro stale_card(c, buttons=True) %}
+<li>
+  <div class="row">
+    <div class="grow">
+      <div><a href="{{ c.url }}" target="_blank">{{ c.title }}</a></div>
+      <div class="meta">{{ c.responsible_name or 'без исполнителя' }} · «{{ c.column_title }}» · <span class="chip warn">{{ c.idle_days }} дн. без движения</span>{% if c.snoozed %} <span class="chip">отложено</span>{% endif %}</div>
+    </div>
+    {% if buttons %}
+    <div class="actions">
+      <form class="inline" method="post" action="/tasks/{{ c.id }}/nudge" data-confirm="Оставить в карточке комментарий-напоминание для исполнителя?"><button class="btn sm">Напомнить</button></form>
+      <form class="inline" method="post" action="/tasks/{{ c.id }}/snooze"><input type="hidden" name="days" value="3"><button class="btn sm ghost">Отложить</button></form>
+    </div>
+    {% endif %}
+  </div>
+</li>
+{% endmacro %}
+
+{% macro ev_time(e) -%}
+{% if e.all_day %}весь день{% else %}{{ e.start | local('%H:%M') }}–{{ e['end'] | local('%H:%M') }}{% endif %}
+{%- endmacro %}
+
+{% macro ev_detail(e) %}
+{#- карточка встречи: открывается по нажатию на встречу в сетке (app.js) #}
+<div class="ev-detail" id="ev-{{ e.n }}" hidden>
+  <div class="ev-detail-h">{{ e.title or 'Без названия' }}</div>
+  <div class="muted small">{{ e.start | local('%d.%m') }} · {{ ev_time(e) }} · {{ e.calendar }}</div>
+  {% if e.location %}<div class="small"><span class="muted">Где:</span> {{ e.location | place }}</div>{% endif %}
+  {% set who = e.attendees | people(12) %}{% if who %}<div class="small"><span class="muted">Участники:</span> {{ who }}</div>{% endif %}
+  {% if e.description %}<div class="small muted ev-desc">{{ e.description | note }}</div>{% endif %}
+  {% if e.url %}<a class="small" href="{{ e.url }}" target="_blank">Открыть в календаре →</a>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro meeting_status(m) %}
+{% set map = {'new': ('в очереди', ''), 'transcribing': ('расшифровка', 'warn'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')} %}
+{% set s = map.get(m.status, (m.status, '')) %}
+<span class="chip {{ s[1] }}" data-meeting-status="{{ m.id }}">{{ s[0] }}{% if m.status == 'transcribing' and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span>
+{% endmacro %}

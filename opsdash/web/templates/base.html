@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Сводка{% endblock %} · PULSE</title>
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
+</head>
+<body>
+{% set nav_items = [
+  ("home", "/", "Сводка", pending_count),
+  ("inbox", "/inbox", "Нужен ответ", attention_count),
+  ("commitments", "/commitments", "Задачи и договорённости", 0),
+  ("calendar", "/calendar", "Календарь", 0),
+  ("meetings", "/meetings", "Встречи", 0),
+  ("docs", "/docs", "Документы", 0),
+  ("kb", "/kb", "База знаний", 0),
+  ("tasks", "/tasks", "Задачи Kaiten", 0),
+  ("people", "/people", "Люди", 0),
+] %}
+<nav class="mobile-nav">
+  {% for key, href, title, n in nav_items %}<a href="{{ href }}" class="{{ 'active' if nav == key }}">{{ title }}{% if n %} · {{ n }}{% endif %}</a>{% endfor %}
+  <a href="/settings" class="{{ 'active' if nav == 'settings' }}">Настройки</a>
+  <a href="/journal" class="{{ 'active' if nav == 'journal' }}">Журнал</a>
+  <a href="/help" class="{{ 'active' if nav == 'help' }}">Справка</a>
+</nav>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">P</span> PULSE</div>
+    <div class="nav">
+      {% for key, href, title, n in nav_items %}
+      <a href="{{ href }}" class="{{ 'active' if nav == key }}"><span>{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'inbox' }}">{{ n }}</span>{% endif %}</a>
+      {% endfor %}
+      <div class="sep"></div>
+      <a href="/settings" class="{{ 'active' if nav == 'settings' }}"><span>Настройки</span></a>
+      <a href="/journal" class="{{ 'active' if nav == 'journal' }}"><span>Журнал</span></a>
+      <a href="/help" class="{{ 'active' if nav == 'help' }}"><span>Справка</span></a>
+    </div>
+    <p class="muted small" style="padding: 18px 10px 0">Версия {{ version }}{% if build %} · {{ build }}{% endif %}<br>Работает на этом компьютере
+      {% if update_available %}<br><a class="update-link" href="/settings?tab=general#updates">● Доступно обновление</a>{% endif %}</p>
+  </aside>
+  <main class="main">
+    {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+    {% if err %}<div class="alert bad">{{ err }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% if voice_tip %}
+<aside class="toast" data-toast="{{ voice_tip.id }}" role="status">
+  <div class="toast-h">🎙 {{ voice_tip.title }}</div>
+  <div class="small">{{ voice_tip.text }}</div>
+  <div class="actions"><a class="btn sm primary" href="/meetings/{{ voice_tip.meeting }}#who">{{ voice_tip.button }}</a><button type="button" class="btn sm ghost" data-toast-close>Позже</button></div>
+</aside>
+{% endif %}
+<script src="/static/app.js?v={{ static_v }}"></script>
+</body>
+</html>

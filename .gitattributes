@@ -1,0 +1,15 @@
+# Переносы строк: bash-скрипт ops должен остаться с LF (иначе Git Bash на Windows его не запустит),
+# скрипты Windows — с CRLF.
+* text=auto
+ops text eol=lf
+*.sh text eol=lf
+*.command text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+*.png binary
+*.ico binary
+*.icns binary
+# в архив (git archive, «Download ZIP» на GitHub) — с номером коммита: по нему PULSE понимает, есть ли обновление
+opsdash/_build.py export-subst
