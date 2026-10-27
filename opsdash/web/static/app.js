@@ -93,6 +93,30 @@
     });
   }
 
+  // новые задачи (добавил Claude, вы ещё не видели): отметка «новая» снимается, когда курсор задержался на задаче
+  // (не мгновенно — чтобы не снять все, просто проведя мышью по доске) или когда открыли её окно
+  var markSeen = function (id) {
+    var marked = document.querySelectorAll('[data-new="' + id + '"]');
+    if (!id || !marked.length) return;
+    marked.forEach(function (el) {
+      el.removeAttribute("data-new");
+      el.classList.remove("new");
+      el.querySelectorAll(".chip.new").forEach(function (chip) { chip.remove(); });
+    });
+    fetch("/commitments/" + id + "/seen", { method: "POST" }).then(function (r) { return r.json(); }).then(function (res) {
+      document.querySelectorAll('.nav a[href="/commitments"] .badge, .btn.toggle .badge').forEach(function (b) {
+        if (res.unseen) b.textContent = res.unseen; else b.remove();
+      });
+    }).catch(function () { /* не получилось — отметка вернётся при следующем открытии страницы */ });
+  };
+  document.querySelectorAll("[data-new]").forEach(function (el) {
+    var timer = null;
+    el.addEventListener("mouseenter", function () {
+      if (el.dataset.new) timer = setTimeout(function () { markSeen(el.dataset.new); }, 600);
+    });
+    el.addEventListener("mouseleave", function () { clearTimeout(timer); });
+  });
+
   // карточка задачи — окно по центру экрана: клик по задаче (на доске, в списке, на таймлайне) — просмотр,
   // карандаш — сразу правка. Закрыть — ✕, Esc (сам браузер) или клик мимо окна
   var showTask = function (dlg, edit) {
@@ -101,6 +125,7 @@
     if (!dlg.open) dlg.showModal();
     // фокус — на поле заголовка, а при просмотре на само окно (иначе браузер обводит рамкой ✕)
     (edit ? dlg.querySelector(".dlg-edit [name=title]") : dlg.querySelector(".dlg-box")).focus();
+    markSeen(dlg.id.slice(5));
   };
   var pressedOn = null;  // нажали внутри окна, а отпустили снаружи (выделяли текст) — не закрываем
   document.addEventListener("mousedown", function (e) { pressedOn = e.target; });
@@ -108,6 +133,17 @@
     var t = e.target;
     var dlg = t.closest("dialog.dlg");
     if (dlg) {
+      // ссылка на связанную задачу (часть задачи, подзадача): её окно есть на странице — открываем его,
+      // нет — обычный переход в «Задачи»
+      var rel = t.closest("[data-task-open]");
+      if (rel) {
+        var other = document.getElementById("task-" + rel.dataset.taskOpen);
+        if (other) {
+          e.preventDefault();
+          if (other !== dlg) { dlg.close(); showTask(other, false); }
+        }
+        return;
+      }
       if ((t === dlg && pressedOn === dlg) || t.closest("[data-dlg-close]")) dlg.close();
       else if (t.closest("[data-dlg-edit]")) showTask(dlg, true);
       else if (t.closest("[data-dlg-view]")) showTask(dlg, false);
@@ -124,6 +160,36 @@
   document.addEventListener("keydown", function (e) {  // полоса на таймлайне — с клавиатуры тоже
     if (e.key === "Enter" && e.target.matches("[data-task-open][role=button]")) e.target.click();
   });
+
+  // поле «Часть задачи»: подсказки (открытые задачи) подгружаем при первом вводе — не держим их в каждой странице
+  document.addEventListener("focusin", function (e) {
+    var list = e.target.list;
+    if (!list || !list.dataset.src || list.dataset.loaded) return;
+    list.dataset.loaded = "1";
+    fetch(list.dataset.src).then(function (r) { return r.json(); }).then(function (labels) {
+      labels.forEach(function (label) {
+        var opt = document.createElement("option");
+        opt.value = label;
+        list.appendChild(opt);
+      });
+    }).catch(function () { delete list.dataset.loaded; });
+  });
+
+  // «Задачи» по ссылке ?task=<id> (со встречи, со сводки): показать задачу на доске и открыть её окно.
+  // Из адреса ссылку убираем — после «Готово» или «Сохранить» окно не должно открываться снова
+  var focus = document.querySelector("[data-focus-task]");
+  if (focus) {
+    var fid = focus.dataset.focusTask;
+    var spot = document.querySelector('.task[data-task="' + fid + '"], li[data-task="' + fid + '"], .gantt-bar[data-task-open="' + fid + '"]');
+    if (spot) {
+      spot.scrollIntoView({ block: "center" });
+      spot.classList.add("flash");
+    }
+    var fdlg = document.getElementById("task-" + fid);
+    if (fdlg) showTask(fdlg, false);
+    var query = location.search.replace(/([?&])task=\d+(&|$)/, "$1").replace(/[?&]$/, "");
+    history.replaceState(null, "", location.pathname + query + location.hash);
+  }
 
   // доска задач: свернуть колонку. Помним в cookie — сервер сразу отдаёт её свёрнутой
   document.querySelectorAll("[data-kb-fold]").forEach(function (btn) {

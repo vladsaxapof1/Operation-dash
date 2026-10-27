@@ -1,7 +1,8 @@
 """Очередь подтверждений.
 
 Claude никогда не пишет во внешние системы напрямую: он создаёт «предложение»
-(создать карточку, оставить комментарий, назначить встречу). Предложение
+(создать карточку, оставить комментарий, назначить встречу). Так же — закрыть задачу PULSE,
+если по переписке или встрече она выглядит выполненной: решает директор. Предложение
 выполняется, когда директор нажимает «Да» в боте или в админке — либо сразу,
 если в настройках автономии для этого действия выбрано «auto».
 """
@@ -19,6 +20,7 @@ KINDS = {
     "kaiten.update": "Изменить карточку Kaiten",
     "calendar.create": "Создать встречу в календаре",
     "calendar.cancel": "Отменить встречу",
+    "task.done": "Закрыть выполненную задачу",
 }
 
 
@@ -193,6 +195,27 @@ def propose_calendar_cancel(*, uid: str, batch: str | None = None, reason: str |
                    source_ref=source_ref, batch=batch)
 
 
+def propose_task_done(*, commitment_id: int, quote: str | None = None, batch: str | None = None,
+                      reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Задача PULSE, судя по встрече или переписке, выполнена — закрыть её после «да» директора.
+    reason — почему так кажется (обязательно), source_ref — где это видно, quote — дословно оттуда."""
+    c = store.row("SELECT * FROM commitments WHERE id=?", (int(commitment_id),))
+    if not c:
+        raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
+    if c["status"] != "open":
+        raise ProposalError(f"Задача [{commitment_id}] уже закрыта")
+    if not (reason or "").strip():
+        raise ProposalError("Напишите в --reason, почему задача выглядит выполненной")
+    dup = store.row("SELECT id FROM proposals WHERE kind='task.done' AND status='pending' "
+                    "AND json_extract(payload, '$.commitment_id')=?", (c["id"],))
+    if dup:
+        return get(dup["id"])
+    payload = {"commitment_id": c["id"], "quote": (quote or "").strip()}
+    label = f"Закрыть задачу «{records.headline(c)}» ({records.route(c)}) — похоже, выполнена"
+    return _create("task.done", label, payload, autonomy_key="task_done", reason=reason.strip(),
+                   source_ref=source_ref, batch=batch)
+
+
 # --- решение ----------------------------------------------------------------
 
 def reject(pid: int) -> dict:
@@ -281,13 +304,76 @@ def execute(p: dict) -> dict:
 
         calendar.cancel_event(pl["uid"])
         return {"uid": pl["uid"]}
+    if kind == "task.done":
+        c = store.row("SELECT status FROM commitments WHERE id=?", (pl["commitment_id"],))
+        if not c:
+            raise ProposalError("Задачи уже нет")
+        if c["status"] == "open":
+            note = f"Закрыта по подтверждению директора: {p.get('reason') or ''}".strip()
+            if p.get("source_ref"):
+                note += f" ({_source_text(p['source_ref'])})"
+            records.update_commitment(pl["commitment_id"], status="done", note=note)
+        return {"commitment_id": pl["commitment_id"]}
     raise ProposalError(f"Неизвестный тип предложения: {kind}")
+
+
+def _source_text(source_ref: str | None) -> str:
+    """Откуда известно, по-человечески: «встреча «Обзор продаж» 27.10», «Telegram, Операционка, 27.10»."""
+    kind, _, ref = (source_ref or "").partition(":")
+    if kind == "meeting":
+        m = store.row("SELECT title, started_at FROM meetings WHERE id=?", (ref,))
+        return f"встреча «{m['title'] or ref}» {store.local(m['started_at'], '%d.%m')}" if m else f"встреча {ref}"
+    if kind in ("telegram", "ymessenger", "mail") and ref.isdigit():
+        msg = store.row("SELECT chat_title, sender_name, ts FROM messages WHERE id=?", (int(ref),))
+        from opsdash import overview
+
+        name = overview.SOURCE_TITLES.get(kind, kind)
+        if msg:
+            return f"{name}, {msg['chat_title'] or msg['sender_name'] or ''}, {store.local(msg['ts'], '%d.%m')}"
+        return name
+    return source_ref or ""
+
+
+def links(p: dict) -> list[tuple[str, str]]:
+    """Ссылки у предложения на сводке: задача PULSE, откуда известно (встреча, сообщение), карточка Kaiten."""
+    from opsdash import links as orig
+
+    out, pl = [], p.get("payload") or {}
+    cid = pl.get("commitment_id")
+    if cid:
+        out.append(("Задача", f"/commitments?task={cid}"))
+    kind, _, ref = (p.get("source_ref") or "").partition(":")
+    if kind == "meeting" and ref:
+        out.append(("Встреча", f"/meetings/{ref}?tab=transcript" if p["kind"] == "task.done" else f"/meetings/{ref}"))
+    elif kind in ("telegram", "ymessenger", "mail") and ref.isdigit():
+        msg = store.row("SELECT source, chat_id, msg_id, sender_id FROM messages WHERE id=?", (int(ref),))
+        found = orig.original(msg["source"], msg["chat_id"], msg["msg_id"], msg["sender_id"]) if msg else None
+        if found:
+            out.append(("Сообщение в Telegram" if kind == "telegram" else "Письмо" if kind == "mail" else "Сообщение",
+                        found[0]))
+    card_id = pl.get("card_id")
+    if not card_id and cid:
+        card_id = store.scalar("SELECT kaiten_card_id FROM commitments WHERE id=?", (cid,))
+    if card_id:
+        url = store.scalar("SELECT url FROM kaiten_cards WHERE id=?", (card_id,))
+        if url:
+            out.append((f"Kaiten #{card_id}", url))
+    return out
 
 
 def describe(p: dict) -> str:
     """Подробное описание для админки и бота."""
     pl = p["payload"]
     lines = [p["title"]]
+    if p["kind"] == "task.done":
+        if p.get("reason"):
+            lines.append(f"Почему так думаю: {p['reason']}")
+        if pl.get("quote"):
+            lines.append(f"«{pl['quote'][:400]}»")
+        if p.get("source_ref"):
+            lines.append(f"Источник: {_source_text(p['source_ref'])}")
+        lines.append("«Да» — задача закроется в PULSE; карточку в Kaiten, если она есть, это не трогает.")
+        return "\n".join(lines)
     if p["kind"] == "kaiten.create_card":
         lines.append(f"Куда: {pl.get('target')}")
         if pl.get("responsible_unresolved"):
@@ -304,6 +390,8 @@ def describe(p: dict) -> str:
 
 
 def result_text(p: dict) -> str:
+    if p["status"] == "done" and p["kind"] == "task.done":
+        return "✅ Задача закрыта"
     if p["status"] == "done":
         res = p.get("result") or {}
         if isinstance(res, dict) and res.get("warning"):

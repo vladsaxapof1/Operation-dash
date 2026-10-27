@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import date, datetime, time, timedelta, timezone
 
 from opsdash import config, store
@@ -104,7 +105,7 @@ def delete_person(person_id: int) -> None:
 def add_commitment(*, direction: str, what: str, who: str | None = None, whom: str | None = None,
                    due: str | None = None, source_type: str = "manual", source_ref: str | None = None,
                    quote: str | None = None, kaiten_card_id: int | None = None, note: str | None = None,
-                   title: str | None = None) -> int:
+                   title: str | None = None, parent_id: int | None = None) -> int:
     if direction not in DIRECTIONS:
         raise ValueError(f"direction должен быть одним из: {', '.join(DIRECTIONS)}")
     if due:
@@ -115,17 +116,74 @@ def add_commitment(*, direction: str, what: str, who: str | None = None, whom: s
         (what, who),
     )
     if dup:
+        if parent_id:
+            set_parent(dup["id"], parent_id)
         return dup["id"]
+    if parent_id:
+        _check_parent(None, parent_id)
     now = store.utcnow()
+    # задачи, которые добавил Claude, — «новые», пока директор их не увидит; свои она уже видела
+    seen = now if source_type == "manual" else None
     return store.execute(
         """INSERT INTO commitments(direction, who, whom, what, title, due, status, source_type, source_ref, quote,
-           kaiten_card_id, note, created, updated) VALUES(?,?,?,?,?,?,'open',?,?,?,?,?,?,?)""",
+           kaiten_card_id, note, parent_id, seen_at, created, updated) VALUES(?,?,?,?,?,?,'open',?,?,?,?,?,?,?,?,?)""",
         (direction, who, whom, what, (title or "").strip() or None, due, source_type, source_ref, quote, kaiten_card_id,
-         note, now, now),
+         note, parent_id or None, seen, now, now),
+    )
+
+
+def _check_parent(cid: int | None, parent_id: int) -> None:
+    """Задача-родитель есть, и связь не замыкается в петлю (задача — часть своей же подзадачи)."""
+    pid, chain = parent_id, set()
+    while pid and pid not in chain:
+        if pid == cid:
+            raise ValueError("Задача не может быть частью самой себя или своей подзадачи")
+        chain.add(pid)
+        r = store.row("SELECT parent_id FROM commitments WHERE id=?", (pid,))
+        if not r:
+            if pid == parent_id:
+                raise ValueError(f"Нет задачи [{parent_id}]")
+            break
+        pid = r["parent_id"]
+
+
+def set_parent(cid: int, parent_id: int | None) -> None:
+    """Сделать задачу частью другой: директор обещала Тимуру отчёт и передала выгрузку Петру — задача Петра
+    становится подзадачей. Пустой parent_id — отвязать."""
+    if parent_id:
+        _check_parent(cid, parent_id)
+    store.execute("UPDATE commitments SET parent_id=?, updated=? WHERE id=?", (parent_id or None, store.utcnow(), cid))
+
+
+def parse_task_ref(value: str | None) -> int | None:
+    """Номер задачи из поля «Часть задачи»: «#34 · Недельный отчёт · Я → Тимур» → 34."""
+    m = re.match(r"\s*#?(\d+)", value or "")
+    return int(m.group(1)) if m else None
+
+
+def mark_seen(cid: int) -> None:
+    store.execute("UPDATE commitments SET seen_at=? WHERE id=? AND seen_at IS NULL", (store.utcnow(), cid))
+
+
+def unseen_count() -> int:
+    """Сколько открытых задач директор ещё не видела (добавил Claude) — значок у «Задач» в меню."""
+    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND seen_at IS NULL") or 0
+
+
+def _settle_done_proposals(cid: int, status: str) -> None:
+    """Задачу закрыли сами — предложение Claude «закрыть задачу» больше не ждёт ответа."""
+    store.execute(
+        "UPDATE proposals SET status=?, decided_at=?, result=? WHERE kind='task.done' AND status='pending' "
+        "AND json_extract(payload, '$.commitment_id')=?",
+        ("done" if status == "done" else "rejected", store.utcnow(),
+         store.json_col({"note": "задачу закрыли вручную"}), cid),
     )
 
 
 def update_commitment(cid: int, **fields) -> None:
+    """Изменить поля задачи. parent_id: номер задачи-родителя, 0 — отвязать."""
+    if (parent_id := fields.pop("parent_id", None)) is not None:
+        set_parent(cid, int(parent_id) or None)
     allowed = {"status", "due", "kaiten_card_id", "note", "what", "title", "who", "whom", "direction"}
     sets, params = [], []
     for k, v in fields.items():
@@ -142,15 +200,19 @@ def update_commitment(cid: int, **fields) -> None:
     sets.append("updated=?")
     params.append(store.utcnow())
     store.execute(f"UPDATE commitments SET {', '.join(sets)} WHERE id=?", [*params, cid])
+    if fields.get("status") in ("done", "cancelled"):
+        _settle_done_proposals(cid, fields["status"])
 
 
 Period = tuple[date | None, date | None]
 
 
 def _filters(person: str | None, q: str | None, created: Period | None, due: Period | None,
-             no_due: bool) -> tuple[str, list]:
-    """Общие условия списка и доски: человек, поиск, дата создания, срок."""
+             no_due: bool, unseen: bool = False) -> tuple[str, list]:
+    """Общие условия списка и доски: человек, поиск, дата создания, срок, только новые (директор их не видела)."""
     sql, params = "", []
+    if unseen:
+        sql += " AND status='open' AND seen_at IS NULL"
     if q:
         sql += " AND (what LIKE ? OR title LIKE ? OR who LIKE ? OR whom LIKE ? OR quote LIKE ?)"
         params += [f"%{q}%"] * 5
@@ -177,9 +239,9 @@ def _filters(person: str | None, q: str | None, created: Period | None, due: Per
 
 
 def edit_commitment(cid: int, *, title: str, what: str, direction: str, who: str | None, whom: str | None,
-                    due: str | None) -> None:
-    """Изменить задачу из её карточки: заголовок, суть, тип, кто и кому, срок (пустой срок — без срока).
-    Без сути заголовок становится и сутью."""
+                    due: str | None, parent_id: int | None = None) -> None:
+    """Изменить задачу из её карточки: заголовок, суть, тип, кто и кому, срок (пустой срок — без срока), часть
+    какой задачи (пусто — самостоятельная). Без сути заголовок становится и сутью."""
     if direction not in DIRECTIONS:
         raise ValueError(f"direction должен быть одним из: {', '.join(DIRECTIONS)}")
     title, what = title.strip(), what.strip() or title.strip()
@@ -187,9 +249,13 @@ def edit_commitment(cid: int, *, title: str, what: str, direction: str, who: str
         raise ValueError("Напишите, что сделать")
     if due and not _as_date(due):
         raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
-    store.execute("UPDATE commitments SET title=?, what=?, direction=?, who=?, whom=?, due=?, updated=? WHERE id=?",
+    if parent_id:
+        _check_parent(cid, parent_id)
+    now = store.utcnow()
+    store.execute("UPDATE commitments SET title=?, what=?, direction=?, who=?, whom=?, due=?, parent_id=?, "
+                  "seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
                   (title or None, what, direction, (who or "").strip() or None, (whom or "").strip() or None,
-                   due or None, store.utcnow(), cid))
+                   due or None, parent_id or None, now, now, cid))
 
 
 def headline(c: dict) -> str:
@@ -212,6 +278,26 @@ HEADLINE_MAX = 60
 def counterpart(c: dict) -> str | None:
     """С кем эта задача: кому обещала директор, кто обещал ей, а между коллегами — исполнитель."""
     return c.get("whom") if c.get("direction") == "mine" else c.get("who")
+
+
+def doer(c: dict) -> str:
+    """Кто делает: «Я» (директор) или имя."""
+    return "Я" if c.get("direction") == "mine" else (c.get("who") or "?")
+
+
+def route(c: dict) -> str:
+    """Кто кому: «Я → Тимур», «Пётр → мне», «Олег → Ирина»."""
+    whom = "мне" if c.get("direction") == "to_me" else (c.get("whom") or "—")
+    return f"{doer(c)} → {whom}"
+
+
+def task_options() -> list[dict]:
+    """Открытые задачи — подсказки для поля «Часть задачи» (при добавлении и в окне правки)."""
+    out = store.rows("SELECT id, direction, who, whom, title, what FROM commitments WHERE status='open' "
+                     "ORDER BY created DESC, id DESC")
+    for c in out:
+        c["label"] = f"#{c['id']} · {headline(c)} · {route(c)}"
+    return out
 
 
 def add_links(items: list[dict]) -> list[dict]:
@@ -246,10 +332,15 @@ def _person_by_name(name: str, people: list[dict]) -> dict | None:
     return hits[0] if len(hits) == 1 else None
 
 
+SORTS = {"due": "по сроку", "created": "сначала новые"}
+
+
 def list_commitments(*, status: str | None = "open", direction: str | None = None, person: str | None = None,
                      overdue: bool = False, q: str | None = None, limit: int = 500, created: Period | None = None,
-                     due: Period | None = None, no_due: bool = False) -> list[dict]:
-    where, params = _filters(person, q, created, due, no_due)
+                     due: Period | None = None, no_due: bool = False, unseen: bool = False,
+                     sort: str = "due") -> list[dict]:
+    """sort: due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху."""
+    where, params = _filters(person, q, created, due, no_due, unseen)
     sql = "SELECT * FROM commitments WHERE 1=1" + where
     if status and status != "all":
         sql += " AND status=?"
@@ -260,9 +351,17 @@ def list_commitments(*, status: str | None = "open", direction: str | None = Non
     if overdue:
         sql += " AND due IS NOT NULL AND due < ?"
         params.append(today_local().isoformat())
-    sql += " ORDER BY CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
+    if sort == "created":
+        sql += " ORDER BY created DESC, id DESC LIMIT ?"
+    else:
+        sql += " ORDER BY CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
     params.append(limit)
     return _mark(store.rows(sql, params))
+
+
+def get_commitment(cid: int) -> dict | None:
+    found = _mark(store.rows("SELECT * FROM commitments WHERE id=?", (cid,)))
+    return found[0] if found else None
 
 
 def _mark(items: list[dict]) -> list[dict]:
@@ -278,17 +377,52 @@ def _mark(items: list[dict]) -> list[dict]:
         c["due_days"] = (due - today).days if due else None
         end_of_day = datetime.combine(today + timedelta(days=1), time.min, now.tzinfo)
         c["due_hours"] = max(1, math.ceil((end_of_day - now).total_seconds() / 3600)) if c["due_days"] == 0 else None
+    _relations(items)
     return items
+
+
+def _relations(items: list[dict]) -> None:
+    """Связи для карточек: часть какой задачи (parent), подзадачи (children), кто ещё в деле (helpers —
+    «Я + Пётр → Тимур»), срок подзадачи позже срока задачи (late_vs_parent); предложение Claude закрыть
+    задачу, если по переписке или встрече она выглядит выполненной (done_hint)."""
+    if not items:
+        return
+    ids = [c["id"] for c in items]
+    parents = list({c["parent_id"] for c in items if c.get("parent_id")})
+    related = store.rows(
+        "SELECT id, direction, who, whom, title, what, due, status, parent_id FROM commitments WHERE status != 'cancelled' "
+        f"AND (parent_id IN ({','.join('?' * len(ids))}) OR id IN ({','.join('?' * len(parents)) or 'NULL'}))",
+        [*ids, *parents])
+    by_id = {r["id"]: r for r in related}
+    kids: dict[int, list[dict]] = {}
+    for r in related:
+        r["headline"], r["route"] = headline(r), route(r)
+        if r["parent_id"]:
+            kids.setdefault(r["parent_id"], []).append(r)
+    hints = {}
+    for p in store.rows("SELECT * FROM proposals WHERE kind='task.done' AND status='pending' ORDER BY id"):
+        p["payload"] = store.loads(p["payload"], {})
+        hints[p["payload"].get("commitment_id")] = p
+    for c in items:
+        c["parent"] = by_id.get(c.get("parent_id"))
+        c["children"] = sorted(kids.get(c["id"], []), key=lambda r: (r["status"] != "open", r["due"] or "9999"))
+        mine = doer(c)
+        c["helpers"] = list(dict.fromkeys(doer(k) for k in c["children"] if k["status"] == "open" and doer(k) != mine))
+        c["kids_done"] = bool(c["children"]) and all(k["status"] == "done" for k in c["children"])
+        c["late_vs_parent"] = bool(c["parent"] and c["status"] == "open" and c["due"] and c["parent"]["due"]
+                                   and c["due"] > c["parent"]["due"])
+        c["done_hint"] = hints.get(c["id"]) if c["status"] == "open" else None
 
 
 def commitments_board(*, person: str | None = None, q: str | None = None, done_days: int = 14,
                       created: Period | None = None, due: Period | None = None,
-                      no_due: bool = False) -> dict[str, list[dict]]:
-    """Доска задач и договорённостей: открытые — по направлению, «Готово» — закрытые за done_days дней."""
+                      no_due: bool = False, unseen: bool = False, sort: str = "due") -> dict[str, list[dict]]:
+    """Доска задач и договорённостей: открытые — по направлению, «Готово» — закрытые за done_days дней
+    (последние закрытые сверху при любой сортировке)."""
     board = {d: list_commitments(status="open", direction=d, person=person, q=q, created=created, due=due,
-                                 no_due=no_due) for d in DIRECTIONS}
+                                 no_due=no_due, unseen=unseen, sort=sort) for d in DIRECTIONS}
     since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=done_days))
-    where, params = _filters(person, q, created, due, no_due)
+    where, params = _filters(person, q, created, due, no_due, unseen)
     sql = "SELECT * FROM commitments WHERE status='done' AND COALESCE(closed_at, updated) >= ?" + where
     board["done"] = _mark(store.rows(sql + " ORDER BY COALESCE(closed_at, updated) DESC LIMIT 300", [since, *params]))
     return board
@@ -415,3 +549,105 @@ def update_meeting(meeting_id: str, **fields) -> None:
 def read_meeting_file(meeting_id: str, name: str) -> str:
     path = meeting_dir(meeting_id) / name
     return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def meeting_commitments(meeting_id: str) -> list[dict]:
+    """Задачи встречи для её страницы: появились на ней (все, и закрытые) и закрытые по её итогам —
+    у таких в заметке id встречи («встреча <id>: …»), они идут после."""
+    return _mark(store.rows(
+        "SELECT * FROM commitments WHERE (source_type='meeting' AND source_ref=?) OR note LIKE ? "
+        "ORDER BY CASE WHEN source_ref=? THEN 0 ELSE 1 END, id", (meeting_id, f"%{meeting_id}%", meeting_id)))
+
+
+# --- ссылки из разбора встречи на задачи PULSE ----------------------------------------------
+
+_STOP = {"для", "что", "это", "как", "его", "она", "они", "при", "все", "или", "так", "уже", "про", "без", "над",
+         "под", "чтобы", "после", "потом", "сначала", "через", "нужно", "надо", "будет", "есть", "если", "обещал",
+         "обещала", "передать", "сделать"}
+
+
+def _stems(text: str | None) -> set[str]:
+    """Основы слов для сравнения формулировок: без регистра, «ё», коротких и служебных слов; окончания отрезаем
+    грубо — первые 5 букв («прогнозы» и «прогноза» совпадут)."""
+    words = re.findall(r"[a-zа-я0-9]+", (text or "").lower().replace("ё", "е"))
+    return {w[:5] for w in words if len(w) >= 3 and w not in _STOP}
+
+
+def _match(lines: list[tuple[int, set[str], set[str]]], tasks: list[dict]) -> dict[int, dict]:
+    """Строка разбора → задача: по общим словам с заголовком и сутью задачи, плюс совпадение исполнителя.
+    Каждая задача — не больше одной строки, лучшие пары первыми."""
+    pairs = []
+    for n, words, people in lines:
+        for c in tasks:
+            common = len(words & c["_stems"])
+            if common < 2 or not words:
+                continue
+            score = common / min(len(words), len(c["_stems"]))
+            if people and _stems(c.get("who")) & people:
+                score += 0.2
+            if score >= 0.45:
+                pairs.append((score, n, c["id"]))
+    out, used = {}, set()
+    by_id = {c["id"]: c for c in tasks}
+    for _, n, cid in sorted(pairs, reverse=True):
+        if n not in out and cid not in used:
+            out[n] = by_id[cid]
+            used.add(cid)
+    return out
+
+
+def _task_ref(c: dict) -> str:
+    label = {"done": "✓ выполнена", "cancelled": "отменена"}.get(c["status"], "задача →")
+    return f"[{label}](/commitments?task={c['id']})"
+
+
+def link_summary(text: str, tasks: list[dict]) -> str:
+    """Ссылки из разбора встречи на задачи PULSE: в таблице «Задачи» — у строки задачи (а «предложено» в колонке
+    Kaiten — номер созданной карточки), в «Договорённостях» — в конце пункта. Строку и задачу сопоставляем по
+    смыслу, поэтому работает и для старых разборов, где ссылок не было."""
+    if not text or not tasks:
+        return text
+    for c in tasks:
+        c["_stems"] = _stems(f"{c.get('title') or ''} {c.get('what') or ''}")
+    cards = {r["id"]: r["url"] for r in store.rows(
+        f"SELECT id, url FROM kaiten_cards WHERE id IN ({','.join('?' * len(tasks))})",
+        [c.get("kaiten_card_id") or 0 for c in tasks])}
+    lines = text.split("\n")
+    section, rows, bullets = "", [], []
+    for n, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            section = stripped.lstrip("#").strip().lower()
+        elif "задач" in section and stripped.startswith("|"):
+            cells = _cells(stripped)
+            is_head = n == 0 or not lines[n - 1].strip().startswith("|")
+            if not is_head and not all(set(x) <= set("-: ") for x in cells):
+                cols = _table_header(lines, n)
+                who = cells[cols.index("кто")] if "кто" in cols and cols.index("кто") < len(cells) else ""
+                rows.append((n, _stems(cells[0]), _stems(who)))
+        elif ("задач" in section or "договор" in section) and re.match(r"([-*]|\d+\.)\s", stripped):
+            bullets.append((n, _stems(stripped), _stems(stripped)))
+    for n, c in _match(rows, tasks).items():
+        cells, cols = _cells(lines[n].strip()), _table_header(lines, n)
+        cells[0] = f"{cells[0]} {_task_ref(c)}"
+        if "kaiten" in cols and c.get("kaiten_card_id"):
+            k = cols.index("kaiten")
+            if k < len(cells) and (cells[k] in ("", "—", "-") or cells[k].lower().startswith("предлож")):
+                card = c["kaiten_card_id"]
+                cells[k] = f"[#{card}]({cards[card]})" if cards.get(card) else f"#{card}"
+        lines[n] = "| " + " | ".join(cells) + " |"
+    for n, c in _match(bullets, tasks).items():
+        lines[n] = f"{lines[n].rstrip()} {_task_ref(c)}"
+    return "\n".join(lines)
+
+
+def _cells(row: str) -> list[str]:
+    return [x.strip() for x in row.strip("|").split("|")]
+
+
+def _table_header(lines: list[str], n: int) -> list[str]:
+    """Названия колонок таблицы, в которой стоит строка n (первая строка таблицы)."""
+    i = n
+    while i > 0 and lines[i - 1].strip().startswith("|"):
+        i -= 1
+    return [x.lower() for x in _cells(lines[i].strip())]

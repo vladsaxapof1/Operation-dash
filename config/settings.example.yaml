@@ -96,6 +96,7 @@ autonomy:
   kaiten_comment: confirm
   kaiten_update: confirm
   calendar: confirm
+  task_done: confirm
 notifications:
   meeting_processed: true
   urgent_immediately: true

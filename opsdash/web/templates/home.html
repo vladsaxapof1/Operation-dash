@@ -58,6 +58,7 @@
         <div class="card-b flush"><ul class="list">{% for c in s.to_me[:6] %}{{ ui.commitment(c, compact=True) }}{% else %}<li class="empty">Открытых задач нет.</li>{% endfor %}</ul></div>
       </section>
     </div>
+    {{ ui.task_datalist() }}
   </div>
 
   <div>

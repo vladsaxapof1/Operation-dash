@@ -530,6 +530,13 @@ def _commitment_line(c: dict) -> str:
         line += f" · kaiten #{c['kaiten_card_id']}"
     if c["source_type"]:
         line += f" · источник {c['source_type']}:{c['source_ref'] or ''}"
+    if c.get("parent"):
+        line += f" · часть задачи [{c['parent']['id']}] «{c['parent']['headline']}» ({c['parent']['route']})"
+    if c.get("children"):
+        line += " · подзадачи: " + ", ".join(f"[{k['id']}] {k['route']}" + (f" ({k['status']})" if k["status"] != "open" else "")
+                                            for k in c["children"])
+    if c.get("done_hint"):
+        line += " · предложено закрыть, ждёт директора"
     return line
 
 
@@ -544,14 +551,20 @@ def cmd_commitments(a) -> None:
             out("Обещаний нет.")
     elif a.action == "add":
         st, ref = parse_source(a.source)
-        cid = records.add_commitment(
-            direction=a.direction, what=a.what, who=a.who, whom=a.whom, due=a.due, source_type=st, source_ref=ref,
-            quote=a.quote, kaiten_card_id=a.card, note=a.note, title=a.title,
-        )
-        out(f"Обещание [{cid}] сохранено")
+        try:
+            cid = records.add_commitment(
+                direction=a.direction, what=a.what, who=a.who, whom=a.whom, due=a.due, source_type=st, source_ref=ref,
+                quote=a.quote, kaiten_card_id=a.card, note=a.note, title=a.title, parent_id=a.parent,
+            )
+        except ValueError as e:
+            fail(str(e))
+        out(f"Обещание [{cid}] сохранено" + (f" как часть задачи [{a.parent}]" if a.parent else ""))
     elif a.action == "set":
-        records.update_commitment(a.id, status=a.status, due=a.due, kaiten_card_id=a.card, note=a.note, what=a.what,
-                                  title=a.title, who=a.who, whom=a.whom)
+        try:
+            records.update_commitment(a.id, status=a.status, due=a.due, kaiten_card_id=a.card, note=a.note, what=a.what,
+                                      title=a.title, who=a.who, whom=a.whom, parent_id=a.parent)
+        except ValueError as e:
+            fail(str(e))
         out("Сохранено")
 
 
@@ -693,6 +706,9 @@ def cmd_propose(a) -> None:
                                                  batch=a.batch, reason=a.reason, source_ref=source_ref)
         elif a.kind == "cancel-meeting":
             p = proposals.propose_calendar_cancel(uid=a.uid, batch=a.batch, reason=a.reason, source_ref=source_ref)
+        elif a.kind == "done":
+            p = proposals.propose_task_done(commitment_id=a.commitment, quote=a.quote, batch=a.batch, reason=a.reason,
+                                            source_ref=source_ref)
         else:
             fail("неизвестный тип")
     except proposals.ProposalError as e:
@@ -963,6 +979,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--quote", help="дословная цитата")
     x.add_argument("--card", type=int, help="карточка Kaiten")
     x.add_argument("--note")
+    x.add_argument("--parent", type=int, help="часть задачи с этим id: директор передала её работу дальше")
     x = ms.add_parser("set")
     x.add_argument("id", type=int)
     x.add_argument("--status", choices=["open", "done", "cancelled"])
@@ -973,6 +990,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--what")
     x.add_argument("--who")
     x.add_argument("--whom")
+    x.add_argument("--parent", type=int, help="сделать частью задачи с этим id (0 — отвязать)")
     s.set_defaults(fn=cmd_commitments)
 
     s = sub.add_parser("attention", help="где ждут ответа директора")
@@ -1047,6 +1065,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--calendar", help="название календаря Яндекса (по умолчанию — из настроек)")
     x = ps.add_parser("cancel-meeting", parents=[common], help="отменить встречу")
     x.add_argument("--uid", required=True)
+    x = ps.add_parser("done", parents=[common], help="закрыть задачу PULSE, которая выглядит выполненной")
+    x.add_argument("--commitment", type=int, required=True, help="id задачи (./ops commitments list)")
+    x.add_argument("--quote", help="дословно, откуда видно, что сделано ([чч:мм:сс] для встречи)")
     s.set_defaults(fn=cmd_propose)
 
     s = sub.add_parser("proposals", help="очередь подтверждений")

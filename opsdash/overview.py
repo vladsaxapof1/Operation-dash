@@ -310,7 +310,9 @@ def overview_markdown(settings: dict | None = None) -> str:
         out.append(f"\n## {title}")
         out += [f"- [commitment {c['id']}] {c['who'] or ''} → {c['whom'] or ''}: {c['what']}"
                 f"{' — до ' + c['due'] if c['due'] else ''}{' (ПРОСРОЧЕНО)' if c['overdue'] else ''}"
-                f"{' · kaiten #' + str(c['kaiten_card_id']) if c['kaiten_card_id'] else ''}" for c in s[key]] or ["- нет"]
+                f"{' · kaiten #' + str(c['kaiten_card_id']) if c['kaiten_card_id'] else ''}"
+                f"{' · часть [commitment ' + str(c['parent_id']) + ']' if c.get('parent_id') else ''}"
+                f"{' · предложено закрыть' if c.get('done_hint') else ''}" for c in s[key]] or ["- нет"]
     out.append("\n## Kaiten: без движения")
     out += [f"- #{c['id']} {c['title']} · {c['responsible_name'] or 'без исполнителя'} · {c['column_title']} · "
             f"{c['idle_days']} дн. · {c['url']}" for c in s["stale"]] or ["- нет"]

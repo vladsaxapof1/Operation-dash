@@ -6,7 +6,7 @@
   <div><h1>Задачи</h1><div class="muted">Собираются из встреч, чатов и почты. Источник каждой — по ссылке.</div></div>
   <div class="actions">
     {% set keep = '&person=' ~ (person | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&created=' ~ created ~ '&created_from=' ~ created_from
-       ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to %}
+       ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to ~ ('&new=1' if new else '') %}
     <div class="seg">
       <a href="?view=board{{ keep }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list{{ keep }}" class="{{ 'active' if view == 'list' }}">Список</a><a href="?view=gantt&scale={{ scale }}{{ keep }}" class="{{ 'active' if view == 'gantt' }}">Гант</a>
     </div>
@@ -14,7 +14,7 @@
   </div>
 </div>
 
-<section class="card add-panel" id="add">
+<section class="card add-panel{{ ' open' if parent_task }}" id="add">
   <div class="card-h"><h2>Новая задача или договорённость</h2><a class="small" href="#">свернуть</a></div>
   <div class="card-b">
     <form method="post" action="/commitments">
@@ -26,6 +26,8 @@
       </div>
       <label>Задача</label><input type="text" name="title" required maxlength="120" placeholder="Коротко, например: прогноз по ключевым клиентам">
       <label>Подробности <span class="muted small">— необязательно</span></label><textarea name="what" rows="2" placeholder="Что именно сделать, в каком виде, кому прислать"></textarea>
+      <label>Часть задачи <span class="muted small">— если передаёте кому-то работу по другой задаче</span></label>
+      <input type="text" name="parent" list="task-options" value="{{ parent_task.label if parent_task else '' }}" placeholder="Начните вводить название задачи; пусто — самостоятельная">
       <div class="form-actions"><button class="btn primary">Добавить</button></div>
     </form>
   </div>
@@ -50,9 +52,18 @@
   {{ ui.period_filter('created', 'Создана', created, created_periods, created_from, created_to) }}
   {{ ui.period_filter('due', 'Срок', due, due_periods, due_from, due_to) }}
   <input type="search" name="q" value="{{ q }}" placeholder="Поиск по задачам">
+  <select name="sort" data-autosubmit class="{{ 'on' if sort != 'due' }}" title="Порядок задач в колонках">
+    {% for key, title in sorts.items() %}<option value="{{ key }}" {{ 'selected' if sort == key }}>Сортировка: {{ title }}</option>{% endfor %}
+  </select>
+  {% if new %}<input type="hidden" name="new" value="1">{% endif %}
   <datalist id="people-list">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>
   <button class="btn">Показать</button>
-  {% if person or q or direction or status != 'open' or created or due %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
+  {% if new or new_tasks_count %}
+  {% set keep_new = keep | replace('&new=1', '') %}
+  <a class="btn toggle{{ ' on' if new }}" href="?view={{ view }}{% if view == 'gantt' %}&scale={{ scale }}{% endif %}{{ keep_new }}{{ '' if new else '&new=1' }}"
+     title="{{ 'Показать все задачи' if new else 'Только задачи, которые добавил Claude и вы ещё не открывали' }}">Новые{% if new_tasks_count %} <span class="badge">{{ new_tasks_count }}</span>{% endif %}</a>
+  {% endif %}
+  {% if person or q or direction or status != 'open' or created or due or new %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
 </form>
 
 {% if view == 'board' %}
@@ -118,7 +129,7 @@
               {% set title = c | headline %}
               <div class="gantt-label">
                 <button type="button" class="gantt-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ title }}</button>
-                <div class="muted small">{% if c.direction == 'mine' %}Я → {{ c.whom or '—' }}{% elif c.direction == 'to_me' %}{{ c.who or '?' }} → мне{% else %}{{ c.who or '?' }} → {{ c.whom or '—' }}{% endif %}</div>
+                <div class="muted small"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>{{ ui.new_chip(c) }} {{ ui.task_people(c) }}{% if c.parent %} · ↳ {{ ui.task_ref(c.parent) }}{% endif %}</div>
                 {{ ui.task_dialog(c, meetings) }}
               </div>
               <div class="gantt-track" style="width: {{ gantt.width }}px">
@@ -137,7 +148,11 @@
 </div>
 {% else %}
 <section class="card">
-  <div class="card-b flush"><ul class="list">{% for c in items %}{{ ui.commitment(c, show_dir=True) }}{% else %}<li class="empty">Ничего не найдено.</li>{% endfor %}</ul></div>
+  <div class="card-b flush"><ul class="list">{% for c in items %}{{ ui.commitment(c, show_dir=True) }}{% else %}<li class="empty">{{ 'Новых задач нет — все просмотрены.' if new else 'Ничего не найдено.' }}</li>{% endfor %}</ul></div>
 </section>
 {% endif %}
+{#- ?task=<id>: окно задачи открывается само (app.js); если фильтры её прячут — окно отдельно #}
+{% if extra %}{{ ui.task_dialog(extra, meetings) }}{% endif %}
+{% if focus %}<span hidden data-focus-task="{{ focus }}"></span>{% endif %}
+{{ ui.task_datalist() }}
 {% endblock %}

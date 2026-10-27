@@ -97,8 +97,18 @@
       </div>
     </section>
     <section class="card">
-      <div class="card-h"><h2>Задачи</h2></div>
-      <div class="card-b flush"><ul class="list">{% for c in commitments %}<li>{{ c.what }}<div class="meta">{{ c.who }}{% if c.due %} · до {{ c.due | date }}{% endif %} · {{ {'open': 'открыто', 'done': 'выполнено', 'cancelled': 'отменено'}[c.status] }}</div></li>{% else %}<li class="empty">Нет.</li>{% endfor %}</ul></div>
+      <div class="card-h"><h2>Задачи</h2>{% if commitments %}<span class="chip">{{ commitments | length }}</span>{% endif %}<span class="grow"></span><a class="small" href="/commitments">все задачи →</a></div>
+      <div class="card-b flush"><ul class="list">{% for c in commitments %}
+        <li class="mtask">
+          {#- ссылка ведёт в «Задачи» и сразу открывает окно этой задачи #}
+          <div>{{ ui.new_chip(c) }} <a href="/commitments?task={{ c.id }}" title="{{ c.what }}">{{ c | headline }}</a></div>
+          <div class="meta">{{ c | route }}{% for h in c.helpers %} + {{ h }}{% endfor %}{% if c.due %} · до {{ c.due | date }}{% endif %}
+            · {% if c.status == 'done' %}<span class="chip ok">выполнена</span>{% elif c.status == 'cancelled' %}отменена{% elif c.overdue %}<span class="chip bad">просрочена</span>{% else %}в работе{% endif %}
+            {%- if c.source_ref != m.id %} · закрыта по итогам встречи{% endif %}
+            {%- if c.done_hint %} · <span class="chip ok" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif %}
+            {%- if c.parent %}<br>↳ часть «{{ c.parent.headline }}»{% endif %}
+            {%- if c.children %}<br>подзадачи: {% for k in c.children %}{{ k.route }}{{ ' (готово)' if k.status == 'done' }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</div>
+        </li>{% else %}<li class="empty">Нет.</li>{% endfor %}</ul></div>
     </section>
     <section class="card">
       <div class="card-h"><h2>Название</h2></div>

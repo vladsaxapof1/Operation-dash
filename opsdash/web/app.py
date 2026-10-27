@@ -66,6 +66,8 @@ def f_md(text: str) -> str:
         text, extensions=["tables", "sane_lists", "nl2br", "toc"],
         extension_configs={"toc": {"slugify": slugify_unicode}},
     )
+    # ссылки на задачи PULSE из разбора встречи (records.link_summary) — значком, а не обычной ссылкой
+    out = out.replace('<a href="/commitments?task=', '<a class="task-ref" href="/commitments?task=')
     return UNSAFE_URL.sub(r'\1="#"', out)
 
 
@@ -183,13 +185,14 @@ def f_size(n: int | None) -> str:
 
 templates.env.filters.update(local=f_local, date=f_date, md=f_md, ago=f_ago, tg=f_tg_html, hhmm=config.hhmm,
                              people=f_people, place=f_place, note=f_note, hl=f_hl, size=f_size,
-                             headline=records.headline)
+                             headline=records.headline, route=records.route)
 templates.env.globals.update(
     plural=f_plural, version=__version__, SOURCE_TITLES=overview.SOURCE_TITLES,
     # метка для ?v= у app.js/style.css: меняется с файлами, и браузер не берёт старые из кэша
     static_v=f"{__version__}.{int(max(p.stat().st_mtime for p in (HERE / 'static').iterdir()))}",
     is_mac=sys.platform == "darwin", is_windows=os.name == "nt",
     is_apple_silicon=sys.platform == "darwin" and platform.machine() == "arm64",
+    proposal_links=proposals.links,  # ссылки у предложений — для макросов (они не видят переменных страницы)
 )
 
 
@@ -201,6 +204,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["err"] = request.query_params.get("err", "")
     ctx["pending_count"] = store.scalar("SELECT COUNT(*) FROM proposals WHERE status='pending'") or 0
     ctx["attention_count"] = store.scalar("SELECT COUNT(*) FROM attention WHERE status='open'") or 0
+    ctx["new_tasks_count"] = records.unseen_count()
     ctx["needs_setup"] = not any(settings[s].get("enabled")
                                  for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten", "ymessenger"))
     ctx["voice_tip"] = None if ctx["nav"] == "meetings" else _voice_tip(request)
@@ -428,18 +432,27 @@ BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
 @app.get("/commitments", response_class=HTMLResponse)
 def commitments(request: Request, view: str = "board", status: str = "open", direction: str = "", person: str = "",
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
-                due: str = "", due_from: str = "", due_to: str = "", scale: str = "week"):
+                due: str = "", due_from: str = "", due_to: str = "", scale: str = "week", sort: str = "",
+                new: str = "", task: int = 0, parent: int = 0):
     from opsdash import gantt
 
     view = view if view in ("list", "gantt") else "board"
     person, q = person.strip(), q.strip()
+    # сортировку запоминаем в cookie: по умолчанию — по сроку, «сначала новые» — по дате появления
+    sort = sort if sort in records.SORTS else request.cookies.get("task_sort", "due")
+    sort = sort if sort in records.SORTS else "due"
     dates = {"created": records.period(created, created_from, created_to) if created else None,
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
-             "no_due": due == "none"}
-    board = records.commitments_board(person=person or None, q=q or None, **dates) if view != "list" else None
+             "no_due": due == "none", "unseen": new == "1"}
+    board = records.commitments_board(person=person or None, q=q or None, sort=sort, **dates) if view != "list" else None
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
-                                      **dates) if view == "list" else None)
+                                      sort=sort, **dates) if view == "list" else None)
     shown = records.add_links([c for col in board.values() for c in col] if board else items)
+    # ?task=<id> — открыть окно задачи (ссылка со встречи или со сводки); если фильтры её прячут — окно всё равно есть
+    extra = None
+    if task and not any(c["id"] == task for c in shown):
+        extra = records.get_commitment(task)
+        shown = shown + records.add_links([extra]) if extra else shown
     meeting_ids = {c["source_ref"] for c in shown if c["source_type"] == "meeting" and c["source_ref"]}
     meetings = {m["id"]: m["title"] for m in store.rows(
         f"SELECT id, title FROM meetings WHERE id IN ({','.join('?' * len(meeting_ids))})", list(meeting_ids))} if meeting_ids else {}
@@ -448,22 +461,31 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     # ширина колонки с названиями на таймлайне — её тянут мышкой, запоминает cookie (app.js)
     gantt_w = int(request.cookies["gantt_w"]) if request.cookies.get("gantt_w", "").isdigit() else 300
     timeline = gantt.layout([(key, title, board[key]) for key, title in BOARD_TITLES], scale) if view == "gantt" else None
-    return render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
-                  direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
-                  add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
-                  folded=folded, created=created, created_from=created_from, created_to=created_to, due=due,
-                  due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
-                  due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
-                  gantt_w=min(max(gantt_w, 200), 720))
+    parent_task = next((o for o in records.task_options() if o["id"] == parent), None) if parent else None
+    response = render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
+                      direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
+                      add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
+                      folded=folded, created=created, created_from=created_from, created_to=created_to, due=due,
+                      due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
+                      due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
+                      gantt_w=min(max(gantt_w, 200), 720), sort=sort, sorts=records.SORTS, new=new == "1",
+                      focus=task, extra=extra, parent_task=parent_task)
+    if request.query_params.get("sort") in records.SORTS:
+        response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
+    return response
 
 
 @app.post("/commitments")
 def commitment_add(request: Request, direction: str = Form(...), title: str = Form(""), what: str = Form(""),
-                   who: str = Form(""), whom: str = Form(""), due: str = Form("")):
+                   who: str = Form(""), whom: str = Form(""), due: str = Form(""), parent: str = Form("")):
     if not (title.strip() or what.strip()):
         return back(request, err="Напишите, что сделать")
-    records.add_commitment(direction=direction, title=title.strip(), what=what.strip() or title.strip(),
-                           who=who.strip() or None, whom=whom.strip() or None, due=due or None, source_type="manual")
+    try:
+        records.add_commitment(direction=direction, title=title.strip(), what=what.strip() or title.strip(),
+                               who=who.strip() or None, whom=whom.strip() or None, due=due or None, source_type="manual",
+                               parent_id=records.parse_task_ref(parent))
+    except ValueError as e:
+        return back(request, err=str(e))
     return back(request, "Задача добавлена")
 
 
@@ -475,12 +497,27 @@ def commitment_update(request: Request, cid: int, status: str = Form(None), due:
 
 @app.post("/commitments/{cid}/edit")
 def commitment_edit(request: Request, cid: int, title: str = Form(""), what: str = Form(""),
-                    direction: str = Form("mine"), who: str = Form(""), whom: str = Form(""), due: str = Form("")):
+                    direction: str = Form("mine"), who: str = Form(""), whom: str = Form(""), due: str = Form(""),
+                    parent: str = Form("")):
     try:
-        records.edit_commitment(cid, title=title, what=what, direction=direction, who=who, whom=whom, due=due or None)
+        records.edit_commitment(cid, title=title, what=what, direction=direction, who=who, whom=whom, due=due or None,
+                                parent_id=records.parse_task_ref(parent))
     except ValueError as e:
         return back(request, err=str(e))
     return back(request, "Задача изменена")
+
+
+@app.get("/api/task-options")
+def task_options():
+    """Подсказки поля «Часть задачи»: открытые задачи «#id · заголовок · кто → кому»."""
+    return [o["label"] for o in records.task_options()]
+
+
+@app.post("/commitments/{cid}/seen")
+def commitment_seen(cid: int):
+    """Директор увидела новую задачу (навела на карточку или открыла её) — снять отметку «новая» (app.js)."""
+    records.mark_seen(cid)
+    return {"ok": True, "unseen": records.unseen_count()}
 
 
 # --- база знаний: антология решений, уроков и удач ----------------------------------
@@ -706,7 +743,8 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
     summary = records.read_meeting_file(mid, "summary.md")
     transcript = records.read_meeting_file(mid, "transcript.md")
     related = proposals.list_proposals("all", batch=f"meeting:{mid}")
-    commitments_ = store.rows("SELECT * FROM commitments WHERE source_type='meeting' AND source_ref=? ORDER BY id", (mid,))
+    commitments_ = records.meeting_commitments(mid)
+    summary = records.link_summary(summary, commitments_)  # строки задач в разборе — со ссылками на задачи PULSE
     meta_path = records.meeting_dir(mid) / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     who, how = voice.speaker_map(meta)

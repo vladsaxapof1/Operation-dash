@@ -168,6 +168,8 @@ CREATE TABLE IF NOT EXISTS commitments (
     quote TEXT,
     kaiten_card_id INTEGER,
     note TEXT,
+    parent_id INTEGER,               -- часть какой задачи: директор передала работу дальше (Пётр → мне, для Тимура)
+    seen_at TEXT,                    -- когда директор увидела задачу; пусто — «новая» (добавил Claude)
     created TEXT, updated TEXT, closed_at TEXT
 );
 
@@ -258,20 +260,25 @@ CREATE TABLE IF NOT EXISTS log (
 _init_lock = threading.Lock()
 _initialized: set[str] = set()
 
-# колонки, добавленные после первой версии: (таблица, колонка, определение)
+# колонки, добавленные после первой версии: (таблица, колонка, определение[, что заполнить у старых строк])
 MIGRATIONS = [
     ("outbox", "sending_at", "TEXT"),
     ("outbox", "dead", "INTEGER DEFAULT 0"),
     ("chats", "username", "TEXT"),
     ("commitments", "title", "TEXT"),
+    ("commitments", "parent_id", "INTEGER"),
+    # задачи, которые были до появления отметки «новая», — уже просмотрены
+    ("commitments", "seen_at", "TEXT", "UPDATE commitments SET seen_at=COALESCE(created, updated, '')"),
 ]
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    for table, column, ddl in MIGRATIONS:
+    for table, column, ddl, *backfill in MIGRATIONS:
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            for sql in backfill:
+                conn.execute(sql)
     # до 26.10.2026 для личных чатов Telegram сохранялись ссылки t.me/<человек>/<id> — такие не открываются
     conn.execute("UPDATE messages SET link=NULL WHERE source='telegram' AND chat_id NOT LIKE '-%' AND link IS NOT NULL")
 

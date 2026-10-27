@@ -431,7 +431,7 @@
 <section class="card"><div class="card-b" style="padding-top:12px">
   <p>Что Claude может делать сам, а что — только после вашего «Да» в боте или на сводке.</p>
   <form method="post" action="/settings/autonomy">
-    {% for key, title in [('kaiten_create_for_me', 'Создавать карточки в Kaiten на вас'), ('kaiten_create_for_others', 'Создавать карточки в Kaiten на коллег'), ('kaiten_comment', 'Писать комментарии в карточки Kaiten'), ('kaiten_update', 'Менять сроки и исполнителей в Kaiten'), ('calendar', 'Создавать и отменять встречи в календаре')] %}
+    {% for key, title in [('kaiten_create_for_me', 'Создавать карточки в Kaiten на вас'), ('kaiten_create_for_others', 'Создавать карточки в Kaiten на коллег'), ('kaiten_comment', 'Писать комментарии в карточки Kaiten'), ('kaiten_update', 'Менять сроки и исполнителей в Kaiten'), ('calendar', 'Создавать и отменять встречи в календаре'), ('task_done', 'Закрывать задачи PULSE, которые по встречам и переписке выглядят выполненными')] %}
       <label>{{ title }}</label>
       <select name="{{ key }}" style="max-width:320px"><option value="confirm" {{ 'selected' if settings.autonomy[key] != 'auto' }}>только после подтверждения</option><option value="auto" {{ 'selected' if settings.autonomy[key] == 'auto' }}>сам, без вопросов</option></select>
     {% endfor %}

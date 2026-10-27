@@ -142,6 +142,7 @@ DEFAULTS: dict = {
         "kaiten_comment": "confirm",
         "kaiten_update": "confirm",
         "calendar": "confirm",
+        "task_done": "confirm",  # закрывать задачи PULSE, которые по встречам и переписке выглядят выполненными
     },
     "notifications": {
         "meeting_processed": True,

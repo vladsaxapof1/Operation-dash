@@ -5,6 +5,8 @@
       <div><strong>{{ p.title }}</strong></div>
       {% set d = describe(p).split('\n')[1:] %}
       {% if d %}<div class="meta">{% for line in d %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+      {% set refs = proposal_links(p) %}
+      {% if refs %}<div class="prop-links">{% for label, url in refs %}<a class="btn sm ghost" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}</div>{% endif %}
     </div>
     <div class="actions">
       <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm ok" title="Выполнить">Да</button></form>
@@ -51,6 +53,27 @@
 {%- endif -%}
 {%- endmacro %}
 
+{% macro new_chip(c) -%}
+{%- if c.status == 'open' and not c.seen_at %}<span class="chip new" title="Новая задача: отметка снимется, когда вы наведёте на неё или откроете">новая</span>{% endif -%}
+{%- endmacro %}
+
+{% macro task_ref(t) -%}
+{#- ссылка на связанную задачу: на странице с этой задачей — открывает её окно, иначе — переход в «Задачи» (app.js) -#}
+<a href="/commitments?task={{ t.id }}" data-task-open="{{ t.id }}">«{{ t.headline }}»</a>
+{%- endmacro %}
+
+{% macro task_people(c) -%}
+{#- кто кому, с цепочкой: подзадача Петра для задачи «я → Тимуру» — «Пётр → мне → Тимур»;
+    у задачи, часть которой передана, — «Я + Пётр → Тимур» -#}
+<b>{{ 'Я' if c.direction == 'mine' else (c.who or '?') }}</b>{% for h in c.helpers or [] %} + {{ h }}{% endfor %} → {{ 'мне' if c.direction == 'to_me' else (c.whom or '—') }}
+{%- if c.parent and c.direction == 'to_me' and c.parent.direction == 'mine' and c.parent.whom %} → {{ c.parent.whom }}{% endif -%}
+{%- endmacro %}
+
+{% macro task_datalist() %}
+{#- подсказки поля «Часть задачи»: открытые задачи подгружаются при первом вводе (app.js) #}
+<datalist id="task-options" data-src="/api/task-options"></datalist>
+{% endmacro %}
+
 {% macro period_filter(name, label, value, options, frm='', to='') %}
 {#- фильтр по дате: готовые периоды и «свой период» — тогда появляются даты «с» и «по» #}
 <select name="{{ name }}" data-autosubmit class="{{ 'on' if value }}">
@@ -92,7 +115,7 @@
 {#- карточка задачи — окно по центру экрана: всё о задаче и правка. Открывается кликом по задаче, карандаш —
     сразу правка (app.js). Закрыть — ✕, Esc или клик мимо окна #}
 {% set title = c | headline %}
-<dialog class="dlg" id="task-{{ c.id }}" aria-label="{{ title }}">
+<dialog class="dlg" id="task-{{ c.id }}" aria-label="{{ title }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
   <div class="dlg-box" tabindex="-1">
     <div class="dlg-top">
       <span class="chip {{ 'acc' if c.direction == 'mine' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>
@@ -103,14 +126,29 @@
     <div class="dlg-view">
       <h2 class="dlg-title">{{ title }}</h2>
       {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
+      {% if c.done_hint %}
+      {% set h = c.done_hint %}
+      <div class="dlg-hint">
+        <div><b>Похоже, задача уже выполнена.</b> {{ h.reason }}</div>
+        {% if h.payload.quote %}<div class="dlg-quote">«{{ h.payload.quote }}»</div>{% endif %}
+        <div class="actions">
+          <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm ok">Да, закрыть</button></form>
+          <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Нет, ещё в работе</button></form>
+          {% for label, url in proposal_links(h) if label != 'Задача' %}<a class="btn sm ghost" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
       <dl class="dlg-facts">
-        <dt>Кто делает</dt><dd>{{ 'Я' if c.direction == 'mine' else (c.who or '—') }}</dd>
-        <dt>Кому</dt><dd>{{ 'мне' if c.direction == 'to_me' else (c.whom or '—') }}</dd>
+        <dt>Кто делает</dt><dd>{{ 'Я' if c.direction == 'mine' else (c.who or '—') }}{% for h in c.helpers or [] %} + {{ h }}{% endfor %}{% if c.helpers %} <span class="muted small">— часть работы передана, см. подзадачи</span>{% endif %}</dd>
+        <dt>Кому</dt><dd>{{ 'мне' if c.direction == 'to_me' else (c.whom or '—') }}{% if c.parent and c.direction == 'to_me' and c.parent.direction == 'mine' and c.parent.whom %} <span class="muted small">→ дальше {{ c.parent.whom }}</span>{% endif %}</dd>
         <dt>Срок</dt><dd>{{ c.due | date if c.due else 'не указан' }}</dd>
         {% if c.created %}<dt>Появилась</dt><dd>{{ c.created | local('%d.%m.%Y') }}</dd>{% endif %}
         {% if c.closed_at and c.status != 'open' %}<dt>{{ 'Выполнена' if c.status == 'done' else 'Отменена' }}</dt><dd>{{ c.closed_at | local('%d.%m.%Y') }}</dd>{% endif %}
         <dt>Откуда</dt><dd>{{ task_source(c, meetings) }}</dd>
         {% if c.kaiten_card_id %}<dt>Kaiten</dt><dd>карточка #{{ c.kaiten_card_id }}</dd>{% endif %}
+        {% if c.parent %}<dt>Часть задачи</dt><dd>{{ task_ref(c.parent) }} <span class="muted small">· {{ c.parent.route }}{% if c.parent.due %} · до {{ c.parent.due | date }}{% endif %}</span>
+          {% if c.late_vs_parent %}<div class="small warn-text">Срок позже, чем у основной задачи ({{ c.parent.due | date }}) — успеете?</div>{% endif %}</dd>{% endif %}
+        {% if c.children %}<dt>Подзадачи</dt><dd><ul class="dlg-kids">{% for k in c.children %}<li>{{ task_ref(k) }} <span class="muted small">· {{ k.route }}{% if k.due %} · до {{ k.due | date }}{% endif %}</span>{% if k.status == 'done' %} <span class="chip ok">готово</span>{% endif %}</li>{% endfor %}</ul></dd>{% endif %}
         {% if c.note %}<dt>Заметка</dt><dd>{{ c.note }}</dd>{% endif %}
       </dl>
       {% if c.quote %}<blockquote class="dlg-quote">{{ c.quote }}</blockquote>{% endif %}
@@ -122,6 +160,7 @@
         {% endif %}
         {% if c.link %}<a class="btn" href="{{ c.link }}" target="_blank" rel="noopener" title="{{ c.link_title }}">↗ {{ c.link_label }}</a>{% endif %}
         <button type="button" class="btn" data-dlg-edit>{{ pencil() }} Изменить</button>
+        {% if c.status == 'open' %}<a class="btn" href="/commitments?add={{ 'to_me' if c.direction == 'mine' else 'other' }}&parent={{ c.id }}#add" title="Передать часть работы: кто, что и к какому сроку">+ Подзадача</a>{% endif %}
         <span class="grow"></span>
         {% if c.status == 'open' %}<form class="inline" method="post" action="/commitments/{{ c.id }}" data-confirm="Отменить задачу «{{ title }}»?"><input type="hidden" name="status" value="cancelled"><button class="btn ghost danger">Отменить задачу</button></form>{% endif %}
       </div>
@@ -138,6 +177,8 @@
         <div><label>Кто делает</label><input type="text" name="who" value="{{ c.who or '' }}" list="people-list"></div>
         <div><label>Кому</label><input type="text" name="whom" value="{{ c.whom or '' }}" list="people-list"></div>
       </div>
+      <label>Часть задачи <span class="muted small">— если это работа, переданная по другой задаче</span></label>
+      <input type="text" name="parent" list="task-options" value="{{ ('#' ~ c.parent.id ~ ' · ' ~ c.parent.headline ~ ' · ' ~ c.parent.route) if c.parent else '' }}" placeholder="Начните вводить название задачи; пусто — самостоятельная">
       <div class="dlg-actions"><button class="btn primary">Сохранить</button><button type="button" class="btn ghost" data-dlg-view>Отмена</button></div>
     </form>
   </div>
@@ -147,8 +188,9 @@
 {% macro commitment(c, show_dir=False, compact=False) %}
 {#- строка списка: заголовок, кто и срок, кнопки под текстом. Клик по строке — карточка задачи.
     compact — узкая колонка (сводка): Telegram — иконкой #}
-<li class="cm" data-task="{{ c.id }}">
+<li class="cm{{ ' new' if c.status == 'open' and not c.seen_at }}" data-task="{{ c.id }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
   <div>
+    {{ new_chip(c) }}
     {% if show_dir %}<span class="chip {{ 'acc' if c.direction == 'mine' else '' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>{% endif %}
     <button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
   </div>
@@ -156,6 +198,9 @@
     {% if c.direction == 'mine' %}{% if c.whom %}кому: {{ c.whom }}{% endif %}{% else %}{{ c.who or '' }}{% if c.direction == 'other' and c.whom %} → {{ c.whom }}{% endif %}{% endif %}
     {% if c.due and c.status == 'open' %} · {{ due_badge(c) }}{% elif c.due %} · до {{ c.due | date }}{% endif %}
     {% if c.kaiten_card_id %} · Kaiten #{{ c.kaiten_card_id }}{% endif %}
+    {% if c.parent %} · часть {{ task_ref(c.parent) }}{% endif %}
+    {% if c.helpers %} · вместе с: {{ c.helpers | join(', ') }}{% endif %}
+    {% if c.done_hint %} · <span class="chip ok" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif %}
     {% if c.source_type == 'meeting' and c.source_ref %} · <a href="/meetings/{{ c.source_ref }}">встреча</a>{% elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif %}
     {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
   </div>
@@ -174,9 +219,12 @@
 
 {% macro task_card(c, meetings={}) %}
 {#- карточка на доске: только главное. Подробности, цитата и правка — в окне задачи (клик по карточке) #}
-<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}" data-task="{{ c.id }}">
+{% set is_new = c.status == 'open' and not c.seen_at %}
+<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' new' if is_new }}" data-task="{{ c.id }}"{% if is_new %} data-new="{{ c.id }}"{% endif %}>
   <div class="task-top">
     <span class="task-chips">
+      {{ new_chip(c) }}
+      {% if c.done_hint %}<span class="chip ok" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif %}
       {% if c.status == 'done' %}<span class="chip ok">✓ готово{% if c.closed_at %} {{ c.closed_at | local('%d.%m') }}{% endif %}</span>{% endif %}
       {% if c.kaiten_card_id %}<span class="chip" title="Есть карточка в Kaiten">Kaiten #{{ c.kaiten_card_id }}</span>{% endif %}
       {% if c.created and c.status == 'open' %}<span class="muted small" title="Когда задача появилась в PULSE">от {{ c.created | local('%d.%m') }}</span>{% endif %}
@@ -184,11 +232,15 @@
     {{ due_badge(c) }}
   </div>
   <button type="button" class="task-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
-  <div class="task-who">
-    {%- if c.direction == 'mine' %}<b>Я</b> → {{ c.whom or '—' }}
-    {%- elif c.direction == 'to_me' %}<b>{{ c.who or '?' }}</b> → мне
-    {%- else %}<b>{{ c.who or '?' }}</b> → {{ c.whom or '—' }}{% endif -%}
+  <div class="task-who">{{ task_people(c) }}</div>
+  {% if c.parent or c.children %}
+  <div class="task-rel">
+    {%- if c.parent %}<span title="Часть задачи «{{ c.parent.headline }}» ({{ c.parent.route }})">↳ часть {{ task_ref(c.parent) }}</span>{% endif %}
+    {%- if c.late_vs_parent %} <span class="chip warn" title="Срок основной задачи — {{ c.parent.due | date }}">позже срока задачи</span>{% endif %}
+    {%- if c.children %}{% set ready = c.children | selectattr('status', 'equalto', 'done') | list | length %}
+    <span class="chip {{ 'ok' if c.kids_done }}" title="{% for k in c.children %}{{ k.headline }} — {{ k.route }}{{ ' (готово)' if k.status == 'done' }}{{ '\n' if not loop.last }}{% endfor %}">подзадачи {{ ready }}/{{ c.children | length }}</span>{% endif -%}
   </div>
+  {% endif %}
   <div class="task-foot">
     <span class="muted small task-src">{{ task_source(c, meetings) }}</span>
     <span class="actions">
