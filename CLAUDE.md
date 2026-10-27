@@ -23,7 +23,7 @@
 | Календарь | база | `./ops calendar --days 7` |
 | Брифы к встречам | база (тексты — `data/briefs/`) | `./ops briefs pending / context <uid> / show <uid>` |
 | Итоги недели, сводка групп | база, раздел «Дайджесты» | `./ops week`, `./ops messages groups` |
-| Загрузка людей | база | раздел «Люди» и строка над доской задач |
+| Загрузка людей | база | раздел «Люди» |
 | Очередь подтверждений | база | `./ops proposals list` |
 | База знаний: решения, уроки, удачи | база (копия — `data/knowledge/Антология.md`) | `./ops kb search "<тема>"`, `./ops kb list --kind decision\|lesson\|win`, `./ops kb add …` |
 | Документы директора (презентации, Excel, Word, PDF, заметки) | индекс папок `knowledge.folders` | `./ops docs search "<слова>"`, `./ops docs show "<файл>" [--part "слайд 3"]`, `./ops docs recent` |

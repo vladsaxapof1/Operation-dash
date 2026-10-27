@@ -505,7 +505,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
                       due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
                       gantt_w=min(max(gantt_w, 200), 720), sort=sort, sorts=records.SORTS, new=new == "1",
-                      focus=task, extra=extra, parent_task=parent_task, workload=records.workload())
+                      focus=task, extra=extra, parent_task=parent_task)
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
     return response

@@ -189,7 +189,8 @@ def test_pages_show_briefs_reminders_workload_followup(client, monkeypatch):
     assert 'class="ev-ok"' in home and "Открыть бриф" in home and "• **" not in home and "1. Что с планом?" in home
     week = client.get("/calendar").text
     assert 'class="ev-ok"' in week and 'class="dlg dlg-brief"' in week
-    assert "Загрузка" in client.get("/commitments").text and "задач 1" in client.get("/people").text
+    assert "Загрузка" not in client.get("/commitments").text, "на доске задач загрузку не показываем"
+    assert 'class="load"' in client.get("/people").text and "задач 1" in client.get("/people").text
 
     from opsdash.sources import telegram
 
