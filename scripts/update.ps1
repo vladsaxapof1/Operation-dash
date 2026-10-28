@@ -23,7 +23,8 @@ if (Test-Path "$Root\.git") {
 }
 
 Write-Host "==> Обновляю библиотеки" -ForegroundColor Cyan
-& $uvPath sync --no-dev
+# в папке из git (у разработчика) оставляем и инструменты разработки: тесты — как при обновлении кнопкой
+if (Test-Path "$Root\.git") { & $uvPath sync } else { & $uvPath sync --no-dev }
 if ($LASTEXITCODE -ne 0) { throw "uv sync завершился с ошибкой" }
 
 Write-Host "==> Запускаю PULSE" -ForegroundColor Cyan

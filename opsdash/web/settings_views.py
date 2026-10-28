@@ -371,7 +371,9 @@ def register(app: FastAPI, render, back) -> None:
     async def pachca_save(request: Request, token: str = Form(""), enabled: str = Form(None)):
         from opsdash.sources import pachca
 
-        config.update_settings("pachca", {"enabled": checkbox(enabled)})
+        # первый токен — директор подключает Пачку: читать сразу, а не ждать, пока заметит галочку
+        first = bool(token.strip()) and not config.get_secret("PACHCA_TOKEN")
+        config.update_settings("pachca", {"enabled": checkbox(enabled) or first})
         msg = "Сохранено"
         if token.strip():
             config.set_secret("PACHCA_TOKEN", token.strip())
@@ -379,7 +381,8 @@ def register(app: FastAPI, render, back) -> None:
                 n = await run_in_threadpool(pachca.refresh_chats)
             except Exception as e:  # noqa: BLE001
                 return back(request, err=f"Токен сохранён, но список чатов не получен: {e}")
-            msg = f"Сохранено. Чатов в Пачке: {n} — отметьте, какие читать"
+            msg = (f"Сохранено{', чтение Пачки включено' if first else ''}. Чатов в Пачке: {n} — "
+                   "отметьте, какие читать")
         collect_soon("pachca")
         return back(request, msg)
 

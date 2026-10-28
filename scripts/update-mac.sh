@@ -23,8 +23,11 @@ chmod +x "$ROOT/ops" "$ROOT"/*.command "$ROOT"/scripts/*.sh
 
 step "Обновляю библиотеки"
 UV="$(find_uv)" || die "uv не найден — запустите INSTALL.command"
-# shellcheck disable=SC2046
-"$UV" sync --no-dev $(uv_extras)
+# в папке из git (у разработчика) оставляем и инструменты разработки: тесты — как при обновлении кнопкой
+NODEV="--no-dev"
+[ -d "$ROOT/.git" ] && NODEV=""
+# shellcheck disable=SC2046,SC2086
+"$UV" sync $NODEV $(uv_extras)
 
 step "Перезапускаю PULSE"
 "$ROOT/ops" mac install

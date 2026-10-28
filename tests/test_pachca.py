@@ -258,3 +258,21 @@ def test_original_link_and_settings_tab(fake, monkeypatch):
     assert 'id="pachca-chats"' in page and 'data-show="-1"' not in page  # «никогда» — только у Telegram
     client.post("/settings/chats", data={"source": "pachca", "chat__20": "1", "ajax": "1"})
     assert store.scalar("SELECT enabled FROM chats WHERE source='pachca' AND chat_id='20'") == 1
+
+
+def test_first_token_turns_reading_on(fake, monkeypatch):
+    """Галочку «Читать Пачку» при подключении легко не заметить — первый токен включает чтение сам."""
+    from urllib.parse import unquote
+
+    from opsdash.web.app import app
+
+    config.set_secret("PACHCA_TOKEN", None)
+    client = TestClient(app, base_url="http://localhost:8765")
+    real_http = pachca._http
+    monkeypatch.setattr(pachca, "_http", lambda transport=None: real_http(httpx.MockTransport(fake)))
+    r = client.post("/settings/pachca", data={"token": "first-token"}, follow_redirects=False)
+    assert "чтение Пачки включено" in unquote(r.headers["location"]) and config.load_settings()["pachca"]["enabled"]
+    client.post("/settings/pachca", data={})  # сняла галочку сама — так и остаётся
+    assert not config.load_settings()["pachca"]["enabled"]
+    client.post("/settings/pachca", data={"token": "other-token"})  # сменила токен — галочку не трогаем
+    assert not config.load_settings()["pachca"]["enabled"]
