@@ -28,6 +28,18 @@
   {% if full and a.why %}<div class="meta">Почему важно: {{ a.why }}</div>{% endif %}
   {% if full and a.msg_text %}<div class="meta">«{{ a.msg_text[:400] }}{% if a.msg_text|length > 400 %}…{% endif %}»</div>{% endif %}
   {% if a.draft %}<div class="draft" data-copy>{{ a.draft }}</div>{% endif %}
+  {% if a.done_hint %}
+  {% set h = a.done_hint %}
+  <div class="dlg-hint">
+    <div><b>Похоже, вы уже ответили.</b> {{ h.reason }}</div>
+    {% if h.payload.quote %}<div class="dlg-quote">«{{ h.payload.quote }}»</div>{% endif %}
+    <div class="actions">
+      <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm ok">Да, убрать</button></form>
+      <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Нет, ещё не ответила</button></form>
+      {% for label, url in proposal_links(h) if label != 'Нужен ответ' %}<a class="btn sm ghost" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
   <div class="att-actions">
     <span class="actions">
       {% if a.draft %}<button class="btn sm" data-copy-btn>Копировать ответ</button>{% endif %}
@@ -105,6 +117,16 @@
 <button type="button" class="btn sm ghost icon" data-task-open="{{ c.id }}" data-edit title="Изменить задачу">{{ pencil() }}</button>
 {%- endmacro %}
 
+{% macro work_button(c, small=False) -%}
+{#- «В работе»: карточка сверху колонки и зелёная; нажать ещё раз — снять -#}
+<form class="inline" method="post" action="/commitments/{{ c.id }}/work"><input type="hidden" name="on" value="{{ 0 if c.in_work else 1 }}"><button class="btn{{ ' sm' if small }} work{{ ' on' if c.in_work }}" aria-pressed="{{ 'true' if c.in_work else 'false' }}" title="{{ 'Снять отметку «в работе»' if c.in_work else 'Отметить, что вы этим занимаетесь: задача встанет наверх колонки' }}">В работе</button></form>
+{%- endmacro %}
+
+{% macro archive_button(c, small=False) -%}
+{#- архив: задача пропадает с доски, из списков и дайджестов, статус не меняется; вернуть — из списка «Архив» -#}
+<form class="inline" method="post" action="/commitments/{{ c.id }}/archive"><input type="hidden" name="on" value="{{ 0 if c.archived_at else 1 }}"><button class="btn{{ ' sm' if small }} ghost" title="{{ 'Вернуть задачу на доску' if c.archived_at else 'Убрать с доски; найти — в списке, фильтр «Архив»' }}">{{ 'Из архива' if c.archived_at else 'В архив' }}</button></form>
+{%- endmacro %}
+
 {% macro task_source(c, meetings={}) -%}
 {%- if c.source_type == 'meeting' and c.source_ref %}<a href="/meetings/{{ c.source_ref }}">{{ ('встреча «' ~ meetings[c.source_ref] ~ '»') if meetings.get(c.source_ref) else 'встреча' }}</a>
 {%- elif c.source_type and c.source_type != 'manual' %}{{ SOURCE_TITLES.get(c.source_type, c.source_type) }}
@@ -120,6 +142,8 @@
     <div class="dlg-top">
       <span class="chip {{ 'acc' if c.direction == 'mine' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>
       {% if c.status != 'open' %}<span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
+      {% if c.in_work %}<span class="chip work">в работе</span>{% endif %}
+      {% if c.archived_at %}<span class="chip">в архиве</span>{% endif %}
       {{ due_badge(c) }}
       <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
     </div>
@@ -161,13 +185,15 @@
       <div class="dlg-actions">
         {% if c.status == 'open' %}
         <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn primary">✓ Готово</button></form>
+        {{ work_button(c) }}
         {% else %}
-        <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn">Вернуть в работу</button></form>
+        <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn">Вернуть</button></form>
         {% endif %}
         {% if c.link %}<a class="btn" href="{{ c.link }}" target="_blank" rel="noopener" title="{{ c.link_title }}">↗ {{ c.link_label }}</a>{% endif %}
         <button type="button" class="btn" data-dlg-edit>{{ pencil() }} Изменить</button>
         {% if c.status == 'open' %}<a class="btn" href="/commitments?add={{ 'to_me' if c.direction == 'mine' else 'other' }}&parent={{ c.id }}#add" title="Передать часть работы: кто, что и к какому сроку">+ Подзадача</a>{% endif %}
         <span class="grow"></span>
+        {{ archive_button(c) }}
         {% if c.status == 'open' %}<form class="inline" method="post" action="/commitments/{{ c.id }}" data-confirm="Отменить задачу «{{ title }}»?"><input type="hidden" name="status" value="cancelled"><button class="btn ghost danger">Отменить задачу</button></form>{% endif %}
       </div>
     </div>
@@ -194,9 +220,10 @@
 {% macro commitment(c, show_dir=False, compact=False) %}
 {#- строка списка: заголовок, кто и срок, кнопки под текстом. Клик по строке — карточка задачи.
     compact — узкая колонка (сводка): Telegram — иконкой #}
-<li class="cm{{ ' new' if c.status == 'open' and not c.seen_at }}" data-task="{{ c.id }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
+<li class="cm{{ ' new' if c.status == 'open' and not c.seen_at }}{{ ' inwork' if c.in_work }}" data-task="{{ c.id }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
   <div>
     {{ new_chip(c) }}
+    {% if c.in_work %}<span class="chip work">в работе</span>{% endif %}
     {% if show_dir %}<span class="chip {{ 'acc' if c.direction == 'mine' else '' }}">{{ {'mine': 'моя задача', 'to_me': 'мне должны', 'other': 'между коллегами'}[c.direction] }}</span>{% endif %}
     <button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
   </div>
@@ -211,7 +238,10 @@
     {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
   </div>
   <div class="actions cm-actions">
-    {% if c.status == 'open' %}
+    {% if c.archived_at %}
+    {{ archive_button(c, small=True) }}
+    {% elif c.status == 'open' %}
+    {{ work_button(c, small=True) }}
     <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненным">✓ Готово</button></form>
     {% else %}
     <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
@@ -228,9 +258,10 @@
 {% set is_new = c.status == 'open' and not c.seen_at %}
 {#- data-rel — связанные задачи: при наведении они подсвечиваются на доске (app.js) #}
 {% set rel = (c.children or []) | map(attribute='id') | list + ([c.parent.id] if c.parent else []) %}
-<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' new' if is_new }}" data-task="{{ c.id }}"{% if is_new %} data-new="{{ c.id }}"{% endif %}{% if rel %} data-rel="{{ rel | join(' ') }}"{% endif %}>
+<div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' new' if is_new }}{{ ' inwork' if c.in_work }}" data-task="{{ c.id }}"{% if is_new %} data-new="{{ c.id }}"{% endif %}{% if rel %} data-rel="{{ rel | join(' ') }}"{% endif %}>
   <div class="task-top">
     <span class="task-chips">
+      {% if c.in_work %}<span class="chip work" title="Вы отметили, что занимаетесь этой задачей — она сверху колонки">в работе</span>{% endif %}
       {{ new_chip(c) }}
       {% if c.done_hint %}<span class="chip ok" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif %}
       {% if c.status == 'done' %}<span class="chip ok">✓ готово{% if c.closed_at %} {{ c.closed_at | local('%d.%m') }}{% endif %}</span>{% endif %}
@@ -255,9 +286,11 @@
     <span class="muted small task-src">{{ task_source(c, meetings) }}</span>
     <span class="actions">
       {% if c.status == 'open' %}
+      {{ work_button(c, small=True) }}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm" title="Отметить выполненной">✓ Готово</button></form>
       {% else %}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm ghost">Вернуть</button></form>
+      {{ archive_button(c, small=True) }}
       {% endif %}
       {{ task_link(c, compact=True) }}
       {{ edit_button(c) }}

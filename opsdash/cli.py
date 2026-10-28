@@ -580,6 +580,10 @@ def _commitment_line(c: dict) -> str:
         line += f" · до {c['due']}" + (" (ПРОСРОЧЕНО)" if c.get("overdue") else "")
     if c["status"] != "open":
         line += f" · {c['status']}"
+    if c.get("in_work"):
+        line += " · в работе"
+    if c.get("archived_at"):
+        line += " · в архиве"
     if c["kaiten_card_id"]:
         line += f" · kaiten #{c['kaiten_card_id']}"
     if c["source_type"]:
@@ -619,6 +623,10 @@ def cmd_commitments(a) -> None:
                                       title=a.title, who=a.who, whom=a.whom, parent_id=a.parent)
         except ValueError as e:
             fail(str(e))
+        if a.in_work:
+            records.set_in_work(a.id, a.in_work == "on")
+        if a.archived:
+            records.set_archived(a.id, a.archived == "on")
         out("Сохранено")
 
 
@@ -630,8 +638,18 @@ def cmd_attention(a) -> None:
         if a.json:
             return as_json(items)
         for x in items:
-            out(f"[{x['id']}] {x['priority']} · {x['status']} · {x['source']} · «{x['chat_title']}» · {x['sender_name']}: "
-                f"{x['summary']} (сообщение {x['message_id']})" + (f"\n    черновик: {short(x['draft'], 300)}" if x["draft"] else ""))
+            marks = ""
+            if x["status"] == "open" and x["reopened_at"]:
+                marks += f" · вернула вручную {store.local(x['reopened_at'])}"
+            if x["done_hint"]:
+                marks += " · предложено закрыть, ждёт директора"
+            out(f"[{x['id']}] {x['priority']} · {x['status']}{marks} · {x['source']} · «{x['chat_title']}» · "
+                f"{x['sender_name']}: {x['summary']} (сообщение {x['message_id']})"
+                + (f"\n    черновик: {short(x['draft'], 300)}" if x["draft"] else ""))
+            if x["status"] == "open":
+                for r in records.replies_after(x):
+                    out(f"    после вопроса вы писали [{r['id']}] {store.local(r['ts'])}"
+                        f"{' (ответ на это сообщение)' if r['is_reply'] else ''}: {short(r['text'], 200)}")
         if not items:
             out("Никто не ждёт ответа.")
     elif a.action == "add":
@@ -763,6 +781,9 @@ def cmd_propose(a) -> None:
         elif a.kind == "done":
             p = proposals.propose_task_done(commitment_id=a.commitment, quote=a.quote, batch=a.batch, reason=a.reason,
                                             source_ref=source_ref)
+        elif a.kind == "answered":
+            p = proposals.propose_answered(attention_id=a.attention, quote=a.quote, batch=a.batch, reason=a.reason,
+                                           source_ref=source_ref)
         elif a.kind == "remind":
             p = proposals.propose_reminder(commitment_id=a.commitment, text=a.text, batch=a.batch, reason=a.reason,
                                            source_ref=source_ref)
@@ -1050,7 +1071,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("commitments", help="обещания и договорённости")
     ms = s.add_subparsers(dest="action", required=True)
     x = ms.add_parser("list")
-    x.add_argument("--status", default="open", choices=["open", "done", "cancelled", "all"])
+    x.add_argument("--status", default="open", choices=["open", "done", "cancelled", "all", "archived"],
+                   help="archived — архив (без него архивные не показываются)")
     x.add_argument("--direction", choices=["mine", "to_me", "other"])
     x.add_argument("--person")
     x.add_argument("--overdue", action="store_true")
@@ -1078,6 +1100,8 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--who")
     x.add_argument("--whom")
     x.add_argument("--parent", type=int, help="сделать частью задачи с этим id (0 — отвязать)")
+    x.add_argument("--in-work", choices=["on", "off"], help="отметка «В работе» (по просьбе директора)")
+    x.add_argument("--archived", choices=["on", "off"], help="убрать в архив или вернуть (по просьбе директора)")
     s.set_defaults(fn=cmd_commitments)
 
     s = sub.add_parser("attention", help="где ждут ответа директора")
@@ -1158,6 +1182,10 @@ def build_parser() -> argparse.ArgumentParser:
     x = ps.add_parser("done", parents=[common], help="закрыть задачу PULSE, которая выглядит выполненной")
     x.add_argument("--commitment", type=int, required=True, help="id задачи (./ops commitments list)")
     x.add_argument("--quote", help="дословно, откуда видно, что сделано ([чч:мм:сс] для встречи)")
+    x = ps.add_parser("answered", parents=[common],
+                      help="убрать «нужен ответ»: по её сообщению видно, что директор ответила")
+    x.add_argument("--attention", type=int, required=True, help="id пункта (./ops attention list)")
+    x.add_argument("--quote", help="её ответ дословно; --source — это сообщение (telegram:<id>)")
     s.set_defaults(fn=cmd_propose)
 
     s = sub.add_parser("proposals", help="очередь подтверждений")

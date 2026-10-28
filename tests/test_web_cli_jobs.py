@@ -621,6 +621,57 @@ def test_tick_submits_enabled_sources(monkeypatch, settings_with):
     assert "triage" not in started  # нет новых сообщений
 
 
+def test_triage_button_collects_fresh_messages_first(monkeypatch, settings_with, client):
+    """После включения компьютера сбор Telegram мог не пройти: кнопка «Разобрать» сначала забирает сообщения."""
+    import queue
+
+    settings_with(telegram={"enabled": True})
+
+    def fake_collect(**_):
+        time.sleep(0.3)
+        store.add_message({"source": "telegram", "chat_id": "2", "chat_title": "Пётр", "msg_id": "1",
+                           "sender_name": "Пётр", "text": "Есть комментарии?", "ts": store.utcnow()})
+        return "новых сообщений: 1"
+
+    monkeypatch.setitem(jobs.REGISTRY, "collect:telegram", fake_collect)
+    monkeypatch.setattr(jobs.brain, "run", lambda prompt, **k: store.execute("UPDATE messages SET processed=1"))
+    monkeypatch.setattr(jobs, "_queues", {"light": queue.Queue()})
+    stop = threading.Event()
+    worker = threading.Thread(target=jobs._worker, args=("light", stop), daemon=True)
+    worker.start()
+    try:
+        assert jobs.job_triage(force=True) == "разобрано 1 из 1"
+    finally:
+        stop.set()
+        worker.join(5)
+
+    page = client.get("/inbox").text
+    assert "последний разбор" not in page  # job_triage вызван напрямую — в журнал не писал
+    store.log("triage", "ок: новых сообщений нет")
+    page = client.get("/inbox").text
+    assert "Все собранные сообщения разобраны" in page and "последний разбор" in page
+    assert "новых сообщений нет" in page
+
+
+def test_task_in_work_and_archive_buttons(client):
+    cid = records.add_commitment(direction="mine", what="Подготовить отчёт для правления", title="Отчёт для правления")
+    other = records.add_commitment(direction="mine", what="Созвониться с юристом")
+    client.post(f"/commitments/{cid}/work", data={"on": "1"})
+    board = client.get("/commitments").text
+    assert 'class="chip work"' in board and " inwork" in board
+    assert board.index("Отчёт для правления") < board.index("Созвониться с юристом"), "«в работе» — сверху колонки"
+    client.post(f"/commitments/{cid}/work", data={"on": "0"})
+    assert records.get_commitment(cid)["in_work_at"] is None
+
+    client.post(f"/commitments/{other}/archive", data={"on": "1"})
+    assert "Созвониться с юристом" not in client.get("/commitments").text
+    assert "Архив · 1" in client.get("/commitments").text
+    archived = client.get("/commitments?view=list&status=archived").text
+    assert "Созвониться с юристом" in archived and "Из архива" in archived
+    client.post(f"/commitments/{other}/archive", data={"on": "0"})
+    assert "Созвониться с юристом" in client.get("/commitments").text
+
+
 def test_run_job_records_errors():
     with pytest.raises(Exception):
         jobs.run_job("collect:kaiten")  # Kaiten не настроен

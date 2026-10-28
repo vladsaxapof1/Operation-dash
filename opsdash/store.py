@@ -171,6 +171,8 @@ CREATE TABLE IF NOT EXISTS commitments (
     parent_id INTEGER,               -- часть какой задачи: директор передала работу дальше (Пётр → мне, для Тимура)
     seen_at TEXT,                    -- когда директор увидела задачу; пусто — «новая» (добавил Claude)
     reminded_at TEXT,                -- когда напомнили исполнителю в Telegram (кнопка «Отправить»)
+    in_work_at TEXT,                 -- директор отметила «В работе»: карточка сверху колонки, зелёная
+    archived_at TEXT,                -- убрана в архив: не видна на доске, в списках и дайджестах
     created TEXT, updated TEXT, closed_at TEXT
 );
 
@@ -183,6 +185,7 @@ CREATE TABLE IF NOT EXISTS attention (
     draft TEXT,
     priority TEXT DEFAULT 'normal',  -- high | normal | low
     status TEXT DEFAULT 'open',      -- open | done | dismissed
+    reopened_at TEXT,                -- директор вернула закрытый пункт: сам по ответу в чате он больше не закрывается
     created TEXT, updated TEXT
 );
 
@@ -289,6 +292,9 @@ MIGRATIONS = [
     # задачи, которые были до появления отметки «новая», — уже просмотрены
     ("commitments", "seen_at", "TEXT", "UPDATE commitments SET seen_at=COALESCE(created, updated, '')"),
     ("commitments", "reminded_at", "TEXT"),
+    ("attention", "reopened_at", "TEXT"),
+    ("commitments", "in_work_at", "TEXT"),
+    ("commitments", "archived_at", "TEXT"),
 ]
 
 

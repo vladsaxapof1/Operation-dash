@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import pytest
+
 from opsdash import config, records, store
 
 
@@ -53,33 +55,101 @@ def test_people_upsert_merges_aliases_and_find():
     assert records.find_person("Сидоров") is None
 
 
-def test_attention_autoclose_in_group_only_by_reply():
-    store.upsert_chat("telegram", "-5", "Операционка", "group", enabled=1)
-    store.add_message({"source": "telegram", "chat_id": "-5", "chat_title": "Операционка", "msg_id": "1",
-                       "sender_name": "Олег", "text": "Анна, что ответить клиенту?", "ts": "2026-10-25T08:00:00+00:00"})
-    mid = store.row("SELECT id FROM messages WHERE msg_id='1'")["id"]
-    records.add_attention(message_id=mid, summary="Олег ждёт ответа клиенту")
-    store.add_message({"source": "telegram", "chat_id": "-5", "chat_title": "Операционка", "msg_id": "2",
-                       "sender_name": "Я", "is_outgoing": True, "text": "Гляну после обеда", "ts": "2026-10-25T08:05:00+00:00"})
-    assert records.autoclose_answered() == 0, "обычное сообщение в группе — не ответ"
-    store.add_message({"source": "telegram", "chat_id": "-5", "chat_title": "Операционка", "msg_id": "3",
-                       "sender_name": "Я", "is_outgoing": True, "text": "14 дней", "ts": "2026-10-25T09:00:00+00:00",
-                       "reply_to": "1"})
-    assert records.autoclose_answered() == 1
+def _msg(chat: str, msg_id: str, sender: str, text: str, ts: str, **extra) -> int:
+    store.add_message({"source": "telegram", "chat_id": chat, "chat_title": "Пётр", "msg_id": msg_id,
+                       "sender_name": sender, "text": text, "ts": ts, "is_outgoing": sender == "Я", **extra})
+    return store.row("SELECT id FROM messages WHERE chat_id=? AND msg_id=?", (chat, msg_id))["id"]
 
 
-def test_attention_autoclose_after_reply():
+def test_attention_closes_only_after_approval(capsys):
+    """Любое её сообщение в чате — ещё не ответ: Claude по смыслу предлагает закрыть, директор подтверждает."""
+    from opsdash import cli, jobs, proposals
+
     store.upsert_chat("telegram", "1", "Пётр", "private", enabled=1)
-    store.add_message({"source": "telegram", "chat_id": "1", "chat_title": "Пётр", "msg_id": "10",
-                       "sender_name": "Пётр", "text": "Согласуете?", "ts": "2026-10-25T09:00:00+00:00"})
-    mid = store.row("SELECT id FROM messages")["id"]
-    aid = records.add_attention(message_id=mid, summary="Пётр ждёт согласования", priority="high")
+    mid = _msg("1", "10", "Пётр", "Посмотришь задачи по счетам? Нужны комментарии", "2026-10-27T14:23:00+00:00")
+    aid = records.add_attention(message_id=mid, summary="Дать комментарии по задачам")
     assert records.add_attention(message_id=mid, summary="обновлено") == aid  # без дублей
-    assert records.autoclose_answered() == 0
-    store.add_message({"source": "telegram", "chat_id": "1", "chat_title": "Пётр", "msg_id": "11",
-                       "sender_name": "Я", "is_outgoing": True, "text": "Да", "ts": "2026-10-25T09:05:00+00:00"})
-    assert records.autoclose_answered() == 1
+    other = _msg("1", "11", "Я", "Не знаю, спроси у Олега", "2026-10-27T15:27:00+00:00")
+    jobs.job_housekeeping()
+    assert [a["id"] for a in records.list_attention("open")] == [aid], "сообщение о другом не закрывает пункт"
+
+    cli.main(["attention", "list"])
+    assert f"после вопроса вы писали [{other}]" in capsys.readouterr().out, "Claude видит, что она писала"
+    with pytest.raises(proposals.ProposalError):
+        proposals.propose_answered(attention_id=aid, source_ref=f"telegram:{other}")  # без довода
+    p = proposals.propose_answered(attention_id=aid, reason="ответила", quote="Не знаю", source_ref=f"telegram:{other}")
+    assert p["status"] == "pending" and records.list_attention("open")[0]["done_hint"]["id"] == p["id"]
+    proposals.reject(p["id"])
+    assert records.list_attention("open")[0]["done_hint"] is None
+    with pytest.raises(proposals.ProposalError, match="Нет"):
+        proposals.propose_answered(attention_id=aid, reason="ответила", source_ref=f"telegram:{other}")
+
+    answer = _msg("1", "12", "Я", "Посмотрел, по второй задаче ок, по остальным правки в документе",
+                  "2026-10-28T08:00:00+00:00")
+    p = proposals.propose_answered(attention_id=aid, reason="дал комментарии", quote="по второй задаче ок",
+                                   source_ref=f"telegram:{answer}")
+    assert "похоже, вы ответили" in p["title"] and "Ваш ответ" in proposals.describe(p)
+    assert proposals.approve(p["id"])["status"] == "done"
     assert records.list_attention("open") == []
+
+
+def test_reopened_attention_needs_a_newer_answer():
+    from opsdash import proposals
+
+    store.upsert_chat("telegram", "1", "Пётр", "private", enabled=1)
+    mid = _msg("1", "10", "Пётр", "Согласуете?", "2026-10-25T09:00:00+00:00")
+    old = _msg("1", "11", "Я", "Да", "2026-10-25T09:05:00+00:00")
+    aid = records.add_attention(message_id=mid, summary="Пётр ждёт согласования")
+    records.close_attention(aid, "done")
+    records.close_attention(aid, "open")  # «Вернуть»: это был не ответ
+    with pytest.raises(proposals.ProposalError, match="вернула"):
+        proposals.propose_answered(attention_id=aid, reason="ответила «Да»", source_ref=f"telegram:{old}")
+    p = proposals.propose_answered(attention_id=aid, reason="ответила", source_ref="manual:")
+    records.close_attention(aid, "done")  # закрыла сама — предложение больше не ждёт ответа
+    assert proposals.get(p["id"])["status"] == "done"
+
+
+def test_replies_after_in_group_marks_direct_reply():
+    store.upsert_chat("telegram", "-5", "Операционка", "group", enabled=1)
+    mid = _msg("-5", "1", "Олег", "Анна, что ответить клиенту?", "2026-10-25T08:00:00+00:00")
+    _msg("-5", "2", "Я", "Гляну после обеда", "2026-10-25T08:05:00+00:00")
+    _msg("-5", "3", "Я", "14 дней", "2026-10-25T09:00:00+00:00", reply_to="1")
+    records.add_attention(message_id=mid, summary="Олег ждёт ответа клиенту")
+    replies = records.replies_after(records.list_attention("open")[0])
+    assert [(r["text"], r["is_reply"]) for r in replies] == [("Гляну после обеда", False), ("14 дней", True)]
+
+
+def test_in_work_goes_first_and_archive_hides():
+    today = config.now().date()
+    soon = records.add_commitment(direction="mine", what="Срочное", due=today.isoformat())
+    later = records.add_commitment(direction="mine", what="Не к спеху", due=(today + timedelta(days=9)).isoformat())
+    owed = records.add_commitment(direction="to_me", who="Пётр", what="Прислать отчёт", due=today.isoformat())
+    assert [c["id"] for c in records.list_commitments(direction="mine")] == [soon, later]
+
+    records.set_in_work(later, True)
+    mine = records.commitments_board()["mine"]
+    assert [c["id"] for c in mine] == [later, soon] and mine[0]["in_work"] and not mine[1]["in_work"]
+    assert [c["id"] for c in records.list_commitments(direction="mine", sort="created")][0] == later
+    records.set_in_work(later, False)
+    assert [c["id"] for c in records.list_commitments(direction="mine")] == [soon, later]
+
+    records.set_in_work(owed, True)
+    records.set_archived(owed, True)
+    assert not records.get_commitment(owed)["in_work"], "в архиве — уже не в работе"
+    assert owed not in [c["id"] for c in records.list_commitments()]
+    assert owed not in [c["id"] for c in records.commitments_board()["to_me"]]
+    assert records.reminders() == [] and owed not in [o["id"] for o in records.task_options()]
+    assert [c["id"] for c in records.list_commitments(status="archived")] == [owed]
+    assert records.add_commitment(direction="to_me", who="Пётр", what="прислать отчёт") == owed, \
+        "убранную в архив задачу Claude не заводит заново"
+    records.set_archived(owed, False)
+    assert owed in [c["id"] for c in records.list_commitments()]
+
+    records.update_commitment(soon, status="done")
+    assert [c["id"] for c in records.commitments_board()["done"]] == [soon]
+    records.set_archived(soon, True)
+    assert records.commitments_board()["done"] == []
+    assert records.list_commitments(status="archived")[0]["status"] == "done", "архив не меняет статус"
 
 
 def test_settings_roundtrip_and_hhmm(settings_with):

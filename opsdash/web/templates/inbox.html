@@ -3,8 +3,9 @@
 {% block title %}Нужен ответ{% endblock %}
 {% block content %}
 <div class="topline">
-  <div><h1>Нужен ваш ответ</h1><div class="muted">Claude отмечает сообщения, где от вас ждут решения или ответа, и готовит черновик</div></div>
-  <form method="post" action="/jobs/run"><input type="hidden" name="name" value="triage"><button class="btn">Разобрать новые сейчас</button></form>
+  <div><h1>Нужен ваш ответ</h1><div class="muted">Claude отмечает сообщения, где от вас ждут решения или ответа, и готовит черновик</div>
+    <div class="muted small">{% if triage.busy %}Забираю свежие сообщения и разбираю — обновите страницу через минуту-две{% else %}{% if triage.pending %}Ждут разбора: {{ triage.pending }}{% else %}Все собранные сообщения разобраны{% endif %}{% if triage.last_ts %} · последний разбор {{ triage.last_ts | ago }}: {{ triage.last }}{% endif %}{% endif %}</div></div>
+  <form method="post" action="/jobs/run"><input type="hidden" name="name" value="triage"><button class="btn" {{ 'disabled' if triage.busy }}>Разобрать новые сейчас</button></form>
 </div>
 
 <section class="card">

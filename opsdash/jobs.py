@@ -92,12 +92,32 @@ def job_process_meeting(meeting_id: str, **_) -> str:
     return "готово"
 
 
+MESSAGE_SOURCES = ("telegram", "ymessenger", "mail", "gmail")
+
+
+def collect_messages_now(settings: dict, timeout: float = 180) -> None:
+    """Забрать свежие сообщения и дождаться сбора. Для кнопки «Разобрать новые сейчас»: без этого
+    Claude видит только собранное по расписанию — после включения компьютера сбор мог ещё не пройти."""
+    if not in_daemon():  # из командной строки — сбор идёт в PULSE, второй клиент Telegram ему помешает
+        return
+    names = {f"collect:{src}" for src in MESSAGE_SOURCES if settings[src].get("enabled")}
+    for name in names:
+        submit(name)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with _pending_lock:
+            if not names & _pending:
+                return
+        time.sleep(1)
+
+
 def job_triage(force: bool = False, **_) -> str:
     settings = config.load_settings()
-    closed = records.autoclose_answered()
+    if force:
+        collect_messages_now(settings)
     pending = store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0
     if not pending:
-        return f"новых сообщений нет (закрыто отвеченных: {closed})"
+        return "новых сообщений нет"
     if not force and not in_work_hours(settings):
         return "вне рабочего времени — разберу позже"
     prompt = (
@@ -106,7 +126,7 @@ def job_triage(force: bool = False, **_) -> str:
     )
     brain.run(prompt, model=settings["claude"]["model_triage"], job="triage")
     left = store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0
-    return f"разобрано {pending - left} из {pending}, закрыто отвеченных: {closed}"
+    return f"разобрано {pending - left} из {pending}"
 
 
 def job_digest(when: str | None = None, **_) -> str:
@@ -293,14 +313,13 @@ def job_voice(path: str, chat_id: str, reply_to: int | None = None, caption: str
 def job_housekeeping(**_) -> str:
     from opsdash import transcribe
 
-    closed = records.autoclose_answered()
     transcribe.release_if_idle()
     try:
         bot.flush_outbox()
     except Exception:  # noqa: BLE001
         pass
     store.execute("DELETE FROM outbox WHERE sent_at IS NOT NULL AND created < ?", (overview.since(24 * 30),))
-    return f"закрыто отвеченных: {closed}"
+    return "готово"
 
 
 def job_update_check(**_) -> str:

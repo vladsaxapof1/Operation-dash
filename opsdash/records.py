@@ -167,7 +167,29 @@ def mark_seen(cid: int) -> None:
 
 def unseen_count() -> int:
     """Сколько открытых задач директор ещё не видела (добавил Claude) — значок у «Задач» в меню."""
-    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND seen_at IS NULL") or 0
+    return store.scalar(
+        "SELECT COUNT(*) FROM commitments WHERE status='open' AND seen_at IS NULL AND archived_at IS NULL") or 0
+
+
+def set_in_work(cid: int, on: bool) -> None:
+    """«В работе»: директор взялась за задачу — карточка сверху своей колонки и зелёная. Снять — on=False."""
+    now = store.utcnow()
+    store.execute("UPDATE commitments SET in_work_at=?, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
+                  (now if on else None, now, now, cid))
+
+
+def set_archived(cid: int, on: bool) -> None:
+    """Убрать задачу в архив (или вернуть): статус не меняется, задача только пропадает с доски, из списков,
+    напоминаний и дайджестов. Архив — в списке задач, фильтр «Архив»."""
+    now = store.utcnow()
+    store.execute("UPDATE commitments SET archived_at=?, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
+                  (now if on else None, now, now, cid))
+    if on:  # задача больше не в работе; предложения Claude по ней («закрыть», «напомнить») не ждут ответа
+        store.execute("UPDATE commitments SET in_work_at=NULL WHERE id=?", (cid,))
+        store.execute(
+            "UPDATE proposals SET status='rejected', decided_at=?, result=? WHERE kind IN ('task.done', 'telegram.remind') "
+            "AND status='pending' AND json_extract(payload, '$.commitment_id')=?",
+            (now, store.json_col({"note": "задачу убрали в архив"}), cid))
 
 
 def _settle_done_proposals(cid: int, status: str) -> None:
@@ -294,7 +316,7 @@ def route(c: dict) -> str:
 def task_options() -> list[dict]:
     """Открытые задачи — подсказки для поля «Часть задачи» (при добавлении и в окне правки)."""
     out = store.rows("SELECT id, direction, who, whom, title, what FROM commitments WHERE status='open' "
-                     "ORDER BY created DESC, id DESC")
+                     "AND archived_at IS NULL ORDER BY created DESC, id DESC")
     for c in out:
         c["label"] = f"#{c['id']} · {headline(c)} · {route(c)}"
     return out
@@ -401,8 +423,8 @@ def reminders() -> list[dict]:
     Кому напомнили меньше суток назад — не показываем."""
     since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(hours=20))
     items = _mark(store.rows(
-        "SELECT * FROM commitments WHERE status='open' AND direction='to_me' AND due IS NOT NULL AND due <= ? "
-        "AND (reminded_at IS NULL OR reminded_at < ?) ORDER BY due, id",
+        "SELECT * FROM commitments WHERE status='open' AND archived_at IS NULL AND direction='to_me' "
+        "AND due IS NOT NULL AND due <= ? AND (reminded_at IS NULL OR reminded_at < ?) ORDER BY due, id",
         ((today_local() + timedelta(days=1)).isoformat(), since)))
     return add_links(items)
 
@@ -470,10 +492,15 @@ def list_commitments(*, status: str | None = "open", direction: str | None = Non
                      overdue: bool = False, q: str | None = None, limit: int = 500, created: Period | None = None,
                      due: Period | None = None, no_due: bool = False, unseen: bool = False,
                      sort: str = "due") -> list[dict]:
-    """sort: due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху."""
+    """sort: due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху.
+    Задачи «в работе» — всегда первыми. status="archived" — архив (любой статус), иначе архив не показываем."""
     where, params = _filters(person, q, created, due, no_due, unseen)
     sql = "SELECT * FROM commitments WHERE 1=1" + where
-    if status and status != "all":
+    if status == "archived":
+        sql += " AND archived_at IS NOT NULL"
+    else:
+        sql += " AND archived_at IS NULL"
+    if status and status not in ("all", "archived"):
         sql += " AND status=?"
         params.append(status)
     if direction:
@@ -482,10 +509,13 @@ def list_commitments(*, status: str | None = "open", direction: str | None = Non
     if overdue:
         sql += " AND due IS NOT NULL AND due < ?"
         params.append(today_local().isoformat())
-    if sort == "created":
-        sql += " ORDER BY created DESC, id DESC LIMIT ?"
+    in_work = "CASE WHEN status='open' AND in_work_at IS NOT NULL THEN 0 ELSE 1 END"
+    if status == "archived":
+        sql += " ORDER BY archived_at DESC, id DESC LIMIT ?"
+    elif sort == "created":
+        sql += f" ORDER BY {in_work}, created DESC, id DESC LIMIT ?"
     else:
-        sql += " ORDER BY CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
+        sql += f" ORDER BY {in_work}, CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
     params.append(limit)
     return _mark(store.rows(sql, params))
 
@@ -502,6 +532,7 @@ def _mark(items: list[dict]) -> list[dict]:
     today = now.date()
     for c in items:
         c["overdue"] = bool(c["due"] and c["due"] < today.isoformat() and c["status"] == "open")
+        c["in_work"] = bool(c.get("in_work_at") and c["status"] == "open")
         c["due_today"] = c["due"] == today.isoformat()
         c["due_tomorrow"] = c["due"] == (today + timedelta(days=1)).isoformat()
         due = _as_date(c["due"])
@@ -554,7 +585,8 @@ def commitments_board(*, person: str | None = None, q: str | None = None, done_d
                                  no_due=no_due, unseen=unseen, sort=sort) for d in DIRECTIONS}
     since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=done_days))
     where, params = _filters(person, q, created, due, no_due, unseen)
-    sql = "SELECT * FROM commitments WHERE status='done' AND COALESCE(closed_at, updated) >= ?" + where
+    sql = ("SELECT * FROM commitments WHERE status='done' AND archived_at IS NULL "
+           "AND COALESCE(closed_at, updated) >= ?" + where)
     board["done"] = _mark(store.rows(sql + " ORDER BY COALESCE(closed_at, updated) DESC LIMIT 300", [since, *params]))
     return board
 
@@ -582,7 +614,16 @@ def add_attention(*, summary: str, message_id: int | None = None, why: str | Non
 
 
 def close_attention(aid: int, status: str = "done") -> None:
-    store.execute("UPDATE attention SET status=?, updated=? WHERE id=?", (status, store.utcnow(), aid))
+    now = store.utcnow()
+    if status == "open":  # «Вернуть»: директор не согласна, что ответила
+        store.execute("UPDATE attention SET status='open', reopened_at=?, updated=? WHERE id=?", (now, now, aid))
+        return
+    store.execute("UPDATE attention SET status=?, updated=? WHERE id=?", (status, now, aid))
+    # закрыли сами — предложение Claude «похоже, вы ответили» больше не ждёт ответа
+    store.execute(
+        "UPDATE proposals SET status=?, decided_at=?, result=? WHERE kind='attention.done' AND status='pending' "
+        "AND json_extract(payload, '$.attention_id')=?",
+        ("done" if status == "done" else "rejected", now, store.json_col({"note": "закрыли вручную"}), aid))
 
 
 def list_attention(status: str = "open") -> list[dict]:
@@ -596,41 +637,32 @@ def list_attention(status: str = "open") -> list[dict]:
     )
     from opsdash import links
 
+    hints = {}
+    for p in store.rows("SELECT * FROM proposals WHERE kind='attention.done' AND status='pending' ORDER BY id"):
+        p["payload"] = store.loads(p["payload"], {})
+        hints[p["payload"].get("attention_id")] = p
     for a in items:  # кнопка «открыть в оригинале»: сообщение, чат или письмо
         a["orig_url"], a["orig_label"] = links.original(
             a["msg_source"] or a["source"], a["chat_id"], a["msg_ext_id"], a["msg_sender"]) or (None, None)
+        a["done_hint"] = hints.get(a["id"]) if a["status"] == "open" else None
     return items
 
 
-def autoclose_answered() -> int:
-    """Закрыть «нужен ответ», если директор ответила: в личном чате — любым сообщением
-    после вопроса, в группе — только ответом (reply) именно на это сообщение.
-    Остальное закрывает Claude при разборе или сама директор."""
-    closed = 0
-    for a in store.rows(
-        """SELECT a.id, m.source, m.chat_id, m.ts, m.msg_id, c.kind FROM attention a
-           JOIN messages m ON m.id=a.message_id
-           LEFT JOIN chats c ON c.source=m.source AND c.chat_id=m.chat_id
-           WHERE a.status='open'"""
-    ):
-        if a["kind"] == "private":
-            answered = store.scalar(
-                "SELECT 1 FROM messages WHERE source=? AND chat_id=? AND is_outgoing=1 AND ts > ? LIMIT 1",
-                (a["source"], a["chat_id"], a["ts"]),
-            )
-        elif a["source"] == "mail":
-            # ответ на письмо лежит в «Отправленных» с In-Reply-To = Message-ID исходного
-            answered = store.scalar(
-                "SELECT 1 FROM messages WHERE source='mail' AND is_outgoing=1 AND reply_to=? LIMIT 1", (a["msg_id"],))
-        else:
-            answered = store.scalar(
-                "SELECT 1 FROM messages WHERE source=? AND chat_id=? AND is_outgoing=1 AND reply_to=? LIMIT 1",
-                (a["source"], a["chat_id"], a["msg_id"]),
-            )
-        if answered:
-            close_attention(a["id"], "done")
-            closed += 1
-    return closed
+def replies_after(a: dict, limit: int = 5) -> list[dict]:
+    """Что директор писала в том же чате после вопроса — чтобы Claude по смыслу решил, ответила ли она
+    (сам по себе факт сообщения ничего не значит: она могла писать о другом). В почте — только ответ
+    на это письмо. is_reply — ответ (reply) именно на это сообщение."""
+    if not a.get("msg_ts"):
+        return []
+    if a.get("msg_source") == "mail":
+        rows = store.rows("SELECT id, ts, text, reply_to FROM messages WHERE source='mail' AND is_outgoing=1 "
+                          "AND reply_to=? ORDER BY ts LIMIT ?", (a["msg_ext_id"], limit))
+    else:
+        rows = store.rows("SELECT id, ts, text, reply_to FROM messages WHERE source=? AND chat_id=? AND is_outgoing=1 "
+                          "AND ts > ? ORDER BY ts LIMIT ?", (a["msg_source"], a["chat_id"], a["msg_ts"], limit))
+    for r in rows:
+        r["is_reply"] = bool(r["reply_to"]) and r["reply_to"] == a.get("msg_ext_id")
+    return rows
 
 
 # --- встречи ----------------------------------------------------------------

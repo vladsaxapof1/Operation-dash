@@ -2,7 +2,8 @@
 
 Claude никогда не пишет во внешние системы напрямую: он создаёт «предложение»
 (создать карточку, оставить комментарий, назначить встречу). Так же — закрыть задачу PULSE,
-если по переписке или встрече она выглядит выполненной: решает директор. Предложение
+если по переписке или встрече она выглядит выполненной, и пункт «нужен ответ», если директор,
+судя по её сообщению, уже ответила: решает директор. Предложение
 выполняется, когда директор нажимает «Да» в боте или в админке — либо сразу,
 если в настройках автономии для этого действия выбрано «auto».
 """
@@ -21,6 +22,7 @@ KINDS = {
     "calendar.create": "Создать встречу в календаре",
     "calendar.cancel": "Отменить встречу",
     "task.done": "Закрыть выполненную задачу",
+    "attention.done": "Закрыть «нужен ответ» — директор ответила",
     "telegram.remind": "Напомнить коллеге в Telegram",
 }
 
@@ -217,6 +219,35 @@ def propose_task_done(*, commitment_id: int, quote: str | None = None, batch: st
                    source_ref=source_ref, batch=batch)
 
 
+def propose_answered(*, attention_id: int, quote: str | None = None, batch: str | None = None,
+                     reason: str | None = None, source_ref: str | None = None) -> dict:
+    """«Нужен ответ»: судя по её сообщению, директор уже ответила — закрыть пункт после её «да».
+    source_ref — её сообщение с ответом (telegram:<id>), quote — дословно оттуда, reason — почему это ответ."""
+    a = store.row("SELECT * FROM attention WHERE id=?", (int(attention_id),))
+    if not a:
+        raise ProposalError(f"Нет пункта [{attention_id}] (./ops attention list)")
+    if a["status"] != "open":
+        raise ProposalError(f"Пункт [{attention_id}] уже закрыт")
+    if not (reason or "").strip():
+        raise ProposalError("Напишите в --reason, почему это ответ на вопрос")
+    ref = (source_ref or "").partition(":")[2]
+    msg = store.row("SELECT ts FROM messages WHERE id=?", (int(ref),)) if ref.isdigit() else None
+    if a["reopened_at"] and msg and msg["ts"] <= a["reopened_at"]:
+        raise ProposalError("Директор вернула этот пункт уже после этого сообщения — значит, это не ответ")
+    if source_ref and store.row(
+            "SELECT id FROM proposals WHERE kind='attention.done' AND status='rejected' AND source_ref=? "
+            "AND json_extract(payload, '$.attention_id')=?", (source_ref, a["id"])):
+        raise ProposalError("Директор уже ответила «Нет» на это предложение — по этому сообщению не предлагай")
+    dup = store.row("SELECT id FROM proposals WHERE kind='attention.done' AND status='pending' "
+                    "AND json_extract(payload, '$.attention_id')=?", (a["id"],))
+    if dup:
+        return get(dup["id"])
+    who = a["sender_name"] or a["chat_title"] or "?"
+    label = f"Закрыть «нужен ответ»: {who} — {a['summary'][:120]} — похоже, вы ответили"
+    return _create("attention.done", label, {"attention_id": a["id"], "quote": (quote or "").strip()},
+                   autonomy_key="attention_done", reason=reason.strip(), source_ref=source_ref, batch=batch)
+
+
 def propose_reminder(*, commitment_id: int, text: str | None = None, batch: str | None = None,
                      reason: str | None = None, source_ref: str | None = None) -> dict:
     """Напомнить исполнителю задачи «мне должны» в Telegram — сообщение уйдёт от имени директора, поэтому
@@ -335,6 +366,13 @@ def execute(p: dict) -> dict:
         telegram.send(pl["target"], pl["text"])
         records.mark_reminded(pl["commitment_id"])
         return {"commitment_id": pl["commitment_id"], "to": pl.get("to")}
+    if kind == "attention.done":
+        a = store.row("SELECT status FROM attention WHERE id=?", (pl["attention_id"],))
+        if not a:
+            raise ProposalError("Пункта уже нет")
+        if a["status"] == "open":
+            records.close_attention(pl["attention_id"], "done")
+        return {"attention_id": pl["attention_id"]}
     if kind == "task.done":
         c = store.row("SELECT status FROM commitments WHERE id=?", (pl["commitment_id"],))
         if not c:
@@ -373,6 +411,8 @@ def links(p: dict) -> list[tuple[str, str]]:
     cid = pl.get("commitment_id")
     if cid:
         out.append(("Задача", f"/commitments?task={cid}"))
+    if pl.get("attention_id"):
+        out.append(("Нужен ответ", "/inbox"))
     kind, _, ref = (p.get("source_ref") or "").partition(":")
     if kind == "meeting" and ref:
         out.append(("Встреча", f"/meetings/{ref}?tab=transcript" if p["kind"] == "task.done" else f"/meetings/{ref}"))
@@ -402,6 +442,15 @@ def describe(p: dict) -> str:
             lines.append(f"Почему: {p['reason']}")
         lines.append("«Да» — сообщение уйдёт от вашего имени из вашего Telegram.")
         return "\n".join(lines)
+    if p["kind"] == "attention.done":
+        if p.get("reason"):
+            lines.append(f"Почему так думаю: {p['reason']}")
+        if pl.get("quote"):
+            lines.append(f"Ваш ответ: «{pl['quote'][:400]}»")
+        if p.get("source_ref"):
+            lines.append(f"Источник: {_source_text(p['source_ref'])}")
+        lines.append("«Да» — пункт уйдёт из «Нужен ответ»; «Нет» — останется, пока не закроете сами.")
+        return "\n".join(lines)
     if p["kind"] == "task.done":
         if p.get("reason"):
             lines.append(f"Почему так думаю: {p['reason']}")
@@ -429,6 +478,8 @@ def describe(p: dict) -> str:
 def result_text(p: dict) -> str:
     if p["status"] == "done" and p["kind"] == "task.done":
         return "✅ Задача закрыта"
+    if p["status"] == "done" and p["kind"] == "attention.done":
+        return "✅ Убрано из «Нужен ответ»"
     if p["status"] == "done" and p["kind"] == "telegram.remind":
         return f"✅ Напоминание отправлено: {(p.get('payload') or {}).get('to') or ''}".rstrip(": ")
     if p["status"] == "done":

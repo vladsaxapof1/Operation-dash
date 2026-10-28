@@ -46,6 +46,7 @@
     <option value="open" {{ 'selected' if status == 'open' }}>Открытые</option>
     <option value="done" {{ 'selected' if status == 'done' }}>Выполненные</option>
     <option value="all" {{ 'selected' if status == 'all' }}>Все</option>
+    <option value="archived" {{ 'selected' if status == 'archived' }}>Архив</option>
   </select>
   {% endif %}
   <input type="text" name="person" value="{{ person }}" placeholder="Человек" list="people-list">
@@ -82,6 +83,7 @@
     <div class="kb-hint">{{ hint }}</div>
     <div class="kb-cards">
       {% for c in col %}{{ ui.task_card(c, meetings) }}{% else %}<div class="kb-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endfor %}
+      {% if key == 'done' and archived_count %}<a class="kb-archive small" href="?view=list&status=archived">Архив · {{ archived_count }}</a>{% endif %}
     </div>
     <button type="button" class="kb-summary" data-kb-fold title="Показать задачи">
       <span class="kb-summary-n">{{ col | length }}</span>
@@ -148,7 +150,7 @@
 </div>
 {% else %}
 <section class="card">
-  <div class="card-b flush"><ul class="list">{% for c in items %}{{ ui.commitment(c, show_dir=True) }}{% else %}<li class="empty">{{ 'Новых задач нет — все просмотрены.' if new else 'Ничего не найдено.' }}</li>{% endfor %}</ul></div>
+  <div class="card-b flush"><ul class="list">{% for c in items %}{{ ui.commitment(c, show_dir=True) }}{% else %}<li class="empty">{{ 'Новых задач нет — все просмотрены.' if new else ('В архиве пусто. «В архив» — в окне задачи и у выполненных на доске.' if status == 'archived' else 'Ничего не найдено.') }}</li>{% endfor %}</ul></div>
 </section>
 {% endif %}
 {#- ?task=<id>: окно задачи открывается само (app.js); если фильтры её прячут — окно отдельно #}

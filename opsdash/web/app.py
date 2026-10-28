@@ -449,8 +449,17 @@ def inbox(request: Request, chat: str = ""):
             "SELECT * FROM messages WHERE source=? AND chat_id=? ORDER BY ts DESC LIMIT 80", (source, chat_id))))
         chat_link = links.original(source, chat_id)
     closed = store.rows("SELECT * FROM attention WHERE status!='open' ORDER BY updated DESC LIMIT 15")
+    from opsdash import jobs
+
+    # чем кончился последний разбор — после кнопки «Разобрать» иначе не видно, что сообщений просто не было
+    last = store.row("SELECT ts, message FROM log WHERE job='triage' AND (message LIKE 'ок:%' OR level='error') "
+                     "ORDER BY id DESC LIMIT 1")
+    triage = {"busy": any(k.partition("|")[0] == "triage" for k in jobs.queued()),
+              "pending": store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0,
+              "last_ts": last["ts"] if last else None,
+              "last": last["message"].split("\n")[0].removeprefix("ок: ") if last else ""}
     return render(request, "inbox.html", nav="inbox", items=items, chats=chats, messages=messages, chat=chat,
-                  chat_link=chat_link, closed=closed)
+                  chat_link=chat_link, closed=closed, triage=triage)
 
 
 @app.post("/attention/{aid}/{action}")
@@ -505,7 +514,8 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
                       due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
                       gantt_w=min(max(gantt_w, 200), 720), sort=sort, sorts=records.SORTS, new=new == "1",
-                      focus=task, extra=extra, parent_task=parent_task)
+                      focus=task, extra=extra, parent_task=parent_task,
+                      archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0)
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
     return response
@@ -529,6 +539,19 @@ def commitment_add(request: Request, direction: str = Form(...), title: str = Fo
 def commitment_update(request: Request, cid: int, status: str = Form(None), due: str = Form(None)):
     records.update_commitment(cid, status=status or None, due=due or None)
     return back(request, "Сохранено")
+
+
+@app.post("/commitments/{cid}/work")
+def commitment_work(request: Request, cid: int, on: int = Form(1)):
+    """«В работе»: карточка закрепляется сверху своей колонки и отмечается зелёным; повторное нажатие — снять."""
+    records.set_in_work(cid, bool(on))
+    return back(request, "Задача в работе" if on else "Отметка «в работе» снята")
+
+
+@app.post("/commitments/{cid}/archive")
+def commitment_archive(request: Request, cid: int, on: int = Form(1)):
+    records.set_archived(cid, bool(on))
+    return back(request, "Задача в архиве — она в списке, фильтр «Архив»" if on else "Задача возвращена из архива")
 
 
 @app.post("/commitments/{cid}/edit")
