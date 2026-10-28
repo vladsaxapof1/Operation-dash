@@ -26,7 +26,7 @@
         {% if chat_link %}<a class="btn" href="{{ chat_link[0] }}" target="_blank" rel="noopener">↗ {{ chat_link[1] }}</a>{% endif %}
       </form>
       {% for m in messages %}
-        <div class="chat-msg {{ 'out' if m.is_outgoing }}"><span class="meta">{{ m.ts | local }}</span> <strong>{{ m.sender_name }}</strong>: {{ m.text }}</div>
+        <div class="chat-msg {{ 'out' if m.is_outgoing }}"><span class="meta">{{ m.ts | local }}{% if m.topic %} · {{ m.topic }}{% endif %}</span> <strong>{{ m.sender_name }}</strong>: {{ m.text }}</div>
       {% else %}
         <div class="muted small">{% if chat %}Сообщений нет.{% else %}Выберите чат, чтобы посмотреть последние сообщения.{% endif %}</div>
       {% endfor %}

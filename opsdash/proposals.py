@@ -393,12 +393,13 @@ def _source_text(source_ref: str | None) -> str:
         m = store.row("SELECT title, started_at FROM meetings WHERE id=?", (ref,))
         return f"встреча «{m['title'] or ref}» {store.local(m['started_at'], '%d.%m')}" if m else f"встреча {ref}"
     if kind in ("telegram", "ymessenger", "pachca", "mail") and ref.isdigit():
-        msg = store.row("SELECT chat_title, sender_name, ts FROM messages WHERE id=?", (int(ref),))
+        msg = store.row("SELECT chat_title, topic, sender_name, ts FROM messages WHERE id=?", (int(ref),))
         from opsdash import overview
 
         name = overview.SOURCE_TITLES.get(kind, kind)
         if msg:
-            return f"{name}, {msg['chat_title'] or msg['sender_name'] or ''}, {store.local(msg['ts'], '%d.%m')}"
+            chat = " · ".join(filter(None, (msg["chat_title"], msg["topic"]))) or msg["sender_name"] or ""
+            return f"{name}, {chat}, {store.local(msg['ts'], '%d.%m')}"
         return name
     return source_ref or ""
 

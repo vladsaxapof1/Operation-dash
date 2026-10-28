@@ -155,6 +155,101 @@ def test_telegram_dialogs_skip_migrated_groups_and_deleted_accounts():
     # время последнего сообщения — для сортировки «свежие сверху», даже у нечитаемых чатов
     assert store.scalar("SELECT last_ts FROM chats WHERE chat_id='42'") == "2026-10-26T09:30:00+00:00"
 
+
+def test_telegram_forum_group_reads_all_topics_and_keeps_topic_names(monkeypatch, settings_with, capsys):
+    from telethon.tl.functions.messages import GetForumTopicsByIDRequest
+    from telethon.tl.types import ForumTopicDeleted, MessageReplyHeader, User
+
+    from opsdash import cli, records
+
+    class Channel(SimpleNamespace):  # по имени класса сборщик понимает, что у сообщений бывают ссылки
+        pass
+
+    olga, me = User(id=5, first_name="Ольга"), User(id=1, first_name="Анна")
+    now = datetime.now(timezone.utc)
+
+    def msg(mid, text, reply=None, action=None):
+        return SimpleNamespace(
+            id=mid, message=text, action=action, out=False, sender=olga, sender_id=olga.id,
+            date=now - timedelta(minutes=60 - mid), reply_to=reply,
+            reply_to_msg_id=reply.reply_to_msg_id if reply else None,
+            voice=None, video_note=None, photo=None, video=None, document=None, sticker=None, file=None)
+
+    forum, broken, plain = (Channel(id=100, username=None, forum=True), Channel(id=200, username=None, forum=True),
+                            Channel(id=300, username=None, forum=False))
+    history = {
+        100: [msg(10, "Всем привет"),  # тема «General» — без пометки темой
+              msg(20, "", action=SimpleNamespace()),  # «тема создана» — служебное
+              msg(21, "Вчера 12 продаж", MessageReplyHeader(forum_topic=True, reply_to_msg_id=20)),
+              msg(22, "А сколько возвратов?", MessageReplyHeader(forum_topic=True, reply_to_msg_id=21,
+                                                                  reply_to_top_id=20)),
+              msg(23, "Привет!", MessageReplyHeader(reply_to_msg_id=10)),
+              msg(31, "Из удалённой темы", MessageReplyHeader(forum_topic=True, reply_to_msg_id=30))],
+        200: [msg(5, "Названий тем не узнать", MessageReplyHeader(forum_topic=True, reply_to_msg_id=4))],
+        300: [msg(7, "Ответ в обычной группе", MessageReplyHeader(reply_to_msg_id=6))],
+    }
+    dialogs = [SimpleNamespace(id=-1000000000000 - e.id, name=name, entity=e, date=now, is_user=False,
+                               is_channel=True, is_group=True, message=SimpleNamespace(id=history[e.id][-1].id))
+               for e, name in ((forum, "Отдел продаж"), (broken, "Сломанный форум"), (plain, "Склад"))]
+    requests = []
+
+    class Client:
+        async def get_me(self):
+            return me
+
+        async def iter_dialogs(self):
+            for d in dialogs:
+                yield d
+
+        async def iter_messages(self, entity, **kw):
+            for m in history[entity.id]:
+                yield m
+
+        async def __call__(self, request):
+            requests.append(request)
+            if request.peer is broken:
+                raise RuntimeError("TOPIC_ID_INVALID")
+            return SimpleNamespace(topics=[SimpleNamespace(id=1, title="General"),
+                                           SimpleNamespace(id=20, title="Итоги дня"), ForumTopicDeleted(id=30)])
+
+        async def disconnect(self):
+            pass
+
+    async def authorized(settings):
+        return Client()
+
+    monkeypatch.setattr(telegram, "_authorized_client", authorized)
+    for d in dialogs:
+        store.upsert_chat("telegram", str(d.id), d.name, "group", enabled=1)
+    assert telegram.collect(settings_with(telegram={"backfill_days": 3})) == "чатов прочитано: 3, новых сообщений: 7"
+
+    # названия тем — одним запросом на группу с темами, только по темам из пачки; у обычной группы не спрашиваем
+    assert [(type(r), r.peer, r.topics) for r in requests] == [
+        (GetForumTopicsByIDRequest, forum, [1, 20, 30]), (GetForumTopicsByIDRequest, broken, [4])]
+    rows = store.rows("SELECT msg_id, chat_title, topic, reply_to FROM messages ORDER BY id")
+    assert [(r["msg_id"], r["chat_title"], r["topic"], r["reply_to"]) for r in rows] == [
+        ("10", "Отдел продаж", "General", None),
+        ("21", "Отдел продаж", "Итоги дня", None),  # пометка «ответ на начало темы» — не ответ
+        ("22", "Отдел продаж", "Итоги дня", "21"),
+        ("23", "Отдел продаж", "General", "10"),
+        ("31", "Отдел продаж", None, None),  # тема удалена — без названия
+        ("5", "Сломанный форум", None, None),  # названия не получили — сообщение всё равно сохранено
+        ("7", "Склад", None, "6"),
+    ]
+    assert store.scalar("SELECT COUNT(*) FROM log WHERE job='telegram' AND level='warning'") == 1
+
+    cli.main(["messages", "pending", "--source", "telegram"])
+    out = capsys.readouterr().out
+    assert "Ольга в теме «Итоги дня» (ответ на 21): А сколько возвратов?" in out
+    assert "Ольга в теме «General»: Всем привет" in out and "Ольга (ответ на 6): Ответ в обычной группе" in out
+    cli.main(["messages", "chat", "Итоги дня"])
+    assert [line.split(": ", 1)[1] for line in capsys.readouterr().out.splitlines()] == [
+        "Вчера 12 продаж", "А сколько возвратов?"]
+
+    mid = store.scalar("SELECT id FROM messages WHERE msg_id='22'")
+    aid = records.add_attention(summary="Спрашивают про возвраты", message_id=mid)
+    assert store.scalar("SELECT chat_title FROM attention WHERE id=?", (aid,)) == "Отдел продаж · Итоги дня"
+
 def test_subtitles_docx_and_speaker_assignment(tmp_path):
     vtt = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n<v Пётр Иванов>Начнём со склада\n\n2\n00:00:05,000 --> 00:00:07,000\nАнна: Хорошо\n"
     cues = transcribe.parse_subtitles(vtt)

@@ -616,11 +616,12 @@ def add_attention(*, summary: str, message_id: int | None = None, why: str | Non
             )
             return dup["id"]
     now = store.utcnow()
+    msg = msg or {}
+    chat = " · ".join(filter(None, (msg.get("chat_title"), msg.get("topic"))))  # «Отдел продаж · Итоги дня»
     return store.execute(
         """INSERT INTO attention(message_id, source, chat_title, sender_name, summary, why, draft, priority, status,
            created, updated) VALUES(?,?,?,?,?,?,?,?,'open',?,?)""",
-        (message_id, (msg or {}).get("source"), (msg or {}).get("chat_title"), (msg or {}).get("sender_name"),
-         summary, why, draft, priority, now, now),
+        (message_id, msg.get("source"), chat or None, msg.get("sender_name"), summary, why, draft, priority, now, now),
     )
 
 

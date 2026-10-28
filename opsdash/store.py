@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS messages (
     source TEXT NOT NULL,
     chat_id TEXT NOT NULL,
     chat_title TEXT,
+    topic TEXT,                      -- тема в группе Telegram с темами
     msg_id TEXT NOT NULL,
     sender_id TEXT,
     sender_name TEXT,
@@ -295,6 +296,7 @@ MIGRATIONS = [
     ("attention", "reopened_at", "TEXT"),
     ("commitments", "in_work_at", "TEXT"),
     ("commitments", "archived_at", "TEXT"),
+    ("messages", "topic", "TEXT"),
 ]
 
 
@@ -488,10 +490,10 @@ def add_message(msg: dict) -> bool:
     with db() as conn:
         cur = conn.execute(
             """INSERT OR IGNORE INTO messages
-               (source, chat_id, chat_title, msg_id, sender_id, sender_name, is_outgoing, text, ts, reply_to, link)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+               (source, chat_id, chat_title, topic, msg_id, sender_id, sender_name, is_outgoing, text, ts, reply_to, link)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                msg["source"], str(msg["chat_id"]), msg.get("chat_title"), str(msg["msg_id"]),
+                msg["source"], str(msg["chat_id"]), msg.get("chat_title"), msg.get("topic"), str(msg["msg_id"]),
                 msg.get("sender_id"), msg.get("sender_name"), int(bool(msg.get("is_outgoing"))),
                 msg.get("text") or "", msg["ts"], msg.get("reply_to"), msg.get("link"),
             ),

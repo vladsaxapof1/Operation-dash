@@ -71,6 +71,32 @@ def _link(entity, msg_id: int) -> str | None:
     return f"https://t.me/{username}/{msg_id}" if username else f"https://t.me/c/{entity.id}/{msg_id}"
 
 
+GENERAL_TOPIC = 1  # тема «General» группы с темами: её сообщения Telegram не помечает темой
+
+
+def _forum_topic(m) -> tuple[int, int | None]:
+    """Сообщение группы с темами → (id темы, id сообщения, на которое это ответ). Каждое сообщение темы
+    Telegram помечает ответом на её первое сообщение — настоящим ответом это не считаем."""
+    r = m.reply_to
+    if not getattr(r, "forum_topic", False):
+        return GENERAL_TOPIC, m.reply_to_msg_id
+    if r.reply_to_top_id:
+        return r.reply_to_top_id, r.reply_to_msg_id
+    return r.reply_to_msg_id, None
+
+
+async def _topic_titles(client, entity, ids: set[int]) -> dict[int, str]:
+    """Названия тем по id. Не удалось узнать — сохраняем сообщения без названия темы."""
+    from telethon.tl.functions.messages import GetForumTopicsByIDRequest
+
+    try:
+        res = await client(GetForumTopicsByIDRequest(peer=entity, topics=sorted(ids)))
+    except Exception as e:  # noqa: BLE001
+        store.log(SOURCE, f"названия тем не получены: {e}", "warning")
+        return {}
+    return {t.id: t.title for t in res.topics if getattr(t, "title", None)}
+
+
 async def _authorized_client(settings: dict):
     client = _client(settings=settings)
     await client.connect()
@@ -137,6 +163,10 @@ async def _collect(settings: dict) -> str:
             else:
                 history = client.iter_messages(d.entity, offset_date=backfill, reverse=True, limit=300)
             batch = [m async for m in history]
+            # группа с темами читается целиком — все темы одним потоком; у сообщения запоминаем его тему
+            forum = bool(getattr(d.entity, "forum", False))
+            titles = await _topic_titles(client, d.entity, {_forum_topic(m)[0] for m in batch if not m.action}) \
+                if forum and batch else {}
             max_id = last_id
             for m in batch:
                 max_id = max(max_id, m.id)
@@ -147,17 +177,22 @@ async def _collect(settings: dict) -> str:
                 if not text or m.action:
                     continue
                 sender = m.sender
+                topic, reply_to = None, m.reply_to_msg_id
+                if forum:
+                    topic_id, reply_to = _forum_topic(m)
+                    topic = titles.get(topic_id)
                 new = store.add_message({
                     "source": SOURCE,
                     "chat_id": chat_id,
                     "chat_title": d.name,
+                    "topic": topic,
                     "msg_id": m.id,
                     "sender_id": str(m.sender_id or ""),
                     "sender_name": "Я" if m.out else (utils.get_display_name(sender) if sender else ""),
                     "is_outgoing": m.out,
                     "text": text[:8000],
                     "ts": store.to_utc_iso(m.date),
-                    "reply_to": str(m.reply_to_msg_id) if m.reply_to_msg_id else None,
+                    "reply_to": str(reply_to) if reply_to else None,
                     "link": _link(d.entity, m.id),
                 })
                 new_total += int(new)

@@ -221,8 +221,9 @@ def cmd_overview(a) -> None:
 
 def _msg_line(m: dict, mark: str = "", limit: int = 1500) -> str:
     who = m["sender_name"] or "?"
+    topic = f" в теме «{m['topic']}»" if m.get("topic") else ""
     reply = f" (ответ на {m['reply_to']})" if m.get("reply_to") and m["source"] != "mail" else ""
-    return f"[{m['id']}]{mark} {store.local(m['ts'])} {who}{reply}: {short(m['text'], limit)}"
+    return f"[{m['id']}]{mark} {store.local(m['ts'])} {who}{topic}{reply}: {short(m['text'], limit)}"
 
 
 def cmd_messages(a) -> None:
@@ -278,8 +279,8 @@ def cmd_messages(a) -> None:
             sql += " AND source=?"
             params.append(a.source)
         if a.chat:
-            sql += " AND chat_title LIKE ?"
-            params.append(f"%{a.chat}%")
+            sql += " AND (chat_title LIKE ? OR topic LIKE ?)"
+            params += [f"%{a.chat}%"] * 2
         sql += " ORDER BY ts DESC LIMIT ?"
         params.append(a.limit)
         items = store.rows(sql, params)
@@ -312,9 +313,9 @@ def cmd_messages(a) -> None:
             for m in c["messages"][-a.limit:]:
                 out(_msg_line(m))
     elif a.action == "chat":
-        sql = "SELECT * FROM messages WHERE chat_title LIKE ? AND ts >= ? ORDER BY ts DESC LIMIT ?"
+        sql = "SELECT * FROM messages WHERE (chat_title LIKE ? OR topic LIKE ?) AND ts >= ? ORDER BY ts DESC LIMIT ?"
         since = store.to_utc_iso(config.now() - timedelta(days=a.days))
-        items = list(reversed(store.rows(sql, (f"%{a.title}%", since, a.limit))))
+        items = list(reversed(store.rows(sql, (f"%{a.title}%", f"%{a.title}%", since, a.limit))))
         if not items:
             return out("Сообщений нет.")
         for m in items:
@@ -936,7 +937,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("query")
     x.add_argument("--days", type=int, default=60)
     x.add_argument("--source")
-    x.add_argument("--chat", help="часть названия чата")
+    x.add_argument("--chat", help="часть названия чата или темы")
     x.add_argument("--limit", type=int, default=50)
     x = ms.add_parser("show", help="сообщение с контекстом")
     x.add_argument("id", type=int)
@@ -944,7 +945,7 @@ def build_parser() -> argparse.ArgumentParser:
     x = ms.add_parser("groups", help="сообщения рабочих групп за последние часы — для сводки групп")
     x.add_argument("--hours", type=int, default=24)
     x.add_argument("--limit", type=int, default=150, help="не больше стольких последних сообщений на группу")
-    x = ms.add_parser("chat", help="последние сообщения чата по названию")
+    x = ms.add_parser("chat", help="последние сообщения чата (или темы группы) по названию")
     x.add_argument("title")
     x.add_argument("--days", type=int, default=7)
     x.add_argument("--limit", type=int, default=100)
