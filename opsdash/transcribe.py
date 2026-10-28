@@ -447,10 +447,15 @@ def transcribe_short(path: Path, settings: dict | None = None) -> str:
 
 _children: dict = {}  # процесс → остановлен ли он вместе с PULSE
 _children_lock = threading.Lock()
+WATCH_SECONDS = 15  # как часто спрашивать cancel, пока идёт расшифровка
 
 
 class Interrupted(Exception):
     """Процесс остановили вместе с PULSE — это не ошибка расшифровки."""
+
+
+class Cancelled(Exception):
+    """Считать дальше незачем (запись убрали из папки) — это не ошибка расшифровки."""
 
 
 class RemoteTraceback(Exception):
@@ -477,10 +482,12 @@ def _child_main(fn, args: tuple, conn) -> None:
         conn.close()
 
 
-def run_in_child(fn, *args):
+def run_in_child(fn, *args, cancel=None):
     """Выполнить fn(*args) в отдельном процессе и дождаться результата. Ошибка внутри —
     TranscribeError с тем же текстом; остановка PULSE (stop_children) — Interrupted.
-    fn — функция уровня модуля, аргументы и результат — простые данные (передаются через pickle)."""
+    fn — функция уровня модуля, аргументы и результат — простые данные (передаются через pickle).
+    cancel() спрашиваем раз в WATCH_SECONDS: вернула причину два раза подряд — процесс останавливаем,
+    Cancelled с этой причиной. Два раза — чтобы не отменить из-за мгновенной подмены файла облачной папкой."""
     ctx = multiprocessing.get_context("spawn")
     recv, send = ctx.Pipe(duplex=False)
     proc = ctx.Process(target=_child_main, args=(fn, args, send), daemon=True,
@@ -489,14 +496,25 @@ def run_in_child(fn, *args):
         proc.start()
         _children[proc] = False
     send.close()  # иначе не узнаем, что процесс завершился, ничего не прислав
-    ok = value = tb = None
+    ok = value = tb = cancelled = None
     try:
-        ok, value, tb = recv.recv()
+        strikes = 0
+        while cancel is not None and not recv.poll(WATCH_SECONDS):
+            try:
+                reason = cancel()
+            except Exception:  # noqa: BLE001 — база занята и т. п.: проверим в следующий раз
+                reason = None
+            strikes = strikes + 1 if reason else 0
+            if strikes >= 2:
+                cancelled = reason
+                break
+        if cancelled is None:
+            ok, value, tb = recv.recv()
     except EOFError:  # упал или его остановили
         pass
     finally:
         recv.close()
-        if ok is None and proc.is_alive():  # ждать перестали (Ctrl+C в ./ops run) — процесс больше не нужен
+        if ok is None and proc.is_alive():  # ждать перестали (отмена, Ctrl+C в ./ops run) — процесс больше не нужен
             proc.terminate()
         proc.join(30)
         if proc.is_alive():  # результат прислал, но завис при выходе
@@ -508,6 +526,8 @@ def run_in_child(fn, *args):
         return value
     if stopped:
         raise Interrupted("остановлено вместе с PULSE")
+    if cancelled:
+        raise Cancelled(cancelled)
     if ok is None:
         raise TranscribeError(f"Процесс расшифровки неожиданно завершился (код {proc.exitcode})")
     raise TranscribeError(value) from RemoteTraceback(tb)

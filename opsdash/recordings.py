@@ -148,6 +148,41 @@ def create_meeting(path: Path, title: str | None = None) -> str:
     return mid
 
 
+def source_gone(meeting_id: str) -> str | None:
+    """Почему расшифровывать встречу больше незачем: файл записи удалили из папки или положили на его место
+    другой (сменились размер или время). Только пока расшифровки нет: у готовой встречи файл можно удалять."""
+    m = store.row("SELECT source_file FROM meetings WHERE id=?", (meeting_id,))
+    if not m:
+        return "встречи больше нет"
+    if (records.meeting_dir(meeting_id) / "transcript.md").exists():
+        return None
+    path = Path(m["source_file"])
+    try:
+        st = path.stat()
+    except OSError:
+        return f"запись {path.name} удалили из папки"
+    seen = store.row("SELECT size, mtime FROM files_seen WHERE path=?", (str(path),))
+    if seen and seen["mtime"] and (st.st_size != seen["size"] or abs(st.st_mtime - seen["mtime"]) > 1):
+        return f"запись {path.name} заменили другим файлом"
+    return None
+
+
+def drop_meeting(meeting_id: str, reason: str) -> None:
+    """Убрать встречу, у которой нет ни расшифровки, ни записи. Файл забываем: если запись вернут
+    (или на том же месте окажется новая), PULSE найдёт её заново."""
+    m = store.row("SELECT source_file FROM meetings WHERE id=?", (meeting_id,))
+    if not m:
+        return
+    store.execute("DELETE FROM meetings WHERE id=?", (meeting_id,))
+    store.execute("DELETE FROM files_seen WHERE path=?", (m["source_file"],))
+    store.execute("DELETE FROM state WHERE key=?", (f"meeting_time_from_name:{meeting_id}",))
+    try:
+        records.meeting_dir(meeting_id).rmdir()  # папка пустая: расшифровки не было
+    except OSError:
+        pass
+    store.log("recordings", f"{reason} — встреча {meeting_id} убрана из очереди")
+
+
 def match_event(start: datetime, end: datetime) -> dict | None:
     """Встреча календаря, больше всего пересекающаяся с записью."""
     from opsdash import overview

@@ -934,6 +934,13 @@ def meeting_rerun(request: Request, mid: str, step: str = Form("process")):
     from opsdash import jobs
 
     if step == "transcribe":
+        m = records.get_meeting(mid)
+        if not m:
+            return back(request, err="Такой встречи нет")
+        if m["status"] in ("new", "transcribing"):  # иначе идущая расшифровка выглядела бы «в очереди»
+            return back(request, "Расшифровка уже идёт или ждёт очереди")
+        if not Path(m["source_file"]).exists():
+            return back(request, err="Файла записи больше нет в папке — расшифровать заново не из чего")
         records.update_meeting(mid, status="new", error="")
         jobs.submit("transcribe", "heavy", {"meeting_id": mid})
         return back(request, "Расшифровка поставлена в очередь")

@@ -11,7 +11,7 @@
   <div class="actions">
     {{ ui.meeting_status(m) }}
     <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn sm" {{ 'disabled' if m.status in ('new', 'transcribing') }}>Разобрать заново</button></form>
-    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="btn sm ghost">Расшифровать заново</button></form>
+    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="btn sm ghost" {{ 'disabled' if m.status in ('new', 'transcribing') }}>Расшифровать заново</button></form>
   </div>
 </div>
 

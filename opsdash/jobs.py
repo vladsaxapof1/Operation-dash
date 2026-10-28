@@ -18,6 +18,7 @@ from opsdash import bot, brain, config, overview, recordings, records, store
 
 _queues: dict[str, queue.Queue] = {}
 _pending: set[str] = set()
+_running: set[str] = set()  # из _pending — те, что выполняются прямо сейчас
 _pending_lock = threading.Lock()
 
 
@@ -44,7 +45,12 @@ def job_recordings(**_) -> str:
     for path in recordings.scan(settings):
         created.append(recordings.create_meeting(path))
     for m in store.rows("SELECT id FROM meetings WHERE status='new'"):
-        submit("transcribe", kind="heavy", args={"meeting_id": m["id"]})
+        args = {"meeting_id": m["id"]}
+        # запись убрали, пока встреча ждала очереди, — убираем и встречу; идущую расшифровку остановит она сама
+        if not running("transcribe", args) and (gone := recordings.source_gone(m["id"])):
+            recordings.drop_meeting(m["id"], gone)
+            continue
+        submit("transcribe", kind="heavy", args=args)
     return f"новых записей: {len(created)}"
 
 
@@ -52,12 +58,20 @@ def job_transcribe(meeting_id: str, **_) -> str:
     from opsdash import transcribe
 
     settings = config.load_settings()
+    if gone := recordings.source_gone(meeting_id):
+        recordings.drop_meeting(meeting_id, gone)
+        return gone
     try:
-        # в своём процессе: расшифровка держит GIL, и PULSE переставал отвечать
-        meta = transcribe.run_in_child(recordings.transcribe_meeting, meeting_id, settings)
+        # в своём процессе: расшифровка держит GIL, и PULSE переставал отвечать;
+        # запись удалили или подменили посреди расшифровки — останавливаем, а не считаем впустую час
+        meta = transcribe.run_in_child(recordings.transcribe_meeting, meeting_id, settings,
+                                       cancel=lambda: recordings.source_gone(meeting_id))
     except transcribe.Interrupted:
         # встреча остаётся «расшифровывается» — при запуске PULSE вернёт её в очередь
         return "прервано остановкой PULSE — продолжится при следующем запуске"
+    except transcribe.Cancelled as e:
+        recordings.drop_meeting(meeting_id, str(e))
+        return f"остановлено: {e}"
     except Exception as e:
         records.update_meeting(meeting_id, status="failed", error=str(e)[:1000])
         bot.notify(f"❌ Не получилось расшифровать запись <b>{bot.e(meeting_id)}</b>: {bot.e(e)}")
@@ -462,16 +476,25 @@ def _worker(kind: str, stop: threading.Event) -> None:
             name, args, key = q.get(timeout=1)
         except queue.Empty:
             continue
+        with _pending_lock:
+            _running.add(key)
         try:
             _safe_run(name, args)
         finally:
             with _pending_lock:
                 _pending.discard(key)
+                _running.discard(key)
 
 
 def queued() -> list[str]:
     with _pending_lock:
         return sorted(_pending)
+
+
+def running(name: str, args: dict | None = None) -> bool:
+    """Выполняется ли задание в очередях PULSE прямо сейчас (а не просто ждёт)."""
+    with _pending_lock:
+        return _key(name, args) in _running
 
 
 # --- расписание -----------------------------------------------------------------
