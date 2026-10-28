@@ -10,12 +10,21 @@
   </div>
   <div class="actions">
     {{ ui.meeting_status(m) }}
-    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn sm" {{ 'disabled' if m.status in ('new', 'transcribing') }}>Разобрать заново</button></form>
-    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="btn sm ghost" {{ 'disabled' if m.status in ('new', 'transcribing') }}>Расшифровать заново</button></form>
+    {% set in_queue = m.status in ('new', 'transcribing', 'paused') %}
+    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn sm" {{ 'disabled' if in_queue or not transcript }}>Разобрать заново</button></form>
+    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="btn sm ghost" {{ 'disabled' if in_queue or recording.size is none }} {% if recording.size is none %}title="Файла записи больше нет"{% endif %}>Расшифровать заново</button></form>
   </div>
 </div>
 
-{% if m.status == 'transcribing' %}<div class="card"><div class="card-b" style="padding-top:14px">Идёт расшифровка… <div class="progress"><div style="width: {{ ((m.progress or 0) * 100) | round }}%" data-meeting-progress="{{ m.id }}"></div></div><div class="hint">Страница обновится сама. Расшифровка идёт на этом компьютере — можно закрыть браузер.</div></div></div>{% endif %}
+{% if in_queue %}<div class="card"><div class="card-b" style="padding-top:14px">
+  {% if m.status == 'transcribing' %}Идёт расшифровка…{% elif m.status == 'paused' %}Расшифровка на паузе{% else %}Ждёт очереди на расшифровку{% endif %}
+  {% if m.status != 'new' %}<div class="progress{{ ' paused' if m.status == 'paused' }}"><div style="width: {{ ((m.progress or 0) * 100) | round }}%" data-meeting-progress="{{ m.id }}"></div></div>{% endif %}
+  <div class="actions" style="margin-top:10px">{{ ui.transcription_controls(m) }}</div>
+  <div class="hint">{% if m.status == 'paused' %}Компьютер не нагружается, следующие записи ждут. Продолжится с того же места; если PULSE перезапустить, расшифровка начнётся сначала.
+    {%- elif m.status == 'new' %}Начнётся, когда закончится расшифровка перед ней.
+    {%- else %}Страница обновится сама. Расшифровка идёт на этом компьютере — можно закрыть браузер. «Пауза» освобождает компьютер, прогресс сохраняется.{% endif %}</div>
+</div></div>{% endif %}
+{% if m.status == 'cancelled' %}<div class="alert info">Расшифровка отменена.{% if recording.size is not none %} <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="transcribe"><button class="btn sm">Расшифровать</button></form>{% endif %}</div>{% endif %}
 {% if m.status == 'processing' %}<div class="alert info">Claude разбирает встречу — обычно это 2–5 минут. Итог придёт в Telegram.</div>{% endif %}
 {% if m.status == 'failed' %}<div class="alert bad">Ошибка: {{ m.error }}</div>{% endif %}
 
@@ -126,6 +135,26 @@
     <section class="card">
       <div class="card-h"><h2>Название</h2></div>
       <div class="card-b"><form method="post" action="/meetings/{{ m.id }}/title"><input type="text" name="title" value="{{ m.title }}"><div class="form-actions"><button class="btn sm">Сохранить</button></div></form></div>
+    </section>
+    <section class="card">
+      <div class="card-h"><h2>Удалить</h2></div>
+      <div class="card-b">
+        {% if recording.size is none %}
+        <p class="muted small" style="margin-top:0">Файла записи уже нет{% if recording.name %}: {{ recording.name }}{% endif %}.</p>
+        {% elif transcript and not in_queue %}
+        <form method="post" action="/meetings/{{ m.id }}/delete" data-confirm="Удалить файл записи «{{ recording.name }}» ({{ recording.size | size }}) с диска? Расшифровка, разбор и задачи останутся, но расшифровать встречу заново будет нельзя."><input type="hidden" name="what" value="recording"><button class="btn sm">Удалить только запись · {{ recording.size | size }}</button></form>
+        <p class="hint">Освободит место на диске. Расшифровка, разбор и задачи останутся.</p>
+        {% endif %}
+        {% set confirm_all -%}
+          Удалить встречу «{{ m.title or m.id }}» целиком? Удалятся файл записи, расшифровка и разбор
+          {%- if memory.commitments %}, задачи и договорённости с неё ({{ memory.commitments }}){% endif %}
+          {%- if memory.proposals %}, предложения ({{ memory.proposals }}){% endif %}
+          {%- if memory.kb %}, записи базы знаний ({{ memory.kb }}){% endif %}, образцы голосов.
+          {%- if memory.in_kaiten %} Карточки в Kaiten ({{ memory.in_kaiten }}) останутся — их удаляют в Kaiten.{% endif %} Вернуть будет нельзя.
+        {%- endset %}
+        <form method="post" action="/meetings/{{ m.id }}/delete" data-confirm="{{ confirm_all }}" data-busy="Удаляю…"><input type="hidden" name="what" value="all"><button class="btn sm danger">Удалить встречу целиком</button></form>
+        <p class="hint">PULSE забудет встречу: файл записи, расшифровку и разбор, задачи и договорённости с неё, предложения, записи базы знаний, образцы голосов. Карточки, уже созданные в Kaiten, останутся там; упоминания в отправленных дайджестах и в сводке контекста Claude — тоже.</p>
+      </div>
     </section>
   </div>
 </div>

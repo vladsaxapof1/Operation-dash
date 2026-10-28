@@ -364,7 +364,7 @@ def handle_media(bot: Bot, msg: dict, chat_id: str) -> None:
         return
     meeting_id = recordings.create_meeting(target, title=(msg.get("caption") or None))
     bot.send(chat_id, f"📥 Получила «{e(name)}». Расшифрую и разберу — пришлю итог сюда.", reply_to=msg["message_id"])
-    jobs.submit("transcribe", kind="heavy", args={"meeting_id": meeting_id})
+    jobs.submit("transcribe", kind="transcribe", args={"meeting_id": meeting_id})
 
 
 def handle_callback(bot: Bot, cq: dict, chat_id: str) -> None:
@@ -562,7 +562,7 @@ def meetings_text() -> str:
     items = records.list_meetings(limit=8)
     if not items:
         return "Встреч пока нет."
-    status = {"processed": "✅", "failed": "❌", "transcribing": "⏳", "processing": "⏳", "transcribed": "📝", "new": "🆕"}
+    status = {"processed": "✅", "failed": "❌", "transcribing": "⏳", "paused": "⏸", "cancelled": "✖️", "processing": "⏳", "transcribed": "📝", "new": "🆕"}
     lines = ["<b>Последние встречи</b>"]
     for m in items:
         lines.append(f"{status.get(m['status'], '•')} {store.local(m['started_at'])} {e(m['title'] or m['id'])}"

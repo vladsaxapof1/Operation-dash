@@ -445,9 +445,13 @@ def transcribe_short(path: Path, settings: dict | None = None) -> str:
 # Whisper и разметка спикеров подолгу не отпускают GIL: в процессе PULSE на время расшифровки
 # часовой записи замирали админка и бот. Поэтому расшифровка встречи идёт в своём процессе.
 
-_children: dict = {}  # процесс → остановлен ли он вместе с PULSE
+_children: dict = {}  # процесс → почему остановлен: None — работает, SHUTDOWN — вместе с PULSE, иначе причина отмены
+_tags: dict = {}      # метка (id встречи) → процесс: чтобы поставить на паузу или отменить именно его
+_paused: set = set()  # замороженные процессы
+_guards: dict = {}    # процесс → замок, без которого он не трогает базу (store.set_guard)
 _children_lock = threading.Lock()
 WATCH_SECONDS = 15  # как часто спрашивать cancel, пока идёт расшифровка
+SHUTDOWN = "остановлено вместе с PULSE"
 
 
 class Interrupted(Exception):
@@ -455,7 +459,7 @@ class Interrupted(Exception):
 
 
 class Cancelled(Exception):
-    """Считать дальше незачем (запись убрали из папки) — это не ошибка расшифровки."""
+    """Считать дальше незачем (запись убрали из папки, расшифровку отменили) — это не ошибка расшифровки."""
 
 
 class RemoteTraceback(Exception):
@@ -465,8 +469,10 @@ class RemoteTraceback(Exception):
         return self.args[0]
 
 
-def _child_main(fn, args: tuple, conn) -> None:
+def _child_main(fn, args: tuple, conn, guard=None) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ctrl+C в окне PULSE: нас остановит сам PULSE
+    if guard is not None:
+        store.set_guard(guard)
     parent = multiprocessing.parent_process()
     if parent is not None:
         def watch() -> None:  # PULSE убит без остановки — не считаем впустую
@@ -482,19 +488,24 @@ def _child_main(fn, args: tuple, conn) -> None:
         conn.close()
 
 
-def run_in_child(fn, *args, cancel=None):
+def run_in_child(fn, *args, cancel=None, tag=None):
     """Выполнить fn(*args) в отдельном процессе и дождаться результата. Ошибка внутри —
     TranscribeError с тем же текстом; остановка PULSE (stop_children) — Interrupted.
     fn — функция уровня модуля, аргументы и результат — простые данные (передаются через pickle).
     cancel() спрашиваем раз в WATCH_SECONDS: вернула причину два раза подряд — процесс останавливаем,
-    Cancelled с этой причиной. Два раза — чтобы не отменить из-за мгновенной подмены файла облачной папкой."""
+    Cancelled с этой причиной. Два раза — чтобы не отменить из-за мгновенной подмены файла облачной папкой.
+    tag — по нему процесс ставят на паузу (pause / resume) и отменяют (stop — тоже Cancelled)."""
     ctx = multiprocessing.get_context("spawn")
     recv, send = ctx.Pipe(duplex=False)
-    proc = ctx.Process(target=_child_main, args=(fn, args, send), daemon=True,
+    guard = ctx.RLock() if tag is not None else None
+    proc = ctx.Process(target=_child_main, args=(fn, args, send, guard), daemon=True,
                        name=f"pult-{getattr(fn, '__name__', 'child')}")
     with _children_lock:
         proc.start()
-        _children[proc] = False
+        _children[proc] = None
+        if tag is not None:
+            _tags[tag] = proc
+            _guards[proc] = guard
     send.close()  # иначе не узнаем, что процесс завершился, ничего не прислав
     ok = value = tb = cancelled = None
     try:
@@ -514,6 +525,13 @@ def run_in_child(fn, *args, cancel=None):
         pass
     finally:
         recv.close()
+        with _children_lock:  # дальше процессом не управляют: он закончил или его сейчас остановим
+            if _tags.get(tag) is proc:
+                del _tags[tag]
+            paused = proc in _paused
+            _paused.discard(proc)
+        if paused:  # замороженный не завершится, пока его не разморозить
+            _unfreeze(proc)
         if ok is None and proc.is_alive():  # ждать перестали (отмена, Ctrl+C в ./ops run) — процесс больше не нужен
             proc.terminate()
         proc.join(30)
@@ -521,16 +539,90 @@ def run_in_child(fn, *args, cancel=None):
             proc.kill()
             proc.join()
         with _children_lock:
-            stopped = _children.pop(proc, False)
+            stopped = _children.pop(proc, None)
+            _guards.pop(proc, None)
     if ok:
         return value
-    if stopped:
-        raise Interrupted("остановлено вместе с PULSE")
-    if cancelled:
-        raise Cancelled(cancelled)
+    if stopped == SHUTDOWN:
+        raise Interrupted(SHUTDOWN)
+    if stopped or cancelled:
+        raise Cancelled(stopped or cancelled)
     if ok is None:
         raise TranscribeError(f"Процесс расшифровки неожиданно завершился (код {proc.exitcode})")
     raise TranscribeError(value) from RemoteTraceback(tb)
+
+
+def _freeze(proc, on: bool) -> None:
+    """Заморозить процесс (считать перестаёт, память и прогресс остаются) или разморозить.
+    На Windows нет SIGSTOP — там NtSuspendProcess."""
+    if os.name == "nt":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x0800, False, proc.pid)  # PROCESS_SUSPEND_RESUME
+        if not handle:
+            raise OSError("нет доступа к процессу расшифровки")
+        try:
+            (ctypes.windll.ntdll.NtSuspendProcess if on else ctypes.windll.ntdll.NtResumeProcess)(handle)
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        os.kill(proc.pid, signal.SIGSTOP if on else signal.SIGCONT)
+
+
+def _unfreeze(proc) -> None:
+    try:
+        _freeze(proc, False)
+    except OSError:  # уже завершился
+        pass
+
+
+def _set_paused(tag, on: bool) -> bool:
+    with _children_lock:
+        proc = _tags.get(tag)
+        if proc is None:
+            return False
+        if (proc in _paused) != on:
+            guard = _guards.get(proc) if on else None
+            if guard is not None and not guard.acquire(timeout=10):  # пишет в базу дольше обычного — не сейчас
+                return False
+            try:
+                _freeze(proc, on)
+            except OSError:
+                return False
+            finally:
+                if guard is not None:
+                    guard.release()
+            (_paused.add if on else _paused.discard)(proc)
+    return True
+
+
+def pause(tag) -> bool:
+    """Поставить на паузу процесс с этой меткой. False — такого процесса нет."""
+    return _set_paused(tag, True)
+
+
+def resume(tag) -> bool:
+    """Продолжить процесс с этой меткой с того же места. False — такого процесса нет."""
+    return _set_paused(tag, False)
+
+
+def stop(tag, reason: str, timeout: float = 10) -> bool:
+    """Остановить процесс с этой меткой и дождаться, пока он завершится; run_in_child поднимет Cancelled(reason).
+    False — такого процесса нет."""
+    from multiprocessing import connection
+
+    with _children_lock:
+        proc = _tags.pop(tag, None)
+        if proc is None:
+            return False
+        _children[proc] = reason
+        paused = proc in _paused
+        _paused.discard(proc)
+    if paused:
+        _unfreeze(proc)
+    proc.terminate()
+    connection.wait([proc.sentinel], timeout)
+    return True
 
 
 def stop_children(timeout: float = 5) -> None:
@@ -538,7 +630,11 @@ def stop_children(timeout: float = 5) -> None:
     with _children_lock:
         procs = list(_children)
         for p in procs:
-            _children[p] = True
+            _children[p] = SHUTDOWN
+        paused = list(_paused)
+        _paused.clear()
+    for p in paused:
+        _unfreeze(p)
     for p in procs:
         p.terminate()
     for p in procs:

@@ -18,7 +18,7 @@
             <td class="nowrap">{{ m.started_at | local('%d.%m.%Y %H:%M') }}{% if m.duration_sec %}<div class="meta">{{ (m.duration_sec / 60) | round | int }} мин</div>{% endif %}</td>
             <td><a href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>{% if m.headline %}<div class="meta">{{ m.headline }}</div>{% endif %}
               {% if m.status == 'failed' and m.error %}<div class="meta" style="color:var(--bad)">{{ m.error[:200] }}</div>{% endif %}</td>
-            <td>{{ ui.meeting_status(m) }}</td>
+            <td>{{ ui.meeting_status(m) }}{% if m.status in ('new', 'transcribing', 'paused') %}<div class="actions tr-actions">{{ ui.transcription_controls(m) }}</div>{% endif %}</td>
           </tr>
         {% else %}
           <tr><td colspan="3" class="empty">Записей пока нет.</td></tr>

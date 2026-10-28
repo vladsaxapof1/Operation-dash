@@ -215,6 +215,8 @@ table.t tr.dim td { opacity: .55; }
 .transcript { font-size: 14.5px; }
 .progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 6px; max-width: 320px; }
 .progress > div { height: 100%; background: var(--accent); }
+.progress.paused > div { background: var(--muted); }
+.tr-actions { margin-top: 6px; flex-wrap: nowrap; }  /* «Пауза · Отменить» в списке встреч — одной строкой */
 
 /* встреча: кто в записи — подтвердить спикера */
 .list > li.spk { display: grid; gap: 4px; }
@@ -645,5 +647,6 @@ button.chip.ok { cursor: pointer; }
   .row { flex-direction: column; gap: 6px; }
   .card-h { flex-wrap: wrap; }
   table.t th, table.t td { padding: 8px; }
+  .tr-actions { flex-wrap: wrap; }
   input[type=text], input[type=password], input[type=number], select, textarea { max-width: 100%; }
 }

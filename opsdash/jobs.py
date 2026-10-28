@@ -1,8 +1,9 @@
 """Фоновые задания и расписание.
 
-Три очереди, каждая со своим потоком:
+Четыре очереди, каждая со своим потоком:
 - light — сбор сообщений, Kaiten, календаря, поиск новых записей;
-- heavy — расшифровка встреч и плановые запуски Claude;
+- heavy — плановые запуски Claude (разбор встреч и сообщений, дайджесты, брифы);
+- transcribe — расшифровка встреч: часовая запись или расшифровка на паузе не задерживают дайджесты;
 - interactive — вопросы директора из Telegram (не ждут часовую расшифровку).
 """
 
@@ -19,6 +20,7 @@ from opsdash import bot, brain, config, overview, recordings, records, store
 _queues: dict[str, queue.Queue] = {}
 _pending: set[str] = set()
 _running: set[str] = set()  # из _pending — те, что выполняются прямо сейчас
+_dropped: set[str] = set()  # из _pending — убранные из очереди (unqueue): поток их пропустит
 _pending_lock = threading.Lock()
 
 
@@ -44,13 +46,14 @@ def job_recordings(**_) -> str:
     created = []
     for path in recordings.scan(settings):
         created.append(recordings.create_meeting(path))
-    for m in store.rows("SELECT id FROM meetings WHERE status='new'"):
+    for m in store.rows("SELECT id, status FROM meetings WHERE status IN ('new','paused','cancelled')"):
         args = {"meeting_id": m["id"]}
-        # запись убрали, пока встреча ждала очереди, — убираем и встречу; идущую расшифровку остановит она сама
+        # запись убрали, пока встреча ждала очереди (стояла на паузе, отменена), — убираем и встречу;
+        # идущую расшифровку остановит она сама
         if not running("transcribe", args) and (gone := recordings.source_gone(m["id"])):
             recordings.drop_meeting(m["id"], gone)
-            continue
-        submit("transcribe", kind="heavy", args=args)
+        elif m["status"] == "new":
+            submit("transcribe", kind="transcribe", args=args)
     return f"новых записей: {len(created)}"
 
 
@@ -58,6 +61,9 @@ def job_transcribe(meeting_id: str, **_) -> str:
     from opsdash import transcribe
 
     settings = config.load_settings()
+    m = records.get_meeting(meeting_id)
+    if m and m["status"] in ("paused", "cancelled"):  # поставили на паузу или отменили, пока ждала очереди
+        return "на паузе" if m["status"] == "paused" else "отменена"
     if gone := recordings.source_gone(meeting_id):
         recordings.drop_meeting(meeting_id, gone)
         return gone
@@ -65,13 +71,15 @@ def job_transcribe(meeting_id: str, **_) -> str:
         # в своём процессе: расшифровка держит GIL, и PULSE переставал отвечать;
         # запись удалили или подменили посреди расшифровки — останавливаем, а не считаем впустую час
         meta = transcribe.run_in_child(recordings.transcribe_meeting, meeting_id, settings,
-                                       cancel=lambda: recordings.source_gone(meeting_id))
+                                       cancel=lambda: recordings.source_gone(meeting_id), tag=meeting_id)
     except transcribe.Interrupted:
         # встреча остаётся «расшифровывается» — при запуске PULSE вернёт её в очередь
         return "прервано остановкой PULSE — продолжится при следующем запуске"
     except transcribe.Cancelled as e:
-        recordings.drop_meeting(meeting_id, str(e))
-        return f"остановлено: {e}"
+        if gone := recordings.source_gone(meeting_id):  # запись убрали из папки или встречу удалили
+            recordings.drop_meeting(meeting_id, gone)
+            return f"остановлено: {gone}"
+        return f"остановлено: {e}"  # отменили кнопкой — статус встречи уже вернули
     except Exception as e:
         records.update_meeting(meeting_id, status="failed", error=str(e)[:1000])
         bot.notify(f"❌ Не получилось расшифровать запись <b>{bot.e(meeting_id)}</b>: {bot.e(e)}")
@@ -83,6 +91,8 @@ def job_transcribe(meeting_id: str, **_) -> str:
 
 def job_process_meeting(meeting_id: str, **_) -> str:
     settings = config.load_settings()
+    if not records.get_meeting(meeting_id):  # встречу удалили, пока разбор ждал очереди
+        return "встречи больше нет"
     records.update_meeting(meeting_id, status="processing", error="")
     prompt = (
         f"Разбери встречу `{meeting_id}` (папка data/meetings/{meeting_id}/). "
@@ -228,6 +238,8 @@ def job_briefs(uid: str | None = None, **_) -> str:
 def job_followup(meeting_id: str, **_) -> str:
     """Текст итогов встречи для участников (followup.md) — по кнопке «Подготовить с Claude» на странице встречи."""
     settings = config.load_settings()
+    if not records.get_meeting(meeting_id):
+        return "встречи больше нет"
     prompt = (
         f"Подготовь текст итогов встречи `{meeting_id}` для участников по шагу «Текст для участников» навыка "
         "process-meeting (.claude/skills/process-meeting/SKILL.md): прочитай data/meetings/"
@@ -456,6 +468,9 @@ def submit(name: str, kind: str = "light", args: dict | None = None) -> bool:
     key = _key(name, args)
     with _pending_lock:
         if key in _pending:
+            if key in _dropped:  # убрали из очереди и снова попросили — задание в ней ещё стоит, пусть выполнится
+                _dropped.discard(key)
+                return True
             return False
         _pending.add(key)
     _queues[kind].put((name, args, key))
@@ -477,6 +492,10 @@ def _worker(kind: str, stop: threading.Event) -> None:
         except queue.Empty:
             continue
         with _pending_lock:
+            if key in _dropped:
+                _dropped.discard(key)
+                _pending.discard(key)
+                continue
             _running.add(key)
         try:
             _safe_run(name, args)
@@ -488,7 +507,17 @@ def _worker(kind: str, stop: threading.Event) -> None:
 
 def queued() -> list[str]:
     with _pending_lock:
-        return sorted(_pending)
+        return sorted(_pending - _dropped)
+
+
+def unqueue(name: str, args: dict | None = None) -> bool:
+    """Убрать из очереди задание, которое ещё ждёт (выполняющееся не трогаем). True — убрали."""
+    key = _key(name, args)
+    with _pending_lock:
+        if key in _pending and key not in _running:
+            _dropped.add(key)
+            return True
+    return False
 
 
 def running(name: str, args: dict | None = None) -> bool:
@@ -614,16 +643,16 @@ def tick(settings: dict | None = None) -> list[str]:
 
 
 def start_workers(stop: threading.Event) -> list[threading.Thread]:
-    for kind in ("light", "heavy", "interactive"):
+    for kind in ("light", "heavy", "transcribe", "interactive"):
         _queues[kind] = queue.Queue()
-    # задания, прерванные выключением компьютера, — продолжаем
+    # задания, прерванные выключением компьютера, — продолжаем (поставленные на паузу ждут «Продолжить»)
     store.execute("UPDATE jobs SET running=0")
     for m in store.rows("SELECT id, status FROM meetings WHERE status IN ('transcribing','processing')"):
         records.update_meeting(m["id"], status="new" if m["status"] == "transcribing" else "transcribed")
         if m["status"] == "processing":
             submit("process-meeting", "heavy", {"meeting_id": m["id"]})
     threads = []
-    for kind in ("light", "heavy", "interactive"):
+    for kind in ("light", "heavy", "transcribe", "interactive"):
         t = threading.Thread(target=_worker, args=(kind, stop), daemon=True, name=f"worker-{kind}")
         t.start()
         threads.append(t)

@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -400,17 +400,26 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+_guard = None  # в процессе расшифровки — замок от PULSE: на паузу её ставят только вне обращения к базе
+
+
+def set_guard(lock) -> None:
+    global _guard
+    _guard = lock
+
+
 @contextmanager
 def db():
-    conn = connect()
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    with _guard or nullcontext():  # замороженный посреди записи процесс держал бы базу запертой для всего PULSE
+        conn = connect()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def rows(sql: str, params: Iterable[Any] = ()) -> list[dict]:

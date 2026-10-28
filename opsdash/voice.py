@@ -142,20 +142,31 @@ def voice_counts() -> dict[int, int]:
     return {int(pid): len(d.get("samples", {})) for pid, d in _people_data().items() if d.get("samples")}
 
 
-def _drop_sample(meeting_id: str, label: str) -> None:
-    """Отметка спикера оказалась ошибочной — его голос из этой записи больше ничей."""
+def _drop_sample(meeting_id: str, label: str | None) -> int:
+    """Отметка спикера оказалась ошибочной — его голос из этой записи больше ничей. label=None — все голоса
+    записи (встречу удалили). Вернуть, сколько образцов убрано."""
+    def match(d: dict) -> bool:
+        sample = d.get("samples", {}).get(meeting_id)
+        return sample is not None and (label is None or sample.get("speaker") == label)
+
+    removed = 0
     data = store.get_state(STATE_KEY) or {}
-    if (data.get("samples", {}).get(meeting_id) or {}).get("speaker") == label:
+    if match(data):
         del data["samples"][meeting_id]
         store.set_state(STATE_KEY, data)
+        removed += 1
     people = _people_data()
-    changed = False
-    for d in people.values():
-        if (d.get("samples", {}).get(meeting_id) or {}).get("speaker") == label:
-            del d["samples"][meeting_id]
-            changed = True
+    changed = [d for d in people.values() if match(d)]
+    for d in changed:
+        del d["samples"][meeting_id]
     if changed:
         store.set_state(PEOPLE_KEY, people)
+    return removed + len(changed)
+
+
+def forget_meeting(meeting_id: str) -> int:
+    """Встречу удалили — её образцы голосов (директора и людей) больше не учитываем."""
+    return _drop_sample(meeting_id, None)
 
 
 def voices() -> dict[str, object]:

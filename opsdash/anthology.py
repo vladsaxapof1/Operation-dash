@@ -90,6 +90,15 @@ def update(item_id: int, export_now: bool = True, **fields) -> None:
         export()
 
 
+def delete(item_ids: list[int]) -> None:
+    """Удалить записи совсем (источник удалили — например, встречу целиком)."""
+    with store.db() as conn:
+        for item_id in item_ids:
+            conn.execute("DELETE FROM anthology WHERE id=?", (item_id,))
+            _fts(conn, item_id)
+    export()
+
+
 def get(item_id: int) -> dict | None:
     r = store.row("SELECT * FROM anthology WHERE id=?", (item_id,))
     return _decorate([r])[0] if r else None

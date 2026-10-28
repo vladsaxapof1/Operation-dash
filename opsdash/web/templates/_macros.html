@@ -456,7 +456,15 @@
 {% endmacro %}
 
 {% macro meeting_status(m) %}
-{% set map = {'new': ('в очереди', ''), 'transcribing': ('расшифровка', 'warn'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')} %}
+{% set map = {'new': ('в очереди', ''), 'transcribing': ('расшифровка', 'warn'), 'paused': ('на паузе', ''), 'cancelled': ('отменена', ''), 'transcribed': ('расшифрована', 'acc'), 'processing': ('разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')} %}
 {% set s = map.get(m.status, (m.status, '')) %}
-<span class="chip {{ s[1] }}" data-meeting-status="{{ m.id }}">{{ s[0] }}{% if m.status == 'transcribing' and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span>
+<span class="chip {{ s[1] }}" data-meeting-status="{{ m.id }}">{{ s[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span>
+{% endmacro %}
+
+{#- пауза / «Продолжить» и отмена расшифровки, пока она ждёт очереди, идёт или стоит на паузе #}
+{% macro transcription_controls(m) %}
+{%- if m.status in ('new', 'transcribing', 'paused') %}
+<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription"><input type="hidden" name="action" value="{{ 'resume' if m.status == 'paused' else 'pause' }}"><button class="btn sm" title="{{ 'Продолжить с того же места' if m.status == 'paused' else 'Остановить на время: компьютер не нагружается, прогресс сохраняется' }}">{{ 'Продолжить' if m.status == 'paused' else 'Пауза' }}</button></form>
+<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription" data-confirm="Отменить расшифровку? Встреча останется, расшифровать её можно будет позже — с начала."><input type="hidden" name="action" value="cancel"><button class="btn sm ghost">Отменить</button></form>
+{%- endif %}
 {% endmacro %}

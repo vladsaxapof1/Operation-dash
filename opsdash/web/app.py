@@ -186,12 +186,14 @@ def f_note(text: str | None, limit: int = 400) -> str:
 
 
 def f_size(n: int | None) -> str:
-    """Размер файла: «340 КБ», «2,4 МБ»."""
+    """Размер файла: «340 КБ», «2,4 МБ», «1,8 ГБ»."""
     if not n:
         return ""
     if n < 1024 * 1024:
         return f"{max(1, round(n / 1024))} КБ"
-    return f"{n / 1024 / 1024:.1f} МБ".replace(".", ",")
+    if n < 1024 ** 3:
+        return f"{n / 1024 / 1024:.1f} МБ".replace(".", ",")
+    return f"{n / 1024 ** 3:.1f} ГБ".replace(".", ",")
 
 
 templates.env.filters.update(local=f_local, date=f_date, md=f_md, ago=f_ago, tg=f_tg_html, hhmm=config.hhmm,
@@ -375,7 +377,7 @@ def api_status():
     from opsdash import jobs
 
     meetings = [{"id": m["id"], "status": m["status"], "progress": m["progress"]}
-                for m in store.rows("SELECT id, status, progress FROM meetings WHERE status IN ('new','transcribing','processing')")]
+                for m in store.rows("SELECT id, status, progress FROM meetings WHERE status IN ('new','transcribing','paused','processing')")]
     running = [r["name"] for r in store.rows("SELECT name FROM jobs WHERE running=1")]
     return {"meetings": meetings, "running": running, "queued": jobs.queued()}
 
@@ -825,11 +827,13 @@ def meetings(request: Request):
 
 @app.get("/meetings/{mid}", response_class=HTMLResponse)
 def meeting(request: Request, mid: str, tab: str = "summary"):
-    from opsdash import voice
+    from opsdash import recordings, voice
 
     m = records.get_meeting(mid)
     if not m:
         return back(request, err="Встреча не найдена", to="/meetings")
+    src = Path(m["source_file"] or "")
+    recording = {"name": src.name, "size": src.stat().st_size if src.is_file() else None}
     summary = records.read_meeting_file(mid, "summary.md")
     transcript = records.read_meeting_file(mid, "transcript.md")
     related = proposals.list_proposals("all", batch=f"meeting:{mid}")
@@ -850,7 +854,8 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
                   # обрывки (меньше 10 с речи) сворачиваем, только когда спикеров много
                   describe=proposals.describe, speakers=[s for s in speakers if len(speakers) <= 4 or not s["short"] or s["who"]],
                   short_speakers=[s for s in speakers if len(speakers) > 4 and s["short"] and not s["who"]], guesses=guesses,
-                  people=records.list_people(), can_tidy=len(speakers) > 1 and not (records.meeting_dir(mid) / voice.PRINTS_FILE).exists())
+                  people=records.list_people(), can_tidy=len(speakers) > 1 and not (records.meeting_dir(mid) / voice.PRINTS_FILE).exists(),
+                  recording=recording, memory=recordings.memory(mid))
 
 
 @app.post("/meetings/{mid}/speaker")
@@ -925,7 +930,7 @@ async def meeting_upload(request: Request, file: UploadFile = File(...), title: 
     with open(dest, "wb") as fh:
         await run_in_threadpool(shutil.copyfileobj, file.file, fh)
     mid = recordings.create_meeting(dest, title.strip() or None)
-    jobs.submit("transcribe", "heavy", {"meeting_id": mid})
+    jobs.submit("transcribe", "transcribe", {"meeting_id": mid})
     return back(request, "Запись загружена — расшифровка началась", to=f"/meetings/{mid}")
 
 
@@ -933,19 +938,65 @@ async def meeting_upload(request: Request, file: UploadFile = File(...), title: 
 def meeting_rerun(request: Request, mid: str, step: str = Form("process")):
     from opsdash import jobs
 
+    from opsdash import recordings
+
     if step == "transcribe":
         m = records.get_meeting(mid)
         if not m:
             return back(request, err="Такой встречи нет")
-        if m["status"] in ("new", "transcribing"):  # иначе идущая расшифровка выглядела бы «в очереди»
-            return back(request, "Расшифровка уже идёт или ждёт очереди")
+        if m["status"] in recordings.IN_QUEUE:  # иначе идущая расшифровка выглядела бы «в очереди»
+            return back(request, "Расшифровка уже идёт, ждёт очереди или стоит на паузе")
         if not Path(m["source_file"]).exists():
             return back(request, err="Файла записи больше нет в папке — расшифровать заново не из чего")
         records.update_meeting(mid, status="new", error="")
-        jobs.submit("transcribe", "heavy", {"meeting_id": mid})
+        jobs.submit("transcribe", "transcribe", {"meeting_id": mid})
         return back(request, "Расшифровка поставлена в очередь")
     jobs.submit("process-meeting", "heavy", {"meeting_id": mid})
     return back(request, "Разбор поставлен в очередь")
+
+
+@app.post("/meetings/{mid}/transcription")
+def meeting_transcription(request: Request, mid: str, action: str = Form(...)):
+    """Пауза, «Продолжить» и отмена расшифровки — со страницы встречи и из списка встреч."""
+    from opsdash import recordings
+
+    done = {"pause": (recordings.pause, "Расшифровка на паузе — компьютер не нагружается"),
+            "resume": (recordings.resume, "Расшифровка продолжается"),
+            "cancel": (recordings.cancel, "Расшифровка отменена")}.get(action)
+    if not done:
+        return back(request, err="Не понял, что сделать с расшифровкой")
+    fn, msg = done
+    if not fn(mid):
+        return back(request, err="Сейчас это сделать нельзя — обновите страницу")
+    return back(request, msg)
+
+
+@app.post("/meetings/{mid}/delete")
+def meeting_delete(request: Request, mid: str, what: str = Form(...)):
+    """Удалить файл записи (встреча остаётся) или встречу целиком — со всем, что PULSE по ней запомнил."""
+    from opsdash import recordings
+
+    try:
+        if what == "recording":
+            name = recordings.delete_recording(mid)
+            return back(request, f"Файл записи {name} удалён. Расшифровка, разбор и задачи остались")
+        if what != "all":
+            return back(request, err="Не понял, что удалить")
+        m = records.get_meeting(mid)
+        done = recordings.forget_meeting(mid)
+    except recordings.MeetingError as e:
+        return back(request, err=str(e))
+    parts = [f"Встреча «{m['title'] or mid}» удалена"]
+    gone = [f"{label}: {done[key]}" for key, label in (("commitments", "задач"), ("proposals", "предложений"),
+                                                         ("kb", "записей базы знаний")) if done[key]]
+    if gone:
+        parts.append("вместе с ней — " + ", ".join(gone))
+    if done["in_kaiten"]:
+        parts.append(f"карточки в Kaiten ({done['in_kaiten']}) остались — удалите их там, если не нужны")
+    if done["file_error"]:
+        return back(request, msg="; ".join(parts), err=f"Файл записи удалить не получилось: {done['file_error']}",
+                    to="/meetings")
+    return back(request, "; ".join(parts), to="/meetings")
 
 
 @app.post("/meetings/{mid}/followup")

@@ -167,20 +167,160 @@ def source_gone(meeting_id: str) -> str | None:
     return None
 
 
+class MeetingError(Exception):
+    """Действие со встречей сейчас невозможно — текст для директора."""
+
+
+IN_QUEUE = ("new", "transcribing", "paused")  # расшифровка ждёт очереди, идёт или стоит на паузе
+
+
+def _remove(meeting_id: str, source_file: str, *, forget_file: bool) -> None:
+    store.execute("DELETE FROM meetings WHERE id=?", (meeting_id,))
+    if forget_file:  # если запись вернут (или на том же месте окажется новая), PULSE найдёт её заново
+        store.execute("DELETE FROM files_seen WHERE path=?", (source_file,))
+    store.execute("DELETE FROM state WHERE key=?", (f"meeting_time_from_name:{meeting_id}",))
+    folder = records.meeting_dir(meeting_id)
+    if meeting_id and folder.parent == config.MEETINGS_DIR:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def drop_meeting(meeting_id: str, reason: str) -> None:
-    """Убрать встречу, у которой нет ни расшифровки, ни записи. Файл забываем: если запись вернут
-    (или на том же месте окажется новая), PULSE найдёт её заново."""
+    """Убрать встречу, у которой нет ни расшифровки, ни записи: показывать и расшифровывать нечего."""
     m = store.row("SELECT source_file FROM meetings WHERE id=?", (meeting_id,))
     if not m:
         return
-    store.execute("DELETE FROM meetings WHERE id=?", (meeting_id,))
-    store.execute("DELETE FROM files_seen WHERE path=?", (m["source_file"],))
-    store.execute("DELETE FROM state WHERE key=?", (f"meeting_time_from_name:{meeting_id}",))
-    try:
-        records.meeting_dir(meeting_id).rmdir()  # папка пустая: расшифровки не было
-    except OSError:
-        pass
+    _remove(meeting_id, m["source_file"], forget_file=True)
     store.log("recordings", f"{reason} — встреча {meeting_id} убрана из очереди")
+
+
+def _settled_status(meeting_id: str) -> str:
+    """Статус встречи, когда расшифровка не идёт, — по тому, что уже лежит в её папке."""
+    folder = records.meeting_dir(meeting_id)
+    if (folder / "summary.md").exists():
+        return "processed"
+    if (folder / "transcript.md").exists():
+        return "transcribed"
+    return "cancelled"
+
+
+def pause(meeting_id: str) -> bool:
+    """Пауза: идущая расшифровка замирает на том же месте и не грузит компьютер, ждущая не начинается."""
+    from opsdash import jobs
+
+    m = records.get_meeting(meeting_id)
+    if not m or m["status"] not in ("new", "transcribing"):
+        return False
+    if not transcribe.pause(meeting_id):
+        if m["status"] != "new":  # идёт не в PULSE (./ops run) — отсюда её не остановить
+            return False
+        jobs.unqueue("transcribe", {"meeting_id": meeting_id})
+    records.update_meeting(meeting_id, status="paused")
+    store.log("recordings", f"{meeting_id}: расшифровка на паузе")
+    return True
+
+
+def resume(meeting_id: str) -> bool:
+    """Продолжить с того же места. Если PULSE за это время перезапускали — расшифровка начнётся заново."""
+    from opsdash import jobs
+
+    m = records.get_meeting(meeting_id)
+    if not m or m["status"] != "paused":
+        return False
+    records.update_meeting(meeting_id, status="transcribing")  # до разморозки: закончив, процесс сам поставит «готово»
+    if not transcribe.resume(meeting_id):
+        records.update_meeting(meeting_id, status="new")
+        jobs.submit("transcribe", "transcribe", {"meeting_id": meeting_id})
+    store.log("recordings", f"{meeting_id}: расшифровка продолжена")
+    return True
+
+
+def cancel(meeting_id: str) -> bool:
+    """Отменить расшифровку. Встреча остаётся: новую — можно расшифровать позже, у расшифрованной раньше
+    остаются прежние расшифровка и разбор."""
+    from opsdash import jobs
+
+    m = records.get_meeting(meeting_id)
+    if not m or m["status"] not in IN_QUEUE:
+        return False
+    jobs.unqueue("transcribe", {"meeting_id": meeting_id})
+    transcribe.stop(meeting_id, "расшифровку отменили")
+    status = _settled_status(meeting_id)
+    records.update_meeting(meeting_id, status=status, progress=0 if status == "cancelled" else 1.0)
+    store.log("recordings", f"{meeting_id}: расшифровка отменена")
+    return True
+
+
+def memory(meeting_id: str) -> dict:
+    """Что PULSE помнит по встрече, кроме её папки: для предупреждения перед удалением."""
+    batch = f"meeting:{meeting_id}"
+    return {
+        "commitments": store.scalar("SELECT COUNT(*) FROM commitments WHERE source_type='meeting' AND source_ref=?",
+                                    (meeting_id,)) or 0,
+        "in_kaiten": store.scalar("SELECT COUNT(*) FROM commitments WHERE source_type='meeting' AND source_ref=? "
+                                  "AND kaiten_card_id IS NOT NULL", (meeting_id,)) or 0,
+        "proposals": store.scalar("SELECT COUNT(*) FROM proposals WHERE batch=? OR source_ref=?", (batch, batch)) or 0,
+        "kb": store.scalar("SELECT COUNT(*) FROM anthology WHERE source_type='meeting' AND source_ref=?",
+                           (meeting_id,)) or 0,
+    }
+
+
+def delete_recording(meeting_id: str) -> str:
+    """Удалить с диска файл записи — расшифровка, разбор и задачи остаются. Вернуть имя файла."""
+    m = records.get_meeting(meeting_id)
+    if not m:
+        raise MeetingError("Такой встречи нет")
+    if m["status"] in IN_QUEUE:
+        raise MeetingError("Запись ещё не расшифрована — отмените расшифровку или удалите встречу целиком")
+    if not (records.meeting_dir(meeting_id) / "transcript.md").exists():
+        raise MeetingError("Расшифровки нет — без записи от встречи ничего не останется. Удалите встречу целиком")
+    path = Path(m["source_file"])
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as e:
+        raise MeetingError(f"Не получилось удалить {path.name}: {e}") from e
+    store.log("recordings", f"{meeting_id}: файл записи {path.name} удалён")
+    return path.name
+
+
+def forget_meeting(meeting_id: str) -> dict:
+    """Удалить встречу целиком: файл записи, расшифровку и разбор, задачи и договорённости с неё, предложения,
+    записи базы знаний, образцы голосов. Карточки, уже созданные в Kaiten, остаются там: внешние системы
+    PULSE меняет только по предложениям. Вернуть, что удалено."""
+    from opsdash import anthology, jobs
+
+    m = records.get_meeting(meeting_id)
+    if not m:
+        raise MeetingError("Такой встречи нет")
+    args = {"meeting_id": meeting_id}
+    if jobs.running("process-meeting", args) or jobs.running("followup", args):  # Claude допишет задачи после нас
+        raise MeetingError("Claude сейчас разбирает эту встречу — удалите её через пару минут, когда закончит")
+    for name in ("transcribe", "process-meeting", "followup"):
+        jobs.unqueue(name, args)
+    transcribe.stop(meeting_id, "встречу удалили")
+    done = memory(meeting_id)
+    path = Path(m["source_file"])
+    try:
+        path.unlink(missing_ok=True)
+        done["file_error"] = None
+    except OSError as e:  # остальное всё равно удаляем, а файл помним — чтобы не завести встречу заново
+        done["file_error"] = str(e)
+    ids = [r["id"] for r in store.rows("SELECT id FROM commitments WHERE source_type='meeting' AND source_ref=?",
+                                       (meeting_id,))]
+    if ids:
+        marks = ",".join("?" * len(ids))
+        store.execute(f"UPDATE commitments SET parent_id=NULL WHERE parent_id IN ({marks})", ids)
+        store.execute(f"DELETE FROM commitments WHERE id IN ({marks})", ids)
+    store.execute("DELETE FROM proposals WHERE batch=? OR source_ref=?", (f"meeting:{meeting_id}",) * 2)
+    kb = [r["id"] for r in store.rows("SELECT id FROM anthology WHERE source_type='meeting' AND source_ref=?",
+                                      (meeting_id,))]
+    if kb:
+        anthology.delete(kb)
+    done["voices"] = voice.forget_meeting(meeting_id)
+    _remove(meeting_id, m["source_file"], forget_file=done["file_error"] is None)
+    store.log("recordings", f"встреча {meeting_id} ({m['title']}) удалена целиком: задач {done['commitments']}, "
+                            f"предложений {done['proposals']}, записей базы знаний {done['kb']}"
+                            + (f"; файл записи не удалён: {done['file_error']}" if done["file_error"] else ""))
+    return done
 
 
 def match_event(start: datetime, end: datetime) -> dict | None:
