@@ -664,12 +664,18 @@ def test_task_in_work_and_archive_buttons(client):
     assert records.get_commitment(cid)["in_work_at"] is None
 
     client.post(f"/commitments/{other}/archive", data={"on": "1"})
-    assert "Созвониться с юристом" not in client.get("/commitments").text
-    assert "Архив · 1" in client.get("/commitments").text
-    archived = client.get("/commitments?view=list&status=archived").text
-    assert "Созвониться с юристом" in archived and "Из архива" in archived
+    board = client.get("/commitments").text
+    assert "Созвониться с юристом" not in board and 'name="archived"' in board
+    for url in ("/commitments?archived=1", "/commitments?view=list&archived=1", "/commitments?view=gantt&archived=1",
+                "/commitments?view=list&status=archived"):  # status=archived — ссылки из прошлой версии
+        page = client.get(url).text
+        assert "Созвониться с юристом" in page and 'class="chip archived"' in page, url
+    shown = client.get("/commitments?archived=1").text
+    assert " archived" in shown and "Из архива" in shown
+    assert shown.index("Отчёт для правления") < shown.index("Созвониться с юристом"), "архивные — в конце колонки"
     client.post(f"/commitments/{other}/archive", data={"on": "0"})
-    assert "Созвониться с юристом" in client.get("/commitments").text
+    board = client.get("/commitments").text
+    assert "Созвониться с юристом" in board and 'name="archived"' not in board, "архив пуст — галочки нет"
 
 
 def test_run_job_records_errors():

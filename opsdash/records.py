@@ -493,14 +493,15 @@ SORTS = {"due": "по сроку", "created": "сначала новые"}
 def list_commitments(*, status: str | None = "open", direction: str | None = None, person: str | None = None,
                      overdue: bool = False, q: str | None = None, limit: int = 500, created: Period | None = None,
                      due: Period | None = None, no_due: bool = False, unseen: bool = False,
-                     sort: str = "due") -> list[dict]:
+                     sort: str = "due", archived: bool = False) -> list[dict]:
     """sort: due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху.
-    Задачи «в работе» — всегда первыми. status="archived" — архив (любой статус), иначе архив не показываем."""
+    Задачи «в работе» — всегда первыми. Архивные — только с archived=True (галочка «Показать архивные»),
+    в конце; status="archived" — только архив, любой статус (./ops commitments list)."""
     where, params = _filters(person, q, created, due, no_due, unseen)
     sql = "SELECT * FROM commitments WHERE 1=1" + where
     if status == "archived":
         sql += " AND archived_at IS NOT NULL"
-    else:
+    elif not archived:
         sql += " AND archived_at IS NULL"
     if status and status not in ("all", "archived"):
         sql += " AND status=?"
@@ -511,13 +512,14 @@ def list_commitments(*, status: str | None = "open", direction: str | None = Non
     if overdue:
         sql += " AND due IS NOT NULL AND due < ?"
         params.append(today_local().isoformat())
-    in_work = "CASE WHEN status='open' AND in_work_at IS NOT NULL THEN 0 ELSE 1 END"
+    first = ("CASE WHEN archived_at IS NOT NULL THEN 2 WHEN status='open' AND in_work_at IS NOT NULL THEN 0 "
+             "ELSE 1 END")
     if status == "archived":
         sql += " ORDER BY archived_at DESC, id DESC LIMIT ?"
     elif sort == "created":
-        sql += f" ORDER BY {in_work}, created DESC, id DESC LIMIT ?"
+        sql += f" ORDER BY {first}, created DESC, id DESC LIMIT ?"
     else:
-        sql += f" ORDER BY {in_work}, CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
+        sql += f" ORDER BY {first}, CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
     params.append(limit)
     return _mark(store.rows(sql, params))
 
@@ -533,7 +535,8 @@ def _mark(items: list[dict]) -> list[dict]:
     now = config.now()
     today = now.date()
     for c in items:
-        c["overdue"] = bool(c["due"] and c["due"] < today.isoformat() and c["status"] == "open")
+        c["archived"] = bool(c.get("archived_at"))
+        c["overdue"] = bool(c["due"] and c["due"] < today.isoformat() and c["status"] == "open" and not c["archived"])
         c["in_work"] = bool(c.get("in_work_at") and c["status"] == "open")
         c["due_today"] = c["due"] == today.isoformat()
         c["due_tomorrow"] = c["due"] == (today + timedelta(days=1)).isoformat()
@@ -580,16 +583,22 @@ def _relations(items: list[dict]) -> None:
 
 def commitments_board(*, person: str | None = None, q: str | None = None, done_days: int = 14,
                       created: Period | None = None, due: Period | None = None,
-                      no_due: bool = False, unseen: bool = False, sort: str = "due") -> dict[str, list[dict]]:
+                      no_due: bool = False, unseen: bool = False, sort: str = "due",
+                      archived: bool = False) -> dict[str, list[dict]]:
     """Доска задач и договорённостей: открытые — по направлению, «Готово» — закрытые за done_days дней
-    (последние закрытые сверху при любой сортировке)."""
+    (последние закрытые сверху при любой сортировке). archived — добавить архивные в конец колонок:
+    открытые — в свою, выполненные и отменённые — в «Готово», за любой срок."""
     board = {d: list_commitments(status="open", direction=d, person=person, q=q, created=created, due=due,
-                                 no_due=no_due, unseen=unseen, sort=sort) for d in DIRECTIONS}
+                                 no_due=no_due, unseen=unseen, sort=sort, archived=archived) for d in DIRECTIONS}
     since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=done_days))
     where, params = _filters(person, q, created, due, no_due, unseen)
     sql = ("SELECT * FROM commitments WHERE status='done' AND archived_at IS NULL "
            "AND COALESCE(closed_at, updated) >= ?" + where)
     board["done"] = _mark(store.rows(sql + " ORDER BY COALESCE(closed_at, updated) DESC LIMIT 300", [since, *params]))
+    if archived:
+        board["done"] += _mark(store.rows(
+            "SELECT * FROM commitments WHERE status IN ('done', 'cancelled') AND archived_at IS NOT NULL" + where
+            + " ORDER BY archived_at DESC LIMIT 300", params))
     return board
 
 

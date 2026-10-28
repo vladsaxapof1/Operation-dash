@@ -151,6 +151,15 @@ def test_in_work_goes_first_and_archive_hides():
     assert records.commitments_board()["done"] == []
     assert records.list_commitments(status="archived")[0]["status"] == "done", "архив не меняет статус"
 
+    # «Показать архивные»: архивные — в своих колонках, в конце, с отметкой; старые выполненные — тоже
+    records.set_archived(later, True)
+    store.execute("UPDATE commitments SET closed_at='2026-01-01T00:00:00+00:00' WHERE id=?", (soon,))
+    board = records.commitments_board(archived=True)
+    assert [c["id"] for c in board["done"]] == [soon] and board["done"][0]["archived"]
+    assert [c["id"] for c in board["mine"]] == [later] and not board["mine"][0]["overdue"]
+    fresh = records.add_commitment(direction="mine", what="Новая", due=(today + timedelta(days=30)).isoformat())
+    assert [c["id"] for c in records.list_commitments(direction="mine", archived=True)] == [fresh, later]
+
 
 def test_settings_roundtrip_and_hhmm(settings_with):
     s = settings_with(owner={"name": "Анна"})

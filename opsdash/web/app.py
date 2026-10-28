@@ -479,10 +479,13 @@ BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
 def commitments(request: Request, view: str = "board", status: str = "open", direction: str = "", person: str = "",
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
                 due: str = "", due_from: str = "", due_to: str = "", scale: str = "week", sort: str = "",
-                new: str = "", task: int = 0, parent: int = 0):
+                new: str = "", task: int = 0, parent: int = 0, archived: str = ""):
     from opsdash import gantt
 
     view = view if view in ("list", "gantt") else "board"
+    # «Показать архивные» — архивные задачи добавляются серыми в конец колонок и списка
+    show_archived = archived == "1" or status == "archived"  # status=archived — ссылки из прошлой версии
+    status = "all" if status == "archived" else status
     person, q = person.strip(), q.strip()
     # сортировку запоминаем в cookie: по умолчанию — по сроку, «сначала новые» — по дате появления
     sort = sort if sort in records.SORTS else request.cookies.get("task_sort", "due")
@@ -490,9 +493,10 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     dates = {"created": records.period(created, created_from, created_to) if created else None,
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
              "no_due": due == "none", "unseen": new == "1"}
-    board = records.commitments_board(person=person or None, q=q or None, sort=sort, **dates) if view != "list" else None
+    board = (records.commitments_board(person=person or None, q=q or None, sort=sort, archived=show_archived, **dates)
+             if view != "list" else None)
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
-                                      sort=sort, **dates) if view == "list" else None)
+                                      sort=sort, archived=show_archived, **dates) if view == "list" else None)
     shown = records.add_links([c for col in board.values() for c in col] if board else items)
     # ?task=<id> — открыть окно задачи (ссылка со встречи или со сводки); если фильтры её прячут — окно всё равно есть
     extra = None
@@ -515,7 +519,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       due_from=due_from, due_to=due_to, created_periods=records.CREATED_PERIODS,
                       due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
                       gantt_w=min(max(gantt_w, 200), 720), sort=sort, sorts=records.SORTS, new=new == "1",
-                      focus=task, extra=extra, parent_task=parent_task,
+                      focus=task, extra=extra, parent_task=parent_task, show_archived=show_archived,
                       archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0)
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
@@ -552,7 +556,8 @@ def commitment_work(request: Request, cid: int, on: int = Form(1)):
 @app.post("/commitments/{cid}/archive")
 def commitment_archive(request: Request, cid: int, on: int = Form(1)):
     records.set_archived(cid, bool(on))
-    return back(request, "Задача в архиве — она в списке, фильтр «Архив»" if on else "Задача возвращена из архива")
+    return back(request, "Задача в архиве — увидеть её: «Показать архивные» в фильтрах" if on
+                else "Задача возвращена из архива")
 
 
 @app.post("/commitments/{cid}/edit")

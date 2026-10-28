@@ -352,7 +352,12 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .task.inwork { border-color: var(--ok); border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--panel)); }
 .list > li.cm.inwork { box-shadow: inset 3px 0 0 var(--ok); background: color-mix(in srgb, var(--ok) 6%, var(--panel)); }
 .btn.work.on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
-.kb-archive { display: block; text-align: center; color: var(--muted); padding: 6px 0 2px; }
+/* архив (галочка «Показать архивные») — серые карточки с плашкой «архив», в конце колонок */
+.chip.archived { background: var(--muted); color: var(--panel); border-color: transparent; font-weight: 600; }
+.task.archived, .list > li.cm.archived { filter: grayscale(1); opacity: .6; }
+.task.archived { border-left-color: var(--muted); box-shadow: none; }
+.task.archived:hover, .list > li.cm.archived:hover { opacity: .85; }
+.gantt-bar.archived { filter: grayscale(1); opacity: .45; }
 /* связи задач: для какой задачи эта работа, кому передана часть — блоком на карточке */
 .task-rel { display: grid; gap: 3px; padding: 6px 8px; border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; line-height: 1.35; }
 .task-rel a { color: var(--text); font-weight: 600; }

@@ -6,7 +6,8 @@
   <div><h1>Задачи</h1><div class="muted">Собираются из встреч, чатов и почты. Источник каждой — по ссылке.</div></div>
   <div class="actions">
     {% set keep = '&person=' ~ (person | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&created=' ~ created ~ '&created_from=' ~ created_from
-       ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to ~ ('&new=1' if new else '') %}
+       ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to ~ ('&new=1' if new else '')
+       ~ ('&archived=1' if show_archived else '') %}
     <div class="seg">
       <a href="?view=board{{ keep }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list{{ keep }}" class="{{ 'active' if view == 'list' }}">Список</a><a href="?view=gantt&scale={{ scale }}{{ keep }}" class="{{ 'active' if view == 'gantt' }}">Гант</a>
     </div>
@@ -46,7 +47,6 @@
     <option value="open" {{ 'selected' if status == 'open' }}>Открытые</option>
     <option value="done" {{ 'selected' if status == 'done' }}>Выполненные</option>
     <option value="all" {{ 'selected' if status == 'all' }}>Все</option>
-    <option value="archived" {{ 'selected' if status == 'archived' }}>Архив</option>
   </select>
   {% endif %}
   <input type="text" name="person" value="{{ person }}" placeholder="Человек" list="people-list">
@@ -57,6 +57,7 @@
     {% for key, title in sorts.items() %}<option value="{{ key }}" {{ 'selected' if sort == key }}>Сортировка: {{ title }}</option>{% endfor %}
   </select>
   {% if new %}<input type="hidden" name="new" value="1">{% endif %}
+  {% if show_archived or archived_count %}<label class="check" title="Добавить на доску и в список задачи, убранные в архив: они серые, с отметкой «архив»"><input type="checkbox" name="archived" value="1" {{ 'checked' if show_archived }} data-autosubmit> Показать архивные{% if archived_count %} <span class="muted">({{ archived_count }})</span>{% endif %}</label>{% endif %}
   <datalist id="people-list">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>
   <button class="btn">Показать</button>
   {% if new or new_tasks_count %}
@@ -64,7 +65,7 @@
   <a class="btn toggle{{ ' on' if new }}" href="?view={{ view }}{% if view == 'gantt' %}&scale={{ scale }}{% endif %}{{ keep_new }}{{ '' if new else '&new=1' }}"
      title="{{ 'Показать все задачи' if new else 'Только задачи, которые добавил Claude и вы ещё не открывали' }}">Новые{% if new_tasks_count %} <span class="badge">{{ new_tasks_count }}</span>{% endif %}</a>
   {% endif %}
-  {% if person or q or direction or status != 'open' or created or due or new %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
+  {% if person or q or direction or status != 'open' or created or due or new or show_archived %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
 </form>
 
 {% if view == 'board' %}
@@ -83,7 +84,6 @@
     <div class="kb-hint">{{ hint }}</div>
     <div class="kb-cards">
       {% for c in col %}{{ ui.task_card(c, meetings) }}{% else %}<div class="kb-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endfor %}
-      {% if key == 'done' and archived_count %}<a class="kb-archive small" href="?view=list&status=archived">Архив · {{ archived_count }}</a>{% endif %}
     </div>
     <button type="button" class="kb-summary" data-kb-fold title="Показать задачи">
       <span class="kb-summary-n">{{ col | length }}</span>
@@ -131,11 +131,11 @@
               {% set title = c | headline %}
               <div class="gantt-label">
                 <button type="button" class="gantt-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ title }}</button>
-                <div class="muted small"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>{{ ui.new_chip(c) }} {{ ui.task_people(c) }}{% if c.parent %} · ↳ {{ ui.task_ref(c.parent) }}{% endif %}</div>
+                <div class="muted small"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>{{ ui.new_chip(c) }}{{ ui.archive_chip(c) }} {{ ui.task_people(c) }}{% if c.parent %} · ↳ {{ ui.task_ref(c.parent) }}{% endif %}</div>
                 {{ ui.task_dialog(c, meetings) }}
               </div>
               <div class="gantt-track" style="width: {{ gantt.width }}px">
-                <div class="gantt-bar {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' nodue' if not c.bar.due }}"
+                <div class="gantt-bar {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' nodue' if not c.bar.due }}{{ ' archived' if c.archived }}"
                      style="left: {{ c.bar.left }}px; width: {{ c.bar.width }}px" data-task-open="{{ c.id }}" role="button" tabindex="0"
                      title="{{ title }} · {{ c.bar.start.strftime('%d.%m') }} → {{ c.bar.end.strftime('%d.%m') if c.bar.due else 'срок не указан' }}">{% if c.bar.width >= 60 %}<span>{{ title }}</span>{% endif %}</div>
               </div>
@@ -150,7 +150,7 @@
 </div>
 {% else %}
 <section class="card">
-  <div class="card-b flush"><ul class="list">{% for c in items %}{{ ui.commitment(c, show_dir=True) }}{% else %}<li class="empty">{{ 'Новых задач нет — все просмотрены.' if new else ('В архиве пусто. «В архив» — в окне задачи и у выполненных на доске.' if status == 'archived' else 'Ничего не найдено.') }}</li>{% endfor %}</ul></div>
+  <div class="card-b flush"><ul class="list">{% for c in items %}{{ ui.commitment(c, show_dir=True) }}{% else %}<li class="empty">{{ 'Новых задач нет — все просмотрены.' if new else 'Ничего не найдено.' }}</li>{% endfor %}</ul></div>
 </section>
 {% endif %}
 {#- ?task=<id>: окно задачи открывается само (app.js); если фильтры её прячут — окно отдельно #}
