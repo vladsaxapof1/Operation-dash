@@ -638,6 +638,13 @@
   if (askForm) {
     var ctxList = askForm.querySelector("[data-ctx-list]");
     var askText = askForm.querySelector("[data-ask-text]");
+    // поле растёт вместе с текстом (до ~10 строк), как в Claude
+    var grow = function () {
+      askText.style.height = "auto";
+      askText.style.height = Math.min(askText.scrollHeight, 260) + "px";
+      askText.style.overflowY = askText.scrollHeight > 260 ? "auto" : "hidden";
+    };
+    askText.addEventListener("input", grow);
     var addMenu = askForm.querySelector("[data-ask-add]");
     var fileInput = askForm.querySelector("[data-ctx-files]");
     var addCtx = function (value, label, files) {
@@ -714,10 +721,11 @@
       if (e.defaultPrevented) return;
       if (!askText.value.trim() && !ctxList.children.length) { e.preventDefault(); askText.focus(); return; }
       var send = askForm.querySelector("[data-ask-send]");
-      send.disabled = true; send.textContent = "Отправляю…";
+      send.disabled = true;
+      send.title = "Отправляю…";
     });
     Array.prototype.forEach.call(document.querySelectorAll("[data-ask-example]"), function (b) {
-      b.addEventListener("click", function () { askText.value = b.dataset.askExample; askText.focus(); });
+      b.addEventListener("click", function () { askText.value = b.dataset.askExample; grow(); askText.focus(); });
     });
 
     // диктовка, как в Handy: звук режется на фразы по паузам, каждая сразу уходит в Whisper на этом компьютере —
@@ -747,6 +755,7 @@
       var before = askText.value;
       if (!before.trim() || /[.!?…]\s*$/.test(before)) text = text.charAt(0).toUpperCase() + text.slice(1);  // начало предложения
       askText.value = before + (before && !/\s$/.test(before) ? " " : "") + text;
+      grow();
       askText.scrollTop = askText.scrollHeight;
     };
     var sendPhrase = function (chunks, rate) {

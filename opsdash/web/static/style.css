@@ -636,7 +636,7 @@ button.chip.ok { cursor: pointer; }
 .notices { position: fixed; right: 20px; bottom: 20px; z-index: 30; width: 340px; max-width: calc(100vw - 24px);
   display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .notices > * { pointer-events: auto; }
-.page-ask .notices { bottom: 205px; }  /* в «Спросить Claude» внизу строка вопроса — встаём над ней */
+.page-ask .notices { bottom: 175px; }  /* в «Спросить Claude» внизу строка вопроса — встаём над ней */
 .notices .toast { position: static; width: auto; max-width: none; }
 .notice-now, .notice { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
@@ -662,23 +662,28 @@ a.notice-t:hover { color: var(--accent); text-decoration: none; }
 .notice-more:hover, .notice-clear:hover { color: var(--text); }
 .notice-more[hidden] { display: none; }
 @media (max-width: 760px) {
-  .notices, .page-ask .notices { left: 12px; right: 12px; bottom: 12px; width: auto; }
+  .notices { left: 12px; right: 12px; bottom: 12px; width: auto; }
+  .page-ask .notices { bottom: auto; top: 56px; }  /* внизу — поле вопроса, наверху — под меню */
 }
 
-/* --- «Спросить Claude» --- */
-.ask { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
-.ask-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
-.ask-new { width: 100%; justify-content: center; margin-bottom: 10px; }
-.ask-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.ask-list a { display: block; padding: 7px 9px; border-radius: 8px; color: var(--text); line-height: 1.3; }
-.ask-list a:hover { background: var(--panel-2); text-decoration: none; }
-.ask-list li.active a { background: var(--accent-soft); }
-.ask-list .meta { display: block; margin-top: 2px; }
-.ask-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.ask-top { margin-bottom: 14px; }
-.ask-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.ask-head h2 { margin: 0; font-size: 18px; flex: 1; min-width: 0; }
-.ask-thread { display: flex; flex-direction: column; gap: 14px; }
+/* --- «Спросить Claude»: чаты слева строками, разговор по центру, поле вопроса прижато к низу экрана --- */
+.page-ask .main { display: flex; flex-direction: column; min-height: 100vh; padding-bottom: 0; }
+.ask-top { margin-bottom: 10px; }
+.ask { flex: 1; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 24px; }
+.ask-side { position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px); overflow: auto; padding-bottom: 16px; }
+.ask-new, .ask-list a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--text); }
+.ask-new { font-weight: 500; }
+.ask-new:hover, .ask-list a:hover { background: var(--panel-2); text-decoration: none; }
+.ask-new.active, .ask-list a.active { background: var(--panel-2); }
+.ask-side-h { margin: 14px 10px 4px; font-size: 12px; color: var(--muted); }
+.ask-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.ask-list a { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-list-empty { padding: 6px 10px; font-size: 13px; color: var(--muted); line-height: 1.4; }
+.ask-main { display: flex; flex-direction: column; min-width: 0; }
+.ask-thread, .ask-empty, .ask-dock { width: 100%; max-width: 860px; margin: 0 auto; }
+.ask-head { display: flex; align-items: baseline; gap: 12px; }
+.ask-head h2 { margin: 0; font-size: 17px; flex: 1; min-width: 0; }
+.ask-thread { flex: 1; display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px; }
 .ask-q { align-self: flex-end; max-width: min(720px, 88%); background: var(--panel); border: 1px solid var(--line); border-radius: 14px 14px 4px 14px; padding: 10px 14px; }
 .ask-q-text { white-space: pre-wrap; }
 .ask-ctx { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -700,16 +705,38 @@ a.notice-t:hover { color: var(--accent); text-decoration: none; }
 @keyframes ask-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 .ask-props { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; }
 .ask-a-tools { margin-top: 4px; }
-.ask-empty { padding: 6px 0 0; }
-.ask-empty p { margin: 0; }
-.ask-examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 10px; }
-.ask-example { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text); cursor: pointer; font: inherit; line-height: 1.4; }
-.ask-example:hover { border-color: var(--accent); }
-.ask-form { position: sticky; bottom: 12px; padding: 12px 14px; margin: 0; box-shadow: 0 6px 24px rgba(0, 0, 0, .12); }
-.ask-form textarea { width: 100%; max-width: none; resize: vertical; min-height: 64px; }
-.ask-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+/* пустой чат: подсказка и примеры — маленькими серыми кнопками по центру */
+.ask-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  padding: 24px 0 36px; text-align: center; }
+.ask-empty p { margin: 0; max-width: 540px; line-height: 1.5; }
+.ask-examples { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 680px; }
+.ask-example { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
+  color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.ask-example:hover { color: var(--text); border-color: var(--muted); }
+/* поле вопроса: прижато к низу экрана, фон под ним до самого края — текст ответа под него не просвечивает */
+.ask-dock { position: sticky; bottom: 0; z-index: 5; padding-bottom: 16px; background: var(--bg); }
+.ask-dock::before { content: ""; position: absolute; left: 0; right: 0; top: -28px; height: 28px; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--bg)); }
+.ask-form { margin: 0; }
+.ask-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 8px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .10); }
+.ask-box:focus-within { border-color: var(--accent); }
+.ask-box textarea { display: block; width: 100%; max-width: none; min-height: 44px; max-height: 260px; padding: 4px 2px;
+  border: 0; background: transparent; box-shadow: none; outline: none; resize: none; font: inherit; line-height: 1.5;
+  overflow-y: hidden; }  /* полоса прокрутки — только когда текст длиннее ~10 строк (app.js) */
+.ask-bar { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .ask-bar .grow { flex: 1; }
-.ask-model { width: auto; max-width: 210px; }
+.ask-icon, .ask-send { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; cursor: pointer; flex: none; }
+.ask-icon { border-radius: 8px; background: none; color: var(--muted); }
+.ask-icon:hover, .ask-add[open] > .ask-icon { background: var(--panel-2); color: var(--text); }
+.ask-send { border-radius: 50%; background: var(--accent); color: #fff; }
+.ask-send:disabled { opacity: .5; cursor: default; }
+.ask-under { display: flex; align-items: center; gap: 4px; margin-top: 6px; padding: 0 4px; font-size: 12px; }
+.ask-under .grow { flex: 1; }
+.ask-sel { width: auto; max-width: 230px; height: 26px; padding: 0 22px 0 6px; border: 0; background-color: transparent;
+  color: var(--muted); font-size: 12px; cursor: pointer; field-sizing: content; }  /* по ширине выбранного */
+.ask-sel:hover { color: var(--text); }
 .ask-add { position: relative; }
 .ask-add > summary { list-style: none; }
 .ask-add > summary::-webkit-details-marker { display: none; }
@@ -717,16 +744,21 @@ a.notice-t:hover { color: var(--accent); text-decoration: none; }
 .ask-add-menu label { margin-top: 8px; }
 .ask-add-menu label:first-child { margin-top: 0; }
 .ask-add-menu select, .ask-add-menu input[type=text] { width: 100%; max-width: none; }
-.ask-mic.on { background: var(--bad); border-color: var(--bad); color: #fff; }
-.ask-mic-status { max-width: 320px; }
-@media (max-width: 1000px) {
-  .ask { grid-template-columns: minmax(0, 1fr); }
-  .ask-side { position: static; max-height: 220px; order: 2; }
+.ask-mic.on, .ask-mic.on:hover { background: var(--bad); color: #fff; }
+.ask-mic-status { min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1000px) {  /* узко: чаты — строкой сверху, листаются вбок */
+  .ask { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .ask-side { position: static; max-height: none; display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+  .ask-side-h { display: none; }
+  .ask-list { flex-direction: row; gap: 4px; }
+  .ask-new, .ask-list a { white-space: nowrap; }
+  .ask-list a { max-width: 200px; }
   .ask-q { max-width: 100%; }
 }
 @media (max-width: 760px) {
-  .ask-form { position: static; box-shadow: none; }  /* на телефоне прилипшая форма закрывала бы ответ */
-  .ask-form .hint { display: none; }
+  .ask-under > .muted { display: none; }
+  .ask-dock { padding-bottom: 10px; }
+  .ask-box textarea { min-height: 54px; }  /* подсказка в поле на телефоне — в две строки */
 }
 
 /* --- телефон и узкие экраны --- */
