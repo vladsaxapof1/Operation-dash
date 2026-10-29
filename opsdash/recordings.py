@@ -73,17 +73,15 @@ def watch_folders(settings: dict) -> list[Path]:
     return out
 
 
-def scan(settings: dict | None = None) -> list[Path]:
-    """Найти новые, уже дописанные файлы записей."""
-    settings = settings or config.load_settings()
+def _unseen(settings: dict) -> list[tuple[Path, float]]:
+    """Файлы записей в папках, по которым ещё нет встречи, — с временем последнего изменения."""
     since = store.get_state("recordings_since")
     if not since:
         # при первом запуске не разбираем старые архивы целиком — только последние сутки
         since = (datetime.now(timezone.utc) - timedelta(days=1)).timestamp()
         store.set_state("recordings_since", since)
-    seen = {r["path"]: r for r in store.rows("SELECT path, size FROM files_seen")}
-    now = datetime.now().timestamp()
-    found: list[Path] = []
+    seen = {r["path"] for r in store.rows("SELECT path FROM files_seen")}
+    out = []
     for folder in watch_folders(settings):
         for p in folder.rglob("*"):
             try:
@@ -94,12 +92,35 @@ def scan(settings: dict | None = None) -> list[Path]:
                 st = p.stat()
             except OSError:
                 continue
-            key = str(p)
-            if key in seen:
+            if str(p) in seen or st.st_mtime < float(since) or st.st_size == 0:
                 continue
-            if st.st_mtime < float(since) or now - st.st_mtime < STABLE_SECONDS or st.st_size == 0:
-                continue
-            found.append(p)
+            out.append((p, st.st_mtime))
+    return out
+
+
+def waiting(settings: dict | None = None) -> list[dict]:
+    """Записи, которые PULSE уже видит, но ещё не взял: файл дописывается (или только что дописан) —
+    встреча появится через STABLE_SECONDS после последнего изменения. Для списка встреч, чтобы не гадать,
+    нашлась ли запись."""
+    settings = settings or config.load_settings()
+    now = datetime.now().timestamp()
+    out = []
+    for p, mtime in _unseen(settings):
+        if p.suffix.lower() in VIDEO and any(  # Zoom: рядом с видео есть аудио — возьмём его, видео не показываем
+                s.suffix.lower() in AUDIO for s in p.parent.iterdir()):
+            continue
+        out.append({"name": p.name, "title": clean_title(p), "path": str(p),
+                    "started_at": store.to_utc_iso(time_from_name(p.name) or time_from_name(p.parent.name)
+                                                   or datetime.fromtimestamp(mtime, tz=config.tz())),
+                    "growing": now - mtime < 15})  # менялся в последние секунды — запись ещё идёт
+    return sorted(out, key=lambda x: x["started_at"], reverse=True)
+
+
+def scan(settings: dict | None = None) -> list[Path]:
+    """Найти новые, уже дописанные файлы записей."""
+    settings = settings or config.load_settings()
+    now = datetime.now().timestamp()
+    found = [p for p, mtime in _unseen(settings) if now - mtime >= STABLE_SECONDS]
     # Zoom сохраняет и видео, и отдельное аудио — берём аудио
     result = []
     for p in found:

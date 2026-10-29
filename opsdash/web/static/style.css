@@ -216,7 +216,12 @@ table.t tr.dim td { opacity: .55; }
 .progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 6px; max-width: 320px; }
 .progress > div { height: 100%; background: var(--accent); }
 .progress.paused > div { background: var(--muted); }
-.tr-actions { margin-top: 6px; flex-wrap: nowrap; }  /* «Пауза · Отменить» в списке встреч — одной строкой */
+/* список встреч: статус и кнопки-иконки (пауза, отмена, удалить) — одной строкой справа от статуса */
+.tr-status { display: flex; align-items: center; gap: 8px; }
+.tr-actions { display: inline-flex; align-items: center; gap: 2px; }
+.tr-actions .btn.icon { width: 28px; }
+.tr-actions .ico { width: 16px; height: 16px; }
+.tr-actions .btn.danger:hover { color: var(--bad); }
 
 /* встреча: кто в записи — подтвердить спикера */
 .list > li.spk { display: grid; gap: 4px; }
@@ -803,6 +808,6 @@ a.notice-t:hover { color: var(--accent); text-decoration: none; }
   .row { flex-direction: column; gap: 6px; }
   .card-h { flex-wrap: wrap; }
   table.t th, table.t td { padding: 8px; }
-  .tr-actions { flex-wrap: wrap; }
+  .tr-status { flex-wrap: wrap; }
   input[type=text], input[type=password], input[type=number], select, textarea { max-width: 100%; }
 }

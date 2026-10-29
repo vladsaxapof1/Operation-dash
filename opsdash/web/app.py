@@ -402,13 +402,16 @@ def api_shutdown():
 
 
 @app.get("/api/status")
-def api_status():
-    from opsdash import jobs
+def api_status(waiting: int = 0):
+    from opsdash import jobs, recordings
 
     meetings = [{"id": m["id"], "status": m["status"], "progress": m["progress"]}
                 for m in store.rows("SELECT id, status, progress FROM meetings WHERE status IN ('new','transcribing','paused','processing')")]
     running = [r["name"] for r in store.rows("SELECT name FROM jobs WHERE running=1")]
-    return {"meetings": meetings, "running": running, "queued": jobs.queued()}
+    out = {"meetings": meetings, "running": running, "queued": jobs.queued()}
+    if waiting:  # список встреч: найденные, но ещё не взятые записи — когда встреча появится, страница обновится
+        out["waiting"] = [[w["path"], w["growing"]] for w in recordings.waiting()]
+    return out
 
 
 # --- главная --------------------------------------------------------------------
@@ -1026,9 +1029,11 @@ async def ask_voice(audio: UploadFile = File(...), prompt: str = Form("")):
 def meetings(request: Request):
     from opsdash import recordings
 
+    settings = config.load_settings()
     items = records.list_meetings(limit=200)
-    folders = [str(p) for p in recordings.watch_folders(config.load_settings())]
-    return render(request, "meetings.html", nav="meetings", items=items, folders=folders)
+    folders = [str(p) for p in recordings.watch_folders(settings)]
+    return render(request, "meetings.html", nav="meetings", items=items, folders=folders,
+                  waiting=recordings.waiting(settings))
 
 
 @app.get("/meetings/{mid}", response_class=HTMLResponse)
