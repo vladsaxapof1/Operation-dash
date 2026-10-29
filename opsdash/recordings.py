@@ -355,6 +355,8 @@ def _tidy_speakers(meeting_id: str, res: dict) -> dict:
 
 
 def transcribe_meeting(meeting_id: str, settings: dict | None = None) -> dict:
+    from opsdash import task_meetings
+
     settings = settings or config.load_settings()
     m = records.get_meeting(meeting_id)
     if not m:
@@ -438,6 +440,9 @@ def transcribe_meeting(meeting_id: str, settings: dict | None = None) -> dict:
             "uid": event["uid"], "title": event["title"], "organizer": event["organizer"],
             "attendees": store.loads(event["attendees"], []), "description": event["description"],
         } if event else None,
+        # задачи, которым встреча посвящена: по итогам Claude предложит их закрыть
+        "tasks": [{"id": c["id"], "title": records.headline(c), "route": records.route(c), "due": c["due"]}
+                  for c in task_meetings.tasks_for(event["uid"])] if event else [],
     }
     (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     records.update_meeting(

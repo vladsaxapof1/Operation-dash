@@ -160,6 +160,7 @@ DEFAULTS: dict = {
         "calendar": "confirm",
         "task_done": "confirm",  # закрывать задачи PULSE, которые по встречам и переписке выглядят выполненными
         "attention_done": "confirm",  # убирать «нужен ответ», когда по её сообщению видно, что она ответила
+        "task_meeting": "confirm",  # связывать задачу со встречей календаря, которая ей посвящена
     },
     "notifications": {
         "meeting_processed": True,

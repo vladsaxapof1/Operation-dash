@@ -32,7 +32,12 @@ def collect_source(name: str) -> str:
     fn = {"telegram": telegram.collect, "ymessenger": ymessenger.collect, "pachca": pachca.collect,
           "mail": mail.collect, "gmail": mail.collect_gmail, "calendar": calendar.collect,
           "google_calendar": calendar.google_collect, "kaiten": kaiten.collect}[name]
-    return fn()
+    result = fn()
+    if name in ("calendar", "google_calendar"):  # появились встречи — не посвящена ли какая-то открытой задаче
+        from opsdash import task_meetings
+
+        task_meetings.suggest()
+    return result
 
 
 def job_docs_index(**_) -> str:

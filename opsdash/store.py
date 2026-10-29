@@ -297,6 +297,8 @@ MIGRATIONS = [
     ("commitments", "in_work_at", "TEXT"),
     ("commitments", "archived_at", "TEXT"),
     ("messages", "topic", "TEXT"),
+    ("commitments", "event_uid", "TEXT"),   # встреча календаря, посвящённая задаче (opsdash.task_meetings)
+    ("commitments", "event_info", "TEXT"),  # её название и время на момент связи — JSON
 ]
 
 

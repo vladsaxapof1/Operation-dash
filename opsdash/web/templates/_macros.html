@@ -100,6 +100,62 @@
 <span class="help{{ ' below' if below }}" tabindex="0" role="note" aria-label="{{ text }}" data-tip="{{ text }}">?</span>
 {%- endmacro %}
 
+{% macro cal_ico() -%}
+<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2.5 4h11v9.5h-11zM2.5 7h11M5.5 2.5v3M10.5 2.5v3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+{%- endmacro %}
+
+{% macro meeting_chip(c) -%}
+{#- встреча по задаче (opsdash.task_meetings): когда; прошла — «была 27.10». Подсказка связать — «встреча?» -#}
+{%- set mt = c.meeting -%}
+{%- if mt -%}
+<span class="chip meet{{ ' past' if mt.past }}" title="Встреча по задаче: {{ mt.title }}, {{ mt.start | local('%d.%m %H:%M') }}{% if mt.people %} · {{ mt.people[:6] | join(', ') }}{% endif %}">{{ cal_ico() }} {{ mt.when }}</span>
+{%- elif c.meeting_hint -%}
+<span class="chip meet hint" title="{{ c.meeting_hint.title }} — откройте задачу, чтобы связать">{{ cal_ico() }} встреча?</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro event_datalist() %}
+{#- «Выбрать из календаря» в окне задачи: встречи на две недели вперёд подгружаются при первом вводе (app.js) #}
+<datalist id="event-options" data-src="/api/event-options"></datalist>
+{% endmacro %}
+
+{% macro task_meeting(c) %}
+{#- окно задачи: встреча, посвящённая ей, — или подсказка связать, или выбрать / назначить самой #}
+{% set mt = c.meeting %}
+{% if mt %}
+<dt>Встреча</dt>
+<dd><b>{{ mt.title }}</b>
+  <div class="muted small">{{ mt.start | local('%d.%m, %H:%M') }}{% if mt.end %}–{{ mt.end | local('%H:%M') }}{% endif %}{% if mt.people %} · {{ mt.people[:8] | join(', ') }}{% endif %}</div>
+  <div class="actions" style="margin-top:4px">
+    {% if mt.recorded %}<a class="btn sm" href="/meetings/{{ mt.recorded }}">Запись и разбор →</a>{% endif %}
+    <a class="btn sm ghost" href="/calendar?start={{ mt.start | local('%Y-%m-%d') }}">В календаре →</a>
+    <form class="inline" method="post" action="/commitments/{{ c.id }}/meeting"><input type="hidden" name="action" value="unlink"><button class="btn sm ghost" title="Это встреча не по этой задаче">Отвязать</button></form>
+  </div>
+  {% if mt.past and c.status == 'open' and not mt.recorded %}<div class="hint">Встреча прошла. Если договорились — закройте задачу; запись встречи PULSE разберёт и предложит это сам.</div>{% endif %}
+</dd>
+{% elif c.status == 'open' %}
+<dt>Встреча</dt>
+<dd>
+  {% set h = c.meeting_hint %}
+  {% if h %}
+  <div class="dlg-hint">
+    <div><b>Похоже, встреча по этой задаче:</b> {{ h.title.split(' — по задаче')[0] }}</div>
+    {% if h.reason %}<div class="small muted">{{ h.reason }}</div>{% endif %}
+    <div class="actions">
+      <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm ok">Связать</button></form>
+      <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Не то</button></form>
+    </div>
+  </div>
+  {% endif %}
+  <form class="meet-pick" method="post" action="/commitments/{{ c.id }}/meeting">
+    <input type="text" name="event" list="event-options" placeholder="Выбрать из календаря: начните вводить название или дату" required>
+    <button class="btn sm">Связать</button>
+    <a class="btn sm ghost" href="/calendar?task={{ c.id }}#new" title="Создать встречу в календаре — она сразу свяжется с задачей">+ Назначить встречу</a>
+  </form>
+</dd>
+{% endif %}
+{% endmacro %}
+
 {% macro pencil() -%}
 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13H3v-3z M9 4l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
 {%- endmacro %}
@@ -175,6 +231,7 @@
         {% if c.closed_at and c.status != 'open' %}<dt>{{ 'Выполнена' if c.status == 'done' else 'Отменена' }}</dt><dd>{{ c.closed_at | local('%d.%m.%Y') }}</dd>{% endif %}
         <dt>Откуда</dt><dd>{{ task_source(c, meetings) }}</dd>
         {% if c.kaiten_card_id %}<dt>Kaiten</dt><dd>карточка #{{ c.kaiten_card_id }}</dd>{% endif %}
+        {{ task_meeting(c) }}
         {% if c.parent %}<dt>Часть задачи</dt><dd>{{ task_ref(c.parent) }} <span class="muted small">· {{ c.parent.route }}{% if c.parent.due %} · до {{ c.parent.due | date }}{% endif %}</span>
           {% if c.late_vs_parent %}<div class="small warn-text">Срок позже, чем у основной задачи ({{ c.parent.due | date }}) — успеете?</div>{% endif %}</dd>{% endif %}
         {% if c.children %}<dt>Подзадачи</dt><dd><ul class="dlg-kids">{% for k in c.children %}<li>{{ task_ref(k) }} <span class="muted small">· {{ k.route }}{% if k.due %} · до {{ k.due | date }}{% endif %}</span>{% if k.status == 'done' %} <span class="chip ok">готово</span>{% endif %}</li>{% endfor %}</ul></dd>{% endif %}
@@ -267,6 +324,7 @@
 <div class="task {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' new' if is_new }}{{ ' inwork' if c.in_work }}{{ ' archived' if c.archived }}" data-task="{{ c.id }}"{% if is_new %} data-new="{{ c.id }}"{% endif %}{% if rel %} data-rel="{{ rel | join(' ') }}"{% endif %}>
   <div class="task-top">
     <span class="task-chips">
+      {{ meeting_chip(c) }}
       {% if c.in_work %}<span class="chip work" title="Вы отметили, что занимаетесь этой задачей — она сверху колонки">в работе</span>{% endif %}
       {{ archive_chip(c) }}
       {{ new_chip(c) }}
@@ -368,6 +426,7 @@
   {% if e.location %}<div class="small"><span class="muted">Где:</span> {{ e.location | place }}</div>{% endif %}
   {% set who = e.attendees | people(12) %}{% if who %}<div class="small"><span class="muted">Участники:</span> {{ who }}</div>{% endif %}
   {% if e.description %}<div class="small muted ev-desc">{{ e.description | note }}</div>{% endif %}
+  {% if e.tasks %}<div class="small"><span class="muted">По задаче:</span> {% for t in e.tasks %}<a href="/commitments?task={{ t.id }}">{{ t.headline }}</a>{{ ' (готово)' if t.status == 'done' }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
   {% if e.url %}<a class="small" href="{{ e.url }}" target="_blank">Открыть в календаре →</a>{% endif %}
   {{ ev_brief(e) }}
 </div>

@@ -22,6 +22,7 @@ KINDS = {
     "calendar.create": "Создать встречу в календаре",
     "calendar.cancel": "Отменить встречу",
     "task.done": "Закрыть выполненную задачу",
+    "task.meeting": "Связать задачу со встречей",
     "attention.done": "Закрыть «нужен ответ» — директор ответила",
     "telegram.remind": "Напомнить коллеге в Telegram",
 }
@@ -169,7 +170,9 @@ def propose_kaiten_update(*, card_id: int, due: str | None = None, title: str | 
 
 def propose_calendar_event(*, title: str, start: str, end: str, attendees: list[str] | None = None,
                            description: str = "", calendar: str = "", batch: str | None = None,
-                           reason: str | None = None, source_ref: str | None = None) -> dict:
+                           reason: str | None = None, source_ref: str | None = None,
+                           commitment_id: int | None = None) -> dict:
+    """commitment_id — встреча по этой задаче: создав встречу, PULSE свяжет их."""
     s = store.parse_local(start)
     e = store.parse_local(end)
     if not s or not e or e <= s:
@@ -177,6 +180,10 @@ def propose_calendar_event(*, title: str, start: str, end: str, attendees: list[
     start, end = s.isoformat(), e.isoformat()
     payload = {"title": title, "start": start, "end": end, "attendees": attendees or [], "description": description,
                "calendar": calendar}
+    if commitment_id:
+        if not store.row("SELECT 1 FROM commitments WHERE id=?", (int(commitment_id),)):
+            raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
+        payload["commitment_id"] = int(commitment_id)
     label = f"Встреча «{title}» {store.local(start, '%d.%m %H:%M')}–{store.local(end, '%H:%M')}"
     if attendees:
         label += f" ({len(attendees)} участн.)"
@@ -217,6 +224,33 @@ def propose_task_done(*, commitment_id: int, quote: str | None = None, batch: st
     label = f"Закрыть задачу «{records.headline(c)}» ({records.route(c)}) — похоже, выполнена"
     return _create("task.done", label, payload, autonomy_key="task_done", reason=reason.strip(),
                    source_ref=source_ref, batch=batch)
+
+
+def propose_task_meeting(*, commitment_id: int, event_uid: str, batch: str | None = None,
+                         reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Встреча из календаря посвящена задаче PULSE — связать их после «да» директора (или сразу — автономия).
+    Задача остаётся открытой до встречи; по её итогам Claude предложит закрыть."""
+    c = store.row("SELECT * FROM commitments WHERE id=?", (int(commitment_id),))
+    if not c:
+        raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
+    if c["status"] != "open":
+        raise ProposalError(f"Задача [{commitment_id}] уже закрыта")
+    e = store.row("SELECT * FROM events WHERE uid=?", (event_uid,))
+    if not e:
+        raise ProposalError(f"Нет встречи с uid {event_uid} (./ops calendar)")
+    if c["event_uid"] == e["uid"]:
+        raise ProposalError("Задача уже связана с этой встречей")
+    if store.row("SELECT id FROM proposals WHERE kind='task.meeting' AND status='rejected' "
+                 "AND json_extract(payload, '$.commitment_id')=? AND json_extract(payload, '$.event_uid')=?",
+                 (c["id"], e["uid"])):
+        raise ProposalError("Директор уже ответила «Нет» на эту пару — не предлагай её снова")
+    dup = store.row("SELECT id FROM proposals WHERE kind='task.meeting' AND status='pending' "
+                    "AND json_extract(payload, '$.commitment_id')=?", (c["id"],))
+    if dup:
+        return get(dup["id"])
+    label = f"Встреча «{e['title'] or 'Без названия'}» {store.local(e['start'])} — по задаче «{records.headline(c)}»"
+    return _create("task.meeting", label, {"commitment_id": c["id"], "event_uid": e["uid"]},
+                   autonomy_key="task_meeting", reason=reason, source_ref=source_ref, batch=batch)
 
 
 def propose_answered(*, attention_id: int, quote: str | None = None, batch: str | None = None,
@@ -354,6 +388,10 @@ def execute(p: dict) -> dict:
 
         uid = calendar.create_event(pl["title"], pl["start"], pl["end"], pl.get("attendees") or [], pl.get("description") or "",
                                     calendar_name=pl.get("calendar") or "")
+        if pl.get("commitment_id"):
+            from opsdash import task_meetings
+
+            task_meetings.link(pl["commitment_id"], uid, title=pl["title"], start=pl["start"], end=pl["end"])
         return {"uid": uid}
     if kind == "calendar.cancel":
         from opsdash.sources import calendar
@@ -373,6 +411,15 @@ def execute(p: dict) -> dict:
         if a["status"] == "open":
             records.close_attention(pl["attention_id"], "done")
         return {"attention_id": pl["attention_id"]}
+    if kind == "task.meeting":
+        from opsdash import task_meetings
+
+        if not store.row("SELECT 1 FROM commitments WHERE id=?", (pl["commitment_id"],)):
+            raise ProposalError("Задачи уже нет")
+        if not store.row("SELECT 1 FROM events WHERE uid=?", (pl["event_uid"],)):
+            raise ProposalError("Встречи уже нет в календаре")
+        task_meetings.link(pl["commitment_id"], pl["event_uid"])
+        return {"commitment_id": pl["commitment_id"], "event_uid": pl["event_uid"]}
     if kind == "task.done":
         c = store.row("SELECT status FROM commitments WHERE id=?", (pl["commitment_id"],))
         if not c:
@@ -414,6 +461,10 @@ def links(p: dict) -> list[tuple[str, str]]:
         out.append(("Задача", f"/commitments?task={cid}"))
     if pl.get("attention_id"):
         out.append(("Нужен ответ", "/inbox"))
+    if p["kind"] == "task.meeting":
+        start = store.scalar("SELECT start FROM events WHERE uid=?", (pl.get("event_uid"),))
+        if start:
+            out.append(("Встреча в календаре", f"/calendar?start={store.local(start, '%Y-%m-%d')}"))
     kind, _, ref = (p.get("source_ref") or "").partition(":")
     if kind == "meeting" and ref:
         out.append(("Встреча", f"/meetings/{ref}?tab=transcript" if p["kind"] == "task.done" else f"/meetings/{ref}"))
@@ -462,6 +513,12 @@ def describe(p: dict) -> str:
             lines.append(f"Источник: {_source_text(p['source_ref'])}")
         lines.append("«Да» — задача закроется в PULSE; карточку в Kaiten, если она есть, это не трогает.")
         return "\n".join(lines)
+    if p["kind"] == "task.meeting":
+        if p.get("reason"):
+            lines.append(f"Почему так думаю: {p['reason']}")
+        lines.append("«Да» — встреча появится на карточке задачи. Задача останется открытой до встречи, "
+                     "а по её итогам Claude предложит закрыть.")
+        return "\n".join(lines)
     if p["kind"] == "kaiten.create_card":
         lines.append(f"Куда: {pl.get('target')}")
         if pl.get("responsible_unresolved"):
@@ -470,8 +527,12 @@ def describe(p: dict) -> str:
             lines.append(pl["description"][:500])
     elif p["kind"] == "kaiten.comment":
         lines.append(pl.get("text", "")[:800])
-    elif p["kind"] == "calendar.create" and pl.get("attendees"):
-        lines.append("Участники: " + ", ".join(pl["attendees"]))
+    elif p["kind"] == "calendar.create":
+        if pl.get("attendees"):
+            lines.append("Участники: " + ", ".join(pl["attendees"]))
+        c = store.row("SELECT * FROM commitments WHERE id=?", (pl["commitment_id"],)) if pl.get("commitment_id") else None
+        if c:
+            lines.append(f"По задаче «{records.headline(c)}» — встреча появится на её карточке")
     if p.get("reason"):
         lines.append(f"Почему: {p['reason']}")
     return "\n".join(lines)
@@ -482,6 +543,8 @@ def result_text(p: dict) -> str:
         return "✅ Задача закрыта"
     if p["status"] == "done" and p["kind"] == "attention.done":
         return "✅ Убрано из «Нужен ответ»"
+    if p["status"] == "done" and p["kind"] == "task.meeting":
+        return "✅ Встреча — на карточке задачи"
     if p["status"] == "done" and p["kind"] == "telegram.remind":
         return f"✅ Напоминание отправлено: {(p.get('payload') or {}).get('to') or ''}".rstrip(": ")
     if p["status"] == "done":

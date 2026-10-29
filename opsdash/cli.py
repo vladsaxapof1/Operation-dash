@@ -596,6 +596,12 @@ def _commitment_line(c: dict) -> str:
                                             for k in c["children"])
     if c.get("done_hint"):
         line += " · предложено закрыть, ждёт директора"
+    if c.get("meeting"):
+        mt = c["meeting"]
+        line += f" · встреча «{mt['title']}» {store.local(mt['start'])}" + (" (прошла)" if mt["past"] else "") \
+            + f" uid {mt['uid']}"
+    elif c.get("meeting_hint"):
+        line += " · предложено связать со встречей, ждёт директора"
     return line
 
 
@@ -744,13 +750,16 @@ def cmd_calendar(a) -> None:
     tzinfo = config.tz()
     start = datetime.combine(
         datetime.fromisoformat(a.date).date() if a.date else config.now().date(), time.min, tzinfo)
-    items = overview.events_between(start, start + timedelta(days=a.days))
+    from opsdash import task_meetings
+
+    items = task_meetings.for_events(overview.events_between(start, start + timedelta(days=a.days)))
     if a.json:
         return as_json(items)
     for e in items:
         who = ", ".join(x.get("name") or x.get("email") for x in e["attendees"][:10])
+        tasks = "; ".join(f"[{t['id']}] {t['headline']}" for t in e["tasks"])
         out(f"{store.local(e['start'], '%d.%m %H:%M')}–{store.local(e['end'], '%H:%M')} {e['title']}"
-            + (f" · {who}" if who else "") + f" · uid {e['uid']}")
+            + (f" · {who}" if who else "") + (f" · по задаче {tasks}" if tasks else "") + f" · uid {e['uid']}")
     if not items:
         out("Встреч нет.")
 
@@ -776,9 +785,13 @@ def cmd_propose(a) -> None:
         elif a.kind == "meeting":
             p = proposals.propose_calendar_event(title=a.title, start=a.start, end=a.end, attendees=a.attendee or [],
                                                  description=a.description or "", calendar=a.calendar or "",
-                                                 batch=a.batch, reason=a.reason, source_ref=source_ref)
+                                                 batch=a.batch, reason=a.reason, source_ref=source_ref,
+                                                 commitment_id=a.commitment)
         elif a.kind == "cancel-meeting":
             p = proposals.propose_calendar_cancel(uid=a.uid, batch=a.batch, reason=a.reason, source_ref=source_ref)
+        elif a.kind == "link-meeting":
+            p = proposals.propose_task_meeting(commitment_id=a.commitment, event_uid=a.uid, batch=a.batch,
+                                               reason=a.reason, source_ref=source_ref)
         elif a.kind == "done":
             p = proposals.propose_task_done(commitment_id=a.commitment, quote=a.quote, batch=a.batch, reason=a.reason,
                                             source_ref=source_ref)
@@ -1177,6 +1190,11 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--attendee", action="append", help="email участника (можно несколько раз)")
     x.add_argument("--description")
     x.add_argument("--calendar", help="название календаря Яндекса (по умолчанию — из настроек)")
+    x.add_argument("--commitment", type=int, help="встреча по этой задаче — после создания она будет на её карточке")
+    x = ps.add_parser("link-meeting", parents=[common],
+                      help="связать задачу со встречей календаря, которая ей посвящена (задача ждёт встречи открытой)")
+    x.add_argument("--commitment", type=int, required=True, help="id задачи (./ops commitments list)")
+    x.add_argument("--uid", required=True, help="uid встречи (./ops calendar)")
     x = ps.add_parser("cancel-meeting", parents=[common], help="отменить встречу")
     x.add_argument("--uid", required=True)
     x = ps.add_parser("remind", parents=[common], help="напомнить исполнителю задачи «мне должны» в Telegram (после «Да»)")

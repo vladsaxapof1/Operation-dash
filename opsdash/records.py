@@ -579,6 +579,9 @@ def _relations(items: list[dict]) -> None:
         c["late_vs_parent"] = bool(c["parent"] and c["status"] == "open" and c["due"] and c["parent"]["due"]
                                    and c["due"] > c["parent"]["due"])
         c["done_hint"] = hints.get(c["id"]) if c["status"] == "open" else None
+    from opsdash import task_meetings
+
+    task_meetings.decorate(items)
 
 
 def commitments_board(*, person: str | None = None, q: str | None = None, done_days: int = 14,

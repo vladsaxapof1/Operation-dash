@@ -386,6 +386,8 @@ def api_status():
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    from opsdash import task_meetings
+
     snap = overview.snapshot()
     feed = store.rows("SELECT * FROM outbox ORDER BY id DESC LIMIT 8")
     batches: dict[str, list] = {}
@@ -395,6 +397,7 @@ def home(request: Request):
     records.add_links(snap["mine"][:6] + snap["to_me"][:6])  # кнопка «↗ Telegram» у задач на сводке
     day = overview.day_grid()
     briefs.for_events(day["events"])
+    task_meetings.for_events(day["events"])
     return render(request, "home.html", nav="home", s=snap, feed=feed, batches=batches, overdue=overdue,
                   describe=proposals.describe, day=day, reminders=records.reminders())
 
@@ -574,6 +577,34 @@ def commitment_edit(request: Request, cid: int, title: str = Form(""), what: str
     return back(request, "Задача изменена")
 
 
+@app.get("/api/event-options")
+def event_options():
+    """Подсказки «Выбрать из календаря» в окне задачи: встречи на две недели вперёд «30.10 15:00 · Название»."""
+    from opsdash import task_meetings
+
+    return [o["label"] for o in task_meetings.options()]
+
+
+@app.post("/commitments/{cid}/meeting")
+def commitment_meeting(request: Request, cid: int, event: str = Form(""), action: str = Form("link")):
+    """Встреча по задаче: связать с выбранной из календаря или отвязать. Задача остаётся открытой до встречи."""
+    from opsdash import task_meetings
+
+    if not records.get_commitment(cid):
+        return back(request, err="Такой задачи нет")
+    if action == "unlink":
+        task_meetings.unlink(cid)
+        return back(request, "Встреча отвязана от задачи")
+    uid = task_meetings.find(event)
+    if not uid:
+        return back(request, err="Такой встречи нет в календаре на две недели вперёд — выберите её из списка")
+    task_meetings.link(cid, uid)
+    for p in store.rows("SELECT id FROM proposals WHERE kind='task.meeting' AND status='pending' "
+                        "AND json_extract(payload, '$.commitment_id')=?", (cid,)):
+        proposals.reject(p["id"])  # подсказка связать с другой встречей больше не нужна
+    return back(request, "Встреча связана с задачей — она на карточке")
+
+
 @app.get("/api/task-options")
 def task_options():
     """Подсказки поля «Часть задачи»: открытые задачи «#id · заголовок · кто → кому»."""
@@ -726,7 +757,8 @@ CALENDAR_SOURCES = {"calendar": "Яндекс", "google_calendar": "Google"}
 
 
 @app.get("/calendar", response_class=HTMLResponse)
-def calendar_page(request: Request, start: str = "", view: str = "week"):
+def calendar_page(request: Request, start: str = "", view: str = "week", task: int = 0):
+    from opsdash import task_meetings
     from opsdash.sources import calendar
 
     settings = config.load_settings()
@@ -740,7 +772,17 @@ def calendar_page(request: Request, start: str = "", view: str = "week"):
         first -= timedelta(days=first.weekday())
     grid = overview.week_grid(first, settings) if view == "week" else None
     days = overview.calendar_days(first, 7, settings) if view == "list" else None
-    briefs.for_events(grid["events"] if grid else [e for d in days for e in d["events"]])
+    shown = grid["events"] if grid else [e for d in days for e in d["events"]]
+    briefs.for_events(shown)
+    task_meetings.for_events(shown)
+    # ?task=<id> — «Назначить встречу» из окна задачи: форма новой встречи заполнена по задаче
+    for_task = records.get_commitment(task) if task else None
+    if for_task:
+        people = records.list_people()
+        emails = [p["email"] for n in (for_task["who"], for_task["whom"]) if n
+                  for p in [records._person_by_name(n, people)] if p and p.get("email")]
+        for_task = {"id": for_task["id"], "title": records.headline(for_task), "attendees": ", ".join(dict.fromkeys(emails)),
+                    "description": for_task["what"] if for_task["what"] != records.headline(for_task) else ""}
     sources = [s for s in CALENDAR_SOURCES if settings[s].get("enabled")]
     synced = [(store.row("SELECT last_ok FROM jobs WHERE name=?", (f"collect:{s}",)) or {}).get("last_ok") for s in sources]
     new_at = (now + timedelta(hours=1)).replace(minute=0)  # ближайший целый час
@@ -750,7 +792,7 @@ def calendar_page(request: Request, start: str = "", view: str = "week"):
                   updated=None if None in synced else min(synced, default=None),  # по самому давнему из календарей
                   new_day=first if first > now.date() else new_at.date(), new_time=new_at.strftime("%H:%M"),
                   minutes=MEETING_MINUTES, people=[p for p in records.list_people() if p.get("email")],
-                  write_calendars=calendar.write_calendar_names(settings),
+                  write_calendars=calendar.write_calendar_names(settings), for_task=for_task,
                   google_calendars=(store.get_state("google_calendar_names") or []) if settings["google_calendar"].get("enabled") else [])
 
 
@@ -787,7 +829,7 @@ async def calendar_refresh(request: Request):
 @app.post("/calendar/new")
 async def calendar_new(request: Request, title: str = Form(...), day: str = Form(...), at: str = Form(...),
                        minutes: int = Form(60), attendees: str = Form(""), description: str = Form(""),
-                       calendar: str = Form("")):
+                       calendar: str = Form(""), task: int = Form(0)):
     title = title.strip()
     emails = [a for a in re.split(r"[\s,;]+", attendees) if a]
     bad = [a for a in emails if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", a)]
@@ -804,13 +846,16 @@ async def calendar_new(request: Request, title: str = Form(...), day: str = Form
         # та же дорожка, что у встреч от Claude (журнал, история), но «да» — сама отправка формы
         p = proposals.propose_calendar_event(title=title, start=start.isoformat(), end=end.isoformat(), attendees=emails,
                                              description=description.strip(), calendar=calendar.strip(), source_ref="manual",
-                                             reason="Создана вручную на странице «Календарь»")
+                                             reason="Создана вручную на странице «Календарь»", commitment_id=task or None)
         return proposals.approve(p["id"]) if p["status"] == "pending" else p
 
     p = await run_in_threadpool(create)
     if p["status"] != "done":
         return back(request, err=f"Встреча не создана: {(p.get('result') or {}).get('error') or p['status']}")
     where = f" в календаре «{calendar.strip()}»" if calendar.strip() else ""
+    if task:  # «Назначить встречу» из окна задачи — назад к задаче, встреча уже на её карточке
+        return back(request, f"Встреча «{title}» создана{where}: {store.local(start, '%d.%m %H:%M')} — она на карточке задачи",
+                    to=f"/commitments?task={task}")
     return back(request, f"Встреча «{title}» создана{where}: {store.local(start, '%d.%m %H:%M')}")
 
 

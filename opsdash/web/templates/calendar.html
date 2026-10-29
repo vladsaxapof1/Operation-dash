@@ -26,8 +26,10 @@
   <div class="card-h"><h2>Новая встреча</h2><a class="small" href="#">свернуть</a></div>
   <div class="card-b">
     <form method="post" action="/calendar/new">
+      {% if for_task %}<input type="hidden" name="task" value="{{ for_task.id }}">
+      <div class="alert info" style="margin-top:0">Встреча по задаче «{{ for_task.title }}» — создав её, PULSE покажет встречу на карточке задачи.</div>{% endif %}
       <div class="form-row">
-        <div class="wide"><label>Название</label><input type="text" name="title" required placeholder="Например, Планёрка по складу" data-new-title></div>
+        <div class="wide"><label>Название</label><input type="text" name="title" required placeholder="Например, Планёрка по складу" value="{{ for_task.title if for_task else '' }}" data-new-title></div>
         <div><label>Дата</label><input type="date" name="day" value="{{ new_day.isoformat() }}" required data-new-day></div>
         <div><label>Начало</label><input type="time" name="at" value="{{ new_time }}" required data-new-time></div>
         <div><label>Длительность</label><select name="minutes">{% for m in minutes %}<option value="{{ m }}" {{ 'selected' if m == 60 }}>{{ m }} мин</option>{% endfor %}</select></div>
@@ -42,11 +44,11 @@
       </div>
       <div class="form-row">
         <div><label>Участники</label>
-          <textarea name="attendees" rows="2" placeholder="ivanov@company.ru, petrova@company.ru" data-attendees></textarea>
+          <textarea name="attendees" rows="2" placeholder="ivanov@company.ru, petrova@company.ru" data-attendees>{{ for_task.attendees if for_task else '' }}</textarea>
           <div class="hint">Адреса почты через запятую или с новой строки. Можно оставить пустым.</div>
           {% if people %}<div class="actions" style="margin-top:6px">{% for p in people[:20] %}<button type="button" class="chip" data-add-attendee="{{ p.email }}" title="{{ p.email }}">+ {{ p.name }}</button>{% endfor %}</div>{% endif %}
         </div>
-        <div><label>Описание</label><textarea name="description" rows="2" placeholder="Повестка, ссылка на звонок"></textarea></div>
+        <div><label>Описание</label><textarea name="description" rows="2" placeholder="Повестка, ссылка на звонок">{{ for_task.description if for_task else '' }}</textarea></div>
       </div>
       <div class="form-actions"><button class="btn primary" {{ 'disabled' if not settings.calendar.enabled }}>Создать встречу</button>
         <span class="hint">Встреча сразу появится в выбранном календаре Яндекса{% if default %} (по умолчанию — «{{ default }}», меняется в <a href="/settings?tab=calendar">настройках</a>){% endif %}. В неделе можно просто нажать на свободное время.</span></div>
