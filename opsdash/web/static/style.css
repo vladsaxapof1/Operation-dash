@@ -632,6 +632,39 @@ button.chip.ok { cursor: pointer; }
 .toast-h { font-weight: 650; }
 .toast .small { color: var(--muted); line-height: 1.45; }
 
+/* --- угол экрана: что PULSE делает сейчас и что сделал (opsdash.notices) --- */
+.notices { position: fixed; right: 20px; bottom: 20px; z-index: 30; width: 340px; max-width: calc(100vw - 24px);
+  display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+.notices > * { pointer-events: auto; }
+.page-ask .notices { bottom: 205px; }  /* в «Спросить Claude» внизу строка вопроса — встаём над ней */
+.notices .toast { position: static; width: auto; max-width: none; }
+.notice-now, .notice { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+.notice-now { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; }
+.notice-now[hidden] { display: none; }
+.notice-list { display: flex; flex-direction: column; gap: 6px; }
+.notice { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px 9px 12px; border-left: 3px solid var(--accent); }
+.notice.ok { border-left-color: var(--ok); }
+.notice.bad { border-left-color: var(--bad); }
+.notice.extra { display: none; }  /* видно три последних, остальные — по «Ещё N» */
+.notices.open .notice.extra { display: flex; }
+.notice-b { flex: 1; min-width: 0; }
+.notice-t { display: block; font-weight: 600; color: var(--text); line-height: 1.35; }
+a.notice-t:hover { color: var(--accent); text-decoration: none; }
+.notice-x { margin-top: 2px; font-size: 12px; color: var(--muted); line-height: 1.4; overflow-wrap: anywhere; }
+.notice-time { margin-top: 3px; font-size: 11px; color: var(--muted); }
+.notice-close { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 12px; line-height: 1.4; }
+.notice-close:hover { color: var(--text); }
+.notice-foot { display: flex; align-items: center; gap: 6px; }
+.notice-foot[hidden] { display: none; }
+.notice-more, .notice-clear { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
+  color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; }
+.notice-more:hover, .notice-clear:hover { color: var(--text); }
+.notice-more[hidden] { display: none; }
+@media (max-width: 760px) {
+  .notices, .page-ask .notices { left: 12px; right: 12px; bottom: 12px; width: auto; }
+}
+
 /* --- «Спросить Claude» --- */
 .ask { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
 .ask-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }

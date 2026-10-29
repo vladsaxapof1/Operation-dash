@@ -591,12 +591,14 @@ def register(app: FastAPI, render, back) -> None:
 
     @app.post("/settings/schedule")
     def schedule_save(request: Request, collect_minutes: int = Form(15), triage_minutes: int = Form(120),
+                      triage_batch: int | None = Form(None),
                       kaiten_minutes: int = Form(30), calendar_minutes: int = Form(30), digest_morning: str = Form(""),
                       digest_evening: str = Form(""), stale_check: str = Form(""), meeting_processed: str = Form(None),
                       urgent_immediately: str = Form(None), stale_pings: str = Form(None),
                       anthology_weekly: str = Form(None), context_weekly: str = Form(None)):
         config.update_settings("schedule", {
             "collect_minutes": max(5, collect_minutes), "triage_minutes": max(15, triage_minutes),
+            **({"triage_batch": max(0, triage_batch)} if triage_batch is not None else {}),
             "kaiten_minutes": max(10, kaiten_minutes), "calendar_minutes": max(10, calendar_minutes),
             "digest_morning": digest_morning, "digest_evening": digest_evening, "stale_check": stale_check,
             **({"anthology_weekly": anthology_weekly} if anthology_weekly is not None else {}),

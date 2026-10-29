@@ -16,7 +16,7 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 
-from opsdash import bot, brain, config, overview, recordings, records, store
+from opsdash import bot, brain, config, notices, overview, recordings, records, store
 
 _queues: dict[str, queue.Queue] = {}
 _pending: set[str] = set()
@@ -154,9 +154,20 @@ def job_triage(force: bool = False, **_) -> str:
         f"Разбери новые сообщения ({pending} шт.) строго по навыку triage (.claude/skills/triage/SKILL.md). "
         "Это фоновый запуск: директор не видит этот чат, связь с ней — только через ./ops notify."
     )
+    before = _triage_counts()
     brain.run(prompt, model=settings["claude"]["model_triage"], job="triage")
     left = store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0
-    return f"разобрано {pending - left} из {pending}"
+    after = _triage_counts()
+    found = [f"{title}: +{after[k] - before[k]}" for k, title in (("attention", "нужен ответ"), ("commitments", "задач"),
+                                                                  ("proposals", "на подтверждение")) if after[k] > before[k]]
+    return f"разобрано {pending - left} из {pending}" + "".join(f" · {f}" for f in found)
+
+
+def _triage_counts() -> dict:
+    """Сколько всего пунктов «Нужен ответ», задач и предложений — чтобы сказать, что принёс разбор."""
+    return {"attention": store.scalar("SELECT COUNT(*) FROM attention") or 0,
+            "commitments": store.scalar("SELECT COUNT(*) FROM commitments") or 0,
+            "proposals": store.scalar("SELECT COUNT(*) FROM proposals") or 0}
 
 
 def job_digest(when: str | None = None, **_) -> str:
@@ -453,6 +464,7 @@ def run_job(name: str, args: dict | None = None) -> str:
             (store.utcnow(), round(time.time() - started, 1), name),
         )
         store.log(name, f"ок: {result}")
+        notices.from_job(name, args, result, None)  # уведомление в углу экрана: что сделано
         return result
     except Exception as e:
         store.execute(
@@ -460,6 +472,7 @@ def run_job(name: str, args: dict | None = None) -> str:
             (str(e)[:1000], round(time.time() - started, 1), name),
         )
         store.log(name, f"ошибка: {e}\n{traceback.format_exc()[-1500:]}", "error")
+        notices.from_job(name, args, None, str(e))
         raise
 
 
@@ -603,6 +616,9 @@ def _weekly(key: str, weekday: int, at: str, settings: dict) -> str | None:
     return target.date().isoformat()
 
 
+TRIAGE_GAP = 10  # минут
+
+
 def tick(settings: dict | None = None) -> list[str]:
     """Один проход планировщика: что пора запустить."""
     settings = settings or config.load_settings()
@@ -629,8 +645,12 @@ def tick(settings: dict | None = None) -> list[str]:
     # раз в сутки (и при первом запуске) — не вышла ли новая версия PULSE; ставит её директор кнопкой
     if settings["updates"].get("auto_check") and settings["updates"].get("repo") and _due("update-check", 24 * 60):
         go("update-check")
-    if (_due("triage", sch["triage_minutes"]) and in_work_hours(settings)
-            and (store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0) > 0):
+    # разбор сообщений: по таймеру — или сразу, как накопилось triage_batch новых (налетело много чатов разом);
+    # между запусками по накоплению — не меньше TRIAGE_GAP минут, чтобы не разбирать по кругу
+    unread = store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0
+    batch = int(sch.get("triage_batch") or 0)
+    if unread and in_work_hours(settings) and (
+            _due("triage", sch["triage_minutes"]) or (batch and unread >= batch and _due("triage", TRIAGE_GAP))):
         go("triage", "heavy")
     if sch.get("digest_morning") and _daily("digest_morning", sch["digest_morning"], settings):
         go("digest", "heavy", {"when": "утренний"})

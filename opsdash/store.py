@@ -236,6 +236,17 @@ CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раз�
     created TEXT
 );
 
+CREATE TABLE IF NOT EXISTS notices (          -- уведомления в углу экрана: что PULSE сделал (opsdash.notices)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT,                       -- задание, после которого появилось: triage, process-meeting, …
+    title TEXT NOT NULL,
+    text TEXT,
+    link TEXT,
+    level TEXT DEFAULT 'info',       -- info | ok | bad
+    created TEXT,
+    dismissed_at TEXT                -- «Скрыть» / «Скрыть все»
+);
+
 CREATE TABLE IF NOT EXISTS ask_chats (        -- разговоры в разделе «Спросить Claude» (opsdash.chat)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT,

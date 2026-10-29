@@ -227,7 +227,35 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["nav_collapsed"] = request.cookies.get("nav") == "collapsed"  # меню свёрнуто в иконки (app.js)
     ctx["theme"] = settings["web"].get("theme") or "system"  # system / light / dark — подключение dark.css
     ctx["update_available"] = bool((store.get_state("update_check") or {}).get("available"))
+    from opsdash import notices
+
+    ctx["notices"] = notices.recent()  # угол экрана: что PULSE сделал и что делает сейчас
+    ctx["running_now"] = notices.running()
     return templates.TemplateResponse(request, name, ctx)
+
+
+@app.get("/api/notices")
+def notices_api(after: int = 0):
+    """Для угла экрана на любой странице: новые уведомления (id больше after) и что PULSE делает сейчас."""
+    from opsdash import notices
+
+    return {"items": [{**n, "ago": f_ago(n["created"])} for n in notices.recent(after)], "running": notices.running()}
+
+
+@app.post("/api/notices/dismiss-all")
+def notices_dismiss_all():
+    from opsdash import notices
+
+    notices.dismiss_all()
+    return {"ok": True}
+
+
+@app.post("/api/notices/{notice_id}/dismiss")
+def notices_dismiss(notice_id: int):
+    from opsdash import notices
+
+    notices.dismiss(notice_id)
+    return {"ok": True}
 
 
 def _voice_tip(request: Request) -> dict | None:

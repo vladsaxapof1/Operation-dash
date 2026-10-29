@@ -59,6 +59,7 @@ DEFAULTS: dict = {
     "schedule": {
         "collect_minutes": 15,
         "triage_minutes": 120,
+        "triage_batch": 50,  # или сразу, когда накопится столько новых сообщений (0 — только по таймеру)
         "kaiten_minutes": 30,
         "calendar_minutes": 30,
         "docs_minutes": 30,  # индекс рабочих документов

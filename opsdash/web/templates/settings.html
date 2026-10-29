@@ -474,6 +474,8 @@
     <div class="form-row">
       <div><label>Собирать сообщения и почту, каждые … мин</label><input type="number" name="collect_minutes" value="{{ settings.schedule.collect_minutes }}" min="5"></div>
       <div><label>Разбирать сообщения (Claude), каждые … мин</label><input type="number" name="triage_minutes" value="{{ settings.schedule.triage_minutes }}" min="15"></div>
+      <div><label>…или сразу, когда накопится … новых</label><input type="number" name="triage_batch" value="{{ settings.schedule.triage_batch }}" min="0">
+        <div class="hint">Налетело много сообщений — разбор не ждёт таймера. 0 — только по таймеру. В рабочие часы.</div></div>
     </div>
     <div class="form-row">
       <div><label>Обновлять Kaiten, каждые … мин</label><input type="number" name="kaiten_minutes" value="{{ settings.schedule.kaiten_minutes }}" min="10"></div>

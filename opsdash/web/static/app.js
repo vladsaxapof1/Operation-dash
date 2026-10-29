@@ -872,4 +872,96 @@
       });
     }, 1200);
   }
+
+  // --- угол экрана: что PULSE делает сейчас и что сделал. Видно три последних, остальные — «Ещё N».
+  // Обновляется сам: пока что-то идёт — каждые 5 с, иначе раз в 15 с
+  var nbox = document.querySelector("[data-notices]");
+  if (nbox) {
+    var nlist = nbox.querySelector("[data-notice-list]"), nfoot = nbox.querySelector("[data-notice-foot]"),
+        nmore = nbox.querySelector("[data-notice-more]"), nnow = nbox.querySelector("[data-notice-now]"),
+        nnowText = nbox.querySelector("[data-notice-now-text]");
+    // на телефоне и в «Спросить Claude» (там внизу строка вопроса) — одно последнее, на остальных страницах — три
+    var SHOWN = document.body.classList.contains("page-ask") || window.innerWidth <= 760 ? 1 : 3;
+    var ago = function (iso) {
+      var s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+      if (s < 60) return "только что";
+      if (s < 3600) return Math.floor(s / 60) + " мин назад";
+      if (s < 86400) return Math.floor(s / 3600) + " ч назад";
+      return Math.floor(s / 86400) + " дн назад";
+    };
+    var layout = function () {
+      var items = nlist.querySelectorAll("[data-notice]");
+      Array.prototype.forEach.call(items, function (el, i) { el.classList.toggle("extra", i >= SHOWN); });
+      var more = Math.max(0, items.length - SHOWN);
+      if (!more) nbox.classList.remove("open");
+      nmore.hidden = !more;
+      nmore.textContent = nbox.classList.contains("open") ? "Свернуть" : "Ещё " + more;
+      nfoot.hidden = items.length < 2 && !more;
+    };
+    var make = function (n) {
+      var el = document.createElement("div");
+      el.className = "notice " + (n.level || "info");
+      el.dataset.notice = n.id;
+      el.dataset.key = n.kind + "|" + n.title;
+      var body = document.createElement("div");
+      body.className = "notice-b";
+      var t = document.createElement(n.link ? "a" : "span");
+      t.className = "notice-t";
+      t.textContent = n.title;
+      if (n.link) t.href = n.link;
+      body.appendChild(t);
+      if (n.text) {
+        var x = document.createElement("div");
+        x.className = "notice-x";
+        x.textContent = n.text;
+        body.appendChild(x);
+      }
+      var tm = document.createElement("div");
+      tm.className = "notice-time";
+      tm.dataset.ts = n.created;
+      tm.textContent = ago(n.created);
+      body.appendChild(tm);
+      var close = document.createElement("button");
+      close.type = "button"; close.className = "notice-close"; close.title = "Скрыть"; close.textContent = "✕";
+      close.setAttribute("data-notice-close", ""); close.setAttribute("aria-label", "Скрыть");
+      el.appendChild(body);
+      el.appendChild(close);
+      return el;
+    };
+    nbox.addEventListener("click", function (e) {
+      var close = e.target.closest("[data-notice-close]");
+      if (close) {
+        var el = close.closest("[data-notice]");
+        fetch("/api/notices/" + el.dataset.notice + "/dismiss", { method: "POST" });
+        el.remove();
+        layout();
+      } else if (e.target.closest("[data-notice-clear]")) {
+        fetch("/api/notices/dismiss-all", { method: "POST" });
+        nlist.innerHTML = "";
+        layout();
+      } else if (e.target.closest("[data-notice-more]")) {
+        nbox.classList.toggle("open");
+        layout();
+      }
+    });
+    var refreshNotices = function () {
+      fetch("/api/notices?after=" + (nbox.dataset.last || 0), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
+        res.items.slice().reverse().forEach(function (n) {  // свежие — наверх
+          Array.prototype.forEach.call(nlist.querySelectorAll("[data-key]"), function (old) {
+            if (old.dataset.key === n.kind + "|" + n.title) old.remove();  // та же ошибка снова — обновилась, не копия
+          });
+          nlist.insertBefore(make(n), nlist.firstChild);
+        });
+        if (res.items.length) nbox.dataset.last = res.items[0].id;
+        var now = res.running || [];
+        nnow.hidden = !now.length;
+        nnowText.textContent = now.map(function (r) { return r.title + (r.detail ? " — " + r.detail : ""); }).join("; ");
+        Array.prototype.forEach.call(nlist.querySelectorAll("[data-ts]"), function (el) { el.textContent = ago(el.dataset.ts); });
+        layout();
+        setTimeout(refreshNotices, now.length ? 5000 : 15000);
+      }).catch(function () { setTimeout(refreshNotices, 30000); });
+    };
+    layout();
+    setTimeout(refreshNotices, nnow.hidden ? 15000 : 5000);
+  }
 })();
