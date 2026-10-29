@@ -632,6 +632,20 @@ button.chip.ok { cursor: pointer; }
 .toast-h { font-weight: 650; }
 .toast .small { color: var(--muted); line-height: 1.45; }
 
+/* --- «Настройки → Claude»: расход и лимиты подписки (opsdash.usage) --- */
+.usage-limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.usage-meter { height: 8px; margin: 6px 0 4px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.usage-meter > div { height: 100%; background: var(--accent); }
+.usage-meter > .warn { background: var(--warn); }
+.usage-meter > .bad { background: var(--bad); }
+.usage-tiles { margin: 16px 0 12px; }
+.usage-tiles .n { font-size: 24px; }
+.usage-days { display: flex; align-items: flex-end; gap: 4px; height: 90px; margin: 4px 0 12px; }
+.usage-day { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; }
+.usage-bar { width: 100%; max-width: 28px; background: var(--accent); border-radius: 3px 3px 0 0; opacity: .8; }
+.usage-day span { font-size: 10px; color: var(--muted); }
+@media (max-width: 760px) { .usage-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 /* --- угол экрана: что PULSE делает сейчас и что сделал (opsdash.notices) --- */
 .notices { position: fixed; right: 20px; bottom: 20px; z-index: 30; width: 340px; max-width: calc(100vw - 24px);
   display: flex; flex-direction: column; gap: 6px; pointer-events: none; }

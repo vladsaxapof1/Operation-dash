@@ -106,9 +106,11 @@ def test_stream_reports_text_and_steps(fake_claude):
 
 
 def test_stream_falls_back_on_old_claude(fake_claude):
-    fake_claude["mode"]("old-cli")
+    fake_claude["mode"]("old-cli")  # не знает --include-partial-messages: ответ целиком, без текста по ходу
     texts = []
-    assert brain.stream("вопрос", on_text=texts.append)["text"] == "ответ целиком" and texts == ["ответ целиком"]
+    res = brain.stream("вопрос", on_text=texts.append)
+    assert res["text"].startswith("| Метрика") and texts == [res["text"]]
+    assert "--include-partial-messages" not in fake_claude["calls"]()[-1]["args"]
 
 
 def test_ask_answers_with_context_and_continues(fake_claude):

@@ -109,6 +109,9 @@ def register(app: FastAPI, render, back) -> None:
         elif tab == "claude":
             ctx["claude_path"] = brain.find_claude(settings)
             ctx["claude_login"] = brain.login_status(ctx["claude_path"], settings) if ctx["claude_path"] else None
+            from opsdash import usage
+
+            ctx["usage"], ctx["limits"] = usage.summary(), usage.limits()
         elif tab == "recordings":
             from opsdash import recordings
 
@@ -643,6 +646,17 @@ def register(app: FastAPI, render, back) -> None:
             "model_ask": model_ask, "timeout_minutes": max(5, int(timeout_minutes)),
         })
         return back(request, "Сохранено")
+
+    @app.post("/settings/claude/limits")
+    async def claude_limits(request: Request):
+        """«Обновить» у лимитов подписки: самый короткий запуск Haiku — Claude Code сообщит заполненность лимитов."""
+        from opsdash import brain
+
+        try:
+            await run_in_threadpool(brain.run, "Ответь одним словом: ок", model="haiku", job="limits", timeout_min=3)
+        except brain.BrainError as e:
+            return back(request, err=str(e), to="/settings?tab=claude#usage")
+        return back(request, "Лимиты обновлены", to="/settings?tab=claude#usage")
 
     @app.post("/settings/claude/login")
     async def claude_login(request: Request):

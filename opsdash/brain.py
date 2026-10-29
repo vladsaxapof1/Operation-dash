@@ -122,9 +122,9 @@ def _env(settings: dict) -> dict:
 
 
 def _command(settings: dict, claude: str, job: str, *, model: str | None, resume: str | None,
-             stream: bool = False, effort: str | None = None) -> list[str]:
-    cmd = [claude, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"] if stream \
-        else [claude, "-p", "--output-format", "json"]
+             partial: bool = False, effort: str | None = None) -> list[str]:
+    # всегда поток событий: в нём и ответ, и заполненность лимитов подписки (opsdash.usage)
+    cmd = [claude, "-p", "--output-format", "stream-json", "--verbose"] + (["--include-partial-messages"] if partial else [])
     if model:
         cmd += ["--model", model]
     if effort:
@@ -152,7 +152,11 @@ def _claude(settings: dict) -> str:
     return claude
 
 
-def _result(data, returncode: int, stderr: str, out: str, job: str) -> dict:
+def _result(data, returncode: int, stderr: str, out: str, job: str, model: str | None = None,
+            limits: dict | None = None) -> dict:
+    from opsdash import usage
+
+    usage.record(job, model, data if isinstance(data, dict) else None, limits)  # расход и лимиты — в «Настройки → Claude»
     if isinstance(data, dict) and (returncode != 0 or data.get("is_error")) and (data.get("result") or data.get("subtype")):
         # в JSON-ответе есть причина — показываем её, а не весь ответ целиком
         reason = str(data.get("result") or data.get("subtype"))
@@ -170,43 +174,18 @@ def _result(data, returncode: int, stderr: str, out: str, job: str) -> dict:
 
 def run(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
         timeout_min: int | None = None) -> dict:
-    settings = config.load_settings()
-    cmd = _command(settings, _claude(settings), job, model=model, resume=resume)
-    timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)
-    kwargs = {}
-    if os.name == "nt":
-        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: без мигающих окон консоли
-    store.log(job, f"запуск Claude ({model or 'модель по умолчанию'})")
-    try:
-        proc = subprocess.run(
-            cmd, input=prompt, cwd=str(config.APP_DIR), env=_env(settings), capture_output=True,
-            text=True, encoding="utf-8", errors="replace", timeout=timeout, **kwargs,
-        )
-    except subprocess.TimeoutExpired as e:
-        raise BrainError(f"Claude не уложился в {timeout // 60} мин") from e
-    out = (proc.stdout or "").strip()
-    data = None
-    for line in reversed(out.splitlines()):
-        try:
-            data = json.loads(line)
-            break
-        except ValueError:
-            continue
-    if data is None:
-        try:
-            data = json.loads(out)
-        except ValueError:
-            data = None
-    return _result(data, proc.returncode, proc.stderr, out, job)
+    """Запуск Claude в фоне; вернуть {"text", "session_id", "raw"}."""
+    return stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, partial=False)
 
 
 def stream(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
-           timeout_min: int | None = None, on_text=None, on_step=None, on_start=None, effort: str | None = None) -> dict:
+           timeout_min: int | None = None, on_text=None, on_step=None, on_start=None, effort: str | None = None,
+           partial: bool = True) -> dict:
     """Как run, но по ходу работы: on_text(текст) — ответ, который Claude сейчас пишет (каждый новый абзац
     рассуждений начинается заново), on_step(инструмент, параметры) — что он делает (читает файл, ищет),
     on_start(процесс) — чтобы его можно было остановить. Результат тот же, что у run."""
     settings = config.load_settings()
-    cmd = _command(settings, _claude(settings), job, model=model, resume=resume, stream=True, effort=effort)
+    cmd = _command(settings, _claude(settings), job, model=model, resume=resume, partial=partial, effort=effort)
     timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)
     kwargs = {}
     if os.name == "nt":
@@ -228,7 +207,7 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
 
     timer = threading.Timer(timeout, kill)
     timer.start()
-    data, text, last = None, "", ""
+    data, text, last, limits = None, "", "", None
     try:
         proc.stdin.write(prompt)
         proc.stdin.close()
@@ -251,6 +230,8 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
                 for block in (d.get("message") or {}).get("content") or []:
                     if block.get("type") == "tool_use":
                         on_step(block.get("name") or "", block.get("input") or {})
+            elif kind == "rate_limit_event":  # заполненность лимитов подписки — на весь аккаунт, раз за запуск
+                limits = (d.get("rate_limit_info") or {}).get("unifiedWindows") or limits
             elif kind == "result":
                 data = d
         proc.wait()
@@ -262,13 +243,14 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
     stderr = "".join(errors)
     if data is None and effort and "--effort" in stderr:  # старый Claude Code не знает --effort — думает как умеет
         return stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, on_text=on_text,
-                      on_step=on_step, on_start=on_start)
-    if data is None and "include-partial-messages" in stderr:  # старый Claude Code: без ответа по ходу работы
-        result = run(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min)
+                      on_step=on_step, on_start=on_start, partial=partial)
+    if data is None and partial and "include-partial-messages" in stderr:  # старый Claude Code: без ответа по ходу
+        result = stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, on_step=on_step,
+                        on_start=on_start, effort=effort, partial=False)
         if on_text:
             on_text(result["text"])
         return result
-    return _result(data, proc.returncode, stderr, last, job)
+    return _result(data, proc.returncode, stderr, last, job, model, limits)
 
 
 def check(settings: dict | None = None) -> str:

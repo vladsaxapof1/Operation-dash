@@ -236,6 +236,19 @@ CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раз�
     created TEXT
 );
 
+CREATE TABLE IF NOT EXISTS claude_runs (      -- каждый запуск Claude: расход для «Настройки → Claude» (opsdash.usage)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job TEXT,
+    model TEXT,                      -- модель, на которую ушло больше всего
+    created TEXT,
+    duration_s REAL,
+    cost_usd REAL,                   -- сколько стоило бы по ценам API (на подписке — расходует её лимит)
+    fresh_tokens INTEGER,            -- вход без кэша и запись в кэш
+    cached_tokens INTEGER,           -- вход из кэша — в разы дешевле
+    output_tokens INTEGER,
+    ok INTEGER DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS notices (          -- уведомления в углу экрана: что PULSE сделал (opsdash.notices)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT,                       -- задание, после которого появилось: triage, process-meeting, …

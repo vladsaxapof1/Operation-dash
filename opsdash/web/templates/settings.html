@@ -556,5 +556,58 @@
     <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('claude') }}</div>
   </form>
 </div></section>
+
+{#- сколько PULSE тратит Claude: лимиты подписки (весь аккаунт) и расход самого PULSE по ценам API (opsdash.usage) #}
+{% set u = usage %}
+<section class="card" id="usage">
+  <div class="card-h"><h2>Расход Claude</h2></div>
+  <div class="card-b">
+    {% if limits %}
+    <div class="usage-limits">
+      {% for w in limits.windows %}
+      <div>
+        <div class="small muted">Лимит подписки · {{ w.title }}</div>
+        <div class="usage-meter"><div class="{{ 'bad' if w.percent >= 80 else 'warn' if w.percent >= 50 else '' }}" style="width: {{ w.percent }}%"></div></div>
+        <div class="small"><b>{{ w.percent }}%</b>{% if w.resets %} <span class="muted">· сброс {{ w.resets.strftime('%d.%m в %H:%M') }}</span>{% endif %}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="hint">Это весь ваш аккаунт Claude — вместе с работой в приложении и в Claude Code; какую долю занимает PULSE,
+      Claude не сообщает. Обновлено {{ limits.at | ago }} — при каждом запуске Claude из PULSE.
+      <form class="inline" method="post" action="/settings/claude/limits" data-busy="Узнаю…"><button class="btn sm ghost">Обновить</button></form></div>
+    {% else %}
+    <p class="small muted" style="margin-top:0">Лимиты подписки появятся после ближайшего запуска Claude из PULSE.
+      <form class="inline" method="post" action="/settings/claude/limits" data-busy="Узнаю…"><button class="btn sm">Узнать сейчас</button></form></p>
+    {% endif %}
+
+    <div class="tiles usage-tiles">
+      <div class="tile"><div class="n">{{ u.week.runs }}</div><div class="l">запусков Claude за 7 дней{% if u.week.tokens %} · {{ '%.1f' | format(u.week.tokens / 1e6) | replace('.', ',') if u.week.tokens >= 1e5 else (u.week.tokens / 1e3) | round | int }} {{ 'млн' if u.week.tokens >= 1e5 else 'тыс.' }} токенов{% endif %}</div></div>
+      <div class="tile"><div class="n">≈${{ '%.0f' | format(u.week.cost) }}</div><div class="l">за 7 дней по ценам API</div></div>
+      <div class="tile"><div class="n">≈${{ '%.0f' | format(u.month.cost) }}</div><div class="l">за 30 дней по ценам API</div></div>
+      <div class="tile"><div class="n">≈${{ '%.0f' | format(u.per_month) }}</div><div class="l">{% if u.span_days >= 7 %}в месяц при нагрузке последней недели{% else %}в месяц — прикидка по {{ u.span_days | round | int }} дн. учёта, через неделю будет точнее{% endif %}</div></div>
+    </div>
+
+    {% if u.month.runs %}
+    <div class="usage-days" aria-label="Расход по дням">
+      {% for d in u.days %}<div class="usage-day" title="{{ d.day.strftime('%d.%m') }}: {{ d.runs }} {{ plural(d.runs, 'запуск', 'запуска', 'запусков') }}, ≈${{ '%.2f' | format(d.cost) }}">
+        <div class="usage-bar" style="height: {{ [d.bar, 2 if d.runs else 0] | max }}%"></div><span>{{ d.day.strftime('%d') }}</span></div>{% endfor %}
+    </div>
+    <div class="table-wrap">
+      <table class="t">
+        <thead><tr><th>Что делал Claude · 30 дней</th><th>Запусков</th><th>≈ по API</th><th>За запуск</th><th>Доля</th></tr></thead>
+        <tbody>
+          {% for j in u.by_job %}
+          <tr><td>{{ j.title }}</td><td>{{ j.runs }}</td><td>${{ '%.2f' | format(j.cost or 0) }}</td><td>${{ '%.2f' | format(j.per_run) }}</td><td>{{ j.share }}%</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    <div class="hint">На подписке Claude Pro / Max PULSE не платит деньгами — он расходует её лимит. Цена по API — ориентир:
+      столько стоил бы PULSE с API-ключом без подписки. Большая часть токенов — из кэша (инструкции и расшифровки
+      перечитываются на каждом шаге), они в 10–40 раз дешевле обычных. Модели по задачам выбираются выше:
+      haiku для сообщений и дайджестов заметно экономнее.</div>
+  </div>
+</section>
 {% endif %}
 {% endblock %}
