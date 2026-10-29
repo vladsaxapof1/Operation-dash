@@ -14,6 +14,7 @@ import platform
 import re
 import shutil
 import sys
+import threading
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -869,9 +870,12 @@ def _ask_page(request: Request, chat_id: int | None, prefill: list[dict]):
         return back(request, err="Такого чата нет", to="/ask")
     meetings = store.rows("SELECT id, title, started_at FROM meetings WHERE status NOT IN ('new','cancelled') "
                           "ORDER BY started_at DESC LIMIT 100")
-    return render(request, "ask.html", nav="ask", chats=chat.list_chats(), chat=current,
+    chats = chat.list_chats()
+    last = current or (chats[0] if chats else {})  # новый чат — с моделью и рассуждением прошлого разговора
+    return render(request, "ask.html", nav="ask", chats=chats, chat=current,
                   items=chat.messages(chat_id) if current else [], prefill=chat.describe(prefill), meetings=meetings,
-                  models=chat.MODELS, model=(current or {}).get("model") or "opus", describe=proposals.describe)
+                  models=chat.MODELS, model=last.get("model") or "opus", efforts=chat.EFFORTS,
+                  effort=last.get("effort") or "", describe=proposals.describe)
 
 
 @app.get("/ask", response_class=HTMLResponse)
@@ -890,7 +894,7 @@ def ask_chat(request: Request, chat_id: int):
 
 @app.post("/ask/send")
 async def ask_send(request: Request, text: str = Form(""), chat_id: int = Form(0), model: str = Form("opus"),
-                   files: list[UploadFile] = File(default=[])):
+                   effort: str = Form(""), files: list[UploadFile] = File(default=[])):
     from opsdash import chat
 
     form = await request.form()
@@ -903,9 +907,9 @@ async def ask_send(request: Request, text: str = Form(""), chat_id: int = Form(0
 
     def go() -> tuple[int, int]:
         named = context or [{"type": "file", "name": name} for name, _ in uploads[:1]]  # чат без текста — по файлу
-        cid = chat_id or chat.create(chat.title_for(text, named), model)
+        cid = chat_id or chat.create(chat.title_for(text, named), model, effort)
         attached = context + [chat.save_file(cid, name, data) for name, data in uploads]
-        return chat.ask(cid, text, attached, model)
+        return chat.ask(cid, text, attached, model, effort)
 
     cid, _ = await run_in_threadpool(go)
     return RedirectResponse(f"/ask/{cid}#end", status_code=303)
@@ -955,10 +959,19 @@ def ask_docs(q: str = ""):
     return [{"label": d.get("rel") or d["title"], "path": d["path"]} for d in docs.search(q, limit=12)]
 
 
+@app.post("/api/ask/voice/warm")
+def ask_voice_warm():
+    """Нажали микрофон — загружаем модель, пока человек говорит первую фразу."""
+    from opsdash import transcribe
+
+    threading.Thread(target=transcribe.warm, daemon=True, name="whisper-warm").start()
+    return {"ok": True}
+
+
 @app.post("/api/ask/voice")
-async def ask_voice(audio: UploadFile = File(...)):
-    """Микрофон в «Спросить Claude»: запись из браузера → текст. Расшифровывает тот же Whisper, что и встречи, —
-    на этом компьютере, звук никуда не уходит."""
+async def ask_voice(audio: UploadFile = File(...), prompt: str = Form("")):
+    """Диктовка в «Спросить Claude»: фраза из браузера (кусок до паузы) → текст. Расшифровывает тот же Whisper,
+    что и встречи, — на этом компьютере, звук никуда не уходит. prompt — что уже надиктовано (для связности)."""
     import tempfile
 
     from opsdash import transcribe
@@ -971,7 +984,7 @@ async def ask_voice(audio: UploadFile = File(...)):
         fh.write(data)
         tmp = Path(fh.name)
     try:
-        text = await run_in_threadpool(transcribe.transcribe_short, tmp)
+        text = await run_in_threadpool(transcribe.transcribe_short, tmp, None, prompt[-300:] or None)
     except Exception as e:  # noqa: BLE001 — покажем у кнопки микрофона
         return JSONResponse({"error": f"Не получилось расшифровать: {e}"}, status_code=500)
     finally:

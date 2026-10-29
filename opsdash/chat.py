@@ -18,7 +18,11 @@ from urllib.parse import quote
 
 from opsdash import brain, config, records, store
 
-MODELS = {"opus": "Подробно · Opus", "sonnet": "Быстро · Sonnet"}
+MODELS = {"fable": "Fable — самая сильная", "opus": "Opus — подробно", "sonnet": "Sonnet — быстро",
+          "haiku": "Haiku — очень быстро"}
+# сколько Claude думает перед ответом (--effort); «авто» — как решит сам Claude Code
+EFFORTS = {"": "Рассуждение: авто", "low": "Рассуждение: лёгкое", "medium": "Рассуждение: обычное",
+           "high": "Рассуждение: глубокое", "xhigh": "Рассуждение: очень глубокое", "max": "Рассуждение: максимум"}
 IMAGES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 HISTORY = 8  # если сессию Claude продолжить нельзя — сколько прошлых реплик пересказать в новой
 
@@ -31,10 +35,10 @@ def files_dir(chat_id: int) -> Path:
     return config.DATA_DIR / "chats" / str(int(chat_id))
 
 
-def create(title: str, model: str = "opus") -> int:
+def create(title: str, model: str = "opus", effort: str = "") -> int:
     now = store.utcnow()
-    return store.execute("INSERT INTO ask_chats(title, model, created, updated) VALUES(?,?,?,?)",
-                         (title, model if model in MODELS else "opus", now, now))
+    return store.execute("INSERT INTO ask_chats(title, model, effort, created, updated) VALUES(?,?,?,?,?)",
+                         (title, model if model in MODELS else "opus", effort if effort in EFFORTS else "", now, now))
 
 
 def get(chat_id: int) -> dict | None:
@@ -195,15 +199,19 @@ def _context_prompt(items: list[dict]) -> str:
 
 # --- вопрос и ответ -----------------------------------------------------------------
 
-def ask(chat_id: int | None, text: str, context: list[dict], model: str | None = None) -> tuple[int, int]:
+def ask(chat_id: int | None, text: str, context: list[dict], model: str | None = None,
+        effort: str | None = None) -> tuple[int, int]:
     """Новый вопрос (в новом или прежнем чате). Ответ Claude пишет в фоне; вернуть (чат, ответ)."""
     from opsdash import jobs
 
     text = (text or "").strip()
     if chat_id is None:
-        chat_id = create(title_for(text, context), model or "opus")
-    elif model in MODELS:
-        store.execute("UPDATE ask_chats SET model=? WHERE id=?", (model, chat_id))
+        chat_id = create(title_for(text, context), model or "opus", effort or "")
+    else:  # модель и рассуждение можно менять от вопроса к вопросу
+        if model in MODELS:
+            store.execute("UPDATE ask_chats SET model=? WHERE id=?", (model, chat_id))
+        if effort is not None and effort in EFFORTS:
+            store.execute("UPDATE ask_chats SET effort=? WHERE id=?", (effort, chat_id))
     now = store.utcnow()
     store.execute("INSERT INTO ask_messages(chat_id, role, text, context, created, updated) VALUES(?,?,?,?,?,?)",
                   (chat_id, "user", text, store.json_col(context), now, now))
@@ -340,16 +348,17 @@ def run(message_id: int) -> str:
             _procs[message_id] = proc
 
     model = chat["model"] if chat["model"] in MODELS else "opus"
+    effort = chat.get("effort") or None
     try:
         try:
             res = brain.stream(head + prompt_tail if not chat["session_id"] else prompt_tail, model=model,
-                               resume=chat["session_id"], job="chat", timeout_min=30,
+                               effort=effort, resume=chat["session_id"], job="chat", timeout_min=30,
                                on_text=on_text, on_step=on_step, on_start=on_start)
         except brain.BrainError:
             if not chat["session_id"] or message_id in _stopped:
                 raise
             # прежнюю сессию продолжить нельзя (её удалили, сменился компьютер) — начинаем новую с пересказом
-            res = brain.stream(head + _history(chat["id"], message_id) + prompt_tail, model=model, job="chat",
+            res = brain.stream(head + _history(chat["id"], message_id) + prompt_tail, model=model, effort=effort, job="chat",
                                timeout_min=30, on_text=on_text, on_step=on_step, on_start=on_start)
     except brain.BrainError as e:
         stopped = message_id in _stopped

@@ -642,7 +642,9 @@ button.chip.ok { cursor: pointer; }
 .ask-list li.active a { background: var(--accent-soft); }
 .ask-list .meta { display: block; margin-top: 2px; }
 .ask-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.ask-head { margin-bottom: 0; }
+.ask-top { margin-bottom: 14px; }
+.ask-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ask-head h2 { margin: 0; font-size: 18px; flex: 1; min-width: 0; }
 .ask-thread { display: flex; flex-direction: column; gap: 14px; }
 .ask-q { align-self: flex-end; max-width: min(720px, 88%); background: var(--panel); border: 1px solid var(--line); border-radius: 14px 14px 4px 14px; padding: 10px 14px; }
 .ask-q-text { white-space: pre-wrap; }
@@ -666,15 +668,15 @@ button.chip.ok { cursor: pointer; }
 .ask-props { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; }
 .ask-a-tools { margin-top: 4px; }
 .ask-empty { padding: 6px 0 0; }
-.ask-empty h1 { margin-bottom: 6px; }
-.ask-examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 14px; }
+.ask-empty p { margin: 0; }
+.ask-examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 10px; }
 .ask-example { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text); cursor: pointer; font: inherit; line-height: 1.4; }
 .ask-example:hover { border-color: var(--accent); }
 .ask-form { position: sticky; bottom: 12px; padding: 12px 14px; margin: 0; box-shadow: 0 6px 24px rgba(0, 0, 0, .12); }
 .ask-form textarea { width: 100%; max-width: none; resize: vertical; min-height: 64px; }
 .ask-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .ask-bar .grow { flex: 1; }
-.ask-model { width: auto; max-width: 180px; }
+.ask-model { width: auto; max-width: 210px; }
 .ask-add { position: relative; }
 .ask-add > summary { list-style: none; }
 .ask-add > summary::-webkit-details-marker { display: none; }

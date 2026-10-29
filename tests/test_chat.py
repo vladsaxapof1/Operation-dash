@@ -24,6 +24,9 @@ mode = (here / "mode.txt").read_text().strip() if (here / "mode.txt").exists() e
 if "--resume" in args and mode == "lost-session":
     print(json.dumps({{"type": "result", "is_error": True, "subtype": "error", "result": "No conversation found"}}))
     sys.exit(1)
+if "--effort" in args and mode == "old-effort":
+    sys.stderr.write("error: unknown option '--effort'\\n")
+    sys.exit(1)
 if "--include-partial-messages" in args and mode == "old-cli":
     sys.stderr.write("error: unknown option '--include-partial-messages'\\n")
     sys.exit(1)
@@ -201,7 +204,45 @@ def test_voice(client, monkeypatch):
     from opsdash import transcribe
 
     heard = []
-    monkeypatch.setattr(transcribe, "transcribe_short", lambda path: heard.append(path.read_bytes()) or "Что решили по складу?")
-    r = client.post("/api/ask/voice", files={"audio": ("voice.webm", b"webm-bytes", "audio/webm")})
-    assert r.json() == {"text": "Что решили по складу?"} and heard == [b"webm-bytes"]
+    monkeypatch.setattr(transcribe, "transcribe_short",
+                        lambda path, settings=None, prompt=None: heard.append((path.read_bytes(), prompt)) or "по складу?")
+    r = client.post("/api/ask/voice", files={"audio": ("phrase.wav", b"wav-bytes", "audio/wav")},
+                    data={"prompt": "Что решили"})
+    assert r.json() == {"text": "по складу?"} and heard == [(b"wav-bytes", "Что решили")]
     assert client.post("/api/ask/voice", files={"audio": ("voice.webm", b"", "audio/webm")}).status_code == 400
+
+
+def test_model_and_reasoning(fake_claude, client):
+    chat_id, answer = chat.ask(None, "Вопрос", [], "fable", "high")
+    _done(answer)
+    args = fake_claude["calls"]()[-1]["args"]
+    assert args[args.index("--model") + 1] == "fable" and args[args.index("--effort") + 1] == "high"
+    page = client.get("/ask").text  # новый чат — с моделью и рассуждением прошлого разговора
+    assert '<option value="fable" selected>' in page and '<option value="high" selected>' in page
+    _, second = chat.ask(chat_id, "Ещё", [], "sonnet", "")
+    _done(second)
+    assert "--effort" not in fake_claude["calls"]()[-1]["args"] and chat.get(chat_id)["effort"] == ""
+    fake_claude["mode"]("old-effort")  # Claude Code без --effort — отвечает как умеет
+    _, third = chat.ask(chat_id, "И ещё", [], "opus", "max")
+    assert _done(third)["status"] == "done" and "--effort" not in fake_claude["calls"]()[-1]["args"]
+
+
+def test_dictation_phrase(monkeypatch, settings_with, tmp_path):
+    import numpy as np
+
+    from opsdash import transcribe
+
+    calls = []
+    monkeypatch.setattr(transcribe, "decode", lambda path, settings=None: np.zeros(16000, dtype="float32"))
+
+    def fake(audio, settings, progress=None, *, timestamps=True, prompt=None):
+        calls.append((timestamps, prompt))
+        return [{"start": 0, "end": 1, "text": answers.pop(0)}], []
+
+    monkeypatch.setattr(transcribe, "whisper_words", fake)
+    answers = ["по складу?", "Продолжение следует..."]
+    phrase = tmp_path / "phrase.wav"
+    phrase.write_bytes(b"x")
+    assert transcribe.transcribe_short(phrase, prompt="Что решили") == "по складу?"
+    assert transcribe.transcribe_short(phrase) == ""  # Whisper «досочинил» титры на тишине
+    assert calls == [(False, "Что решили"), (False, None)]  # без пословных отметок — быстрее

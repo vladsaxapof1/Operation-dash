@@ -657,6 +657,9 @@
       ctxList.appendChild(chip);
     };
     var picked = function () { addMenu.open = false; askText.focus(); };
+    // меню «Контекст» закрывается кликом мимо него и Esc, а не только повторным нажатием
+    document.addEventListener("click", function (e) { if (addMenu.open && !addMenu.contains(e.target)) addMenu.open = false; });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && addMenu.open) addMenu.open = false; });
     ctxList.addEventListener("click", function (e) {
       if (!e.target.matches("[data-ctx-remove]")) return;
       var chip = e.target.closest(".ctx-chip");
@@ -708,6 +711,7 @@
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); askForm.requestSubmit(); }
     });
     askForm.addEventListener("submit", function (e) {
+      if (e.defaultPrevented) return;
       if (!askText.value.trim() && !ctxList.children.length) { e.preventDefault(); askText.focus(); return; }
       var send = askForm.querySelector("[data-ask-send]");
       send.disabled = true; send.textContent = "Отправляю…";
@@ -716,42 +720,135 @@
       b.addEventListener("click", function () { askText.value = b.dataset.askExample; askText.focus(); });
     });
 
-    // микрофон: запись в браузере → Whisper на этом компьютере → текст в поле вопроса
-    var mic = askForm.querySelector("[data-mic]"), micStatus = askForm.querySelector("[data-mic-status]"), rec = null, micTick;
+    // диктовка, как в Handy: звук режется на фразы по паузам, каждая сразу уходит в Whisper на этом компьютере —
+    // текст появляется, пока вы говорите. Нажать ещё раз (или Esc) — закончить
+    var mic = askForm.querySelector("[data-mic]"), micStatus = askForm.querySelector("[data-mic-status]"), dict = null;
+    var PRE_ROLL = 0.3, PAUSE = 0.7, MAX_PHRASE = 20, MIN_SPEECH = 0.25;  // секунды
+    var wavBlob = function (chunks, rate) {
+      var n = chunks.reduce(function (s, c) { return s + c.length; }, 0);
+      var view = new DataView(new ArrayBuffer(44 + n * 2)), off = 44;
+      var str = function (o, s) { for (var i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+      str(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); str(8, "WAVEfmt "); view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true);
+      view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+      str(36, "data"); view.setUint32(40, n * 2, true);
+      chunks.forEach(function (c) {
+        for (var i = 0; i < c.length; i++, off += 2) view.setInt16(off, Math.max(-1, Math.min(1, c[i])) * 0x7fff, true);
+      });
+      return new Blob([view], { type: "audio/wav" });
+    };
+    var showStatus = function () {
+      if (!dict) return;
+      micStatus.textContent = (dict.failed ? dict.failed + " · " : "")
+        + (dict.stopping ? "Дописываю…" : "● Слушаю" + (dict.pending ? " · распознаю…" : " — говорите, текст появится сам"));
+    };
+    var insertText = function (text) {
+      if (!text) return;
+      var before = askText.value;
+      if (!before.trim() || /[.!?…]\s*$/.test(before)) text = text.charAt(0).toUpperCase() + text.slice(1);  // начало предложения
+      askText.value = before + (before && !/\s$/.test(before) ? " " : "") + text;
+      askText.scrollTop = askText.scrollHeight;
+    };
+    var sendPhrase = function (chunks, rate) {
+      var fd = new FormData();
+      fd.append("audio", wavBlob(chunks, rate), "phrase.wav");
+      dict.pending++;
+      showStatus();
+      var d = dict;
+      d.chain = d.chain.then(function () {
+        // что уже надиктовано — Whisper продолжит связно; в пустом поле подсказка «Вопрос:» даёт заглавные и «?»
+        fd.append("prompt", askText.value.slice(-300) || "Вопрос:");
+        return fetch("/api/ask/voice", { method: "POST", body: fd }).then(function (r) { return r.json(); })
+          .then(function (res) { if (res.error) d.failed = res.error; else insertText(res.text); })
+          .catch(function () { d.failed = "Не получилось распознать фразу"; });
+      }).then(function () { d.pending--; showStatus(); });
+    };
+    var endPhrase = function () {
+      var p = dict.phrase;
+      dict.phrase = null;
+      if (p && p.speech >= MIN_SPEECH) sendPhrase(p.chunks, dict.rate);
+    };
+    var onFrame = function (frame) {
+      var d = dict, sec = frame.length / d.rate, sum = 0;
+      for (var i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
+      var level = Math.sqrt(sum / frame.length);
+      var loud = level > Math.max(0.012, d.floor * 3);
+      if (!loud) d.floor = d.floor * 0.995 + level * 0.005;  // фоновый шум комнаты
+      mic.style.boxShadow = "0 0 0 " + Math.min(10, 2 + level * 120).toFixed(1) + "px rgba(220, 60, 60, .25)";
+      d.preroll.push(frame);
+      d.prerollSec += sec;
+      while (d.prerollSec - d.preroll[0].length / d.rate > PRE_ROLL) d.prerollSec -= d.preroll.shift().length / d.rate;
+      if (loud) {
+        if (!d.phrase) d.phrase = { chunks: d.preroll.slice(0, -1), len: d.prerollSec - sec, speech: 0, quiet: 0 };
+        d.phrase.speech += sec;
+        d.phrase.quiet = 0;
+      } else if (d.phrase) {
+        d.phrase.quiet += sec;
+      }
+      if (d.phrase) {
+        d.phrase.chunks.push(frame);
+        d.phrase.len += sec;
+        if (d.phrase.quiet >= PAUSE || d.phrase.len >= MAX_PHRASE) endPhrase();
+      }
+    };
+    var stopDictation = function () {
+      if (!dict || dict.stopping) return;
+      var d = dict;
+      d.stopping = true;
+      endPhrase();
+      showStatus();
+      d.stream.getTracks().forEach(function (t) { t.stop(); });
+      d.ctx.close();
+      mic.style.boxShadow = "";
+      d.chain.then(function () {
+        mic.classList.remove("on");
+        if (dict === d) dict = null;
+        micStatus.textContent = d.failed || "";
+        askText.focus();
+      });
+    };
+    var startDictation = function (stream) {
+      var ctx, source;
+      try { ctx = new AudioContext({ sampleRate: 16000 }); source = ctx.createMediaStreamSource(stream); }
+      catch (e) {  // Firefox не смешивает частоты — берём частоту устройства, сервер приведёт её к 16 кГц
+        if (ctx) ctx.close();
+        ctx = new AudioContext();
+        source = ctx.createMediaStreamSource(stream);
+      }
+      if (ctx.state === "suspended") ctx.resume();  // браузер мог создать его «на паузе» — звук бы не шёл
+      dict = { ctx: ctx, stream: stream, rate: ctx.sampleRate, floor: 0.005, preroll: [], prerollSec: 0, phrase: null,
+               pending: 0, chain: Promise.resolve(), stopping: false };
+      mic.classList.add("on");
+      showStatus();
+      var connect = function (node) { source.connect(node); node.connect(ctx.destination); };  // звук не выводит — только слушает
+      var legacy = function () {  // браузеры без AudioWorklet
+        var proc = ctx.createScriptProcessor(4096, 1, 1);
+        proc.onaudioprocess = function (e) { if (dict && !dict.stopping) onFrame(e.inputBuffer.getChannelData(0).slice(0)); };
+        connect(proc);
+      };
+      if (!ctx.audioWorklet) { legacy(); return; }
+      ctx.audioWorklet.addModule("/static/mic-worklet.js").then(function () {
+        var node = new AudioWorkletNode(ctx, "pulse-mic");
+        node.port.onmessage = function (e) { if (dict && !dict.stopping) onFrame(e.data); };
+        connect(node);
+      }).catch(legacy);
+    };
     mic.addEventListener("click", function () {
-      if (rec) { rec.stop(); return; }
-      if (!navigator.mediaDevices || !window.MediaRecorder) { micStatus.textContent = "Этот браузер не умеет записывать звук"; return; }
-      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-        var chunks = [], started = Date.now();
-        rec = new MediaRecorder(stream);
-        rec.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
-        rec.onstop = function () {
-          stream.getTracks().forEach(function (t) { t.stop(); });
-          clearInterval(micTick);
-          mic.classList.remove("on");
-          rec = null;
-          var type = (chunks[0] && chunks[0].type) || "audio/webm";
-          var fd = new FormData();
-          fd.append("audio", new Blob(chunks, { type: type }), "voice." + (type.indexOf("ogg") >= 0 ? "ogg" : type.indexOf("mp4") >= 0 ? "m4a" : "webm"));
-          mic.disabled = true;
-          micStatus.textContent = "Расшифровываю…";
-          fetch("/api/ask/voice", { method: "POST", body: fd }).then(function (r) { return r.json(); }).then(function (res) {
-            mic.disabled = false;
-            if (res.error) { micStatus.textContent = res.error; return; }
-            micStatus.textContent = res.text ? "" : "Не разобрала слов — попробуйте ещё раз";
-            if (res.text) askText.value = (askText.value.trim() ? askText.value.replace(/\s*$/, " ") : "") + res.text;
-            askText.focus();
-          }).catch(function () { mic.disabled = false; micStatus.textContent = "Не получилось расшифровать"; });
-        };
-        rec.start();
-        mic.classList.add("on");
-        micStatus.textContent = "● идёт запись — нажмите ещё раз, чтобы закончить";
-        micTick = setInterval(function () {
-          var sec = Math.round((Date.now() - started) / 1000);
-          micStatus.textContent = "● " + Math.floor(sec / 60) + ":" + ("0" + sec % 60).slice(-2) + " — нажмите ещё раз, чтобы закончить";
-        }, 500);
-      }).catch(function () { micStatus.textContent = "Нет доступа к микрофону — разрешите его в браузере"; });
+      if (dict) { stopDictation(); return; }
+      if (!navigator.mediaDevices || !window.AudioContext) { micStatus.textContent = "Этот браузер не умеет записывать звук"; return; }
+      fetch("/api/ask/voice/warm", { method: "POST" });  // модель загрузится, пока звучит первая фраза
+      navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+        .then(startDictation)
+        .catch(function () { micStatus.textContent = "Нет доступа к микрофону — разрешите его в браузере"; });
     });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && dict) stopDictation(); });
+    askForm.addEventListener("submit", function (e) {  // отправили посреди диктовки — сначала дописываем последнюю фразу
+      if (!dict) return;
+      e.preventDefault();
+      var d = dict;
+      stopDictation();
+      d.chain.then(function () { askForm.requestSubmit(); });
+    }, true);
   }
 
   // ответ Claude пишется по ходу: шаги и текст обновляются, по готовности — страница целиком (Markdown, кнопки)

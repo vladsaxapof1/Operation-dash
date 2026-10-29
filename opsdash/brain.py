@@ -122,11 +122,13 @@ def _env(settings: dict) -> dict:
 
 
 def _command(settings: dict, claude: str, job: str, *, model: str | None, resume: str | None,
-             stream: bool = False) -> list[str]:
+             stream: bool = False, effort: str | None = None) -> list[str]:
     cmd = [claude, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"] if stream \
         else [claude, "-p", "--output-format", "json"]
     if model:
         cmd += ["--model", model]
+    if effort:
+        cmd += ["--effort", effort]
     if resume:
         cmd += ["--resume", resume]
     for folder in settings["knowledge"].get("folders") or []:
@@ -199,12 +201,12 @@ def run(prompt: str, *, model: str | None = None, resume: str | None = None, job
 
 
 def stream(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
-           timeout_min: int | None = None, on_text=None, on_step=None, on_start=None) -> dict:
+           timeout_min: int | None = None, on_text=None, on_step=None, on_start=None, effort: str | None = None) -> dict:
     """Как run, но по ходу работы: on_text(текст) — ответ, который Claude сейчас пишет (каждый новый абзац
     рассуждений начинается заново), on_step(инструмент, параметры) — что он делает (читает файл, ищет),
     on_start(процесс) — чтобы его можно было остановить. Результат тот же, что у run."""
     settings = config.load_settings()
-    cmd = _command(settings, _claude(settings), job, model=model, resume=resume, stream=True)
+    cmd = _command(settings, _claude(settings), job, model=model, resume=resume, stream=True, effort=effort)
     timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)
     kwargs = {}
     if os.name == "nt":
@@ -258,6 +260,9 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
     if timed_out.is_set():
         raise BrainError(f"Claude не уложился в {timeout // 60} мин")
     stderr = "".join(errors)
+    if data is None and effort and "--effort" in stderr:  # старый Claude Code не знает --effort — думает как умеет
+        return stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, on_text=on_text,
+                      on_step=on_step, on_start=on_start)
     if data is None and "include-partial-messages" in stderr:  # старый Claude Code: без ответа по ходу работы
         result = run(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min)
         if on_text:

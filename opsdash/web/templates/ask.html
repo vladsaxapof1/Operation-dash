@@ -5,6 +5,10 @@
 {%- if c.href %}<a class="chip acc ctx-chip" href="{{ c.href }}">{{ c.label }}</a>{% else %}<span class="chip acc ctx-chip">{{ c.label }}</span>{% endif -%}
 {%- endmacro %}
 {% block content %}
+<div class="topline ask-top">
+  <div><h1>Спросить Claude</h1>
+    <div class="muted">О встречах, задачах, переписке и документах — Claude ищет ответ в ваших данных и называет источник.</div></div>
+</div>
 <div class="ask">
   <aside class="ask-side card">
     <div class="card-b">
@@ -22,8 +26,8 @@
 
   <section class="ask-main">
     {% if chat %}
-    <div class="topline ask-head">
-      <h1>{{ chat.title or 'Без названия' }}</h1>
+    <div class="ask-head">
+      <h2>{{ chat.title or 'Без названия' }}</h2>
       <form class="inline" method="post" action="/ask/{{ chat.id }}/delete" data-confirm="Удалить чат «{{ chat.title }}»? Вопросы, ответы и приложенные файлы удалятся.">
         <button class="btn sm ghost danger">Удалить чат</button></form>
     </div>
@@ -66,9 +70,7 @@
     </div>
     {% else %}
     <div class="ask-empty">
-      <h1>Спросить Claude</h1>
-      <p class="muted">О встречах, задачах, переписке и документах — Claude ищет ответ в ваших данных и называет источник.
-        Приложите встречу — он прочитает расшифровку целиком, а не только разбор.</p>
+      <p class="muted">Приложите встречу — Claude прочитает расшифровку целиком, а не только разбор. Примеры:</p>
       <div class="ask-examples">
         {% for q in ['Распиши решения этой встречи по каждой метрике: что было, на что поменяли, кто предложил — с отметками времени',
                      'Что я обещала на этой неделе и что из этого просрочено?',
@@ -99,8 +101,10 @@
             <div class="hint">Документы, таблицы, презентации, PDF, текст и картинки. Файл сохранится в этом чате.</div>
           </div>
         </details>
-        <select name="model" class="ask-model" title="Подробно — Opus: для разборов и длинных ответов. Быстро — Sonnet: для коротких вопросов">
+        <select name="model" class="ask-model" title="Модель Claude: Fable и Opus — для разборов и длинных ответов, Sonnet и Haiku — для коротких вопросов">
           {% for key, title in models.items() %}<option value="{{ key }}" {{ 'selected' if model == key }}>{{ title }}</option>{% endfor %}</select>
+        <select name="effort" class="ask-model" title="Сколько Claude думает перед ответом: глубже — точнее, но дольше">
+          {% for key, title in efforts.items() %}<option value="{{ key }}" {{ 'selected' if effort == key }}>{{ title }}</option>{% endfor %}</select>
         <span class="grow"></span>
         <span class="small muted ask-mic-status" data-mic-status></span>
         <button type="button" class="btn ask-mic" data-mic title="Надиктовать — расшифрует Whisper на этом компьютере, звук никуда не уходит" aria-label="Надиктовать">{{ ui.mic_ico() }}</button>

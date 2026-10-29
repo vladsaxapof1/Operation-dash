@@ -239,7 +239,8 @@ CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раз�
 CREATE TABLE IF NOT EXISTS ask_chats (        -- разговоры в разделе «Спросить Claude» (opsdash.chat)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT,
-    model TEXT,                      -- opus (подробно) | sonnet (быстро)
+    model TEXT,                      -- fable | opus | sonnet | haiku
+    effort TEXT,                     -- сколько думать: low … max; пусто — как решит Claude Code
     session_id TEXT,                 -- сессия Claude Code: следующий вопрос продолжает её (--resume)
     created TEXT, updated TEXT
 );
@@ -319,6 +320,7 @@ MIGRATIONS = [
     ("messages", "topic", "TEXT"),
     ("commitments", "event_uid", "TEXT"),   # встреча календаря, посвящённая задаче (opsdash.task_meetings)
     ("commitments", "event_info", "TEXT"),  # её название и время на момент связи — JSON
+    ("ask_chats", "effort", "TEXT"),
 ]
 
 

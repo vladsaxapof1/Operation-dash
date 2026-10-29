@@ -170,14 +170,15 @@ def engine(settings: dict) -> str:
     return "mlx"
 
 
-def mlx_words(audio, settings: dict, progress=None) -> tuple[list[dict], list[dict]]:
+def mlx_words(audio, settings: dict, progress=None, *, timestamps: bool = True,
+              prompt: str | None = None) -> tuple[list[dict], list[dict]]:
     import mlx_whisper
 
     _prepare_env(settings)
     name = settings["recordings"].get("whisper_model") or "large-v3-turbo"
     result = mlx_whisper.transcribe(
         audio, path_or_hf_repo=MLX_MODELS.get(name, name), language=settings["recordings"].get("language") or None,
-        word_timestamps=True, condition_on_previous_text=False, verbose=None,
+        word_timestamps=timestamps, condition_on_previous_text=False, verbose=None, initial_prompt=prompt or None,
     )
     segments, words = [], []
     for seg in result.get("segments") or []:
@@ -189,12 +190,14 @@ def mlx_words(audio, settings: dict, progress=None) -> tuple[list[dict], list[di
     return segments, words
 
 
-def whisper_words(audio, settings: dict, progress=None) -> tuple[list[dict], list[dict]]:
-    """Вернуть (сегменты, слова) с отметками времени."""
+def whisper_words(audio, settings: dict, progress=None, *, timestamps: bool = True,
+                  prompt: str | None = None) -> tuple[list[dict], list[dict]]:
+    """Вернуть (сегменты, слова) с отметками времени. timestamps=False — без слов, зато быстрее (диктовка);
+    prompt — текст перед этим куском: Whisper продолжит его без лишних заглавных и с той же лексикой."""
     global _mlx_failed
     if engine(settings) == "mlx":
         try:
-            return mlx_words(audio, settings, progress)
+            return mlx_words(audio, settings, progress, timestamps=timestamps, prompt=prompt)
         except Exception as e:  # noqa: BLE001 — откат на проверенный движок
             _mlx_failed = True
             store.log("transcribe", f"MLX не сработал, считаю через faster-whisper: {e}", "warning")
@@ -204,8 +207,8 @@ def whisper_words(audio, settings: dict, progress=None) -> tuple[list[dict], lis
 
     def run(m):
         segments_iter, _info = m.transcribe(
-            audio, language=lang, vad_filter=True, word_timestamps=True, beam_size=5,
-            condition_on_previous_text=False,
+            audio, language=lang, vad_filter=True, word_timestamps=timestamps, beam_size=5,
+            condition_on_previous_text=False, initial_prompt=prompt or None,
         )
         segments, words = [], []
         for seg in segments_iter:
@@ -433,12 +436,29 @@ def transcribe_audio(path: Path, settings: dict, *, num_speakers: int | None = N
             "audio": audio}  # для узнавания голоса директора (voice.recognize)
 
 
-def transcribe_short(path: Path, settings: dict | None = None) -> str:
-    """Голосовое сообщение → текст (без разметки спикеров)."""
+# Whisper на тишине и обрывках «досочиняет» титры из своего обучения — такие куски диктовки выбрасываем
+_PHANTOMS = re.compile(r"^(продолжение следует|субтитры|редактор субтитров|спасибо за (внимание|просмотр)|"
+                       r"подписывайтесь на канал|thank you|thanks for watching)\b", re.IGNORECASE)
+_short_lock = threading.Lock()  # голосовые из бота и диктовка на странице — по одному: модель одна
+
+
+def transcribe_short(path: Path, settings: dict | None = None, prompt: str | None = None) -> str:
+    """Голосовое сообщение или фраза диктовки → текст (без разметки спикеров и отметок времени)."""
     settings = settings or config.load_settings()
     audio = decode(path, settings)
-    segments, _ = whisper_words(audio, settings)
-    return " ".join(s["text"] for s in segments).strip()
+    with _short_lock:
+        segments, _ = whisper_words(audio, settings, timestamps=False, prompt=prompt)
+    text = " ".join(s["text"] for s in segments).strip()
+    return "" if _PHANTOMS.match(text) and len(text) < 60 else text
+
+
+def warm(settings: dict | None = None) -> None:
+    """Загрузить модель заранее (нажали микрофон): первая фраза диктовки не будет ждать загрузки."""
+    import numpy as np
+
+    settings = settings or config.load_settings()
+    with _short_lock:
+        whisper_words(np.zeros(SR, dtype="float32"), settings, timestamps=False)
 
 
 # --- отдельный процесс ------------------------------------------------------------
