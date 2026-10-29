@@ -909,6 +909,7 @@
       nmore.textContent = nbox.classList.contains("open") ? "Свернуть" : "Ещё " + more;
       nfoot.hidden = !more;
       nhead.hidden = items.length < 2;
+      nlist.hidden = !nlist.querySelector("[data-notice]");
     };
     // скрыть: уезжает вправо и тает, затем схлопывается (style.css: .leaving, .gone)
     var leave = function (el) {
@@ -999,6 +1000,20 @@
         setTimeout(refreshNotices, now.length ? 5000 : 15000);
       }).catch(function () { setTimeout(refreshNotices, 30000); });
     };
+    // в «Спросить Claude» внизу поле вопроса: встаём над ним, только если угол на него заходит. На широком экране
+    // поле по центру и до угла не достаёт — тогда угол внизу, как везде. На телефоне угол наверху (style.css)
+    var dock = document.querySelector(".ask-dock");
+    if (dock) {
+      var place = function () {
+        nbox.style.bottom = "";
+        if (window.innerWidth <= 760) return;
+        var d = dock.getBoundingClientRect(), b = nbox.getBoundingClientRect();
+        nbox.style.bottom = (b.left < d.right && b.right > d.left ? window.innerHeight - d.top + 10 : 20) + "px";
+      };
+      place();
+      window.addEventListener("resize", place);
+      if (window.ResizeObserver) new ResizeObserver(place).observe(dock);  // поле растёт вместе с текстом
+    }
     layout();
     setTimeout(refreshNotices, nnow.hidden ? 15000 : 5000);
   }

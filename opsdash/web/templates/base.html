@@ -57,7 +57,7 @@
   <div class="notice-head" data-notice-head{% if notices | length < 2 %} hidden{% endif %}>
     <button type="button" class="notice-clear" data-notice-clear>Скрыть все</button>
   </div>
-  <div class="notice-list" data-notice-list aria-live="polite">
+  <div class="notice-list" data-notice-list aria-live="polite"{% if not notices %} hidden{% endif %}>
     {% for n in notices %}
     <div class="notice {{ n.level }}" data-notice="{{ n.id }}" data-key="{{ n.kind }}|{{ n.title }}">
       <div class="notice-b">

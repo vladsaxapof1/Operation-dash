@@ -655,13 +655,14 @@ button.chip.ok { cursor: pointer; }
 .notices { position: fixed; right: 20px; bottom: 20px; z-index: 30; width: 340px; max-width: calc(100vw - 24px);
   display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .notices > * { pointer-events: auto; }
-.page-ask .notices { bottom: 175px; }  /* в «Спросить Claude» внизу строка вопроса — встаём над ней */
+.page-ask .notices { bottom: 175px; }  /* в «Спросить Claude» — над полем вопроса, если угол на него заходит (app.js) */
 .notices .toast { position: static; width: auto; max-width: none; }
 .notice-now, .notice { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
 .notice-now { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; }
 .notice-now[hidden] { display: none; }
 .notice-list { display: flex; flex-direction: column; gap: 6px; }
+.notice-list[hidden] { display: none; }  /* пустой — иначе под «Сейчас» лишний зазор */
 .notice { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px 9px 12px; border-left: 3px solid var(--accent);
   transition: transform .22s ease-in, opacity .22s ease-in, height .16s ease, padding .16s ease, margin .16s ease; }
 .notice:has(a.notice-t) { cursor: pointer; }  /* клик по всему уведомлению — переход по его ссылке */
