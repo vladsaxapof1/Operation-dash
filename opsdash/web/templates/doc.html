@@ -10,6 +10,7 @@
   <div class="actions">
     <form class="inline" method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><button class="btn primary">Открыть файл</button></form>
     <form class="inline" method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><input type="hidden" name="reveal" value="1"><button class="btn">{{ 'Показать в Finder' if is_mac else 'Показать в папке' }}</button></form>
+    <a class="btn" href="/ask?doc={{ d.path | urlencode }}" title="Задать вопрос по этому документу">Спросить Claude</a>
   </div>
 </div>
 

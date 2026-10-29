@@ -633,4 +633,146 @@
       });
     }, 5000);
   }
+  // --- «Спросить Claude»: контекст к вопросу, микрофон, ответ по ходу работы ---
+  var askForm = document.querySelector("[data-ask-form]");
+  if (askForm) {
+    var ctxList = askForm.querySelector("[data-ctx-list]");
+    var askText = askForm.querySelector("[data-ask-text]");
+    var addMenu = askForm.querySelector("[data-ask-add]");
+    var fileInput = askForm.querySelector("[data-ctx-files]");
+    var addCtx = function (value, label, files) {
+      if (!files && Array.prototype.some.call(ctxList.querySelectorAll("input[name=ctx]"), function (i) { return i.value === value; })) return;
+      var chip = document.createElement("span");
+      chip.className = "chip acc ctx-chip";
+      chip.textContent = label;
+      if (files) chip.dataset.files = "1";
+      else {
+        var hidden = document.createElement("input");
+        hidden.type = "hidden"; hidden.name = "ctx"; hidden.value = value;
+        chip.appendChild(hidden);
+      }
+      var x = document.createElement("button");
+      x.type = "button"; x.textContent = "✕"; x.setAttribute("data-ctx-remove", ""); x.setAttribute("aria-label", "Убрать");
+      chip.appendChild(x);
+      ctxList.appendChild(chip);
+    };
+    var picked = function () { addMenu.open = false; askText.focus(); };
+    ctxList.addEventListener("click", function (e) {
+      if (!e.target.matches("[data-ctx-remove]")) return;
+      var chip = e.target.closest(".ctx-chip");
+      if (chip.dataset.files) fileInput.value = "";
+      chip.remove();
+    });
+    var meetingPick = askForm.querySelector("[data-ctx-meeting]");
+    meetingPick.addEventListener("change", function () {
+      if (!meetingPick.value) return;
+      addCtx("meeting:" + meetingPick.value, "встреча «" + meetingPick.options[meetingPick.selectedIndex].text + "»");
+      meetingPick.value = "";
+      picked();
+    });
+    var taskPick = askForm.querySelector("[data-ctx-task]");
+    taskPick.addEventListener("change", function () {
+      var m = taskPick.value.match(/^#(\d+)\s*·\s*([^·]+)/);
+      if (!m) return;
+      addCtx("task:" + m[1], "задача «" + m[2].trim() + "»");
+      taskPick.value = "";
+      picked();
+    });
+    var docPick = askForm.querySelector("[data-ctx-doc]"), docList = document.getElementById("ask-docs"), docPaths = {}, docTimer;
+    docPick.addEventListener("input", function () {
+      if (docPaths[docPick.value]) {
+        addCtx("doc:" + docPaths[docPick.value], "документ «" + docPick.value + "»");
+        docPick.value = "";
+        picked();
+        return;
+      }
+      clearTimeout(docTimer);
+      docTimer = setTimeout(function () {
+        fetch("/api/ask/docs?q=" + encodeURIComponent(docPick.value)).then(function (r) { return r.json(); }).then(function (items) {
+          docList.innerHTML = "";
+          items.forEach(function (it) {
+            docPaths[it.label] = it.path;
+            var o = document.createElement("option");
+            o.value = it.label;
+            docList.appendChild(o);
+          });
+        });
+      }, 250);
+    });
+    fileInput.addEventListener("change", function () {
+      Array.prototype.forEach.call(ctxList.querySelectorAll("[data-files]"), function (c) { c.remove(); });
+      var names = Array.prototype.map.call(fileInput.files, function (f) { return f.name; });
+      if (names.length) { addCtx("", (names.length > 1 ? "файлы: " : "файл «") + names.join(", ") + (names.length > 1 ? "" : "»"), true); picked(); }
+    });
+    askText.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); askForm.requestSubmit(); }
+    });
+    askForm.addEventListener("submit", function (e) {
+      if (!askText.value.trim() && !ctxList.children.length) { e.preventDefault(); askText.focus(); return; }
+      var send = askForm.querySelector("[data-ask-send]");
+      send.disabled = true; send.textContent = "Отправляю…";
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ask-example]"), function (b) {
+      b.addEventListener("click", function () { askText.value = b.dataset.askExample; askText.focus(); });
+    });
+
+    // микрофон: запись в браузере → Whisper на этом компьютере → текст в поле вопроса
+    var mic = askForm.querySelector("[data-mic]"), micStatus = askForm.querySelector("[data-mic-status]"), rec = null, micTick;
+    mic.addEventListener("click", function () {
+      if (rec) { rec.stop(); return; }
+      if (!navigator.mediaDevices || !window.MediaRecorder) { micStatus.textContent = "Этот браузер не умеет записывать звук"; return; }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        var chunks = [], started = Date.now();
+        rec = new MediaRecorder(stream);
+        rec.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
+        rec.onstop = function () {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          clearInterval(micTick);
+          mic.classList.remove("on");
+          rec = null;
+          var type = (chunks[0] && chunks[0].type) || "audio/webm";
+          var fd = new FormData();
+          fd.append("audio", new Blob(chunks, { type: type }), "voice." + (type.indexOf("ogg") >= 0 ? "ogg" : type.indexOf("mp4") >= 0 ? "m4a" : "webm"));
+          mic.disabled = true;
+          micStatus.textContent = "Расшифровываю…";
+          fetch("/api/ask/voice", { method: "POST", body: fd }).then(function (r) { return r.json(); }).then(function (res) {
+            mic.disabled = false;
+            if (res.error) { micStatus.textContent = res.error; return; }
+            micStatus.textContent = res.text ? "" : "Не разобрала слов — попробуйте ещё раз";
+            if (res.text) askText.value = (askText.value.trim() ? askText.value.replace(/\s*$/, " ") : "") + res.text;
+            askText.focus();
+          }).catch(function () { mic.disabled = false; micStatus.textContent = "Не получилось расшифровать"; });
+        };
+        rec.start();
+        mic.classList.add("on");
+        micStatus.textContent = "● идёт запись — нажмите ещё раз, чтобы закончить";
+        micTick = setInterval(function () {
+          var sec = Math.round((Date.now() - started) / 1000);
+          micStatus.textContent = "● " + Math.floor(sec / 60) + ":" + ("0" + sec % 60).slice(-2) + " — нажмите ещё раз, чтобы закончить";
+        }, 500);
+      }).catch(function () { micStatus.textContent = "Нет доступа к микрофону — разрешите его в браузере"; });
+    });
+  }
+
+  // ответ Claude пишется по ходу: шаги и текст обновляются, по готовности — страница целиком (Markdown, кнопки)
+  var askLive = document.querySelector("[data-ask-live]");
+  if (askLive) {
+    var liveSteps = askLive.querySelector("[data-live-steps]"), liveText = askLive.querySelector("[data-live-text]"),
+        liveState = askLive.querySelector("[data-live-state]");
+    var askPoll = setInterval(function () {
+      fetch("/api/ask/" + askLive.dataset.askLive + "/live", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
+        if (!res.running) { clearInterval(askPoll); window.location.reload(); return; }
+        var nearEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 200;
+        liveSteps.innerHTML = "";
+        (res.steps || []).forEach(function (step) {
+          var d = document.createElement("div");
+          d.textContent = step;
+          liveSteps.appendChild(d);
+        });
+        liveText.textContent = res.text || "";
+        if (liveState) liveState.textContent = res.text ? "пишет ответ" : "думает";
+        if (nearEnd) window.scrollTo(0, document.body.scrollHeight);
+      });
+    }, 1200);
+  }
 })();

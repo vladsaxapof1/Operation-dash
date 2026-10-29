@@ -236,6 +236,26 @@ CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раз�
     created TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ask_chats (        -- разговоры в разделе «Спросить Claude» (opsdash.chat)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    model TEXT,                      -- opus (подробно) | sonnet (быстро)
+    session_id TEXT,                 -- сессия Claude Code: следующий вопрос продолжает её (--resume)
+    created TEXT, updated TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ask_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    role TEXT NOT NULL,              -- user | assistant
+    text TEXT DEFAULT '',
+    context TEXT DEFAULT '[]',       -- JSON: что приложено к вопросу — встреча, задача, документ, файл
+    steps TEXT DEFAULT '[]',         -- JSON: что Claude делал по ходу ответа («Читает расшифровку…»)
+    status TEXT DEFAULT 'done',      -- done | running | failed
+    error TEXT,
+    created TEXT, updated TEXT
+);
+
 CREATE TABLE IF NOT EXISTS files_seen (
     path TEXT PRIMARY KEY,
     size INTEGER,

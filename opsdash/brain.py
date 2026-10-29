@@ -13,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -120,13 +121,10 @@ def _env(settings: dict) -> dict:
     return env
 
 
-def run(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
-        timeout_min: int | None = None) -> dict:
-    settings = config.load_settings()
-    claude = find_claude(settings)
-    if not claude:
-        raise BrainError("Не найден Claude Code (команда claude). Установите его и войдите — см. docs/01-установка.md")
-    cmd = [claude, "-p", "--output-format", "json"]
+def _command(settings: dict, claude: str, job: str, *, model: str | None, resume: str | None,
+             stream: bool = False) -> list[str]:
+    cmd = [claude, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"] if stream \
+        else [claude, "-p", "--output-format", "json"]
     if model:
         cmd += ["--model", model]
     if resume:
@@ -142,6 +140,36 @@ def run(prompt: str, *, model: str | None = None, resume: str | None = None, job
         cmd += ["--append-system-prompt", context.write(settings).read_text(encoding="utf-8")]
     except Exception as e:  # noqa: BLE001 — без сводки Claude всё равно работает, просто ищет больше
         store.log(job, f"сводка контекста не собрана: {e}", "warning")
+    return cmd
+
+
+def _claude(settings: dict) -> str:
+    claude = find_claude(settings)
+    if not claude:
+        raise BrainError("Не найден Claude Code (команда claude). Установите его и войдите — см. docs/01-установка.md")
+    return claude
+
+
+def _result(data, returncode: int, stderr: str, out: str, job: str) -> dict:
+    if isinstance(data, dict) and (returncode != 0 or data.get("is_error")) and (data.get("result") or data.get("subtype")):
+        # в JSON-ответе есть причина — показываем её, а не весь ответ целиком
+        reason = str(data.get("result") or data.get("subtype"))
+        if "not logged in" in reason.lower():
+            reason = "не выполнен вход — Настройки → Claude → «Войти в Claude»"
+        raise BrainError(f"Claude: {reason[:1500]}")
+    if returncode != 0 or not isinstance(data, dict):
+        err = (stderr or out or "").strip()[-1500:]
+        raise BrainError(f"Claude завершился с ошибкой (код {returncode}): {err}")
+    cost = data.get("total_cost_usd")
+    store.log(job, f"Claude закончил за {round((data.get('duration_ms') or 0) / 1000)} с"
+                   + (f", ≈${cost:.2f} (в рамках подписки)" if cost else ""))
+    return {"text": (data.get("result") or "").strip(), "session_id": data.get("session_id"), "raw": data}
+
+
+def run(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
+        timeout_min: int | None = None) -> dict:
+    settings = config.load_settings()
+    cmd = _command(settings, _claude(settings), job, model=model, resume=resume)
     timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)
     kwargs = {}
     if os.name == "nt":
@@ -167,19 +195,75 @@ def run(prompt: str, *, model: str | None = None, resume: str | None = None, job
             data = json.loads(out)
         except ValueError:
             data = None
-    if isinstance(data, dict) and (proc.returncode != 0 or data.get("is_error")) and (data.get("result") or data.get("subtype")):
-        # в JSON-ответе есть причина — показываем её, а не весь ответ целиком
-        reason = str(data.get("result") or data.get("subtype"))
-        if "not logged in" in reason.lower():
-            reason = "не выполнен вход — Настройки → Claude → «Войти в Claude»"
-        raise BrainError(f"Claude: {reason[:1500]}")
-    if proc.returncode != 0 or not isinstance(data, dict):
-        err = (proc.stderr or out or "").strip()[-1500:]
-        raise BrainError(f"Claude завершился с ошибкой (код {proc.returncode}): {err}")
-    cost = data.get("total_cost_usd")
-    store.log(job, f"Claude закончил за {round((data.get('duration_ms') or 0) / 1000)} с"
-                   + (f", ≈${cost:.2f} (в рамках подписки)" if cost else ""))
-    return {"text": (data.get("result") or "").strip(), "session_id": data.get("session_id"), "raw": data}
+    return _result(data, proc.returncode, proc.stderr, out, job)
+
+
+def stream(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
+           timeout_min: int | None = None, on_text=None, on_step=None, on_start=None) -> dict:
+    """Как run, но по ходу работы: on_text(текст) — ответ, который Claude сейчас пишет (каждый новый абзац
+    рассуждений начинается заново), on_step(инструмент, параметры) — что он делает (читает файл, ищет),
+    on_start(процесс) — чтобы его можно было остановить. Результат тот же, что у run."""
+    settings = config.load_settings()
+    cmd = _command(settings, _claude(settings), job, model=model, resume=resume, stream=True)
+    timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x08000000
+    store.log(job, f"запуск Claude ({model or 'модель по умолчанию'})")
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            cwd=str(config.APP_DIR), env=_env(settings), text=True, encoding="utf-8",
+                            errors="replace", **kwargs)
+    if on_start:
+        on_start(proc)
+    errors: list[str] = []
+    reader = threading.Thread(target=lambda: errors.append(proc.stderr.read()), daemon=True)  # не даём трубе забиться
+    reader.start()
+    timed_out = threading.Event()
+
+    def kill() -> None:
+        timed_out.set()
+        proc.kill()
+
+    timer = threading.Timer(timeout, kill)
+    timer.start()
+    data, text, last = None, "", ""
+    try:
+        proc.stdin.write(prompt)
+        proc.stdin.close()
+        for line in proc.stdout:
+            last = line
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            kind = d.get("type")
+            if kind == "stream_event":
+                e = d.get("event") or {}
+                if e.get("type") == "content_block_start" and (e.get("content_block") or {}).get("type") == "text":
+                    text = ""
+                elif e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
+                    text += e["delta"].get("text") or ""
+                    if on_text:
+                        on_text(text)
+            elif kind == "assistant" and on_step:
+                for block in (d.get("message") or {}).get("content") or []:
+                    if block.get("type") == "tool_use":
+                        on_step(block.get("name") or "", block.get("input") or {})
+            elif kind == "result":
+                data = d
+        proc.wait()
+        reader.join(5)
+    finally:
+        timer.cancel()
+    if timed_out.is_set():
+        raise BrainError(f"Claude не уложился в {timeout // 60} мин")
+    stderr = "".join(errors)
+    if data is None and "include-partial-messages" in stderr:  # старый Claude Code: без ответа по ходу работы
+        result = run(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min)
+        if on_text:
+            on_text(result["text"])
+        return result
+    return _result(data, proc.returncode, stderr, last, job)
 
 
 def check(settings: dict | None = None) -> str:

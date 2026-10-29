@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}{{ chat.title if chat else 'Спросить Claude' }}{% endblock %}
+{% macro ctx_chip(c) -%}
+{%- if c.href %}<a class="chip acc ctx-chip" href="{{ c.href }}">{{ c.label }}</a>{% else %}<span class="chip acc ctx-chip">{{ c.label }}</span>{% endif -%}
+{%- endmacro %}
+{% block content %}
+<div class="ask">
+  <aside class="ask-side card">
+    <div class="card-b">
+      <a class="btn primary ask-new" href="/ask">+ Новый чат</a>
+      <ul class="ask-list">
+        {% for c in chats %}
+        <li class="{{ 'active' if chat and chat.id == c.id }}"><a href="/ask/{{ c.id }}">{{ c.title or 'Без названия' }}
+          <span class="meta">{{ c.updated | local('%d.%m %H:%M') }}{% if c.n > 1 %} · {{ c.n }} {{ plural(c.n, 'вопрос', 'вопроса', 'вопросов') }}{% endif %}</span></a></li>
+        {% else %}
+        <li class="muted small">Здесь будут ваши разговоры с Claude — к любому можно вернуться и продолжить.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </aside>
+
+  <section class="ask-main">
+    {% if chat %}
+    <div class="topline ask-head">
+      <h1>{{ chat.title or 'Без названия' }}</h1>
+      <form class="inline" method="post" action="/ask/{{ chat.id }}/delete" data-confirm="Удалить чат «{{ chat.title }}»? Вопросы, ответы и приложенные файлы удалятся.">
+        <button class="btn sm ghost danger">Удалить чат</button></form>
+    </div>
+    <div class="ask-thread">
+      {% for m in items %}
+      {% if m.role == 'user' %}
+      <div class="ask-q">
+        {% if m.context %}<div class="ask-ctx">{% for c in m.context %}{{ ctx_chip(c) }}{% endfor %}</div>{% endif %}
+        {% if m.text %}<div class="ask-q-text">{{ m.text }}</div>{% endif %}
+      </div>
+      {% elif m.status == 'running' %}
+      <div class="ask-a running" data-ask-live="{{ chat.id }}">
+        <div class="ask-steps" data-live-steps>{% for s in m.steps %}<div>{{ s }}</div>{% endfor %}</div>
+        <div class="ask-live-text" data-live-text>{{ m.text }}</div>
+        <div class="ask-thinking"><span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          Claude <span data-live-state>{{ 'пишет ответ' if m.text else 'думает' }}</span>…
+          <form class="inline" method="post" action="/ask/{{ chat.id }}/stop"><button class="btn sm ghost">Остановить</button></form></div>
+      </div>
+      {% else %}
+      <div class="ask-a" data-copy-scope>
+        {% if m.steps %}<details class="ask-steps-done"><summary>Что делал Claude · {{ m.steps | length }} {{ plural(m.steps | length, 'шаг', 'шага', 'шагов') }}</summary>
+          {% for s in m.steps %}<div>{{ s }}</div>{% endfor %}</details>{% endif %}
+        {% if m.text %}<div class="doc ask-text">{{ m.text | md | safe }}</div><textarea hidden data-copy>{{ m.text }}</textarea>{% endif %}
+        {% if m.status == 'failed' %}
+        <div class="alert {{ 'info' if m.error == 'Остановлено' else 'bad' }}">{{ m.error }}
+          <form class="inline" method="post" action="/ask/{{ chat.id }}/retry"><input type="hidden" name="message_id" value="{{ m.id }}"><button class="btn sm">Спросить ещё раз</button></form></div>
+        {% endif %}
+        {% if m.proposals %}
+        <ul class="list ask-props">
+          {% for p in m.proposals %}{% if p.status == 'pending' %}{{ ui.proposal(p, describe) }}{% else %}
+          <li><div>{{ p.title }}</div><div class="meta">{% if p.status == 'done' %}<span class="chip ok">выполнено</span>{% elif p.status == 'rejected' %}<span class="chip">отклонено</span>{% else %}<span class="chip bad">{{ p.status }}</span>{% endif %}</div></li>
+          {% endif %}{% endfor %}
+        </ul>
+        {% endif %}
+        {% if m.text and m.status == 'done' %}<div class="actions ask-a-tools"><button type="button" class="btn sm ghost" data-copy-btn>Копировать</button></div>{% endif %}
+      </div>
+      {% endif %}
+      {% endfor %}
+      <span id="end"></span>
+    </div>
+    {% else %}
+    <div class="ask-empty">
+      <h1>Спросить Claude</h1>
+      <p class="muted">О встречах, задачах, переписке и документах — Claude ищет ответ в ваших данных и называет источник.
+        Приложите встречу — он прочитает расшифровку целиком, а не только разбор.</p>
+      <div class="ask-examples">
+        {% for q in ['Распиши решения этой встречи по каждой метрике: что было, на что поменяли, кто предложил — с отметками времени',
+                     'Что я обещала на этой неделе и что из этого просрочено?',
+                     'Что обсуждали с Петром за последний месяц и о чём договорились?',
+                     'Подготовь ответ Олегу про бюджет — по переписке и документам'] %}
+        <button type="button" class="ask-example" data-ask-example="{{ q }}">{{ q }}</button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <form class="ask-form card" method="post" action="/ask/send" enctype="multipart/form-data" data-ask-form>
+      {% if chat %}<input type="hidden" name="chat_id" value="{{ chat.id }}">{% endif %}
+      <div class="ask-ctx" data-ctx-list>{% for c in prefill %}<span class="chip acc ctx-chip">{{ c.label }}<input type="hidden" name="ctx" value="{{ c.type }}:{{ c.id or c.path }}"><button type="button" data-ctx-remove aria-label="Убрать">✕</button></span>{% endfor %}</div>
+      <textarea name="text" rows="3" data-ask-text placeholder="{{ 'Спросите ещё — Claude помнит этот разговор' if chat else 'Спросите о встречах, задачах, переписке, документах…' }}"{{ ' autofocus' if not chat or prefill }}></textarea>
+      <div class="ask-bar">
+        <details class="ask-add" data-ask-add>
+          <summary class="btn sm">{{ ui.clip_ico() }} Контекст</summary>
+          <div class="ask-add-menu">
+            <label>Встреча</label>
+            <select data-ctx-meeting><option value="">Выберите встречу…</option>{% for m in meetings %}<option value="{{ m.id }}">{{ m.started_at | local('%d.%m') }} · {{ m.title or m.id }}</option>{% endfor %}</select>
+            <label>Задача</label>
+            <input type="text" list="task-options" data-ctx-task placeholder="Начните вводить название задачи">
+            <label>Документ из ваших папок</label>
+            <input type="text" list="ask-docs" data-ctx-doc placeholder="Поиск по документам: начните вводить"><datalist id="ask-docs"></datalist>
+            <label>Файл с компьютера</label>
+            <input type="file" name="files" multiple data-ctx-files accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.html,.htm,.png,.jpg,.jpeg,.webp">
+            <div class="hint">Документы, таблицы, презентации, PDF, текст и картинки. Файл сохранится в этом чате.</div>
+          </div>
+        </details>
+        <select name="model" class="ask-model" title="Подробно — Opus: для разборов и длинных ответов. Быстро — Sonnet: для коротких вопросов">
+          {% for key, title in models.items() %}<option value="{{ key }}" {{ 'selected' if model == key }}>{{ title }}</option>{% endfor %}</select>
+        <span class="grow"></span>
+        <span class="small muted ask-mic-status" data-mic-status></span>
+        <button type="button" class="btn ask-mic" data-mic title="Надиктовать — расшифрует Whisper на этом компьютере, звук никуда не уходит" aria-label="Надиктовать">{{ ui.mic_ico() }}</button>
+        <button class="btn primary" data-ask-send>Отправить</button>
+      </div>
+      <div class="hint">Ctrl+Enter — отправить. Карточки, встречи и сообщения коллегам Claude только предлагает — под ответом будут «Да / Нет».</div>
+    </form>
+  </section>
+</div>
+{{ ui.task_datalist() }}
+{% endblock %}

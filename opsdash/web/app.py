@@ -859,6 +859,126 @@ async def calendar_new(request: Request, title: str = Form(...), day: str = Form
     return back(request, f"Встреча «{title}» создана{where}: {store.local(start, '%d.%m %H:%M')}")
 
 
+# --- спросить Claude ---------------------------------------------------------------
+
+def _ask_page(request: Request, chat_id: int | None, prefill: list[dict]):
+    from opsdash import chat
+
+    current = chat.get(chat_id) if chat_id else None
+    if chat_id and not current:
+        return back(request, err="Такого чата нет", to="/ask")
+    meetings = store.rows("SELECT id, title, started_at FROM meetings WHERE status NOT IN ('new','cancelled') "
+                          "ORDER BY started_at DESC LIMIT 100")
+    return render(request, "ask.html", nav="ask", chats=chat.list_chats(), chat=current,
+                  items=chat.messages(chat_id) if current else [], prefill=chat.describe(prefill), meetings=meetings,
+                  models=chat.MODELS, model=(current or {}).get("model") or "opus", describe=proposals.describe)
+
+
+@app.get("/ask", response_class=HTMLResponse)
+def ask_page(request: Request, meeting: str = "", task: int = 0, doc: str = ""):
+    """«Спросить Claude»: новый чат. ?meeting= / ?task= / ?doc= — с этим контекстом (кнопки на страницах)."""
+    from opsdash import chat
+
+    refs = [f"meeting:{meeting}"] * bool(meeting) + [f"task:{task}"] * bool(task) + [f"doc:{doc}"] * bool(doc)
+    return _ask_page(request, None, chat.parse_refs(refs))
+
+
+@app.get("/ask/{chat_id}", response_class=HTMLResponse)
+def ask_chat(request: Request, chat_id: int):
+    return _ask_page(request, chat_id, [])
+
+
+@app.post("/ask/send")
+async def ask_send(request: Request, text: str = Form(""), chat_id: int = Form(0), model: str = Form("opus"),
+                   files: list[UploadFile] = File(default=[])):
+    from opsdash import chat
+
+    form = await request.form()
+    context = chat.parse_refs([str(v) for v in form.getlist("ctx")])
+    uploads = [(f.filename, await f.read()) for f in files if f.filename]
+    if not text.strip() and not context and not uploads:
+        return back(request, err="Напишите вопрос или приложите встречу, задачу, файл")
+    if chat_id and not chat.get(chat_id):
+        return back(request, err="Такого чата нет", to="/ask")
+
+    def go() -> tuple[int, int]:
+        named = context or [{"type": "file", "name": name} for name, _ in uploads[:1]]  # чат без текста — по файлу
+        cid = chat_id or chat.create(chat.title_for(text, named), model)
+        attached = context + [chat.save_file(cid, name, data) for name, data in uploads]
+        return chat.ask(cid, text, attached, model)
+
+    cid, _ = await run_in_threadpool(go)
+    return RedirectResponse(f"/ask/{cid}#end", status_code=303)
+
+
+@app.get("/api/ask/{chat_id}/live")
+def ask_live(chat_id: int):
+    from opsdash import chat
+
+    return chat.live(chat_id)
+
+
+@app.post("/ask/{chat_id}/stop")
+def ask_stop(request: Request, chat_id: int):
+    from opsdash import chat
+
+    m = chat.live(chat_id)
+    if m.get("running"):
+        chat.stop(m["id"])
+    return back(request, "Остановлено", to=f"/ask/{chat_id}")
+
+
+@app.post("/ask/{chat_id}/retry")
+def ask_retry(request: Request, chat_id: int, message_id: int = Form(...)):
+    from opsdash import chat
+
+    if not chat.retry(message_id):
+        return back(request, err="Этот ответ ещё пишется")
+    return RedirectResponse(f"/ask/{chat_id}#end", status_code=303)
+
+
+@app.post("/ask/{chat_id}/delete")
+def ask_delete(request: Request, chat_id: int):
+    from opsdash import chat
+
+    chat.delete(chat_id)
+    return back(request, "Чат удалён", to="/ask")
+
+
+@app.get("/api/ask/docs")
+def ask_docs(q: str = ""):
+    """Подсказки «Документ» в контексте вопроса: лучшие совпадения поиска по папкам документов."""
+    from opsdash import docs
+
+    if len(q.strip()) < 2:
+        return []
+    return [{"label": d.get("rel") or d["title"], "path": d["path"]} for d in docs.search(q, limit=12)]
+
+
+@app.post("/api/ask/voice")
+async def ask_voice(audio: UploadFile = File(...)):
+    """Микрофон в «Спросить Claude»: запись из браузера → текст. Расшифровывает тот же Whisper, что и встречи, —
+    на этом компьютере, звук никуда не уходит."""
+    import tempfile
+
+    from opsdash import transcribe
+
+    data = await audio.read()
+    if not data:
+        return JSONResponse({"error": "Пустая запись"}, status_code=400)
+    suffix = Path(audio.filename or "voice.webm").suffix or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as fh:
+        fh.write(data)
+        tmp = Path(fh.name)
+    try:
+        text = await run_in_threadpool(transcribe.transcribe_short, tmp)
+    except Exception as e:  # noqa: BLE001 — покажем у кнопки микрофона
+        return JSONResponse({"error": f"Не получилось расшифровать: {e}"}, status_code=500)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return {"text": text}
+
+
 # --- встречи ---------------------------------------------------------------------
 
 @app.get("/meetings", response_class=HTMLResponse)

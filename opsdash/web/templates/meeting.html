@@ -11,6 +11,7 @@
   <div class="actions">
     {{ ui.meeting_status(m) }}
     {% set in_queue = m.status in ('new', 'transcribing', 'paused') %}
+    {% if transcript %}<a class="btn sm" href="/ask?meeting={{ m.id }}" title="Задать вопрос по этой встрече — Claude прочитает расшифровку целиком">Спросить Claude</a>{% endif %}
     <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn sm" {{ 'disabled' if in_queue or not transcript }}>Разобрать заново</button></form>
     <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="btn sm ghost" {{ 'disabled' if in_queue or recording.size is none }} {% if recording.size is none %}title="Файла записи больше нет"{% endif %}>Расшифровать заново</button></form>
   </div>

@@ -1,10 +1,11 @@
 """Фоновые задания и расписание.
 
-Четыре очереди, каждая со своим потоком:
+Пять очередей, каждая со своим потоком:
 - light — сбор сообщений, Kaiten, календаря, поиск новых записей;
 - heavy — плановые запуски Claude (разбор встреч и сообщений, дайджесты, брифы);
 - transcribe — расшифровка встреч: часовая запись или расшифровка на паузе не задерживают дайджесты;
-- interactive — вопросы директора из Telegram (не ждут часовую расшифровку).
+- interactive — вопросы директора из Telegram (не ждут часовую расшифровку);
+- chat — ответы в разделе «Спросить Claude»: подробный разбор на полчаса не задерживает бота.
 """
 
 from __future__ import annotations
@@ -327,6 +328,12 @@ def job_ask(text: str, chat_id: str, reply_to: int | None = None, **_) -> str:
     return "ответ отправлен"
 
 
+def job_chat(message_id: int, **_) -> str:
+    from opsdash import chat
+
+    return chat.run(message_id)
+
+
 def job_voice(path: str, chat_id: str, reply_to: int | None = None, caption: str = "", **_) -> str:
     from pathlib import Path
 
@@ -394,6 +401,7 @@ REGISTRY = {
     "stale": job_stale,
     "ask": job_ask,
     "voice": job_voice,
+    "chat": job_chat,
     "housekeeping": job_housekeeping,
     "update-check": job_update_check,
     "update": job_update,
@@ -423,6 +431,7 @@ TITLES = {
     "stale": "Напоминания: Kaiten без движения",
     "ask": "Вопрос из Telegram (Claude)",
     "voice": "Голосовое из Telegram",
+    "chat": "Спросить Claude",
     "housekeeping": "Обслуживание",
     "update-check": "Проверка обновлений PULSE",
     "update": "Обновление PULSE",
@@ -648,16 +657,18 @@ def tick(settings: dict | None = None) -> list[str]:
 
 
 def start_workers(stop: threading.Event) -> list[threading.Thread]:
-    for kind in ("light", "heavy", "transcribe", "interactive"):
+    for kind in ("light", "heavy", "transcribe", "interactive", "chat"):
         _queues[kind] = queue.Queue()
     # задания, прерванные выключением компьютера, — продолжаем (поставленные на паузу ждут «Продолжить»)
     store.execute("UPDATE jobs SET running=0")
+    store.execute("UPDATE ask_messages SET status='failed', error='Прервано перезапуском PULSE — спросите ещё раз' "
+                  "WHERE status='running'")
     for m in store.rows("SELECT id, status FROM meetings WHERE status IN ('transcribing','processing')"):
         records.update_meeting(m["id"], status="new" if m["status"] == "transcribing" else "transcribed")
         if m["status"] == "processing":
             submit("process-meeting", "heavy", {"meeting_id": m["id"]})
     threads = []
-    for kind in ("light", "heavy", "transcribe", "interactive"):
+    for kind in ("light", "heavy", "transcribe", "interactive", "chat"):
         t = threading.Thread(target=_worker, args=(kind, stop), daemon=True, name=f"worker-{kind}")
         t.start()
         threads.append(t)
