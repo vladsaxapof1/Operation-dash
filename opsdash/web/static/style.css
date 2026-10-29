@@ -657,7 +657,14 @@ button.chip.ok { cursor: pointer; }
 .notice-now { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; }
 .notice-now[hidden] { display: none; }
 .notice-list { display: flex; flex-direction: column; gap: 6px; }
-.notice { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px 9px 12px; border-left: 3px solid var(--accent); }
+.notice { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px 9px 12px; border-left: 3px solid var(--accent);
+  transition: transform .22s ease-in, opacity .22s ease-in, height .16s ease, padding .16s ease, margin .16s ease; }
+.notice:has(a.notice-t) { cursor: pointer; }  /* клик по всему уведомлению — переход по его ссылке */
+.notice:has(a.notice-t):hover .notice-t { color: var(--accent); }
+/* скрыли (клик или ✕): уезжает вправо и тает, потом схлопывается — соседние подтягиваются без скачка */
+.notice.leaving { transform: translateX(30%); opacity: 0; pointer-events: none; }
+.notice.gone { height: 0 !important; padding-top: 0; padding-bottom: 0; margin-top: -6px; border-width: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .notice.leaving { transform: none; } }
 .notice.ok { border-left-color: var(--ok); }
 .notice.bad { border-left-color: var(--bad); }
 .notice.extra { display: none; }  /* видно три последних, остальные — по «Ещё N» */
@@ -669,8 +676,9 @@ a.notice-t:hover { color: var(--accent); text-decoration: none; }
 .notice-time { margin-top: 3px; font-size: 11px; color: var(--muted); }
 .notice-close { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 12px; line-height: 1.4; }
 .notice-close:hover { color: var(--text); }
+.notice-head { display: flex; justify-content: flex-end; }  /* «Скрыть все» — справа над крестиком верхнего */
 .notice-foot { display: flex; align-items: center; gap: 6px; }
-.notice-foot[hidden] { display: none; }
+.notice-head[hidden], .notice-foot[hidden] { display: none; }
 .notice-more, .notice-clear { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
   color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; }
 .notice-more:hover, .notice-clear:hover { color: var(--text); }

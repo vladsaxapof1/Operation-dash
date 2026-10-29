@@ -1,13 +1,14 @@
 """Уведомления в правом нижнем углу: что PULSE только что сделал — разобрал сообщения, расшифровал
 и разобрал встречу, отправил дайджест, ответил в чате — и что делает сейчас.
 
-Появляются после фоновых заданий (jobs.run_job), висят, пока их не скроют — по одному или «Скрыть все»;
+Появляются после фоновых заданий (jobs.run_job), висят, пока их не скроют — по одному (✕ или переходом по нему) или «Скрыть все»;
 показываем за последние сутки. Ошибка одного и того же задания не плодит новые уведомления, а обновляет
 прежнее: сбор сообщений каждые 15 минут иначе засыпал бы угол одинаковыми ошибками.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from opsdash import store
@@ -71,6 +72,18 @@ def running() -> list[dict]:
     return out
 
 
+def _triage_link(result: str) -> str:
+    """Куда ведёт «Разобрал новые сообщения» — туда, где прибавилось больше: новые задачи (поровну — тоже они)
+    или «Нужен ответ». Ни того ни другого, а есть предложения — на сводку, где их подтверждают."""
+    found = {k: int(n) for k, n in re.findall(r"(нужен ответ|задач|на подтверждение): \+(\d+)", result)}
+    replies, tasks = found.get("нужен ответ", 0), found.get("задач", 0)
+    if replies > tasks:
+        return "/inbox"
+    if tasks:
+        return "/commitments?new=1"
+    return "/" if found.get("на подтверждение") else "/inbox"
+
+
 def _meeting(meeting_id: str | None) -> dict:
     if not meeting_id:
         return {}
@@ -97,7 +110,7 @@ def _from_job(name: str, args: dict, result: str, error: str | None) -> None:
     mid = args.get("meeting_id")
     if name == "triage":
         if result.startswith("разобрано"):
-            add(name, "Разобрал новые сообщения", result, "/inbox", "ok")
+            add(name, "Разобрал новые сообщения", result, _triage_link(result), "ok")
     elif name == "process-meeting":
         m = _meeting(mid)
         if m:

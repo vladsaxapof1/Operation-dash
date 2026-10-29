@@ -887,7 +887,7 @@
   var nbox = document.querySelector("[data-notices]");
   if (nbox) {
     var nlist = nbox.querySelector("[data-notice-list]"), nfoot = nbox.querySelector("[data-notice-foot]"),
-        nmore = nbox.querySelector("[data-notice-more]"), nnow = nbox.querySelector("[data-notice-now]"),
+        nhead = nbox.querySelector("[data-notice-head]"), nmore = nbox.querySelector("[data-notice-more]"), nnow = nbox.querySelector("[data-notice-now]"),
         nnowText = nbox.querySelector("[data-notice-now-text]");
     // на телефоне и в «Спросить Claude» (там внизу строка вопроса) — одно последнее, на остальных страницах — три
     var SHOWN = document.body.classList.contains("page-ask") || window.innerWidth <= 760 ? 1 : 3;
@@ -899,13 +899,27 @@
       return Math.floor(s / 86400) + " дн назад";
     };
     var layout = function () {
-      var items = nlist.querySelectorAll("[data-notice]");
+      var items = nlist.querySelectorAll("[data-notice]:not(.leaving)");  // уезжающее уже не считаем — его место займёт следующее
       Array.prototype.forEach.call(items, function (el, i) { el.classList.toggle("extra", i >= SHOWN); });
       var more = Math.max(0, items.length - SHOWN);
       if (!more) nbox.classList.remove("open");
       nmore.hidden = !more;
       nmore.textContent = nbox.classList.contains("open") ? "Свернуть" : "Ещё " + more;
-      nfoot.hidden = items.length < 2 && !more;
+      nfoot.hidden = !more;
+      nhead.hidden = items.length < 2;
+    };
+    // скрыть: уезжает вправо и тает, затем схлопывается (style.css: .leaving, .gone)
+    var leave = function (el) {
+      if (el.classList.contains("leaving")) return;
+      el.style.height = el.offsetHeight + "px";
+      el.classList.add("leaving");
+      layout();
+      setTimeout(function () { el.classList.add("gone"); }, 200);
+      setTimeout(function () { el.remove(); layout(); }, 380);
+    };
+    var dismiss = function (el) {
+      leave(el);
+      return fetch("/api/notices/" + el.dataset.notice + "/dismiss", { method: "POST", keepalive: true });
     };
     var make = function (n) {
       var el = document.createElement("div");
@@ -938,15 +952,28 @@
       return el;
     };
     nbox.addEventListener("click", function (e) {
-      var close = e.target.closest("[data-notice-close]");
-      if (close) {
-        var el = close.closest("[data-notice]");
-        fetch("/api/notices/" + el.dataset.notice + "/dismiss", { method: "POST" });
-        el.remove();
-        layout();
+      var el = e.target.closest("[data-notice]"), link = el && el.querySelector("a.notice-t");
+      if (e.target.closest("[data-notice-close]")) {
+        dismiss(el);
+      } else if (link && !el.classList.contains("leaving")) {
+        // клик по уведомлению — открываем, куда оно ведёт, а само скрываем: прочитано
+        var href = link.href, newTab = e.ctrlKey || e.metaKey || e.shiftKey;
+        var sent = dismiss(el);
+        if (newTab) {
+          if (!e.target.closest("a")) window.open(href, "_blank");  // по ссылке браузер откроет вкладку сам
+          return;
+        }
+        e.preventDefault();
+        // уходим, когда уведомление уехало и сервер его скрыл — иначе на новой странице оно покажется снова
+        var went = false, go = function () { if (!went) { went = true; location.href = href; } };
+        Promise.all([sent.catch(function () {}), new Promise(function (r) { setTimeout(r, 220); })]).then(go);
+        setTimeout(go, 1500);  // сервер не ответил — всё равно переходим
       } else if (e.target.closest("[data-notice-clear]")) {
         fetch("/api/notices/dismiss-all", { method: "POST" });
-        nlist.innerHTML = "";
+        Array.prototype.forEach.call(nlist.querySelectorAll("[data-notice]"), function (n, i) {
+          if (n.offsetHeight) setTimeout(function () { leave(n); }, i * 50);  // видимые уезжают по очереди
+          else n.remove();
+        });
         layout();
       } else if (e.target.closest("[data-notice-more]")) {
         nbox.classList.toggle("open");

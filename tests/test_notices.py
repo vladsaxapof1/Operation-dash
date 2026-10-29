@@ -60,7 +60,22 @@ def test_triage_says_what_it_found_and_notices(monkeypatch, settings_with):
     monkeypatch.setattr(jobs.brain, "run", claude)
     assert jobs.run_job("triage") == "разобрано 3 из 3 · нужен ответ: +1 · задач: +2"
     [n] = notices.recent()
-    assert n["title"] == "Разобрал новые сообщения" and n["text"].startswith("разобрано 3 из 3") and n["link"] == "/inbox"
+    assert n["title"] == "Разобрал новые сообщения" and n["text"].startswith("разобрано 3 из 3")
+    assert n["link"] == "/commitments?new=1"  # задач прибавилось больше, чем «Нужен ответ» — ведём в задачи
+
+
+@pytest.mark.parametrize("result, link", [
+    ("разобрано 5 из 5 · задач: +2", "/commitments?new=1"),                          # ответов не нужно — в задачи
+    ("разобрано 5 из 5 · нужен ответ: +1 · задач: +3", "/commitments?new=1"),
+    ("разобрано 5 из 5 · нужен ответ: +3 · задач: +1", "/inbox"),                    # где больше плюсов
+    ("разобрано 5 из 5 · нужен ответ: +2 · задач: +2", "/commitments?new=1"),        # поровну — в задачи
+    ("разобрано 5 из 5 · нужен ответ: +1 · на подтверждение: +4", "/inbox"),
+    ("разобрано 5 из 5 · на подтверждение: +2", "/"),                                # только предложения — на сводку
+    ("разобрано 5 из 5", "/inbox"),
+])
+def test_triage_notice_leads_where_most_was_added(settings_with, result, link):
+    notices.from_job("triage", {}, result, None)
+    assert notices.recent()[0]["link"] == link
 
 
 def test_notices_from_jobs(settings_with):

@@ -54,6 +54,9 @@
     <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
     <span data-notice-now-text>{% for r in running_now %}{{ r.title }}{% if r.detail %} — {{ r.detail }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}</span>
   </div>
+  <div class="notice-head" data-notice-head{% if notices | length < 2 %} hidden{% endif %}>
+    <button type="button" class="notice-clear" data-notice-clear>Скрыть все</button>
+  </div>
   <div class="notice-list" data-notice-list aria-live="polite">
     {% for n in notices %}
     <div class="notice {{ n.level }}" data-notice="{{ n.id }}" data-key="{{ n.kind }}|{{ n.title }}">
@@ -66,10 +69,8 @@
     </div>
     {% endfor %}
   </div>
-  <div class="notice-foot" data-notice-foot{% if notices | length < 2 %} hidden{% endif %}>
+  <div class="notice-foot" data-notice-foot hidden>
     <button type="button" class="notice-more" data-notice-more hidden></button>
-    <span class="grow"></span>
-    <button type="button" class="notice-clear" data-notice-clear>Скрыть все</button>
   </div>
   {% if voice_tip %}
   <aside class="toast" data-toast="{{ voice_tip.id }}" role="status">
