@@ -619,11 +619,13 @@
   var busy = Array.prototype.some.call(document.querySelectorAll("[data-meeting-status]"), function (n) {
     return /очеред|расшифровка|разбор/.test(n.textContent);
   });
-  if (watching.length && busy) {
+  // запись нашлась в папке, но встречи ещё нет — ждём, когда PULSE её возьмёт
+  var waitingRec = !!document.querySelector("[data-waiting]");
+  if ((watching.length && busy) || waitingRec) {
     var last = null;
     setInterval(function () {
-      fetch("/api/status").then(function (r) { return r.json(); }).then(function (res) {
-        var state = JSON.stringify(res.meetings.map(function (m) { return [m.id, m.status, Math.round((m.progress || 0) * 20)]; }));
+      fetch(waitingRec ? "/api/status?waiting=1" : "/api/status").then(function (r) { return r.json(); }).then(function (res) {
+        var state = JSON.stringify([res.meetings.map(function (m) { return [m.id, m.status, Math.round((m.progress || 0) * 20)]; }), res.waiting || []]);
         if (last !== null && state !== last) window.location.reload();
         last = state;
         res.meetings.forEach(function (m) {

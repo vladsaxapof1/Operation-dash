@@ -13,15 +13,22 @@
       <table class="t">
         <thead><tr><th>Когда</th><th>Встреча</th><th>Статус</th></tr></thead>
         <tbody>
+        {% for w in waiting %}
+          <tr data-waiting>
+            <td class="nowrap">{{ w.started_at | local('%d.%m.%Y %H:%M') }}</td>
+            <td>{{ w.title }}<div class="meta">{{ w.name }} · {{ 'запись ещё идёт — расшифровка начнётся через минуту после её окончания' if w.growing else 'файл дописан — через минуту встреча появится и начнётся расшифровка' }}</div></td>
+            <td><span class="chip" title="PULSE видит файл в папке и ждёт, пока он перестанет меняться">{{ 'идёт запись' if w.growing else 'найдена' }}</span></td>
+          </tr>
+        {% endfor %}
         {% for m in items %}
           <tr>
             <td class="nowrap">{{ m.started_at | local('%d.%m.%Y %H:%M') }}{% if m.duration_sec %}<div class="meta">{{ (m.duration_sec / 60) | round | int }} мин</div>{% endif %}</td>
             <td><a href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>{% if m.headline %}<div class="meta">{{ m.headline }}</div>{% endif %}
               {% if m.status == 'failed' and m.error %}<div class="meta" style="color:var(--bad)">{{ m.error[:200] }}</div>{% endif %}</td>
-            <td>{{ ui.meeting_status(m) }}{% if m.status in ('new', 'transcribing', 'paused') %}<div class="actions tr-actions">{{ ui.transcription_controls(m) }}</div>{% endif %}</td>
+            <td><div class="tr-status">{{ ui.meeting_status(m) }}{% if m.status in ('new', 'transcribing', 'paused', 'cancelled', 'failed') %}<span class="tr-actions">{{ ui.transcription_controls(m, compact=True) }}</span>{% endif %}</div></td>
           </tr>
         {% else %}
-          <tr><td colspan="3" class="empty">Записей пока нет.</td></tr>
+          {% if not waiting %}<tr><td colspan="3" class="empty">Записей пока нет.</td></tr>{% endif %}
         {% endfor %}
         </tbody>
       </table>
@@ -46,7 +53,7 @@
       <div class="card-h"><h2>Папки, за которыми я слежу</h2></div>
       <div class="card-b">
         {% for f in folders %}<div><code>{{ f }}</code></div>{% else %}<div class="muted">Папки не найдены.</div>{% endfor %}
-        <div class="hint" style="margin-top:8px">Новые файлы из этих папок разбираются автоматически (через минуту после окончания записи). Изменить — <a href="/settings?tab=recordings">Настройки → Записи встреч</a>.</div>
+        <div class="hint" style="margin-top:8px">Новые файлы из этих папок разбираются автоматически: файл появляется в списке сразу, расшифровка начинается через минуту после окончания записи. Изменить — <a href="/settings?tab=recordings">Настройки → Записи встреч</a>.</div>
       </div>
     </section>
   </div>

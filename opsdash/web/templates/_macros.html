@@ -537,10 +537,21 @@
 <span class="chip {{ s[1] }}" data-meeting-status="{{ m.id }}">{{ s[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span>
 {% endmacro %}
 
-{#- пауза / «Продолжить» и отмена расшифровки, пока она ждёт очереди, идёт или стоит на паузе #}
-{% macro transcription_controls(m) %}
+{#- пауза / «Продолжить» и отмена расшифровки, пока она ждёт очереди, идёт или стоит на паузе;
+    compact — иконками для списка встреч, там же корзина: удалить встречу целиком #}
+{% macro transcription_controls(m, compact=False) %}
+{%- import "_icons.html" as icons %}
+{%- set paused = m.status == 'paused' %}
+{%- set pause_title = 'Продолжить с того же места' if paused else 'Пауза: компьютер не нагружается, прогресс сохраняется' %}
 {%- if m.status in ('new', 'transcribing', 'paused') %}
-<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription"><input type="hidden" name="action" value="{{ 'resume' if m.status == 'paused' else 'pause' }}"><button class="btn sm" title="{{ 'Продолжить с того же места' if m.status == 'paused' else 'Остановить на время: компьютер не нагружается, прогресс сохраняется' }}">{{ 'Продолжить' if m.status == 'paused' else 'Пауза' }}</button></form>
-<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription" data-confirm="Отменить расшифровку? Встреча останется, расшифровать её можно будет позже — с начала."><input type="hidden" name="action" value="cancel"><button class="btn sm ghost">Отменить</button></form>
+<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription"><input type="hidden" name="action" value="{{ 'resume' if paused else 'pause' }}">
+  {%- if compact %}<button class="btn sm icon ghost" title="{{ pause_title }}" aria-label="{{ 'Продолжить' if paused else 'Пауза' }}">{{ icons.icon('play' if paused else 'pause') }}</button>
+  {%- else %}<button class="btn sm" title="{{ pause_title }}">{{ 'Продолжить' if paused else 'Пауза' }}</button>{% endif %}</form>
+<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription" data-confirm="Отменить расшифровку? Встреча останется, расшифровать её можно будет позже — с начала."><input type="hidden" name="action" value="cancel">
+  {%- if compact %}<button class="btn sm icon ghost" title="Отменить расшифровку — встреча останется" aria-label="Отменить расшифровку">{{ icons.icon('close') }}</button>
+  {%- else %}<button class="btn sm ghost">Отменить</button>{% endif %}</form>
+{%- endif %}
+{%- if compact %}
+<form class="inline" method="post" action="/meetings/{{ m.id }}/delete" data-confirm="Удалить встречу «{{ m.title or m.id }}» целиком? Удалятся файл записи и всё, что PULSE по ней запомнил. Вернуть будет нельзя." data-busy="Удаляю…"><input type="hidden" name="what" value="all"><button class="btn sm icon ghost danger" title="Удалить встречу вместе с файлом записи" aria-label="Удалить встречу">{{ icons.icon('trash') }}</button></form>
 {%- endif %}
 {% endmacro %}
