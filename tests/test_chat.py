@@ -1,6 +1,7 @@
 """«Спросить Claude»: разговор с Claude в PULSE — вопрос, контекст, ответ по ходу работы, продолжение разговора."""
 
 import json
+import os
 import sys
 import time
 import zipfile
@@ -57,6 +58,8 @@ out({{"type": "result", "subtype": "success", "result": "| Метрика | Бы
 
 @pytest.fixture
 def fake_claude(tmp_path, settings_with):
+    if os.name == "nt":
+        pytest.skip("поддельный claude — скрипт с #!, Windows его не запускает")
     path = tmp_path / "claude"
     path.write_text(FAKE.format(python=sys.executable), encoding="utf-8")
     path.chmod(0o755)

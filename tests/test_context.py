@@ -1,5 +1,7 @@
+import os
 from datetime import datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from opsdash import anthology, brain, config, context, jobs, records, store
@@ -29,6 +31,7 @@ def test_context_summary_sections(settings_with):
     assert "### Словарь" in text and "# О компании\n" not in text and len(text) <= context.MAX_CHARS + 1
 
 
+@pytest.mark.skipif(os.name == "nt", reason="поддельный claude — shell-скрипт")
 def test_summary_goes_into_every_claude_run(tmp_path, settings_with, monkeypatch):
     fake = tmp_path / "claude"
     fake.write_text("#!/bin/sh\nfor a; do echo \"$a\"; done > \"$(dirname \"$0\")/args.txt\"\ncat >/dev/null\n"

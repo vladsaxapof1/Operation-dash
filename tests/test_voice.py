@@ -75,7 +75,7 @@ def test_this_is_me_relabels_cleans_up_and_reprocesses(tmp_path, settings_with, 
     md = (records.meeting_dir(mid) / "transcript.md").read_text(encoding="utf-8")
     assert "] Анна: 15 минут" in md and "] Спикер 1: сколько тебе" in md
     assert "Вы в записи: Анна = Спикер 2 (отмечено вами)" in md
-    assert json.loads((records.meeting_dir(mid) / "transcript.json").read_text())[1]["speaker"] == "Спикер 2"
+    assert json.loads((records.meeting_dir(mid) / "transcript.json").read_text(encoding="utf-8"))[1]["speaker"] == "Спикер 2"
     assert store.row("SELECT 1 FROM commitments WHERE id=?", (wrong,)) is None
     assert store.row("SELECT 1 FROM commitments WHERE id=?", (kept,)) is not None  # карточка уже создана — не трогаем
     assert proposals.get(p["id"])["status"] == "rejected"

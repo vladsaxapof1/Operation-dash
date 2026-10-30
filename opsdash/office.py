@@ -312,6 +312,12 @@ def _norm(path: str) -> str:
     return os.path.normcase(unicodedata.normalize("NFC", os.path.abspath(os.path.expanduser(path)))).rstrip(os.sep)
 
 
+def _below(path: str, root: str) -> list[str]:
+    """Папки пути внутри root (путь уже проверен _inside) — как они записаны: _norm на Windows опускает регистр
+    букв, а это имена проектов."""
+    return list(Path(unicodedata.normalize("NFC", os.path.abspath(os.path.expanduser(path)))).parts[len(Path(_norm(root)).parts):])
+
+
 def _inside(path: str, root: str) -> bool:
     p, r = _norm(path), _norm(root)
     return p == r or p.startswith(r + os.sep)
@@ -564,13 +570,12 @@ def _subagents(journal: Path, root: Path, now: datetime) -> list[dict]:
 def _room(s: dict, root: Path) -> str:
     """Проект (папка первого уровня), в котором работала сессия: по её папке, иначе — по файлам, которые она
     трогала. Пусто — сама папка офиса."""
-    rel = os.path.relpath(_norm(s["cwd"]), _norm(str(root))) if s["cwd"] else "."
-    if rel != "." and not rel.startswith(".."):
-        return rel.split(os.sep)[0]
+    if s["cwd"] and _inside(s["cwd"], str(root)) and _below(s["cwd"], str(root)):
+        return _below(s["cwd"], str(root))[0]
     rooms = Counter()
     for p, n in s["touched"].items():
         if _inside(p, str(root)):
-            parts = os.path.relpath(_norm(p), _norm(str(root))).split(os.sep)
+            parts = _below(p, str(root))
             if len(parts) > 1:
                 rooms[parts[0]] += n
     return rooms.most_common(1)[0][0] if rooms else ""

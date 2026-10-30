@@ -258,7 +258,7 @@ def test_waiting_follows_the_claude_app(claude_home, tmp_path, monkeypatch):
                "lastAssistantUuid": "u1" if cli != "old" else "u2", "postTurnSummaryFor": "u1",
                "postTurnSummary": {"status_category": status, "needs_action": "Создать MR и отправить коллеге"}}
         (app / "x" / "y").mkdir(parents=True, exist_ok=True)
-        (app / "x" / "y" / f"local_{cli}.json").write_text(json.dumps(rec, ensure_ascii=False))
+        (app / "x" / "y" / f"local_{cli}.json").write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
         _write(journals / f"{cli}.jsonl", [_line("user", _ago(minutes=3), str(root / "Проект А"), entrypoint="claude-desktop", message={"content": "Сделай"}),
                                           _line("assistant", _ago(minutes=2), str(root / "Проект А"), message={"content": [{"type": "text", "text": "Готово"}]})])
     snap = office.snapshot("f0")

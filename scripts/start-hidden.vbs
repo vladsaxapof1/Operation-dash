@@ -5,6 +5,9 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(fso.GetParentFolderName(WScript.ScriptFullName))
 Set sh = CreateObject("WScript.Shell")
 sh.CurrentDirectory = root
+' UTF-8 mode, like ops.cmd: files and output in UTF-8 whatever the Windows locale
+sh.Environment("PROCESS")("PYTHONUTF8") = "1"
+sh.Environment("PROCESS")("PYTHONIOENCODING") = "utf-8"
 pyw = root & "\.venv\Scripts\pythonw.exe"
 If Not fso.FileExists(pyw) Then
   MsgBox "PULSE is not installed yet. Run INSTALL.bat first.", 48, "PULSE"

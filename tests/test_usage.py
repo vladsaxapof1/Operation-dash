@@ -1,6 +1,7 @@
 """Расход Claude в «Настройки → Claude»: каждый запуск — токены и стоимость по ценам API, лимиты подписки."""
 
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
@@ -35,6 +36,8 @@ def client():
 
 @pytest.fixture
 def fake_claude(tmp_path, settings_with):
+    if os.name == "nt":
+        pytest.skip("поддельный claude — скрипт с #!, Windows его не запускает")
     path = tmp_path / "claude"
     path.write_text(FAKE, encoding="utf-8")
     path.chmod(0o755)

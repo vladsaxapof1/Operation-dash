@@ -12,6 +12,7 @@ import pytest
 from opsdash import config, macos, transcribe
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="служба и приложение — только macOS")
 def test_launch_agent_plist(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     data = macos.agent_dict(Path("/Users/anna/Pult"))
@@ -100,6 +101,7 @@ def test_mlx_failure_falls_back_to_faster_whisper(fake_mlx, monkeypatch):
     assert transcribe.engine(config.load_settings()) == "faster-whisper", "после сбоя MLX больше не пробуем"
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="служба и приложение — только macOS")
 def test_install_agent_and_app_commands(monkeypatch, tmp_path):
     import subprocess
 
