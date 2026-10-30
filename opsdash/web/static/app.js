@@ -122,6 +122,9 @@
   var showTask = function (dlg, edit) {
     dlg.querySelector(".dlg-view").hidden = edit;
     dlg.querySelector(".dlg-edit").hidden = !edit;
+    // карточка задачи скрыта (свёрнутые «готовые», фильтр) — окно внутри неё не отрисуется, но модальное
+    // окно всё равно заблокирует страницу. Такое окно переносим в body
+    if (!dlg.open && !dlg.parentElement.checkVisibility()) document.body.appendChild(dlg);
     if (!dlg.open) dlg.showModal();
     // фокус — на поле заголовка, а при просмотре на само окно (иначе браузер обводит рамкой ✕)
     (edit ? dlg.querySelector(".dlg-edit [name=title]") : dlg.querySelector(".dlg-box")).focus();
