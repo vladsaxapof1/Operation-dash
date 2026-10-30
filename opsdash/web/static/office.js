@@ -783,7 +783,6 @@
       if (c.at && c.at.group && !c.path && c.box && c.at.lounge) hits.push({ id: id, poly: hull(c.box) });
     });
     lights();
-    zoneTags(placed);
     nameTags(t, placed);
   }
   function lights() {  // свет мониторов и ламп — «светлым» наложением; ночью края темнее
@@ -811,24 +810,6 @@
     }
   }
   function overlaps(r, list) { return list.some(function (q) { return r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]; }); }
-  function zoneTags(placed) {  // табличка проекта у переднего угла его коврика; наезжает на соседнюю — ниже
-    ctx.font = "700 11px system-ui, -apple-system, sans-serif";
-    world.areas.forEach(function (a) {
-      a.zones.forEach(function (z) {
-        var p = P(z.x + 0.5, z.y + z.d - 0.5, 0), name = clip(z.name, 30), w = ctx.measureText(name).width + 22;
-        if (p[0] < -w || p[0] > cw || p[1] < -20 || p[1] > ch + 20) return;
-        for (var k = 0; k < 6 && overlaps([p[0] - 6, p[1] - 9, p[0] - 6 + w, p[1] + 9], placed); k++) p = [p[0], p[1] + 20];
-        placed.push([p[0] - 6, p[1] - 9, p[0] - 6 + w, p[1] + 9]);
-        ctx.globalAlpha = quiet(z) ? 0.5 : 1;
-        ctx.fillStyle = pal.night ? "rgba(20,16,24,.82)" : "rgba(255,255,255,.9)";
-        pill(p[0] - 6, p[1] - 9, w, 18, 9);
-        ctx.fillStyle = z.color; ctx.beginPath(); ctx.arc(p[0] + 4, p[1], 4, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = pal.night ? "#f3ece6" : "#2b2320"; ctx.textBaseline = "middle"; ctx.fillText(name, p[0] + 12, p[1] + 0.5);
-        ctx.globalAlpha = 1;
-        ctx.textBaseline = "alphabetic";
-      });
-    });
-  }
   // бейдж с именем над головой (точка — состояние); реплика — у работающих, у выбранного и в болтовне в лаунже.
   // Сначала важные (выбранный, работающие, ждущие), подписи остальных пропускаем, если наезжают
   function nameTags(t, placed) {
