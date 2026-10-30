@@ -108,6 +108,7 @@
     <div class="sess sess-{{ s.state }}" data-obj="sess:{{ s.id }}">
       <div class="sess-h"><span class="sess-title">{{ s.title }}</span> {{ state(s.state, s.state_title) }} <span class="muted small nowrap">{{ s.last | ago }}</span>
         {% if s.link %}<a class="btn sm office-claude{{ ' primary' if s.state in ('waiting', 'blocked') }}" href="{{ s.link }}" title="Открыть эту сессию в приложении Claude">Открыть в Claude</a>{% endif %}</div>
+      {% if s.needs %}<div class="small sess-needs">Нужно от вас: {{ s.needs }}</div>{% endif %}
       {{ steps(s.steps, 5 if s.state == 'working' else 2) }}
       {% if s.agents %}
       <ul class="sess-agents">

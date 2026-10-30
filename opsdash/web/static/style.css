@@ -731,6 +731,7 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .sess-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sess-title { font-weight: 600; }
 .sess-h .office-claude { margin-left: auto; }  /* «Открыть в Claude» — справа в заголовке сессии */
+.sess-needs { color: var(--warn); }  /* что приложение Claude считает нужным сделать вам по итогам хода */
 .sess-agents { list-style: none; margin: 2px 0 0; padding: 0; font-size: 13px; display: grid; gap: 3px; }
 .sess-files { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .office-file { border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 6px; padding: 0 7px;

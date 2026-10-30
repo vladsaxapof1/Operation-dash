@@ -79,13 +79,14 @@
   }
   function drawBox(b) {
     if (b.draw) { b.draw(b); flat(); return; }
-    if (b.alpha) ctx.globalAlpha = b.alpha;
+    var was = ctx.globalAlpha;
+    if (b.alpha) ctx.globalAlpha = was * b.alpha;
     var top = [P(b.x0, b.y0, b.z1), P(b.x1, b.y0, b.z1), P(b.x1, b.y1, b.z1), P(b.x0, b.y1, b.z1)];
     var e = P(b.x0, b.y1, b.z0), f = P(b.x1, b.y1, b.z0), g = P(b.x1, b.y0, b.z0);
     quad(e, f, top[2], top[3], b.left || b.c);
     quad(f, g, top[1], top[2], b.right || shade(b.c, -0.26));
     quad(top[0], top[1], top[2], top[3], b.top || shade(b.c, 0.16));
-    if (b.alpha) ctx.globalAlpha = 1;
+    ctx.globalAlpha = was;
   }
   // кто кого заслоняет: a рисуем раньше b, если между ними есть разделяющая плоскость и a — по дальнюю сторону
   function behind(a, b) {
@@ -136,8 +137,9 @@
         a.zones.forEach(function (z) {
           var n = z.desks.length, color = ZONES[z.color % ZONES.length];
           if (col && col + n > 4) { col = 0; row++; }
-          zones.push({ col: col, row: row, n: n, name: z.name, color: color });
-          z.desks.forEach(function (d, i) { cells.push({ col: col + i, row: row, d: d, color: color }); });
+          var zone = { col: col, row: row, n: n, name: z.name, color: color, cells: [] };
+          zones.push(zone);
+          z.desks.forEach(function (d, i) { var c = { col: col + i, row: row, d: d, color: color }; cells.push(c); zone.cells.push(c); });
           col += n; used = Math.max(used, col);
         });
         cols = Math.max(2, used); rows = row + 1;
@@ -475,7 +477,11 @@
     return r ? { shirt: r.shirt, hair: HAIR[r.hair], skin: SKIN[r.skin], cap: r.cap, phones: r.phones }
       : { shirt: st.cell.color || ZONES[seed % ZONES.length], hair: HAIR[seed % HAIR.length], skin: SKIN[(seed >> 3) % SKIN.length] };
   }
-  function idle(c) { var s = c.st.cell.d.state; return s === "idle" || s === "rest"; }
+  // свободный сотрудник PULSE отдыхает и ходит по офису; неактивная сессия папки сидит у себя полупрозрачной
+  function idle(c) { return c.st.cell.d.state === "idle"; }
+  function sleepy(st) { return st.cell.area.kind === "folder" && st.cell.d.state === "rest"; }
+  function busy(state) { return state === "working" || state === "waiting" || state === "blocked" || state === "error" || state === "queued"; }
+  function quiet(z) { return !z.cells.some(function (c) { return busy(c.d.state); }); }
   function want(c) {
     var s = c.st.cell.d.state;
     if (s === "working" || s === "queued" || s === "error") return c.st.chair;
@@ -658,7 +664,13 @@
       for (var gy = 8; gy < a.y1; gy += 6) { ctx.moveTo(a.x0, gy); ctx.lineTo(a.x1, gy); }
       ctx.stroke();
     });
-    world.areas.forEach(function (a) { a.zones.forEach(function (z) { rug(z.x, z.y, z.w, z.d, shade(z.color, pal.night ? -0.5 : 0.5), 1.5); }); });
+    world.areas.forEach(function (a) {
+      a.zones.forEach(function (z) {  // проект, где никто не работает и никто не ждёт, — коврик бледнее
+        ctx.globalAlpha = quiet(z) ? 0.4 : 1;
+        rug(z.x, z.y, z.w, z.d, shade(z.color, pal.night ? -0.5 : 0.5), 1.5);
+        ctx.globalAlpha = 1;
+      });
+    });
     (world.rugs || []).forEach(function (r) { rug(r.x, r.y, r.w, r.d, pal.night ? "#3c4a40" : "#a9bba4", 3); });
     flat();
     drawBox({ x0: -1.5, y0: -1.5, z0: -2.5, x1: W, y1: 0, z1: WALL_H, c: pal.wall, top: pal.wallTop });
@@ -759,8 +771,10 @@
     hits = [];
     depthSort(groups).forEach(function (g) {
       var more = extra[g.key];
+      if (g.station && sleepy(g.station)) ctx.globalAlpha = 0.38;
       if (more) depthSort(g.base.concat(more)).forEach(drawBox);
       else (g.sorted || (g.sorted = depthSort(g.base))).forEach(drawBox);
+      ctx.globalAlpha = 1;
       if (g.station) hits.push({ id: g.station.id, poly: hull(more ? bounds(g.base.concat(more)) : g) });
       if (g.char) hits.push({ id: g.char.id, poly: hull(g) });
     });
@@ -805,10 +819,12 @@
         if (p[0] < -w || p[0] > cw || p[1] < -20 || p[1] > ch + 20) return;
         for (var k = 0; k < 6 && overlaps([p[0] - 6, p[1] - 9, p[0] - 6 + w, p[1] + 9], placed); k++) p = [p[0], p[1] + 20];
         placed.push([p[0] - 6, p[1] - 9, p[0] - 6 + w, p[1] + 9]);
+        ctx.globalAlpha = quiet(z) ? 0.5 : 1;
         ctx.fillStyle = pal.night ? "rgba(20,16,24,.82)" : "rgba(255,255,255,.9)";
         pill(p[0] - 6, p[1] - 9, w, 18, 9);
         ctx.fillStyle = z.color; ctx.beginPath(); ctx.arc(p[0] + 4, p[1], 4, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = pal.night ? "#f3ece6" : "#2b2320"; ctx.textBaseline = "middle"; ctx.fillText(name, p[0] + 12, p[1] + 0.5);
+        ctx.globalAlpha = 1;
         ctx.textBaseline = "alphabetic";
       });
     });
@@ -818,19 +834,20 @@
   function nameTags(t, placed) {
     var list = Object.keys(chars).map(function (id) { return chars[id]; });
     world.stations.forEach(function (st) { if (st.cell.d.state === "off") list.push({ id: st.id, st: st, head: [st.cx + 9, st.cy + 5.5, 17], empty: true }); });
-    var rank = function (c) { var s = c.st.cell.d.state; return c.id === selected || c.id === hover ? 0 : s === "working" || s === "error" || s === "waiting" || s === "blocked" ? 1 : 2; };
+    var rank = function (c) { var s = c.st.cell.d.state; return c.id === selected || c.id === hover ? 0 : s === "working" || s === "error" || s === "waiting" || s === "blocked" ? 1 : sleepy(c.st) ? 3 : 2; };
     list.sort(function (a, b) { return rank(a) - rank(b); });
     list.forEach(function (c) {
       var d = c.st.cell.d, p = P(c.head[0], c.head[1], c.head[2]), picked = c.id === selected || c.id === hover;
       if (p[0] < -150 || p[0] > cw + 150 || p[1] < -40 || p[1] > ch + 40) return;
       ctx.font = "600 11px system-ui, -apple-system, sans-serif";
       var name = clip(d.label, 22), w = ctx.measureText(name).width + 22, r = [p[0] - w / 2, p[1] - 9, p[0] + w / 2, p[1] + 9];
-      if (rank(c) === 2 && overlaps(r, placed)) return;
+      if (rank(c) >= 2 && overlaps(r, placed)) return;
+      var faint = c.empty || (sleepy(c.st) && !picked);
       placed.push(r);
-      ctx.fillStyle = c.empty ? "rgba(20,16,24,.45)" : "rgba(20,16,24,.82)";
+      ctx.fillStyle = faint ? "rgba(20,16,24,.45)" : "rgba(20,16,24,.82)";
       pill(r[0], r[1], w, 18, 9);
       ctx.fillStyle = DOT[d.state] || "#9aa0a8"; ctx.beginPath(); ctx.arc(r[0] + 9, p[1], 3.5, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = c.empty ? "rgba(255,255,255,.55)" : "#fff"; ctx.textBaseline = "middle"; ctx.fillText(name, r[0] + 16, p[1] + 0.5);
+      ctx.fillStyle = faint ? "rgba(255,255,255,.55)" : "#fff"; ctx.textBaseline = "middle"; ctx.fillText(name, r[0] + 16, p[1] + 0.5);
       ctx.textBaseline = "alphabetic";
       var text = "", style = "hover";
       if (d.state === "working") { text = d.say; style = "working"; }

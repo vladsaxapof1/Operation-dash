@@ -244,6 +244,33 @@ def test_open_in_claude_link_and_pulse_own_runs_hidden(client, claude_home, tmp_
     assert 'href="claude://code/continue?session=local_aaa-1"' in page and "Открыть в Claude" in page
 
 
+def test_waiting_follows_the_claude_app(claude_home, tmp_path, monkeypatch):
+    """«Ждёт ответа» — только если приложение Claude считает, что нужно действие человека, и вы ещё не открывали
+    сессию после ответа; всё готово или уже просмотрено — сессия просто не активна."""
+    journals, root = claude_home
+    app = tmp_path / "app"
+    monkeypatch.setattr(office, "desktop_dir", lambda: app)
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    cases = {  # журнал → (итог хода по оценке приложения, открывали ли после ответа)
+        "seen": ("blocked", now_ms), "fresh": ("blocked", 0), "done": ("completed", 0), "old": ("blocked", 0)}
+    for cli, (status, focused) in cases.items():
+        rec = {"sessionId": f"local_{cli}", "cliSessionId": cli, "lastActivityAt": now_ms - 60000, "lastFocusedAt": focused,
+               "lastAssistantUuid": "u1" if cli != "old" else "u2", "postTurnSummaryFor": "u1",
+               "postTurnSummary": {"status_category": status, "needs_action": "Создать MR и отправить коллеге"}}
+        (app / "x" / "y").mkdir(parents=True, exist_ok=True)
+        (app / "x" / "y" / f"local_{cli}.json").write_text(json.dumps(rec, ensure_ascii=False))
+        _write(journals / f"{cli}.jsonl", [_line("user", _ago(minutes=3), str(root / "Проект А"), entrypoint="claude-desktop", message={"content": "Сделай"}),
+                                          _line("assistant", _ago(minutes=2), str(root / "Проект А"), message={"content": [{"type": "text", "text": "Готово"}]})])
+    snap = office.snapshot("f0")
+    got = {s["id"]: (s["state"], s["needs"]) for r in snap["rooms"] for s in r["sessions"]}
+    assert got["seen"] == ("rest", "Создать MR и отправить коллеге")  # уже открывали — не висит, но что нужно — видно
+    assert got["fresh"] == ("waiting", "Создать MR и отправить коллеге")
+    assert got["done"][0] == "rest"
+    assert got["old"] == ("waiting", "")  # итог от прошлого хода — не верим, решает журнал
+    say = {d["id"]: d["say"] for z in snap["scene"]["zones"] for d in z["desks"]}
+    assert say["sess:fresh"] == "Нужно от вас: Создать MR и отправить коллеге"
+
+
 def test_office_settings_saved(client):
     r = client.post("/settings/office", data={"folders": "/нет/такой\n", "hide": "Личное", "days": 100},
                     follow_redirects=False)

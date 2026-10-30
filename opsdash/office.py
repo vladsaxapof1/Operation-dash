@@ -366,13 +366,15 @@ def desktop_dir() -> Path:
     return base / "claude-code-sessions"
 
 
-_desktop: dict[str, tuple] = {}  # файл сессии приложения → (mtime, номер журнала Claude Code, {id, archived})
+_desktop: dict[str, tuple] = {}  # файл сессии приложения → (mtime, номер журнала Claude Code, сведения о ней)
 _DESKTOP_ID = re.compile(r"^local_[A-Za-z0-9-]{1,64}$")  # такие номера приложение принимает в ссылке
 
 
 def desktop_sessions() -> dict[str, dict]:
-    """Сессии приложения Claude: номер журнала Claude Code → {id: local_…, archived}. Открыть сессию в приложении —
-    ссылка claude://code/continue?session=<id>. Только чтение; что не разобрали — пропускаем."""
+    """Сессии приложения Claude: номер журнала Claude Code → {id: local_…, archived, status, needs, seen}.
+    Открыть сессию в приложении — ссылка claude://code/continue?session=<id>. status — итог последнего хода, как его
+    оценило само приложение (completed — готово, review_ready — на проверку, blocked — нужно действие человека, needs —
+    какое); seen — вы открывали сессию после её последнего ответа. Только чтение; что не разобрали — пропускаем."""
     out = {}
     for f in desktop_dir().glob("*/*/local_*.json"):
         key = str(f)
@@ -386,8 +388,13 @@ def desktop_sessions() -> dict[str, dict]:
                 d = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            c = _desktop[key] = (mtime, str(d.get("cliSessionId") or ""),
-                                 {"id": str(d.get("sessionId") or ""), "archived": bool(d.get("isArchived"))})
+            summary = d.get("postTurnSummary") if isinstance(d.get("postTurnSummary"), dict) else {}
+            fresh = bool(summary) and (d.get("postTurnSummaryFor") or summary.get("summarizes_uuid")) == d.get("lastAssistantUuid")
+            status = str(summary.get("status_category") or "") if fresh else ""  # итог не последнего хода — не верим
+            c = _desktop[key] = (mtime, str(d.get("cliSessionId") or ""), {
+                "id": str(d.get("sessionId") or ""), "archived": bool(d.get("isArchived")), "status": status,
+                "needs": str(summary.get("needs_action") or "")[:300] if status == "blocked" else "",
+                "seen": (d.get("lastFocusedAt") or 0) >= (d.get("lastActivityAt") or 0) > 0})
         if c[1] and _DESKTOP_ID.match(c[2]["id"]):
             out[c[1]] = c[2]
     return out
@@ -605,7 +612,10 @@ def folder(path: str, settings: dict | None = None) -> dict:
         title = s["title"] or (s["prompt"].splitlines()[0][:90] if s["prompt"] else "Без названия")
         mine = app.get(journal.stem)  # сессия из приложения Claude — её можно открыть там же ссылкой
         link = f"claude://code/continue?session={mine['id']}" if mine and not mine["archived"] else ""
+        if st == "waiting" and mine and (mine["seen"] or mine["status"] in ("completed", "review_ready")):
+            st = "rest"  # приложение знает лучше: всё готово или вы уже открывали сессию после ответа
         sessions.append({"id": journal.stem, "title": title, "room": room, "state": st, "state_title": STATES[st], "link": link,
+                         "needs": mine["needs"] if mine else "",
                          "first": s["first"], "last": s["last"], "steps": s["steps"][-6:], "tools": s["tools"],
                          "prompts": s["prompts"], "model": s["model"], "cwd": s["cwd"],
                          "files": _files_view(s["written"], root), "agents": agents})
@@ -699,6 +709,8 @@ def _scene_session(s: dict) -> dict:
     say = SAY.get(s["state"], "")
     if s["state"] == "working":
         say = s["steps"][-1]["t"] if s["steps"] else "Работают субагенты" if agents else ""
+    elif s["state"] == "waiting" and s.get("needs"):
+        say = "Нужно от вас: " + s["needs"][:140]
     return {"id": f"sess:{s['id']}", "label": s["title"][:32], "state": s["state"], "say": say,
             "hint": f"{s['title']}: {s['state_title']}",
             "agents": [{"label": a["title"][:32], "say": a["steps"][-1]["t"] if a["steps"] else ""} for a in agents[:2]],
