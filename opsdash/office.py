@@ -7,7 +7,9 @@
 - папки, где вы сами работаете с Claude Code (Настройки → Офис). Их сессии PULSE читает из журналов
   Claude Code: ~/.claude/projects/<папка>/<сессия>.jsonl, субагенты — <сессия>/subagents/agent-*.jsonl
   и .meta.json рядом. Только читает: в сами папки ничего не ставит. Формат журналов Claude Code официально
-  не описан — что не разобрали, пропускаем молча; каждый раз дочитываем только дописанное.
+  не описан — что не разобрали, пропускаем молча; каждый раз дочитываем только дописанное. Сессии, начатые
+  в приложении Claude, открываются там же кнопкой «Открыть в Claude» (desktop_sessions); фоновые запуски
+  самого PULSE в офисы-папки не попадают — они уже в офисе PULSE.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import unicodedata
 from collections import Counter
@@ -352,8 +355,46 @@ def step_label(tool: str, params: dict) -> str:
     return tool
 
 
+def desktop_dir() -> Path:
+    """Где приложение Claude хранит свои сессии Claude Code (вкладка Code)."""
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "Claude"
+    elif os.name == "nt":
+        base = Path(os.environ.get("APPDATA") or Path.home()) / "Claude"
+    else:
+        base = Path.home() / ".config" / "Claude"
+    return base / "claude-code-sessions"
+
+
+_desktop: dict[str, tuple] = {}  # файл сессии приложения → (mtime, номер журнала Claude Code, {id, archived})
+_DESKTOP_ID = re.compile(r"^local_[A-Za-z0-9-]{1,64}$")  # такие номера приложение принимает в ссылке
+
+
+def desktop_sessions() -> dict[str, dict]:
+    """Сессии приложения Claude: номер журнала Claude Code → {id: local_…, archived}. Открыть сессию в приложении —
+    ссылка claude://code/continue?session=<id>. Только чтение; что не разобрали — пропускаем."""
+    out = {}
+    for f in desktop_dir().glob("*/*/local_*.json"):
+        key = str(f)
+        try:
+            mtime = f.stat().st_mtime
+        except OSError:
+            continue
+        c = _desktop.get(key)
+        if not c or c[0] != mtime:
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            c = _desktop[key] = (mtime, str(d.get("cliSessionId") or ""),
+                                 {"id": str(d.get("sessionId") or ""), "archived": bool(d.get("isArchived"))})
+        if c[1] and _DESKTOP_ID.match(c[2]["id"]):
+            out[c[1]] = c[2]
+    return out
+
+
 def _blank() -> dict:
-    return {"cwd": "", "title": "", "prompt": "", "first": None, "last": None, "turn": "", "pending": {},
+    return {"cwd": "", "entry": "", "title": "", "prompt": "", "first": None, "last": None, "turn": "", "pending": {},
             "steps": [], "tools": 0, "prompts": 0, "written": [], "touched": Counter(), "model": "", "agents": 0}
 
 
@@ -374,6 +415,7 @@ def _feed(s: dict, raw: bytes, sub: bool) -> None:
     at = d.get("timestamp") or s["last"]
     s["first"], s["last"] = s["first"] or at, at
     s["cwd"] = d.get("cwd") or s["cwd"]
+    s["entry"] = d.get("entrypoint") or s["entry"]  # claude-desktop, cli; sdk-… — запуск без человека (claude -p)
     message = d.get("message") or {}
     content = message.get("content")
     blocks = [{"type": "text", "text": content}] if isinstance(content, str) else \
@@ -474,8 +516,8 @@ def _state(s: dict, now: datetime, sub: bool = False, finished: bool | None = No
     age = now - last
     if finished:
         return "done"
-    if s["turn"] == "answered":
-        return "done" if sub else "waiting" if age < WAITING else "rest"
+    if s["turn"] == "answered":  # ответил; запуск без человека (claude -p) ответа не ждёт — отвечать некому
+        return "done" if sub else "waiting" if age < WAITING and not s["entry"].startswith("sdk") else "rest"
     if s["turn"] == "stopped":
         return "rest"
     if s["pending"]:
@@ -537,6 +579,7 @@ def folder(path: str, settings: dict | None = None) -> dict:
     hide = {unicodedata.normalize("NFC", h.strip()).casefold() for h in settings["office"].get("hide") or [] if h.strip()}
     now = datetime.now(timezone.utc)
     since = now.timestamp() - days * 86400
+    app = desktop_sessions()
     sessions = []
     for journal in (claude_dir() / "projects").glob("*/*.jsonl"):
         try:
@@ -550,6 +593,8 @@ def folder(path: str, settings: dict | None = None) -> dict:
         s = _session(journal)
         if not s or not (s["prompts"] or s["tools"]) or (store.parse_ts(s["last"]) or now).timestamp() < since:
             continue  # пустая или давняя: приложение Claude иногда дописывает в старые журналы служебное
+        if s["entry"].startswith("sdk") and _inside(s["cwd"] or cwd, str(config.APP_DIR)):
+            continue  # фоновые запуски самого PULSE (разбор сообщений, дайджесты, «Спросить Claude») — они в офисе PULSE
         room = _room(s, root)
         if room.casefold() in hide:
             continue
@@ -558,7 +603,9 @@ def folder(path: str, settings: dict | None = None) -> dict:
         if st != "working" and any(a["state"] == "working" for a in agents):
             st = "working"
         title = s["title"] or (s["prompt"].splitlines()[0][:90] if s["prompt"] else "Без названия")
-        sessions.append({"id": journal.stem, "title": title, "room": room, "state": st, "state_title": STATES[st],
+        mine = app.get(journal.stem)  # сессия из приложения Claude — её можно открыть там же ссылкой
+        link = f"claude://code/continue?session={mine['id']}" if mine and not mine["archived"] else ""
+        sessions.append({"id": journal.stem, "title": title, "room": room, "state": st, "state_title": STATES[st], "link": link,
                          "first": s["first"], "last": s["last"], "steps": s["steps"][-6:], "tools": s["tools"],
                          "prompts": s["prompts"], "model": s["model"], "cwd": s["cwd"],
                          "files": _files_view(s["written"], root), "agents": agents})

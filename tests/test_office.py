@@ -96,6 +96,7 @@ def claude_home(tmp_path, monkeypatch, settings_with):
     for project in ("Проект А", "Личное", "Проект Б"):
         (root / project).mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.setattr(office, "desktop_dir", lambda: tmp_path / "no-app")  # не читать сессии настоящего приложения
     settings_with(office={"folders": [str(root)], "hide": ["личное"], "days": 7})
     return home / "projects" / "-work", root
 
@@ -213,6 +214,34 @@ def test_scene_for_folder_puts_busy_sessions_first_and_caps_desks(client, claude
     assert [a["kind"] for a in data["areas"]] == ["pulse", "folder"]
     assert 'data-obj="sess:w"' in page and 'data-obj="desk:triage"' in page and "/static/office.js" in page
     assert page.count('class="office-group"') == 2
+
+
+def test_open_in_claude_link_and_pulse_own_runs_hidden(client, claude_home, tmp_path, monkeypatch):
+    journals, root = claude_home
+    from opsdash import config
+
+    pulse_dir = root / "Пульт"  # PULSE лежит внутри папки офиса — его фоновые запуски не дублируем
+    pulse_dir.mkdir()
+    monkeypatch.setattr(config, "APP_DIR", pulse_dir)
+    app = tmp_path / "app-sessions"
+    monkeypatch.setattr(office, "desktop_dir", lambda: app)
+    for local, cli, archived in (("local_aaa-1", "mine", False), ("local_bbb-2", "gone", True)):
+        (app / "u" / "w").mkdir(parents=True, exist_ok=True)
+        (app / "u" / "w" / f"{local}.json").write_text(json.dumps({"sessionId": local, "cliSessionId": cli, "isArchived": archived}))
+    answered = [{"type": "text", "text": "Готово"}]
+    _write(journals / "mine.jsonl", [_line("user", _ago(minutes=9), str(root / "Проект А"), entrypoint="claude-desktop", message={"content": "Сделай"}),
+                                     _line("assistant", _ago(minutes=8), str(root / "Проект А"), message={"content": answered})])
+    _write(journals / "gone.jsonl", [_line("user", _ago(minutes=9), str(root / "Проект Б"), entrypoint="claude-desktop", message={"content": "Старое"})])
+    _write(journals / "bg.jsonl", [_line("user", _ago(minutes=5), str(pulse_dir), entrypoint="sdk-cli", message={"content": "Разбери сообщения"})])
+    _write(journals / "sdk.jsonl", [_line("user", _ago(minutes=9), str(root / "Проект Б"), entrypoint="sdk-cli", message={"content": "Скрипт"}),
+                                    _line("assistant", _ago(minutes=8), str(root / "Проект Б"), message={"content": answered})])
+    sessions = {s["id"]: s for r in office.snapshot("f0")["rooms"] for s in r["sessions"]}
+    assert "bg" not in sessions  # разбор сообщений PULSE — в офисе PULSE, не в папке
+    assert sessions["mine"]["link"] == "claude://code/continue?session=local_aaa-1" and sessions["mine"]["state"] == "waiting"
+    assert sessions["gone"]["link"] == ""  # в приложении — в архиве
+    assert sessions["sdk"]["state"] == "rest"  # запуск без человека ответа не ждёт
+    page = client.get("/office").text
+    assert 'href="claude://code/continue?session=local_aaa-1"' in page and "Открыть в Claude" in page
 
 
 def test_office_settings_saved(client):
