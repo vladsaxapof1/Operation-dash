@@ -56,17 +56,22 @@ def cmd_daemon(a) -> None:
 
 
 def start_background() -> None:
-    """Запустить PULSE в фоне: на Mac — через службу launchd (если установлена), иначе отдельным процессом."""
+    """Запустить PULSE в фоне: на Mac — через службу launchd (если установлена), на Windows — через
+    scripts/start-hidden.vbs (он же перезапустит PULSE после сбоя), иначе отдельным процессом."""
     from opsdash import macos
 
     if macos.is_mac() and macos.kickstart():
         return
     exe = Path(sys.executable)
     pyw = exe.with_name("pythonw.exe")
+    vbs = config.APP_DIR / "scripts" / "start-hidden.vbs"
     kwargs = {"cwd": str(config.APP_DIR)}
     if os.name == "nt":
         kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        cmd = [str(pyw if pyw.exists() else exe), "-m", "opsdash", "daemon"]
+        if vbs.exists() and pyw.exists():
+            cmd = [str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "wscript.exe"), str(vbs)]
+        else:
+            cmd = [str(pyw if pyw.exists() else exe), "-m", "opsdash", "daemon"]
     else:
         kwargs["start_new_session"] = True
         cmd = [str(exe), "-m", "opsdash", "daemon"]
@@ -1076,6 +1081,8 @@ def cmd_update(a) -> None:
     if not a.no_restart and daemon.is_running():
         updates.restart(in_daemon=False)
         out("PULSE перезапускается — через полминуты откройте его снова.")
+    elif updates.libraries_busy():  # Windows, PULSE работает, а перезапуск не просили
+        out("Библиотеки обновятся после перезапуска: запустите UPDATE.bat.")
 
 
 # --- разбор аргументов -------------------------------------------------------------

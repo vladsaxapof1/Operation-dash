@@ -37,13 +37,13 @@ def find_claude(settings: dict | None = None) -> str | None:
     if explicit and Path(explicit).exists():
         return explicit
     found = shutil.which("claude")
-    if found:
+    # npm-обёртка claude.cmd (Windows) — только если родного claude.exe нет: она идёт через cmd.exe (см. _fit_command)
+    if found and not _is_cmd(found):
         return found
     home = Path.home()
     candidates = [
         home / ".local" / "bin" / "claude.exe",
         home / ".local" / "bin" / "claude",
-        Path(os.environ.get("APPDATA", "")) / "npm" / "claude.cmd",
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "claude" / "claude.exe",
         home / ".claude" / "local" / "claude",
         Path("/opt/homebrew/bin/claude"),
@@ -53,21 +53,62 @@ def find_claude(settings: dict | None = None) -> str | None:
         if str(c) not in ("", ".") and c.exists():
             return str(c)
     desktop = _desktop_app_claude()
-    return str(desktop) if desktop else None
+    if desktop:
+        return str(desktop)
+    npm = Path(os.environ.get("APPDATA", "")) / "npm" / "claude.cmd"
+    return found or (str(npm) if os.environ.get("APPDATA") and npm.exists() else None)
+
+
+def _is_cmd(path: str) -> bool:
+    return path.lower().endswith((".cmd", ".bat"))
+
+
+def app_dirs() -> list[Path]:
+    """Папки приложения Claude: в них его Claude Code (claude-code) и сессии вкладки Code. На Windows приложение
+    в пакете MSIX пишет не в %APPDATA%, а в свою копию в %LOCALAPPDATA%\\Packages."""
+    if sys.platform == "darwin":
+        return [Path.home() / "Library" / "Application Support" / "Claude"]
+    if os.name == "nt":
+        dirs = [Path(os.environ.get("APPDATA") or Path.home()) / "Claude"]
+        if os.environ.get("LOCALAPPDATA"):
+            dirs += sorted(Path(os.environ["LOCALAPPDATA"], "Packages").glob("Claude_*/LocalCache/Roaming/Claude"))
+        return dirs
+    return [Path.home() / ".config" / "Claude"]
 
 
 def _desktop_app_claude() -> Path | None:
     """Claude Code, который скачало себе приложение Claude (вкладка Code). Папка меняется с каждой
     версией (…/claude-code/2.1.308/<хеш>/claude.app), поэтому ищем при каждом запуске и берём новейшую."""
-    if sys.platform != "darwin":
+    if sys.platform == "darwin":
+        patterns = ["*/*/claude.app/Contents/MacOS/claude"]
+    elif os.name == "nt":
+        patterns = ["*/*/claude.exe", "*/claude.exe"]
+    else:
         return None
-    root = Path.home() / "Library" / "Application Support" / "Claude" / "claude-code"
-    found = [p for p in root.glob("*/*/claude.app/Contents/MacOS/claude") if os.access(p, os.X_OK)]
+    found = []  # (номер версии — первая папка внутри claude-code, путь)
+    for root in (d / "claude-code" for d in app_dirs()):
+        for pattern in patterns:
+            found += [(p.relative_to(root).parts[0], p) for p in root.glob(pattern) if os.access(p, os.X_OK)]
 
-    def version(p: Path) -> tuple:
-        return tuple(int(x) if x.isdigit() else 0 for x in p.parts[-6].split("."))
+    def version(item: tuple) -> tuple:
+        return tuple(int(x) if x.isdigit() else 0 for x in item[0].split("."))
 
-    return max(found, key=version, default=None)
+    best = max(found, key=version, default=None)
+    return best[1] if best else None
+
+
+def _git_bash() -> str | None:
+    """Windows: bash.exe из Git for Windows — без него Claude Code не запускается. Сам Claude ищет git в PATH, а PATH
+    у PULSE — с момента входа в Windows: Git, поставленный позже, он без подсказки не увидит."""
+    if os.name != "nt" or os.environ.get("CLAUDE_CODE_GIT_BASH_PATH"):
+        return None
+    git = shutil.which("git")
+    candidates = [Path(git).parent.parent / "bin" / "bash.exe"] if git else []  # …\Git\cmd\git.exe → …\Git\bin
+    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"),
+                 os.environ.get("LOCALAPPDATA") and os.path.join(os.environ["LOCALAPPDATA"], "Programs")):
+        if base:
+            candidates.append(Path(base) / "Git" / "bin" / "bash.exe")
+    return next((str(c) for c in candidates if c.exists()), None)
 
 
 _login_cache: dict[str, tuple[float, dict | None]] = {}
@@ -91,12 +132,25 @@ def login_status(claude: str, settings: dict | None = None, max_age: float = 0) 
 
 
 def open_login(settings: dict | None = None) -> None:
-    """macOS: открыть Терминал со входом в Claude Code — дальше браузер, как при обычном входе."""
+    """Открыть окно со входом в Claude Code (macOS — Терминал, Windows — PowerShell) — дальше браузер,
+    как при обычном входе."""
+    settings = settings or config.load_settings()
     claude = find_claude(settings)
     if not claude:
         raise BrainError("Claude Code не найден")
+    if os.name == "nt":
+        script = config.DATA_DIR / "claude-login.ps1"
+        quoted = "'" + claude.replace("'", "''") + "'"
+        script.write_text(
+            f"& {quoted} auth login --claudeai\n"
+            'Write-Host ""; Write-Host "Готово. Вернитесь в PULSE и обновите страницу настроек."\n'
+            'Read-Host "Нажмите Enter, чтобы закрыть окно"\n',
+            encoding="utf-8-sig")  # Windows PowerShell читает файл как UTF-8 только с BOM
+        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                         env=_env(settings), creationflags=0x00000010)  # CREATE_NEW_CONSOLE: у PULSE своего окна нет
+        return
     if sys.platform != "darwin":
-        raise BrainError(f'Выполните в PowerShell: & "{claude}" auth login')
+        raise BrainError(f"Выполните в терминале: {shlex.quote(claude)} auth login")
     script = config.DATA_DIR / "claude-login.command"  # .command открывается в Терминале без лишних разрешений
     script.write_text(
         "#!/bin/bash\n"
@@ -115,7 +169,7 @@ def _env(settings: dict) -> dict:
     env["PYTHONIOENCODING"] = "utf-8"
     env["OPSDASH_HOME"] = str(config.ROOT)
     env["OPSDASH_AGENT"] = "1"  # фоновый Claude: подтверждать предложения ему запрещено (см. cli.cmd_proposals)
-    git_bash = settings["claude"].get("git_bash_path")
+    git_bash = settings["claude"].get("git_bash_path") or _git_bash()
     if git_bash:
         env["CLAUDE_CODE_GIT_BASH_PATH"] = git_bash
     return env
@@ -143,6 +197,15 @@ def _command(settings: dict, claude: str, job: str, *, model: str | None, resume
     except Exception as e:  # noqa: BLE001 — без сводки Claude всё равно работает, просто ищет больше
         store.log(job, f"сводка контекста не собрана: {e}", "warning")
     return cmd
+
+
+def _fit_command(cmd: list[str], prompt: str) -> tuple[list[str], str]:
+    """npm-обёртка claude.cmd запускается через cmd.exe, а он не примет команду длиннее 8191 символа — сводка контекста
+    туда не влезает. Тогда сводку отдаём в начале самого задания (оно идёт через stdin, там длина не ограничена)."""
+    if not _is_cmd(cmd[0]) or "--append-system-prompt" not in cmd:
+        return cmd, prompt
+    i = cmd.index("--append-system-prompt")
+    return cmd[:i] + cmd[i + 2:], f"{cmd[i + 1]}\n\n---\n\n{prompt}"
 
 
 def _claude(settings: dict) -> str:
@@ -189,6 +252,7 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
     on_step = office.step_recorder(on_step)  # шаги — и в раздел «Офис», если это фоновое задание
     settings = config.load_settings()
     cmd = _command(settings, _claude(settings), job, model=model, resume=resume, partial=partial, effort=effort)
+    cmd, task = _fit_command(cmd, prompt)  # prompt не трогаем: с ним stream повторяют для старого Claude Code
     timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)
     kwargs = {}
     if os.name == "nt":
@@ -212,7 +276,7 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
     timer.start()
     data, text, last, limits = None, "", "", None
     try:
-        proc.stdin.write(prompt)
+        proc.stdin.write(task)
         proc.stdin.close()
         for line in proc.stdout:
             last = line

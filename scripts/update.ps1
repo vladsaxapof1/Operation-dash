@@ -9,7 +9,14 @@ if (-not $uvPath) { $uvPath = "$env:USERPROFILE\.local\bin\uv.exe" }
 
 Write-Host "==> Останавливаю PULSE" -ForegroundColor Cyan
 & "$Root\ops.cmd" stop
-Start-Sleep -Seconds 2
+# ждём, пока PULSE закроется и отпустит файлы библиотек: пока он работает, он держит блокировку data\pult.lock
+$lock = Join-Path $Root "data\pult.lock"
+for ($i = 0; $i -lt 60 -and (Test-Path $lock); $i++) {
+    $f = $null
+    try { $f = [IO.File]::Open($lock, "Open", "ReadWrite", "ReadWrite"); $f.Lock(0, 1); $f.Unlock(0, 1); break }
+    catch { Start-Sleep -Seconds 1 }
+    finally { if ($f) { $f.Close() } }
+}
 
 if (Test-Path "$Root\.git") {
     Write-Host "==> Скачиваю новую версию (git pull)" -ForegroundColor Cyan

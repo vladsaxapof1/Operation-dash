@@ -190,14 +190,14 @@ def find_uv() -> str | None:
         return found
     home = Path.home()
     for p in (home / ".local" / "bin" / "uv", home / ".local" / "bin" / "uv.exe", home / ".cargo" / "bin" / "uv",
-              Path("/opt/homebrew/bin/uv"), Path("/usr/local/bin/uv")):
+              home / ".cargo" / "bin" / "uv.exe", Path("/opt/homebrew/bin/uv"), Path("/usr/local/bin/uv")):
         if p.exists():
             return str(p)
     return None
 
 
-def sync_libraries(root: Path) -> None:
-    """Библиотеки под новую версию — как в установщике (на Apple Silicon с macOS 14+ — с ускорением MLX)."""
+def _sync_command(root: Path) -> list[str]:
+    """uv sync — как в установщике (на Apple Silicon с macOS 14+ — с ускорением MLX)."""
     uv = find_uv()
     if not uv:
         raise UpdateError("не найден uv — запустите установку (INSTALL) заново")
@@ -206,9 +206,46 @@ def sync_libraries(root: Path) -> None:
     mac = platform.mac_ver()[0]
     if sys.platform == "darwin" and platform.machine() == "arm64" and mac and int(mac.split(".")[0]) >= 14:
         cmd += ["--extra", "mlx"]
-    res = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=1800)
+    return cmd
+
+
+def sync_libraries(root: Path) -> None:
+    """Библиотеки под новую версию."""
+    res = subprocess.run(_sync_command(root), cwd=str(root), capture_output=True, text=True, timeout=1800)
     if res.returncode:
         raise UpdateError("библиотеки не обновились: " + (res.stderr or res.stdout).strip()[-400:])
+
+
+def libraries_busy() -> bool:
+    """Windows: пока PULSE работает, файлы его библиотек открыты, и uv sync не сможет их заменить — библиотеки
+    обновит restart, когда PULSE закроется."""
+    from opsdash import daemon
+
+    return os.name == "nt" and daemon.is_running()
+
+
+# Windows, перезапуск после обновления: дождаться, пока старый PULSE закроется (освободит data/pult.lock), обновить
+# библиотеки и запустить новый. Только стандартная библиотека Python: импорт opsdash открыл бы файлы тех самых
+# библиотек (PyYAML, pydantic), которые uv sync должен заменить. Аргументы: файл блокировки, журнал, папка, uv sync…
+_WINDOWS_RESTART = """
+import msvcrt, subprocess, sys, time
+lock, log, root, cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+for _ in range(180):
+    try:
+        with open(lock, "a+") as f:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        break
+    except OSError:
+        time.sleep(1)
+with open(log, "a", encoding="utf-8") as out:
+    out.write(time.strftime("%Y-%m-%d %H:%M:%S") + " uv sync\\n")
+    out.flush()
+    subprocess.run(cmd, cwd=root, stdout=out, stderr=out, creationflags=0x08000000)
+from opsdash import cli
+cli.start_background()
+"""
 
 
 def apply(settings: dict | None = None, root: Path | None = None, transport: httpx.BaseTransport | None = None) -> str:
@@ -230,7 +267,9 @@ def apply(settings: dict | None = None, root: Path | None = None, transport: htt
         (config.DATA_DIR / INSTALLED_FILE).write_text(json.dumps(
             {"sha": head["sha"], "date": head["date"], "installed_at": store.utcnow(), "files": files},
             ensure_ascii=False, indent=1), encoding="utf-8")
-    sync_libraries(root)
+    later = real and libraries_busy()
+    if not later:
+        sync_libraries(root)
     if real and sys.platform == "darwin":
         from opsdash import macos
 
@@ -241,7 +280,7 @@ def apply(settings: dict | None = None, root: Path | None = None, transport: htt
                 store.log("update", f"приложение не обновлено: {e}", "warning")
     after = installed(root)
     store.set_state(STATE_KEY, {**last_check(), "installed": after, "available": False, "changes": []})
-    return f'версия {before["sha"][:7] or "?"} → {after["sha"][:7]}'
+    return f'версия {before["sha"][:7] or "?"} → {after["sha"][:7]}' + (" (библиотеки — при перезапуске)" if later else "")
 
 
 def restart(in_daemon: bool) -> None:
@@ -256,12 +295,17 @@ def restart(in_daemon: bool) -> None:
     # Windows и запуск без службы: новый PULSE стартует, когда старый закроется
     kwargs: dict = {"cwd": str(config.APP_DIR), "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
                     "stderr": subprocess.DEVNULL}
+    cmd = [sys.executable, "-c", "import time; time.sleep(5); from opsdash import cli; cli.start_background()"]
     if os.name == "nt":
         kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        try:  # библиотеки — когда старый PULSE закроется (libraries_busy); без новых версий uv sync проходит за секунду
+            cmd = [sys.executable, "-c", _WINDOWS_RESTART, str(config.DATA_DIR / "pult.lock"),
+                   str(config.DATA_DIR / "logs" / "update-libs.log"), str(config.APP_DIR), *_sync_command(config.APP_DIR)]
+        except UpdateError:
+            pass
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5); from opsdash import cli; cli.start_background()"],
-                     **kwargs)
+    subprocess.Popen(cmd, **kwargs)
     if in_daemon:
         import threading
 

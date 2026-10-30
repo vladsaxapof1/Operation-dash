@@ -548,11 +548,11 @@
     <div class="hint">Подробно — в <a href="/help/01-установка">инструкции по установке</a>.</div>
   {% elif claude_login and not claude_login.loggedIn %}
     <p>⚠ Claude Code найден, но <b>вход не выполнен</b> — без него PULSE не сможет разбирать встречи и сообщения.</p>
-    {% if is_mac %}
+    {% if is_mac or is_windows %}
     <form method="post" action="/settings/claude/login"><button class="btn primary">Войти в Claude</button></form>
-    <div class="hint">Откроется Терминал, а за ним браузер: войдите тем же аккаунтом, что в приложении Claude, и обновите эту страницу.</div>
+    <div class="hint">Откроется {{ 'Терминал' if is_mac else 'окно PowerShell' }}, а за ним браузер: войдите тем же аккаунтом, что в приложении Claude, и обновите эту страницу.</div>
     {% else %}
-    <div class="hint">Откройте PowerShell, выполните <code>&amp; "{{ claude_path }}" auth login</code>, войдите в браузере и обновите эту страницу.</div>
+    <div class="hint">Выполните в терминале <code>"{{ claude_path }}" auth login</code>, войдите в браузере и обновите эту страницу.</div>
     {% endif %}
   {% else %}
     <p>✅ Claude Code найден{% if claude_login and claude_login.email %}, вход: <b>{{ claude_login.email }}</b>{% endif %}.</p>

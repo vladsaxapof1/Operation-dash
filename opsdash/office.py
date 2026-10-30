@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import threading
 import unicodedata
 from collections import Counter
@@ -359,13 +358,10 @@ def step_label(tool: str, params: dict) -> str:
 
 def desktop_dir() -> Path:
     """Где приложение Claude хранит свои сессии Claude Code (вкладка Code)."""
-    if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support" / "Claude"
-    elif os.name == "nt":
-        base = Path(os.environ.get("APPDATA") or Path.home()) / "Claude"
-    else:
-        base = Path.home() / ".config" / "Claude"
-    return base / "claude-code-sessions"
+    from opsdash import brain
+
+    dirs = [d / "claude-code-sessions" for d in brain.app_dirs()]
+    return next((d for d in dirs if d.exists()), dirs[0])
 
 
 _desktop: dict[str, tuple] = {}  # файл сессии приложения → (mtime, номер журнала Claude Code, сведения о ней)

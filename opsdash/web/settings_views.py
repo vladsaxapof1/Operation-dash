@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -675,5 +676,9 @@ def register(app: FastAPI, render, back) -> None:
     async def claude_login(request: Request):
         from opsdash import brain
 
-        await run_in_threadpool(brain.open_login)
-        return back(request, "Открыла Терминал: войдите в браузере, затем обновите эту страницу", to="/settings?tab=claude")
+        try:
+            await run_in_threadpool(brain.open_login)
+        except brain.BrainError as e:
+            return back(request, err=str(e), to="/settings?tab=claude")
+        where = "Терминал" if sys.platform == "darwin" else "окно PowerShell"
+        return back(request, f"Открыла {where}: войдите в браузере, затем обновите эту страницу", to="/settings?tab=claude")

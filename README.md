@@ -28,7 +28,13 @@ Claude **ничего не делает во внешних системах б�
 
 **Windows 10/11**
 1. Установите [Git for Windows](https://git-scm.com/download/win) (все параметры по умолчанию).
-2. Скопируйте папку PULSE, например, в `C:\Users\<вы>\Pult` и запустите **INSTALL.bat**.
+2. Откройте Windows PowerShell, вставьте строку и нажмите Enter — PULSE скачается в
+   `C:\Users\<вы>\Pult` и установится (на вопросы установщика отвечайте `Y`):
+   ```
+   irm https://raw.githubusercontent.com/vladsaxapof1/Operation-dash/claude/pult-v1/scripts/get-windows.ps1 | iex
+   ```
+   Или скачайте архив ветки, распакуйте в `C:\Users\<вы>\Pult` и запустите **INSTALL.bat** —
+   подробно в [docs/01-установка.md](docs/01-установка.md).
 
 **macOS 13+ (Apple Silicon и Intel)**
 1. Скопируйте папку PULSE в домашнюю папку: `~/Pult` (не в «Документы» и не в iCloud).

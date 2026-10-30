@@ -1,15 +1,27 @@
-' Starts Pult without a console window. Argument "open" also opens the browser.
+' Starts PULSE without a console window. Argument "open" also opens the browser.
+' Like KeepAlive on macOS: if PULSE crashes, it is started again in 30 seconds. A normal stop (STOP.bat, update,
+' a second copy that only opens the browser) exits with code 0 and ends this script.
 Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(fso.GetParentFolderName(WScript.ScriptFullName))
 Set sh = CreateObject("WScript.Shell")
 sh.CurrentDirectory = root
 pyw = root & "\.venv\Scripts\pythonw.exe"
 If Not fso.FileExists(pyw) Then
-  MsgBox "Pult is not installed yet. Run INSTALL.bat first.", 48, "Pult"
+  MsgBox "PULSE is not installed yet. Run INSTALL.bat first.", 48, "PULSE"
   WScript.Quit 1
 End If
 extra = ""
 If WScript.Arguments.Count > 0 Then
   If WScript.Arguments(0) = "open" Then extra = " --open"
 End If
-sh.Run """" & pyw & """ -m opsdash daemon" & extra, 0, False
+fails = 0
+Do
+  started = Now
+  code = sh.Run("""" & pyw & """ -m opsdash daemon" & extra, 0, True)
+  If code = 0 Then Exit Do
+  extra = ""
+  ' crashes right after start (broken libraries) - stop after 5 in a row, the reason is in data\logs
+  If DateDiff("s", started, Now) < 120 Then fails = fails + 1 Else fails = 1
+  If fails >= 5 Then Exit Do
+  WScript.Sleep 30000
+Loop

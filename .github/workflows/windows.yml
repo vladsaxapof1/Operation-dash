@@ -1,0 +1,87 @@
+# Проверка PULSE на настоящем Windows — так, как его ставит директор: установка одной строкой из инструкции,
+# запуск без окна, ярлыки, перезапуск после сбоя, команда ops из Git Bash (так её вызывает Claude Code), поиск
+# Claude Code, обычная остановка, тесты. Запускается при каждой отправке в GitHub и вручную (Actions → Windows).
+# Скрипты шагов на PowerShell — только латиницей: файл шага Windows PowerShell может прочитать не как UTF-8.
+name: Windows
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PULSE_UNATTENDED: "1"  # установщик не задаёт вопросов: на всё «нет»
+      PULSE_REPO: ${{ github.repository }}
+      PULSE_REF: ${{ github.sha }}
+    steps:
+      - name: Claude Code (как его ставит установщик)
+        shell: powershell
+        run: irm https://claude.ai/install.ps1 | iex
+
+      - name: Установка одной строкой — как в инструкции
+        shell: powershell
+        run: irm https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/get-windows.ps1 | iex
+
+      - name: PULSE запустился сам и отвечает
+        shell: powershell
+        run: |
+          for ($i = 0; $i -lt 60; $i++) {
+            try { if ((Invoke-WebRequest http://localhost:8765/health -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { "PULSE is up"; exit 0 } } catch { }
+            Start-Sleep 2
+          }
+          Get-ChildItem "$env:USERPROFILE\Pult\data\logs" -File -ErrorAction SilentlyContinue | Get-Content -Tail 40
+          exit 1
+
+      - name: Ярлыки на рабочем столе, в «Пуске» и в автозагрузке
+        shell: powershell
+        run: |
+          foreach ($dir in "Desktop", "Programs", "Startup") {
+            $lnk = Join-Path ([Environment]::GetFolderPath($dir)) "PULSE.lnk"
+            if (-not (Test-Path $lnk)) { throw "no shortcut $lnk" }
+          }
+
+      - name: Перезапуск после сбоя (как KeepAlive на Mac)
+        shell: powershell
+        run: |
+          Get-Process pythonw | Stop-Process -Force
+          Start-Sleep 5
+          for ($i = 0; $i -lt 40; $i++) {
+            try { if ((Invoke-WebRequest http://localhost:8765/health -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { "PULSE is up again"; exit 0 } } catch { }
+            Start-Sleep 2
+          }
+          exit 1
+
+      - name: Команда ops из Git Bash — так её вызывает Claude Code
+        shell: bash
+        run: |
+          cd "$HOME/Pult"
+          ./ops version
+          ./ops overview
+          ./ops kb search "склад"
+
+      - name: PULSE находит Claude Code и спрашивает его о входе
+        shell: powershell
+        run: |
+          Set-Location "$env:USERPROFILE\Pult"
+          .\.venv\Scripts\python.exe -c "from opsdash import brain; p = brain.find_claude(); print(p); s = brain.login_status(p); print(s); assert p and s is not None and not s['loggedIn']"
+
+      - name: Обычная остановка — без перезапуска
+        shell: powershell
+        run: |
+          Set-Location "$env:USERPROFILE\Pult"
+          .\ops.cmd stop
+          Start-Sleep 40
+          $up = $true
+          try { Invoke-WebRequest http://localhost:8765/health -UseBasicParsing -TimeoutSec 3 | Out-Null } catch { $up = $false }
+          if ($up) { throw "PULSE started again after a normal stop" }
+          "stopped"
+
+      - name: Тесты
+        shell: powershell
+        run: |
+          Set-Location "$env:USERPROFILE\Pult"
+          & "$env:USERPROFILE\.local\bin\uv.exe" sync
+          .\.venv\Scripts\python.exe -m pytest -q

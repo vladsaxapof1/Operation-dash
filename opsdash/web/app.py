@@ -67,6 +67,8 @@ def f_md(text: str) -> str:
         text, extensions=["tables", "sane_lists", "nl2br", "toc"],
         extension_configs={"toc": {"slugify": slugify_unicode}},
     )
+    # внутри `кода` Markdown экранирует & ещё раз: «&lt;» стало бы видно как есть — `C:\Users\&lt;вы>`
+    out = re.sub(r"<code[^>]*>.*?</code>", lambda m: m.group(0).replace("&amp;lt;", "&lt;"), out, flags=re.S)
     # ссылки на задачи PULSE из разбора встречи (records.link_summary) — значком, а не обычной ссылкой
     out = out.replace('<a href="/commitments?task=', '<a class="task-ref" href="/commitments?task=')
     return UNSAFE_URL.sub(r'\1="#"', out)
