@@ -184,6 +184,9 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
     """Как run, но по ходу работы: on_text(текст) — ответ, который Claude сейчас пишет (каждый новый абзац
     рассуждений начинается заново), on_step(инструмент, параметры) — что он делает (читает файл, ищет),
     on_start(процесс) — чтобы его можно было остановить. Результат тот же, что у run."""
+    from opsdash import office
+
+    on_step = office.step_recorder(on_step)  # шаги — и в раздел «Офис», если это фоновое задание
     settings = config.load_settings()
     cmd = _command(settings, _claude(settings), job, model=model, resume=resume, partial=partial, effort=effort)
     timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)

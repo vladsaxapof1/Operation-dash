@@ -755,23 +755,29 @@ def doc_view(request: Request, path: str, q: str = ""):
 @app.post("/docs/open")
 def doc_open(request: Request, path: str = Form(...), reveal: str = Form("")):
     """Открыть файл в его программе или показать в Finder — на этом же компьютере."""
-    import subprocess
-
     from opsdash import docs
 
     d = docs.find(path)  # только файлы из индекса — не любые пути
     if not d or not Path(d["path"]).exists():
         return back(request, err="Файл не найден — возможно, его переместили")
+    _open_local(d["path"], bool(reveal))
+    return back(request, "Показала в Finder" if reveal else "Открыла файл")
+
+
+def _open_local(path: str, reveal: bool) -> None:
+    """Открыть файл в его программе или показать в Finder / Проводнике — на этом компьютере. Путь проверяет
+    вызывающий: только документы из индекса или файлы из папок «Офиса»."""
+    import subprocess
+
     if sys.platform == "darwin":
-        subprocess.run(["open", "-R", d["path"]] if reveal else ["open", d["path"]], check=False, timeout=15)
+        subprocess.run(["open", "-R", path] if reveal else ["open", path], check=False, timeout=15)
     elif os.name == "nt":
         if reveal:
-            subprocess.run(["explorer", "/select,", d["path"]], check=False, timeout=15)
+            subprocess.run(["explorer", "/select,", path], check=False, timeout=15)
         else:
-            os.startfile(d["path"])  # noqa: S606 — файл из индекса рабочих папок
+            os.startfile(path)  # noqa: S606 — проверенный путь из рабочих папок
     else:
-        subprocess.run(["xdg-open", str(Path(d["path"]).parent if reveal else d["path"])], check=False, timeout=15)
-    return back(request, "Показала в Finder" if reveal else "Открыла файл")
+        subprocess.run(["xdg-open", str(Path(path).parent if reveal else path)], check=False, timeout=15)
 
 
 @app.post("/docs/index")
@@ -1366,6 +1372,42 @@ def journal(request: Request, level: str = ""):
                 "recordings", "triage", "digest", "stale"]
     return render(request, "journal.html", nav="journal", logs=logs, jobs=job_rows, runnable=runnable,
                   titles=jobs.TITLES, queued=jobs.queued(), level=level)
+
+
+# --- офис ----------------------------------------------------------------------------
+
+@app.get("/office", response_class=HTMLResponse)
+def office_page(request: Request, o: str = ""):
+    """Офис целиком: PULSE и папки с Claude Code — одной картинкой, списками под ней. o — какой список раскрыть."""
+    from opsdash import office
+
+    settings = config.load_settings()
+    return render(request, "office.html", nav="office", snaps=office.everything(settings), open_key=o, settings=settings)
+
+
+@app.get("/office/live", response_class=HTMLResponse)
+def office_live(request: Request):
+    """Списки и данные картинки — страница подменяет их сама, пока открыта (app.js)."""
+    from opsdash import office
+
+    return templates.TemplateResponse(request, "_office_body.html", {"snaps": office.everything(), "open_key": ""})
+
+
+@app.get("/api/office")
+def office_api(o: str = ""):
+    from opsdash import office
+
+    return office.snapshot(o) if o else {"offices": office.everything()}
+
+
+@app.post("/office/open")
+def office_open(request: Request, path: str = Form(...), reveal: str = Form("")):
+    from opsdash import office
+
+    if not office.can_open(path):  # только файлы из папок офиса
+        return back(request, err="Файл не найден — возможно, его переместили")
+    _open_local(path, bool(reveal))
+    return back(request, "Показала в Finder" if reveal else "Открыла файл")
 
 
 @app.post("/jobs/run")

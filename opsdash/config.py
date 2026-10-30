@@ -153,6 +153,12 @@ DEFAULTS: dict = {
         # папки, которые не индексируем: служебные, код, черновики сборок
         "exclude": ["node_modules", "venv", "__pycache__", "_staging", "site", "dist", "build"],
     },
+    # раздел «Офис»: папки, где вы сами работаете с Claude Code, — их сессии видно рядом с заданиями PULSE
+    "office": {
+        "folders": [],
+        "hide": [],  # проекты (папки первого уровня), которые в офисе не показываем
+        "days": 7,  # за сколько дней показывать сессии
+    },
     "autonomy": {
         "kaiten_create_for_me": "confirm",
         "kaiten_create_for_others": "confirm",

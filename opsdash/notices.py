@@ -99,54 +99,64 @@ def from_job(name: str, args: dict | None, result: str | None, error: str | None
 
 
 def _from_job(name: str, args: dict, result: str, error: str | None) -> None:
+    if not error and (name in QUIET or name.startswith("collect:")):
+        return
+    s = summary(name, args, result, error)
+    if s:
+        add(name, s["title"], s["text"], s["link"], s["level"], merge_hours=6 if error else 0)
+
+
+def summary(name: str, args: dict, result: str, error: str | None) -> dict | None:
+    """Итог задания по-человечески: {title, text, link, level}. None — сказать нечего («новых сообщений нет»).
+    Нужен уведомлению в углу и разделу «Офис» (opsdash.office)."""
     from opsdash import jobs
 
-    title = jobs.TITLES.get(name, name)
+    def done(title: str, text: str = "", link: str | None = None, level: str = "ok") -> dict:
+        return {"title": title, "text": text, "link": link, "level": level}
+
     if error:
-        add(name, f"Не получилось: {title}", error.splitlines()[0][:300], "/journal", "bad", merge_hours=6)
-        return
-    if name in QUIET or name.startswith("collect:"):
-        return
+        return done(f"Не получилось: {jobs.TITLES.get(name, name)}", error.splitlines()[0][:300], "/journal", "bad")
     mid = args.get("meeting_id")
     if name == "triage":
         if result.startswith("разобрано"):
-            add(name, "Разобрал новые сообщения", result, _triage_link(result), "ok")
+            return done("Разобрал новые сообщения", result, _triage_link(result))
     elif name == "process-meeting":
         m = _meeting(mid)
         if m:
-            add(name, f"Разобрал встречу «{m['title'] or mid}»", m.get("headline") or "", f"/meetings/{mid}", "ok")
+            return done(f"Разобрал встречу «{m['title'] or mid}»", m.get("headline") or "", f"/meetings/{mid}")
     elif name == "transcribe":
         m = _meeting(mid)
         if result.startswith("остановлено"):
             if not result.endswith(("отменили", "встречу удалили")):  # остановили кнопкой — и так видно
-                add(name, "Остановил расшифровку", result.removeprefix("остановлено: "), "/meetings")
+                return done("Остановил расшифровку", result.removeprefix("остановлено: "), "/meetings", "info")
         elif m.get("status") in ("transcribed", "processing", "processed"):
             minutes = result.rpartition(": ")[2] if result.endswith(" мин") else ""
-            add(name, f"Расшифровал встречу «{m['title'] or mid}»", minutes, f"/meetings/{mid}", "ok")
+            return done(f"Расшифровал встречу «{m['title'] or mid}»", minutes, f"/meetings/{mid}")
     elif name == "digest":
-        add(name, result[:1].upper() + result[1:], "", "/digests", "ok")
+        return done(result[:1].upper() + result[1:], "", "/digests")
     elif name == "weekly":
-        add(name, "Итоги недели готовы", "", "/digests", "ok")
+        return done("Итоги недели готовы", "", "/digests")
     elif name == "groups":
         if not result.startswith("в рабочих группах"):
-            add(name, "Сводка рабочих групп готова", result, "/digests", "ok")
+            return done("Сводка рабочих групп готова", result, "/digests")
     elif name == "briefs":
         if result.startswith("брифов готово"):
-            add(name, "Брифы к встречам", result, "/calendar", "ok")
+            return done("Брифы к встречам", result, "/calendar")
     elif name == "followup":
-        add(name, "Текст итогов встречи готов", "", f"/meetings/{mid}?tab=followup" if mid else "/meetings", "ok")
+        return done("Текст итогов встречи готов", "", f"/meetings/{mid}?tab=followup" if mid else "/meetings")
     elif name == "anthology":
-        add(name, "Обзор недели для базы знаний готов", "Решения, уроки и удачи — подтвердите или отклоните", "/kb", "ok")
+        return done("Обзор недели для базы знаний готов", "Решения, уроки и удачи — подтвердите или отклоните", "/kb")
     elif name == "company-context":
-        add(name, "Обновил раздел «О компании»", "", "/kb/context", "ok")
+        return done("Обновил раздел «О компании»", "", "/kb/context")
     elif name == "stale":
         if result.startswith("напоминаний") and not result.endswith(": 0"):
-            add(name, "Напомнил о задачах Kaiten без движения", result, "/tasks")
+            return done("Напомнил о задачах Kaiten без движения", result, "/tasks", "info")
     elif name == "chat":
         if result == "ответ готов":
             m = store.row("SELECT c.id, c.title FROM ask_messages m JOIN ask_chats c ON c.id=m.chat_id WHERE m.id=?",
                           (args.get("message_id"),))
             if m:
-                add(name, "Claude ответил", f"«{m['title']}»", f"/ask/{m['id']}", "ok")
+                return done("Claude ответил", f"«{m['title']}»", f"/ask/{m['id']}")
     elif name == "update":
-        add(name, "PULSE обновлён", result, "/settings?tab=general#updates", "ok")
+        return done("PULSE обновлён", result, "/settings?tab=general#updates")
+    return None

@@ -13,6 +13,7 @@
 {% set nav_items = [
   ("home", "/", "Сводка", pending_count),
   ("ask", "/ask", "Спросить Claude", 0),
+  ("office", "/office", "Офис", 0),
   ("inbox", "/inbox", "Нужен ответ", attention_count),
   ("commitments", "/commitments", "Задачи", new_tasks_count),
   ("calendar", "/calendar", "Календарь", 0),
@@ -52,7 +53,7 @@
 <div class="notices" data-notices data-last="{{ notices[0].id if notices else 0 }}">
   <div class="notice-now" data-notice-now role="status"{% if not running_now %} hidden{% endif %}>
     <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-    <span data-notice-now-text>{% for r in running_now %}{{ r.title }}{% if r.detail %} — {{ r.detail }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}</span>
+    <a class="notice-now-t" href="/office" title="Открыть «Офис»: что делает Claude по шагам"><span data-notice-now-text>{% for r in running_now %}{{ r.title }}{% if r.detail %} — {{ r.detail }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}</span></a>
   </div>
   <div class="notice-head" data-notice-head{% if notices | length < 2 %} hidden{% endif %}>
     <button type="button" class="notice-clear" data-notice-clear>Скрыть все</button>

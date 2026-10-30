@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Офис{% endblock %}
+{% block content %}
+<div class="topline">
+  <div><h1>Офис</h1><div class="muted">Кто из агентов Claude работает, что делает прямо сейчас и что уже сделал. Обновляется само.</div></div>
+  <div class="actions"><a class="btn ghost" href="/settings?tab=office">Папки с Claude Code</a></div>
+</div>
+<section class="office-scene" data-office-scene>
+  <div class="office-scene-wrap" data-scene-wrap>
+    <canvas tabindex="0" role="img" aria-label="Офис картинкой: рабочие места и кто чем занят — то же, что в списках ниже. Перетаскивайте мышью, стрелки двигают вид"></canvas>
+    <div class="office-zoom">
+      <button type="button" class="office-zoom-b" data-zoom="1" title="Ближе" aria-label="Ближе">+</button>
+      <button type="button" class="office-zoom-b" data-zoom="-1" title="Дальше" aria-label="Дальше">−</button>
+      <button type="button" class="office-zoom-b" data-zoom="0" title="Показать весь офис" aria-label="Показать весь офис">⤢</button>
+    </div>
+    <aside class="office-panel" data-office-panel hidden>
+      <div class="office-panel-h"><a href="#" class="small" data-panel-list>В списке ↓</a><button type="button" class="notice-close" data-panel-close aria-label="Закрыть">✕</button></div>
+      <div data-panel-body></div>
+    </aside>
+  </div>
+  <div class="office-scene-bar"><span class="muted small" data-scene-hint>Двигайте офис мышью или подведите курсор к краю, «+» и «−» — ближе и дальше. Нажмите на сотрудника — подробности справа.</span><button type="button" class="btn sm ghost" data-scene-toggle>Скрыть картинку</button></div>
+</section>
+<div data-office data-live="/office/live">{% include "_office_body.html" %}</div>
+{% if snaps | length == 1 %}
+<p class="muted small">Работаете с Claude Code в своих папках? Добавьте папку в <a href="/settings?tab=office">Настройки → Офис</a> — у её сессий появится свой open space в офисе и свой список.</p>
+{% endif %}
+<script src="/static/office.js?v={{ static_v }}"></script>
+{% endblock %}

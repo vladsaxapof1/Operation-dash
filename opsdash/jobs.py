@@ -16,7 +16,7 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 
-from opsdash import bot, brain, config, notices, overview, recordings, records, store
+from opsdash import bot, brain, config, notices, office, overview, recordings, records, store
 
 _queues: dict[str, queue.Queue] = {}
 _pending: set[str] = set()
@@ -368,6 +368,7 @@ def job_housekeeping(**_) -> str:
     except Exception:  # noqa: BLE001
         pass
     store.execute("DELETE FROM outbox WHERE sent_at IS NOT NULL AND created < ?", (overview.since(24 * 30),))
+    office.prune()
     return "готово"
 
 
@@ -457,6 +458,7 @@ def run_job(name: str, args: dict | None = None) -> str:
         "ON CONFLICT(name) DO UPDATE SET last_run=excluded.last_run, running=1",
         (name, store.utcnow()),
     )
+    run = office.start_run(name, args)  # раздел «Офис»: шаги Claude по ходу и итог
     try:
         result = fn(**(args or {}))
         store.execute(
@@ -464,6 +466,7 @@ def run_job(name: str, args: dict | None = None) -> str:
             (store.utcnow(), round(time.time() - started, 1), name),
         )
         store.log(name, f"ок: {result}")
+        office.finish_run(run, name, args, result, None)
         notices.from_job(name, args, result, None)  # уведомление в углу экрана: что сделано
         return result
     except Exception as e:
@@ -472,6 +475,7 @@ def run_job(name: str, args: dict | None = None) -> str:
             (str(e)[:1000], round(time.time() - started, 1), name),
         )
         store.log(name, f"ошибка: {e}\n{traceback.format_exc()[-1500:]}", "error")
+        office.finish_run(run, name, args, None, str(e))
         notices.from_job(name, args, None, str(e))
         raise
 
@@ -681,6 +685,7 @@ def start_workers(stop: threading.Event) -> list[threading.Thread]:
         _queues[kind] = queue.Queue()
     # задания, прерванные выключением компьютера, — продолжаем (поставленные на паузу ждут «Продолжить»)
     store.execute("UPDATE jobs SET running=0")
+    office.interrupted()
     store.execute("UPDATE ask_messages SET status='failed', error='Прервано перезапуском PULSE — спросите ещё раз' "
                   "WHERE status='running'")
     for m in store.rows("SELECT id, status FROM meetings WHERE status IN ('transcribing','processing')"):

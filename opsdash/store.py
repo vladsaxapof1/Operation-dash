@@ -249,6 +249,18 @@ CREATE TABLE IF NOT EXISTS claude_runs (      -- каждый запуск Claud
     ok INTEGER DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS agent_runs (       -- запуски фоновых заданий для раздела «Офис» (opsdash.office)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job TEXT,                        -- triage, process-meeting, digest, …
+    args TEXT DEFAULT '{}',          -- JSON: с чем запущено (встреча, «утренний»)
+    started TEXT,
+    finished TEXT,
+    status TEXT DEFAULT 'running',   -- running | ok | error
+    steps TEXT DEFAULT '[]',         -- JSON: что Claude делал по ходу — [{t: «Читает расшифровку…», at}]
+    result TEXT,                     -- что вернуло задание или текст ошибки
+    title TEXT, text TEXT, link TEXT -- итог по-человечески и куда ведёт — как в уведомлении в углу
+);
+
 CREATE TABLE IF NOT EXISTS notices (          -- уведомления в углу экрана: что PULSE сделал (opsdash.notices)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT,                       -- задание, после которого появилось: triage, process-meeting, …

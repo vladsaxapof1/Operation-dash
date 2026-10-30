@@ -1,0 +1,129 @@
+{#- списки «Офиса» под картинкой — по офису на спойлер; страница перезапрашивает их сама (/office/live, app.js),
+    открытые спойлеры, «История» и «Шаги» не сворачиваются -#}
+{% set CHIP = {"working": "acc", "queued": "warn", "error": "bad", "waiting": "warn", "blocked": "warn", "done": "ok"} %}
+{% macro state(st, title) -%}
+<span class="chip {{ CHIP.get(st, '') }}">{% if st == 'working' %}<span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>{% endif %}{{ title }}</span>
+{%- endmacro %}
+{% macro steps(items, n=5) -%}
+{% if items %}<ol class="office-steps">{% for s in items[-n:] %}<li{% if loop.last %} class="last"{% endif %}>{{ s.t }}</li>{% endfor %}</ol>{% endif %}
+{%- endmacro %}
+{% macro open_file(f, label=None) -%}
+<form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ f.path }}"><button class="office-file" title="{{ f.rel }}">{{ label or f.name }}</button></form>
+{%- endmacro %}
+
+{% set busy = namespace(n=0) %}
+{% for snap in snaps %}{% set busy.n = busy.n + ((snap.desks | selectattr('state', 'equalto', 'working') | list | length) if snap.kind == 'pulse' else snap.counts.working) %}{% endfor %}
+<div data-office-active="{{ 1 if busy.n else 0 }}" hidden></div>
+{#- картинка офиса (static/office.js) берёт, что рисовать, отсюда — обновляется вместе с карточками; это данные, не скрипт #}
+<script type="application/json" data-office-json>{{ {"areas": snaps | map(attribute='scene') | list} | tojson }}</script>
+{% for snap in snaps %}
+<details class="office-group" data-key="g-{{ snap.key }}" data-remember{% if open_key == snap.key %} open{% endif %}>
+  <summary class="office-group-h">
+    <span class="office-group-t">{{ snap.name }}</span>
+    {% if snap.kind == 'pulse' %}
+      {% set w = snap.desks | selectattr('state', 'equalto', 'working') | list | length %}{% set e = snap.desks | selectattr('state', 'equalto', 'error') | list | length %}
+      <span class="muted small">{{ snap.desks | length }} рабочих мест · фоновые задания PULSE</span>
+      {% if w %}{{ state('working', 'работают: ' ~ w) }}{% endif %}{% if e %} <span class="chip bad">ошибок: {{ e }}</span>{% endif %}
+    {% else %}
+      <span class="muted small">{{ snap.counts.sessions }} {{ plural(snap.counts.sessions, 'сессия', 'сессии', 'сессий') }} Claude Code за {{ snap.days }} дн.</span>
+      {% if snap.counts.working %}{{ state('working', 'работают: ' ~ snap.counts.working) }}{% endif %}{% if snap.counts.waiting %} <span class="chip warn">ждут ответа: {{ snap.counts.waiting }}</span>{% endif %}
+    {% endif %}
+  </summary>
+  <div class="office-group-b">
+{% if snap.kind == 'pulse' %}
+<div class="office-grid">
+  {% for d in snap.desks %}
+  <section class="card desk desk-{{ d.state }}" data-obj="desk:{{ d.key }}">
+    <div class="desk-h">
+      <div><div class="desk-title">{{ d.title }}</div><div class="muted small">{{ d.what }}</div></div>
+      {{ state(d.state, d.state_title) }}
+    </div>
+    {% if d.current %}
+    <div class="desk-now">
+      <div class="desk-now-h">{{ d.current.what }}{% if d.detail %} — {{ d.detail }}{% endif %}{% if d.current.started %} <span class="muted small">· с {{ d.current.started | local('%H:%M') }}</span>{% endif %}</div>
+      {{ steps(d.current.steps) }}
+    </div>
+    {% endif %}
+    {% if d.sources %}
+    <ul class="desk-sources">
+      {% for s in d.sources %}<li><span>{{ s.title }}</span> <span class="muted small">{% if s.running %}забирает…{% else %}{{ s.last | ago }}{% endif %}</span>{% if s.error %} <span class="chip bad" title="{{ s.error }}">ошибка</span>{% endif %}</li>{% endfor %}
+    </ul>
+    {% elif d.last %}
+    <div class="desk-last">
+      <div class="muted small">Последний раз — {{ d.last.finished | ago }}{% if d.last.duration %}, за {{ d.last.duration }}{% endif %}</div>
+      <div>{% if d.last.link %}<a href="{{ d.last.link }}">{{ d.last.title or d.last.what }}</a>{% else %}{{ d.last.title or d.last.what }}{% endif %}</div>
+      {% if d.last.text %}<div class="small">{{ d.last.text }}</div>{% elif not d.last.title and d.last.result %}<div class="small muted">{{ d.last.result }}</div>{% endif %}
+    </div>
+    {% elif not d.current %}
+    <div class="muted small desk-last">{{ d.off or 'Ещё не работал' }}</div>
+    {% endif %}
+    <div class="desk-foot">
+      <span class="muted small">{% if d.next %}Дальше: {{ d.next }}{% endif %}</span>
+      <span class="desk-actions">
+        {% for job, label in d.run %}<form class="inline" method="post" action="/jobs/run" data-busy="Запускаю…"><input type="hidden" name="name" value="{{ job }}"><button class="btn sm"{% if d.state in ('working', 'queued') %} disabled{% endif %}>{{ label }}</button></form>{% endfor %}
+        {% if d.link %}<a class="btn sm ghost" href="{{ d.link[0] }}">{{ d.link[1] }}</a>{% endif %}
+      </span>
+    </div>
+    {% if d.history %}
+    <details class="desk-hist" data-key="h-{{ d.key }}">
+      <summary>История · {{ d.history | length }}</summary>
+      <ul>
+        {% for r in d.history %}
+        <li>
+          <div><span class="muted small nowrap">{{ r.started | local('%d.%m %H:%M') }}</span>
+            {% if r.link %}<a href="{{ r.link }}">{{ r.title or r.what }}</a>{% else %}{{ r.title or r.what }}{% endif %}
+            {% if r.status == 'error' %}<span class="chip bad">ошибка</span>{% endif %}
+            {% if r.duration %}<span class="muted small">· {{ r.duration }}</span>{% endif %}</div>
+          {% if r.text or (not r.title and r.result) %}<div class="small muted">{{ r.text or r.result }}</div>{% endif %}
+          {% if r.steps %}<details class="office-more" data-key="r-{{ r.id }}"><summary>Что делал · {{ r.steps | length }}</summary>{{ steps(r.steps, 200) }}</details>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+
+{% else %}
+{% if not snap.exists %}<section class="card"><div class="card-b empty">Папки «{{ snap.path }}» нет — проверьте путь в <a href="/settings?tab=office">Настройки → Офис</a>.</div></section>{% endif %}
+<div class="tiles office-tiles">
+  <div class="tile{{ ' ok' if snap.counts.working }}"><div class="n">{{ snap.counts.working }}</div><div class="l">работают сейчас</div></div>
+  <div class="tile{{ ' warn' if snap.counts.waiting }}"><div class="n">{{ snap.counts.waiting }}</div><div class="l">ждут ответа</div></div>
+  <div class="tile"><div class="n">{{ snap.counts.agents_working }}<span class="muted small"> / {{ snap.counts.agents }}</span></div><div class="l">субагенты: работают / всего</div></div>
+  <div class="tile"><div class="n">{{ snap.counts.sessions }}</div><div class="l">сессий за {{ snap.days }} дн. · {{ snap.counts.tools }} действий</div></div>
+</div>
+{% for room in snap.rooms %}
+<section class="card room">
+  <div class="card-h">
+    <h2>{{ room.name }} <span class="muted small">· {{ room.sessions | length }} {{ plural(room.sessions | length, 'сессия', 'сессии', 'сессий') }}</span>{% if room.working %} {{ state('working', 'работает') }}{% endif %}</h2>
+    <span class="desk-actions">
+      {% if room.passport %}<form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ room.passport }}"><button class="btn sm ghost">Паспорт проекта</button></form>{% endif %}
+      <form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ room.path }}"><input type="hidden" name="reveal" value="1"><button class="btn sm ghost">Папка</button></form>
+    </span>
+  </div>
+  <div class="card-b room-sessions">
+    {% for s in room.sessions %}
+    {% if loop.index == 4 %}<details class="office-more room-rest" data-key="rest-{{ snap.key }}-{{ room.name }}"><summary>Ещё {{ room.sessions | length - 3 }}</summary>{% endif %}
+    <div class="sess sess-{{ s.state }}" data-obj="sess:{{ s.id }}">
+      <div class="sess-h"><span class="sess-title">{{ s.title }}</span> {{ state(s.state, s.state_title) }} <span class="muted small nowrap">{{ s.last | ago }}</span></div>
+      {{ steps(s.steps, 5 if s.state == 'working' else 2) }}
+      {% if s.agents %}
+      <ul class="sess-agents">
+        {% for a in s.agents %}<li>{{ state(a.state, a.state_title) }} <span>{{ a.title }}</span>{% if a.kind %} <span class="muted small">{{ a.kind }}</span>{% endif %}{% if a.state == 'working' and a.steps %} <span class="muted small">— {{ a.steps[-1].t }}</span>{% endif %}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if s.files %}<div class="sess-files"><span class="muted small">Файлы:</span> {% for f in s.files %}{{ open_file(f) }}{% endfor %}</div>{% endif %}
+      <div class="muted small">{{ s.prompts }} {{ plural(s.prompts, 'вопрос', 'вопроса', 'вопросов') }} · {{ s.tools }} {{ plural(s.tools, 'действие', 'действия', 'действий') }}{% if s.model %} · {{ s.model | replace('claude-', '') }}{% endif %} · начата {{ s.first | local }}</div>
+    </div>
+    {% if loop.last and loop.length > 3 %}</details>{% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<section class="card"><div class="card-b empty">За {{ snap.days }} дн. сессий Claude Code в этой папке не было.</div></section>
+{% endfor %}
+{% endif %}
+  </div>
+</details>
+{% endfor %}

@@ -21,6 +21,7 @@ TABS = [
     ("kaiten", "Kaiten"),
     ("recordings", "Записи встреч"),
     ("knowledge", "Документы"),
+    ("office", "Офис"),
     ("autonomy", "Автономия"),
     ("schedule", "Расписание"),
     ("claude", "Claude"),
@@ -576,6 +577,16 @@ def register(app: FastAPI, render, back) -> None:
         if lines(folders) and jobs.in_daemon():
             jobs.submit("docs-index")  # сразу, а не через полчаса
         daemon.sync_claude_settings()
+        missing = [f for f in lines(folders) if not config.resolve_path(f).exists()]
+        if missing:
+            return back(request, err="Сохранено, но этих папок нет: " + "; ".join(missing))
+        return back(request, "Сохранено")
+
+    # --- офис ---
+
+    @app.post("/settings/office")
+    def office_save(request: Request, folders: str = Form(""), hide: str = Form(""), days: int = Form(7)):
+        config.update_settings("office", {"folders": lines(folders), "hide": lines(hide), "days": max(1, min(days, 60))})
         missing = [f for f in lines(folders) if not config.resolve_path(f).exists()]
         if missing:
             return back(request, err="Сохранено, но этих папок нет: " + "; ".join(missing))

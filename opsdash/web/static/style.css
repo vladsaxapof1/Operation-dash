@@ -694,6 +694,83 @@ a.notice-t:hover { color: var(--accent); text-decoration: none; }
   .page-ask .notices { bottom: auto; top: 56px; }  /* внизу — поле вопроса, наверху — под меню */
 }
 
+a.notice-now-t { color: inherit; flex: 1; min-width: 0; }  /* «Сейчас» в углу ведёт в «Офис» */
+a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
+
+/* --- «Офис»: рабочие места PULSE карточками; сессии Claude Code в папке — по проектам --- */
+.office-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; align-items: start; }
+.office-grid .card { margin: 0; }
+.desk { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 10px; border-top: 3px solid var(--line); }
+.desk-working { border-top-color: var(--accent); }
+.desk-queued { border-top-color: var(--warn); }
+.desk-error { border-top-color: var(--bad); }
+.desk-off { opacity: .7; }
+.desk-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.desk-title { font-weight: 650; font-size: 16px; }
+.desk-now { background: var(--accent-soft); border-radius: 10px; padding: 8px 10px; }
+.desk-now-h { font-weight: 600; font-size: 14px; }
+.desk-last { font-size: 14px; }
+.desk-sources { list-style: none; margin: 0; padding: 0; font-size: 14px; display: grid; gap: 2px; }
+.desk-sources li { display: flex; gap: 6px; align-items: center; }
+.desk-sources li > span:first-child { min-width: 110px; }
+.desk-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+.desk-actions { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.desk-hist { border-top: 1px solid var(--line); padding-top: 8px; font-size: 14px; }
+.desk-hist > summary, .office-more > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.desk-hist ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.office-steps { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--muted); }
+.office-steps li { overflow-wrap: anywhere; }
+.office-steps li.last { color: var(--text); }
+.desk-now .office-steps li.last::after { content: " …"; }
+.office-tiles .n .small { font-size: 14px; font-weight: 500; }
+.room .card-h h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.room-sessions { display: grid; gap: 10px; }
+.sess { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; display: grid; gap: 4px; }
+.sess-working { border-color: var(--accent); background: var(--accent-soft); }
+.sess-waiting, .sess-blocked { border-color: var(--warn); }
+.sess-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sess-title { font-weight: 600; }
+.sess-agents { list-style: none; margin: 2px 0 0; padding: 0; font-size: 13px; display: grid; gap: 3px; }
+.sess-files { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.office-file { border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 6px; padding: 0 7px;
+  font: inherit; font-size: 12px; cursor: pointer; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-file:hover { border-color: var(--accent); }
+.room-rest { display: grid; gap: 10px; }
+.room-rest[open] > summary { margin-bottom: 2px; }
+@media (max-width: 760px) { .office-grid { grid-template-columns: minmax(0, 1fr); } }
+/* картинка офиса (static/office.js) и панель с карточкой рабочего места по нажатию */
+.office-scene { margin-bottom: 18px; }
+.office-scene-wrap { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
+  background: #1d1622; }
+.office-scene-wrap canvas { display: block; width: 100%; cursor: grab; touch-action: none; outline: none; }
+.office-scene-wrap canvas.dragging { cursor: grabbing; }
+.office-zoom { position: absolute; top: 10px; left: 10px; display: flex; flex-direction: column; gap: 4px; }
+.office-zoom-b { width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(20, 16, 24, .72); color: #fff; font: 600 18px/1 system-ui, sans-serif; cursor: pointer; }
+.office-zoom-b:hover { background: rgba(60, 50, 80, .9); }
+/* списки под картинкой — по офису на спойлер */
+.office-group { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 12px; box-shadow: var(--shadow); }
+.office-group-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; cursor: pointer; list-style: none; }
+.office-group-h::-webkit-details-marker { display: none; }
+.office-group-h::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+.office-group[open] > .office-group-h::before { transform: rotate(90deg); }
+.office-group-t { font-weight: 700; font-size: 16px; }
+.office-group-b { padding: 0 14px 14px; }
+.office-group-b > .card:last-child { margin-bottom: 0; }
+.office-scene.off .office-scene-wrap { display: none; }
+.office-scene-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
+.office-scene.off [data-scene-hint] { visibility: hidden; }
+.office-panel { position: absolute; top: 10px; right: 10px; max-height: calc(100% - 20px); width: 370px; max-width: calc(100% - 20px);
+  overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35); padding: 8px 10px 10px; }
+.office-panel-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.office-panel .card, .office-panel .sess { margin: 0; box-shadow: none; }
+.office-flash { animation: office-flash 1.6s ease-out; }
+@keyframes office-flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+@media (max-width: 760px) {
+  .office-panel { position: static; width: auto; max-width: none; border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
+}
+
 /* --- «Спросить Claude»: чаты слева строками, разговор по центру, поле вопроса прижато к низу экрана --- */
 .page-ask .main { display: flex; flex-direction: column; min-height: 100vh; padding-bottom: 0; }
 .ask-top { margin-bottom: 10px; }

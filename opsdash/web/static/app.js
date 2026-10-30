@@ -884,6 +884,47 @@
     }, 1200);
   }
 
+  // --- «Офис»: тело вкладки перезапрашиваем, пока страница на экране: кто-то работает — каждые 3 с, иначе раз в 15 с.
+  // На скрытой вкладке не спрашиваем вовсе; открытые «История» и «Шаги» после обновления остаются открытыми
+  var officeBox = document.querySelector("[data-office]");
+  if (officeBox) {
+    // какие спойлеры офисов раскрыты — помним в браузере (только удобство: без хранилища все свёрнуты)
+    var remembered = {};
+    try { remembered = JSON.parse(localStorage.getItem("office-open") || "{}") || {}; } catch (e) { remembered = {}; }
+    Array.prototype.forEach.call(officeBox.querySelectorAll("details[data-remember]"), function (d) { if (remembered[d.dataset.key]) d.open = true; });
+    officeBox.addEventListener("toggle", function (e) {
+      var d = e.target;
+      if (!d.matches || !d.matches("details[data-remember]")) return;
+      remembered[d.dataset.key] = d.open;
+      try { localStorage.setItem("office-open", JSON.stringify(remembered)); } catch (err) { /* не запоминаем */ }
+    }, true);
+    var officeTimer = null;
+    var officeActive = function () {
+      var mark = officeBox.querySelector("[data-office-active]");
+      return mark && mark.dataset.officeActive === "1";
+    };
+    var officeNext = function () {
+      clearTimeout(officeTimer);
+      officeTimer = setTimeout(officeRefresh, officeActive() ? 3000 : 15000);
+    };
+    var officeRefresh = function () {
+      if (document.visibilityState !== "visible") return;  // вернёмся — обновим сразу (visibilitychange)
+      fetch(officeBox.dataset.live, { cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.text();
+      }).then(function (html) {
+        var open = Array.prototype.map.call(officeBox.querySelectorAll("details[open][data-key]"), function (d) { return d.dataset.key; });
+        officeBox.innerHTML = html;
+        open.forEach(function (key) {
+          Array.prototype.forEach.call(officeBox.querySelectorAll("details[data-key]"), function (d) { if (d.dataset.key === key) d.open = true; });
+        });
+        officeNext();
+      }).catch(function () { clearTimeout(officeTimer); officeTimer = setTimeout(officeRefresh, 30000); });
+    };
+    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") officeRefresh(); });
+    officeNext();
+  }
+
   // --- угол экрана: что PULSE делает сейчас и что сделал. Видно три последних, остальные — «Ещё N».
   // Обновляется сам: пока что-то идёт — каждые 5 с, иначе раз в 15 с
   var nbox = document.querySelector("[data-notices]");

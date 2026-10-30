@@ -455,6 +455,22 @@
   </form>
 </div></section>
 
+{% elif tab == 'office' %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <p>В <a href="/office">«Офисе»</a> видно рабочие места PULSE: что Claude разбирает сейчас и что уже сделал. Если вы и сами работаете с Claude Code в своих папках, добавьте их сюда — у каждой папки появится свой open space в офисе: сессии, субагенты и сделанные файлы.</p>
+  <form method="post" action="/settings/office">
+    <label>Папки, где вы работаете с Claude Code (по одной в строке)</label>
+    <textarea name="folders" rows="3">{{ settings.office.folders | join('\n') }}</textarea>
+    <div class="hint">PULSE читает журналы сессий Claude Code на этом компьютере (папка .claude/projects в вашей домашней папке) — только читает, в сами папки ничего не ставит. Видно и сессии в приложении Claude, и в терминале. Проекты — папки первого уровня внутри.</div>
+    <label>Не показывать проекты (имена папок, по одному в строке)</label>
+    <textarea name="hide" rows="2">{{ settings.office.hide | join('\n') }}</textarea>
+    <div class="hint">Например, личную работу — если показываете офис коллегам или на демо.</div>
+    <label>Показывать сессии за … дней</label>
+    <input type="number" name="days" value="{{ settings.office.days }}" min="1" max="60" style="max-width:120px">
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
 {% elif tab == 'autonomy' %}
 <section class="card"><div class="card-b" style="padding-top:12px">
   <p>Что Claude может делать сам, а что — только после вашего «Да» в боте или на сводке.</p>
