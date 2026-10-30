@@ -19,7 +19,7 @@ LIMIT = 20
 QUIET = {"housekeeping", "docs-index", "ask", "voice", "recordings", "update-check"}
 # «Сейчас» в углу: что делает Claude или расшифровка; сбор и обслуживание — секунды, о них не пишем
 BUSY = {"triage", "process-meeting", "transcribe", "digest", "weekly", "groups", "briefs", "followup", "anthology",
-        "company-context", "chat", "update"}
+        "company-context", "chat", "update", "projects"}
 
 
 def add(kind: str, title: str, text: str = "", link: str | None = None, level: str = "info",
@@ -146,6 +146,8 @@ def summary(name: str, args: dict, result: str, error: str | None) -> dict | Non
         return done("Текст итогов встречи готов", "", f"/meetings/{mid}?tab=followup" if mid else "/meetings")
     elif name == "anthology":
         return done("Обзор недели для базы знаний готов", "Решения, уроки и удачи — подтвердите или отклоните", "/kb")
+    elif name == "projects":
+        return done("Собрал проекты", result, "/" if result.startswith("на подтверждение") else "/commitments?view=projects")
     elif name == "company-context":
         return done("Обновил раздел «О компании»", "", "/kb/context")
     elif name == "stale":

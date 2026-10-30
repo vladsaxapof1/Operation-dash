@@ -91,6 +91,55 @@
       ganttBox.querySelectorAll(".gantt-what").forEach(function (el) { widest = Math.max(widest, el.scrollWidth); });
       setW(widest + 32, true);  // + поля ячейки
     });
+
+    // стрелки «ждёт»: от конца полосы задачи, которую ждут, к началу полосы той, что ждёт (data-waits — id через
+    // пробел). Рисуем поверх таймлайна заново, когда меняется раскладка: свернули группу, потянули ширину, окно
+    var body = ganttBox.querySelector(".gantt-body");
+    var NS = "http://www.w3.org/2000/svg";
+    var links = document.createElementNS(NS, "svg");
+    links.setAttribute("class", "gantt-links");
+    links.setAttribute("aria-hidden", "true");
+    body.appendChild(links);
+    var drawLinks = function () {
+      var box = body.getBoundingClientRect();
+      links.setAttribute("width", body.scrollWidth);
+      links.setAttribute("height", body.scrollHeight);
+      var out = ['<defs><marker id="gl-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">' +
+                 '<path d="M0 0L8 4L0 8z" class="gl-head"/></marker>' +
+                 '<marker id="gl-ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">' +
+                 '<path d="M0 0L8 4L0 8z" class="gl-head hl"/></marker></defs>'];
+      body.querySelectorAll(".gantt-bar[data-waits]").forEach(function (bar) {
+        if (!bar.offsetParent) return;  // группа свёрнута
+        var b = bar.getBoundingClientRect();
+        bar.dataset.waits.split(" ").forEach(function (id) {
+          var from = body.querySelector('.gantt-bar[data-task-open="' + id + '"]');
+          if (!from || !from.offsetParent) return;  // ту задачу фильтр спрятал или её группа свёрнута
+          var a = from.getBoundingClientRect();
+          var x1 = Math.round(a.right - box.left), y1 = Math.round(a.top + a.height / 2 - box.top);
+          var x2 = Math.round(b.left - box.left), y2 = Math.round(b.top + b.height / 2 - box.top);
+          var d = x2 - x1 >= 24
+            ? "M" + x1 + " " + y1 + "H" + (x1 + 10) + "V" + y2 + "H" + (x2 - 1)
+            : "M" + x1 + " " + y1 + "h8V" + Math.round(b.top - box.top - 6) + "H" + (x2 - 12) + "V" + y2 + "H" + (x2 - 1);
+          out.push('<path d="' + d + '" data-from="' + id + '" data-to="' + bar.dataset.taskOpen + '" marker-end="url(#gl-a)"/>');
+        });
+      });
+      links.innerHTML = out.join("");
+    };
+    var hl = function (id, on) {
+      links.querySelectorAll('[data-from="' + id + '"], [data-to="' + id + '"]').forEach(function (p) {
+        p.classList.toggle("hl", on);
+        p.setAttribute("marker-end", on ? "url(#gl-ah)" : "url(#gl-a)");
+      });
+    };
+    body.querySelectorAll(".gantt-bar").forEach(function (bar) {
+      bar.addEventListener("mouseenter", function () { hl(bar.dataset.taskOpen, true); });
+      bar.addEventListener("mouseleave", function () { hl(bar.dataset.taskOpen, false); });
+    });
+    var redraw = function () { requestAnimationFrame(drawLinks); };
+    if (window.ResizeObserver) new ResizeObserver(redraw).observe(body);  // свернули группу, потянули ширину
+    window.addEventListener("resize", redraw);
+    window.addEventListener("load", redraw);
+    drawLinks();
   }
 
   // новые задачи (добавил Claude, вы ещё не видели): отметка «новая» снимается, когда курсор задержался на задаче

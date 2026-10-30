@@ -516,10 +516,12 @@ BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
 def commitments(request: Request, view: str = "board", status: str = "open", direction: str = "", person: str = "",
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
                 due: str = "", due_from: str = "", due_to: str = "", scale: str = "week", sort: str = "",
-                new: str = "", task: int = 0, parent: int = 0, archived: str = ""):
-    from opsdash import gantt
+                new: str = "", task: int = 0, parent: int = 0, archived: str = "", project: str = "",
+                done_projects: str = ""):
+    from opsdash import gantt, projects
 
-    view = view if view in ("list", "gantt") else "board"
+    view = view if view in ("list", "gantt", "projects") else "board"
+    project = project if project == "none" or project.isdigit() else ""
     # «Показать архивные» — архивные задачи добавляются серыми в конец колонок и списка
     show_archived = archived == "1" or status == "archived"  # status=archived — ссылки из прошлой версии
     status = "all" if status == "archived" else status
@@ -530,11 +532,12 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     dates = {"created": records.period(created, created_from, created_to) if created else None,
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
              "no_due": due == "none", "unseen": new == "1"}
-    board = (records.commitments_board(person=person or None, q=q or None, sort=sort, archived=show_archived, **dates)
-             if view != "list" else None)
+    board = (records.commitments_board(person=person or None, q=q or None, sort=sort, archived=show_archived,
+                                       project=project or None, **dates) if view in ("board", "gantt") else None)
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
-                                      sort=sort, archived=show_archived, **dates) if view == "list" else None)
-    shown = records.add_links([c for col in board.values() for c in col] if board else items)
+                                      sort=sort, archived=show_archived, project=project or None, **dates)
+             if view == "list" else None)
+    shown = records.add_links([c for col in board.values() for c in col] if board else (items or []))
     # ?task=<id> — открыть окно задачи (ссылка со встречи или со сводки); если фильтры её прячут — окно всё равно есть
     extra = None
     if task and not any(c["id"] == task for c in shown):
@@ -557,7 +560,10 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
                       gantt_w=min(max(gantt_w, 200), 720), sort=sort, sorts=records.SORTS, new=new == "1",
                       focus=task, extra=extra, parent_task=parent_task, show_archived=show_archived,
-                      archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0)
+                      archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0,
+                      project=project, project_options=projects.options(),
+                      projects=projects.list_projects("all" if done_projects else "active") if view == "projects" else [],
+                      done_projects=bool(done_projects))
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
     return response
@@ -565,15 +571,22 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
 
 @app.post("/commitments")
 def commitment_add(request: Request, direction: str = Form(...), title: str = Form(""), what: str = Form(""),
-                   who: str = Form(""), whom: str = Form(""), due: str = Form(""), parent: str = Form("")):
+                   who: str = Form(""), whom: str = Form(""), due: str = Form(""), parent: str = Form(""),
+                   project: str = Form("")):
     if not (title.strip() or what.strip()):
         return back(request, err="Напишите, что сделать")
     try:
-        records.add_commitment(direction=direction, title=title.strip(), what=what.strip() or title.strip(),
-                               who=who.strip() or None, whom=whom.strip() or None, due=due or None, source_type="manual",
-                               parent_id=records.parse_task_ref(parent))
+        cid = records.add_commitment(direction=direction, title=title.strip(), what=what.strip() or title.strip(),
+                                     who=who.strip() or None, whom=whom.strip() or None, due=due or None,
+                                     source_type="manual", parent_id=records.parse_task_ref(parent),
+                                     project_id=int(project) if project.isdigit() else None)
     except ValueError as e:
         return back(request, err=str(e))
+    similar = [c for c in records.similar_open(direction=direction, who=who.strip(), whom=whom.strip(), title=title,
+                                               what=what, exclude=cid) if c["similarity"] >= 0.5]
+    if similar:
+        return back(request, f"Задача добавлена. Похожая уже есть: «{similar[0]['headline']}» — если это одно и то же, "
+                             "откройте новую и выберите «Это дубль задачи…»")
     return back(request, "Задача добавлена")
 
 
@@ -600,13 +613,119 @@ def commitment_archive(request: Request, cid: int, on: int = Form(1)):
 @app.post("/commitments/{cid}/edit")
 def commitment_edit(request: Request, cid: int, title: str = Form(""), what: str = Form(""),
                     direction: str = Form("mine"), who: str = Form(""), whom: str = Form(""), due: str = Form(""),
-                    parent: str = Form("")):
+                    parent: str = Form(""), project: str = Form(""), has_project: str = Form("")):
+    """project: «#3 · Запуск склада» из подсказок, пусто — ни в каком проекте; без has_project (поля нет в форме) —
+    не менять: пустое поле FastAPI не отличает от отсутствующего."""
+    if not has_project:
+        project_id = -1
+    elif project.strip():
+        project_id = records.parse_task_ref(project) if project.strip().startswith("#") else None
+        if not project_id:
+            return back(request, err="Выберите проект из подсказок — начните вводить его название")
+    else:
+        project_id = None
     try:
         records.edit_commitment(cid, title=title, what=what, direction=direction, who=who, whom=whom, due=due or None,
-                                parent_id=records.parse_task_ref(parent))
+                                parent_id=records.parse_task_ref(parent), project_id=project_id)
     except ValueError as e:
         return back(request, err=str(e))
     return back(request, "Задача изменена")
+
+
+def _back_task(request: Request, cid: int, msg: str = "", err: str = "") -> RedirectResponse:
+    """Назад туда же (вид, фильтры), но с открытым окном задачи: правишь пункты или связи — окно не закрывается."""
+    ref = urlparse(request.headers.get("referer") or "/commitments")
+    query = "&".join(p for p in ref.query.split("&") if p and not p.startswith(("task=", "msg=", "err=")))
+    return back(request, msg, err, to=f"{ref.path or '/commitments'}?{query + '&' if query else ''}task={cid}")
+
+
+@app.post("/commitments/{cid}/items")
+def commitment_items_add(request: Request, cid: int, text: str = Form("")):
+    """Пункты внутри задачи: один или несколько через «;»."""
+    try:
+        added = records.add_items(cid, text)
+    except ValueError as e:
+        return _back_task(request, cid, err=str(e))
+    return _back_task(request, cid, "Пункт добавлен" if len(added) == 1 else f"Пунктов добавлено: {len(added)}")
+
+
+@app.post("/commitments/{cid}/items/{item_id}/done")
+def commitment_item_done(request: Request, cid: int, item_id: int, on: int = Form(1)):
+    if store.row("SELECT 1 FROM task_items WHERE id=? AND task_id=?", (item_id, cid)):
+        records.set_item_done(item_id, bool(on))
+    return _back_task(request, cid)
+
+
+@app.post("/commitments/{cid}/items/{item_id}/remove")
+def commitment_item_remove(request: Request, cid: int, item_id: int):
+    if store.row("SELECT 1 FROM task_items WHERE id=? AND task_id=?", (item_id, cid)):
+        records.remove_item(item_id)
+    return _back_task(request, cid, "Пункт убран")
+
+
+@app.post("/commitments/{cid}/wait")
+def commitment_wait(request: Request, cid: int, target: str = Form(""), until: str = Form("")):
+    """«Ждёт»: задачу из подсказок («#69 · …») или событие своими словами («встреча Олега с собственником»)."""
+    m = re.match(r"\s*#(\d+)\b", target)
+    try:
+        if m:
+            records.add_wait(cid, waits_for=int(m.group(1)))
+        else:
+            records.add_wait(cid, event=target, until=until or None)
+    except ValueError as e:
+        return _back_task(request, cid, err=str(e))
+    return _back_task(request, cid, "Связь добавлена: задача ждёт" + (" другую" if m else " событие"))
+
+
+@app.post("/commitments/{cid}/wait/{link_id}/remove")
+def commitment_unwait(request: Request, cid: int, link_id: int):
+    if store.row("SELECT 1 FROM task_links WHERE id=? AND task_id=?", (link_id, cid)):
+        records.remove_wait(link_id)
+    return _back_task(request, cid, "Связь убрана")
+
+
+@app.post("/commitments/{cid}/wait/{link_id}/done")
+def commitment_event_done(request: Request, cid: int, link_id: int, on: int = Form(1)):
+    """Событие, которого ждала задача, случилось (on=0 — ещё нет)."""
+    if not store.row("SELECT 1 FROM task_links WHERE id=? AND task_id=?", (link_id, cid)):
+        return back(request, err="Такой связи у задачи нет")
+    records.set_event_done(link_id, bool(on))
+    return _back_task(request, cid, "Отмечено: случилось" if on else "Снова ждём")
+
+
+@app.post("/commitments/{cid}/wait/{link_id}/kaiten")
+def commitment_wait_kaiten(request: Request, cid: int, link_id: int):
+    """«Заблокировать в Kaiten»: директор сама нажала — блокировка ставится сразу, карточкой той задачи."""
+    link = store.row("SELECT * FROM task_links WHERE id=? AND task_id=? AND waits_for IS NOT NULL", (link_id, cid))
+    c, other = records.get_commitment(cid), records.get_commitment(link["waits_for"]) if link else None
+    if not link or not c or not other or not c["kaiten_card_id"] or not other["kaiten_card_id"]:
+        return _back_task(request, cid, err="У обеих задач должны быть карточки Kaiten")
+    try:
+        p = proposals.propose_kaiten_block(card_id=c["kaiten_card_id"], blocker_card=other["kaiten_card_id"],
+                                           text=f"Ждёт «{records.headline(other)}»", reason="вы нажали «Заблокировать в Kaiten»")
+    except proposals.ProposalError as e:
+        return _back_task(request, cid, err=str(e))
+    p = proposals.approve(p["id"])
+    if p["status"] == "failed":
+        return _back_task(request, cid, err=proposals.result_text(p))
+    return _back_task(request, cid, proposals.result_text(p))
+
+
+@app.post("/commitments/{cid}/merge")
+def commitment_merge(request: Request, cid: int, into: str = Form("")):
+    """«Это дубль задачи…»: эта задача закрывается, её источник, связи и подзадачи переходят в выбранную."""
+    keep = records.parse_task_ref(into) if into.strip().startswith("#") else None
+    if not keep:
+        return back(request, err="Выберите задачу из подсказок — начните вводить её название")
+    try:
+        records.merge_commitments(cid, keep)
+    except ValueError as e:
+        return back(request, err=str(e))
+    # вернуться туда же (вид, фильтры), но с открытым окном задачи, которая осталась
+    ref = urlparse(request.headers.get("referer") or "/commitments")
+    query = "&".join(p for p in ref.query.split("&") if p and not p.startswith("task="))
+    return back(request, "Объединено: задача закрыта как дубль, всё перенесено в основную",
+                to=f"{ref.path or '/commitments'}?{query + '&' if query else ''}task={keep}")
 
 
 @app.get("/api/event-options")
@@ -635,6 +754,89 @@ def commitment_meeting(request: Request, cid: int, event: str = Form(""), action
                         "AND json_extract(payload, '$.commitment_id')=?", (cid,)):
         proposals.reject(p["id"])  # подсказка связать с другой встречей больше не нужна
     return back(request, "Встреча связана с задачей — она на карточке")
+
+
+# --- проекты: задачи с общим результатом ----------------------------------------------
+
+@app.get("/projects/{pid}", response_class=HTMLResponse)
+def project_page(request: Request, pid: int, task: int = 0):
+    from opsdash import projects
+
+    p = projects.get(pid)
+    if not p:
+        return back(request, err="Такого проекта нет", to="/commitments?view=projects")
+    shown = [c for step in p["steps"] for c in step] + p["finished"] + p["parked"]
+    records.add_links(shown)
+    meeting_ids = {c["source_ref"] for c in shown if c["source_type"] == "meeting" and c["source_ref"]}
+    meetings = {m["id"]: m["title"] for m in store.rows(
+        f"SELECT id, title FROM meetings WHERE id IN ({','.join('?' * len(meeting_ids))})", list(meeting_ids))} if meeting_ids else {}
+    return render(request, "project.html", nav="commitments", p=p, meetings=meetings, people=records.list_people(),
+                  statuses=projects.STATUSES, focus=task)
+
+
+@app.post("/projects")
+def project_add(request: Request, title: str = Form(""), goal: str = Form(""), owner: str = Form(""),
+                due: str = Form("")):
+    from opsdash import projects
+
+    try:
+        pid = projects.add(title=title, goal=goal, owner=owner, due=due or None)
+    except ValueError as e:
+        return back(request, err=str(e))
+    return back(request, "Проект создан — добавьте в него задачи", to=f"/projects/{pid}")
+
+
+@app.post("/projects/{pid}/edit")
+def project_edit(request: Request, pid: int, title: str = Form(""), goal: str = Form(""), owner: str = Form(""),
+                 due: str = Form(""), card: str = Form("")):
+    from opsdash import projects
+
+    card = card.strip().lstrip("#")
+    try:
+        projects.update(pid, title=title, goal=goal, owner=owner, due=due, kaiten_card_id=int(card) if card.isdigit() else "")
+    except ValueError as e:
+        return back(request, err=str(e))
+    return back(request, "Проект изменён")
+
+
+@app.post("/projects/{pid}/status")
+def project_status(request: Request, pid: int, status: str = Form(...)):
+    from opsdash import projects
+
+    try:
+        projects.update(pid, status=status)
+    except ValueError as e:
+        return back(request, err=str(e))
+    return back(request, {"done": "Проект завершён", "paused": "Проект на паузе"}.get(status, "Проект снова в работе"))
+
+
+@app.post("/projects/{pid}/delete")
+def project_delete(request: Request, pid: int):
+    from opsdash import projects
+
+    projects.delete(pid)
+    return back(request, "Проект удалён, его задачи остались", to="/commitments?view=projects")
+
+
+@app.post("/projects/{pid}/tasks")
+def project_tasks(request: Request, pid: int, task: str = Form("")):
+    """«Добавить задачу» на странице проекта: из подсказок «#69 · …» — вместе с её подзадачами."""
+    from opsdash import projects
+
+    tid = records.parse_task_ref(task) if task.strip().startswith("#") else None
+    if not tid:
+        return back(request, err="Выберите задачу из подсказок — начните вводить её название")
+    if not projects.assign(pid, [tid]):
+        return back(request, err="Такой задачи нет")
+    return back(request, "Задача добавлена в проект")
+
+
+@app.get("/api/project-options")
+def project_options():
+    """Подсказки поля «Проект» в окне задачи: «#3 · Запуск склада»."""
+    from opsdash import projects
+
+    return [f"#{p['id']} · {p['title']}" for p in projects.options() if p["status"] != "done"]
 
 
 @app.get("/api/task-options")
@@ -1369,6 +1571,7 @@ def journal(request: Request, level: str = ""):
     job_rows = {j["name"]: j for j in store.rows("SELECT * FROM jobs")}
     runnable = ["collect:telegram", "collect:ymessenger", "collect:pachca", "collect:mail", "collect:gmail",
                 "collect:calendar", "collect:google_calendar", "collect:kaiten", "docs-index", "anthology", "company-context",
+                "projects",
                 "recordings", "triage", "digest", "stale"]
     return render(request, "journal.html", nav="journal", logs=logs, jobs=job_rows, runnable=runnable,
                   titles=jobs.TITLES, queued=jobs.queued(), level=level)
@@ -1415,7 +1618,7 @@ def job_run(request: Request, name: str = Form(...)):
     from opsdash import jobs
 
     args = {"force": True} if name == "triage" else None
-    heavy = name in ("triage", "digest", "anthology", "company-context")  # запуски Claude — не мешать сбору сообщений
+    heavy = name in ("triage", "digest", "anthology", "company-context", "projects")  # запуски Claude — не мешать сбору
     jobs.submit(name, "heavy" if heavy else "light", args)
     return back(request, f"Запущено: {jobs.TITLES.get(name, name)}")
 

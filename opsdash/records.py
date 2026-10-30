@@ -102,10 +102,21 @@ def delete_person(person_id: int) -> None:
 
 # --- обещания ----------------------------------------------------------------
 
+class DuplicateError(ValueError):
+    """Такая задача уже есть: existing — её id."""
+
+    def __init__(self, message: str, existing: int):
+        super().__init__(message)
+        self.existing = existing
+
+
 def add_commitment(*, direction: str, what: str, who: str | None = None, whom: str | None = None,
                    due: str | None = None, source_type: str = "manual", source_ref: str | None = None,
                    quote: str | None = None, kaiten_card_id: int | None = None, note: str | None = None,
-                   title: str | None = None, parent_id: int | None = None) -> int:
+                   title: str | None = None, parent_id: int | None = None, force: bool = False,
+                   project_id: int | None = None) -> int:
+    """force — добавить, даже если у той же карточки Kaiten уже есть открытая задача (обычно это дубль).
+    project_id — проект; у подзадачи без своего проекта — проект основной задачи."""
     if direction not in DIRECTIONS:
         raise ValueError(f"direction должен быть одним из: {', '.join(DIRECTIONS)}")
     if due:
@@ -118,22 +129,36 @@ def add_commitment(*, direction: str, what: str, who: str | None = None, whom: s
     if dup:
         if parent_id:
             set_parent(dup["id"], parent_id)
+        if project_id and not store.scalar("SELECT project_id FROM commitments WHERE id=?", (dup["id"],)):
+            set_project(dup["id"], project_id)
         return dup["id"]
+    if kaiten_card_id and not force:
+        same = store.row("SELECT * FROM commitments WHERE kaiten_card_id=? AND status='open' AND archived_at IS NULL",
+                         (kaiten_card_id,))
+        if same:
+            raise DuplicateError(f"У карточки Kaiten #{kaiten_card_id} уже есть задача [{same['id']}] «{headline(same)}» "
+                                 f"({route(same)}). Допиши в неё: ./ops commitments set {same['id']} --what/--due/--note; "
+                                 "если это всё же другая задача — повтори с --force", same["id"])
     if parent_id:
         _check_parent(None, parent_id)
+        project_id = project_id or store.scalar("SELECT project_id FROM commitments WHERE id=?", (parent_id,))
+    if project_id:
+        _check_project(project_id)
     now = store.utcnow()
     # задачи, которые добавил Claude, — «новые», пока директор их не увидит; свои она уже видела
     seen = now if source_type == "manual" else None
     return store.execute(
         """INSERT INTO commitments(direction, who, whom, what, title, due, status, source_type, source_ref, quote,
-           kaiten_card_id, note, parent_id, seen_at, created, updated) VALUES(?,?,?,?,?,?,'open',?,?,?,?,?,?,?,?,?)""",
+           kaiten_card_id, note, parent_id, project_id, seen_at, created, updated)
+           VALUES(?,?,?,?,?,?,'open',?,?,?,?,?,?,?,?,?,?)""",
         (direction, who, whom, what, (title or "").strip() or None, due, source_type, source_ref, quote, kaiten_card_id,
-         note, parent_id or None, seen, now, now),
+         note, parent_id or None, project_id or None, seen, now, now),
     )
 
 
 def _check_parent(cid: int | None, parent_id: int) -> None:
-    """Задача-родитель есть, и связь не замыкается в петлю (задача — часть своей же подзадачи)."""
+    """Задача-родитель есть, и связь не замыкается в петлю (задача — часть своей же подзадачи или ждёт свою
+    основную задачу: основная ждёт подзадачи, получился бы круг)."""
     pid, chain = parent_id, set()
     while pid and pid not in chain:
         if pid == cid:
@@ -145,6 +170,8 @@ def _check_parent(cid: int | None, parent_id: int) -> None:
                 raise ValueError(f"Нет задачи [{parent_id}]")
             break
         pid = r["parent_id"]
+    if cid and _reaches(_waits_graph(), cid, parent_id):
+        raise ValueError("Задача ждёт ту, частью которой её делают, — получится замкнутый круг")
 
 
 def set_parent(cid: int, parent_id: int | None) -> None:
@@ -153,6 +180,31 @@ def set_parent(cid: int, parent_id: int | None) -> None:
     if parent_id:
         _check_parent(cid, parent_id)
     store.execute("UPDATE commitments SET parent_id=?, updated=? WHERE id=?", (parent_id or None, store.utcnow(), cid))
+    project = parent_id and store.scalar("SELECT project_id FROM commitments WHERE id=?", (parent_id,))
+    if project and not store.scalar("SELECT project_id FROM commitments WHERE id=?", (cid,)):
+        set_project(cid, project)  # подзадача — в проекте основной задачи
+
+
+def _check_project(project_id: int) -> None:
+    if not store.row("SELECT 1 FROM projects WHERE id=?", (project_id,)):
+        raise ValueError(f"Нет проекта [{project_id}] (./ops projects list)")
+
+
+def set_project(cid: int, project_id: int | None) -> None:
+    """Задача — в проекте (пусто — ни в каком). Её подзадачи идут следом, если они были там же, где она,
+    или без проекта."""
+    if project_id:
+        _check_project(project_id)
+    old = store.scalar("SELECT project_id FROM commitments WHERE id=?", (cid,))
+    now, todo, seen = store.utcnow(), [cid], set()
+    while todo:
+        tid = todo.pop()
+        if tid in seen:
+            continue
+        seen.add(tid)
+        store.execute("UPDATE commitments SET project_id=?, updated=? WHERE id=?", (project_id or None, now, tid))
+        todo += [r["id"] for r in store.rows(
+            "SELECT id FROM commitments WHERE parent_id=? AND (project_id IS NULL OR project_id IS ?)", (tid, old))]
 
 
 def parse_task_ref(value: str | None) -> int | None:
@@ -203,9 +255,11 @@ def _settle_done_proposals(cid: int, status: str) -> None:
 
 
 def update_commitment(cid: int, **fields) -> None:
-    """Изменить поля задачи. parent_id: номер задачи-родителя, 0 — отвязать."""
+    """Изменить поля задачи. parent_id: номер задачи-родителя, 0 — отвязать; project_id: проект, 0 — убрать из проекта."""
     if (parent_id := fields.pop("parent_id", None)) is not None:
         set_parent(cid, int(parent_id) or None)
+    if (project_id := fields.pop("project_id", None)) is not None:
+        set_project(cid, int(project_id) or None)
     allowed = {"status", "due", "kaiten_card_id", "note", "what", "title", "who", "whom", "direction"}
     sets, params = [], []
     for k, v in fields.items():
@@ -219,20 +273,388 @@ def update_commitment(cid: int, **fields) -> None:
         params.append(store.utcnow())
     elif fields.get("status") == "open":
         sets.append("closed_at=NULL")
+        sets.append("duplicate_of=NULL")  # вернули дубль — снова самостоятельная задача
     sets.append("updated=?")
     params.append(store.utcnow())
+    was = store.scalar("SELECT status FROM commitments WHERE id=?", (cid,))
     store.execute(f"UPDATE commitments SET {', '.join(sets)} WHERE id=?", [*params, cid])
     if fields.get("status") in ("done", "cancelled"):
         _settle_done_proposals(cid, fields["status"])
+        if was == "open":
+            _notify_unblocked(cid)
+
+
+# --- «ждёт» и дубли ---------------------------------------------------------------------
+# «Ждёт» — задачу нельзя закончить, пока не сделана другая («Схемы в карточку проекта» ждёт «Описание процесса
+# подрядчику») или не случилось событие («встреча Олега с собственником 02.11»). Подзадача — другое: часть той же работы,
+# переданная дальше; основная задача ждёт свои подзадачи без отдельной связи.
+
+def _waits_graph() -> dict[int, set[int]]:
+    """Кто кого ждёт: связи «ждёт» и подзадачи (основная задача ждёт свои части)."""
+    graph: dict[int, set[int]] = {}
+    for r in store.rows("SELECT task_id, waits_for FROM task_links WHERE waits_for IS NOT NULL"):
+        graph.setdefault(r["task_id"], set()).add(r["waits_for"])
+    for r in store.rows("SELECT id, parent_id FROM commitments WHERE parent_id IS NOT NULL"):
+        graph.setdefault(r["parent_id"], set()).add(r["id"])
+    return graph
+
+
+def _reaches(graph: dict[int, set[int]], start: int, target: int) -> bool:
+    seen, todo = set(), [start]
+    while todo:
+        node = todo.pop()
+        if node == target:
+            return True
+        if node not in seen:
+            seen.add(node)
+            todo.extend(graph.get(node, ()))
+    return False
+
+
+def check_wait(task_id: int, waits_for: int | None = None, event: str | None = None, until: str | None = None) -> None:
+    """Можно ли связать: задачи есть, задача не ждёт сама себя и не ждёт то, что (напрямую или через другие
+    задачи и подзадачи) ждёт её. Для события — есть текст, дата в виде ГГГГ-ММ-ДД."""
+    if not store.row("SELECT 1 FROM commitments WHERE id=?", (task_id,)):
+        raise ValueError(f"Нет задачи [{task_id}]")
+    if until and not _as_date(until):
+        raise ValueError("Дата события — в виде ГГГГ-ММ-ДД")
+    if waits_for:
+        if int(waits_for) == int(task_id):
+            raise ValueError("Задача не может ждать сама себя")
+        if not store.row("SELECT 1 FROM commitments WHERE id=?", (waits_for,)):
+            raise ValueError(f"Нет задачи [{waits_for}]")
+        if _reaches(_waits_graph(), int(waits_for), int(task_id)):
+            raise ValueError("Получится замкнутый круг: та задача уже ждёт эту — напрямую, через другие или как подзадача")
+    elif not (event or "").strip():
+        raise ValueError("Укажите задачу, которую ждёт эта, или событие")
+
+
+def add_wait(task_id: int, *, waits_for: int | None = None, event: str | None = None, until: str | None = None,
+             note: str | None = None, source_ref: str | None = None, by: str = "director") -> int:
+    """Задача ждёт другую задачу (waits_for) или событие (event, until — когда его ждём). Такая связь уже есть —
+    обновляем её. by: director — поставила директор, claude — Claude по встрече или переписке, kaiten — блокировка
+    из Kaiten (sync_kaiten_waits)."""
+    check_wait(task_id, waits_for, event, until)
+    event = " ".join((event or "").split()) or None
+    if waits_for:
+        old = store.row("SELECT id FROM task_links WHERE task_id=? AND waits_for=?", (task_id, waits_for))
+    else:
+        old = store.row("SELECT id FROM task_links WHERE task_id=? AND waits_for IS NULL AND lower(event)=lower(?)",
+                        (task_id, event))
+    if old:
+        store.execute("UPDATE task_links SET until=COALESCE(?, until), note=COALESCE(?, note), done_at=NULL WHERE id=?",
+                      (until or None, note or None, old["id"]))
+        return old["id"]
+    return store.execute(
+        "INSERT INTO task_links(task_id, waits_for, event, until, note, source_ref, added_by, created) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (task_id, waits_for or None, None if waits_for else event, None if waits_for else (until or None),
+         (note or "").strip() or None, source_ref, by if by in ("claude", "kaiten") else "director", store.utcnow()))
+
+
+def find_waits(task_id: int, *, waits_for: int | None = None, event: str | None = None) -> list[dict]:
+    """Связи «ждёт» у задачи: с этой задачей или с событием, где есть этот текст (для ./ops)."""
+    if waits_for:
+        return store.rows("SELECT * FROM task_links WHERE task_id=? AND waits_for=?", (task_id, waits_for))
+    q = " ".join((event or "").split()).lower()
+    return [r for r in store.rows("SELECT * FROM task_links WHERE task_id=? AND waits_for IS NULL", (task_id,))
+            if q and q in (r["event"] or "").lower()]
+
+
+def remove_wait(link_id: int) -> None:
+    store.execute("DELETE FROM task_links WHERE id=?", (link_id,))
+
+
+def set_event_done(link_id: int, done: bool = True) -> None:
+    """Событие, которого ждала задача, случилось (или нет — вернуть ожидание)."""
+    link = store.row("SELECT * FROM task_links WHERE id=? AND waits_for IS NULL", (link_id,))
+    if not link:
+        raise ValueError("Нет такого события у задачи")
+    store.execute("UPDATE task_links SET done_at=? WHERE id=?", (store.utcnow() if done else None, link_id))
+    if done and not link["done_at"]:
+        _notify_unblocked(None, task_id=link["task_id"], event=link["event"])
+
+
+KAITEN_REF = "kaiten:blocker:"  # source_ref связи, которую поставила блокировка из Kaiten
+
+
+def sync_kaiten_waits(card_ids: list[int]) -> None:
+    """Блокировки из Kaiten (зеркало kaiten_cards.blockers) → «ждёт» у открытых задач с этими карточками: карточку
+    блокирует карточка другой открытой задачи — задача ждёт ту задачу; другая карточка или причина текстом —
+    событие. Сняли блокировку в Kaiten — связь, которую поставил Kaiten, уходит, событие «случилось»."""
+    if not card_ids:
+        return
+    marks = ",".join("?" * len(card_ids))
+    tasks = store.rows(f"SELECT id, kaiten_card_id FROM commitments WHERE status='open' AND archived_at IS NULL "
+                       f"AND kaiten_card_id IN ({marks})", card_ids)
+    by_card = {r["kaiten_card_id"]: r["id"] for r in store.rows(
+        "SELECT id, kaiten_card_id FROM commitments WHERE status='open' AND kaiten_card_id IS NOT NULL ORDER BY id DESC")}
+    blockers = {r["id"]: store.loads(r["blockers"], []) or [] for r in store.rows(
+        f"SELECT id, blockers FROM kaiten_cards WHERE id IN ({marks})", card_ids)}
+    for t in tasks:
+        active = set()
+        for b in blockers.get(t["kaiten_card_id"], []):
+            ref = f"{KAITEN_REF}{b['id']}"
+            active.add(ref)
+            if store.row("SELECT 1 FROM task_links WHERE task_id=? AND source_ref=?", (t["id"], ref)):
+                continue
+            other = by_card.get(b.get("blocker_card_id"))
+            try:
+                if other and other != t["id"]:
+                    if not find_waits(t["id"], waits_for=other):
+                        add_wait(t["id"], waits_for=other, note=b.get("reason"), source_ref=ref, by="kaiten")
+                else:
+                    event = (f"карточка Kaiten «{b.get('blocker_card_title') or b.get('blocker_card_id')}»"
+                             if b.get("blocker_card_id") else f"в Kaiten: {b.get('reason') or 'блокировка'}")
+                    add_wait(t["id"], event=event, note=b.get("reason") if b.get("blocker_card_id") else None,
+                             source_ref=ref, by="kaiten")
+            except ValueError:  # замкнутый круг или задачи уже нет — эту блокировку не переносим
+                continue
+        for link in store.rows("SELECT * FROM task_links WHERE task_id=? AND source_ref LIKE ?",
+                               (t["id"], KAITEN_REF + "%")):
+            if link["source_ref"] in active:
+                continue
+            if link["waits_for"]:
+                remove_wait(link["id"])
+                if not _open_waits(t["id"]):
+                    _notify_unblocked(None, task_id=t["id"], why="В Kaiten сняли блокировку")
+            elif not link["done_at"]:
+                set_event_done(link["id"])
+
+
+def _open_waits(task_id: int) -> int:
+    """Сколько ещё не готово из того, что ждёт задача: открытые задачи и не случившиеся события."""
+    return store.scalar(
+        "SELECT COUNT(*) FROM task_links l LEFT JOIN commitments c ON c.id=l.waits_for WHERE l.task_id=? "
+        "AND ((l.waits_for IS NOT NULL AND c.status='open') OR (l.waits_for IS NULL AND l.done_at IS NULL))",
+        (task_id,)) or 0
+
+
+def _notify_unblocked(closed_id: int | None, *, task_id: int | None = None, event: str | None = None,
+                      why: str | None = None) -> None:
+    """Готово то, что ждали, — уведомление в углу экрана «Можно делать» по каждой задаче, которой больше нечего
+    ждать. closed_id — закрытая задача; task_id и event — у этой задачи случилось событие."""
+    from opsdash import notices
+
+    if closed_id:
+        closed = store.row("SELECT * FROM commitments WHERE id=?", (closed_id,))
+        waiting = [r["task_id"] for r in store.rows("SELECT task_id FROM task_links WHERE waits_for=?", (closed_id,))]
+        why = (f"{doer(closed)}: «{headline(closed)}» — "
+               + ("готово" if closed["status"] == "done" else "отменена, больше не ждём"))
+    else:
+        waiting, why = [task_id], why or f"Случилось: {event}"
+    for tid in dict.fromkeys(waiting):
+        t = store.row("SELECT * FROM commitments WHERE id=? AND status='open' AND archived_at IS NULL", (tid,))
+        if t and not _open_waits(tid):
+            notices.add("tasks", f"Можно делать: «{headline(t)}»", why.replace("Я:", "Вы:", 1),
+                        link=f"/commitments?task={tid}")
+
+
+def unblocked(days: int = 2) -> list[dict]:
+    """Открытые задачи, которые ждали другое, и всё это готово за последние days дней — «можно делать»
+    в сводке и дайджесте. c["freed_by"] — что было готово последним."""
+    since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=days))
+    out = []
+    for c in list_commitments(status="open"):
+        if c["waits"] and not c["blocked"]:
+            done = [(w["task"]["closed_at"] if w["task"] else w["done_at"]) or "" for w in c["waits"]]
+            last = max(done)
+            if last >= since:
+                c["freed_by"] = c["waits"][done.index(last)]
+                out.append(c)
+    return out
+
+
+def check_merge(drop_id: int, keep_id: int) -> tuple[dict, dict]:
+    """Можно ли объединить: остаётся открытая задача (иначе живая работа пропала бы с доски), дубль — открытый
+    или уже закрытый (закрыли раньше, а работа продолжается в keep), но не дубль чего-то ещё."""
+    drop = store.row("SELECT * FROM commitments WHERE id=?", (drop_id,))
+    keep = store.row("SELECT * FROM commitments WHERE id=?", (keep_id,))
+    if not drop or not keep:
+        raise ValueError(f"Нет задачи [{drop_id if not drop else keep_id}]")
+    if drop["id"] == keep["id"]:
+        raise ValueError("Задачу нельзя объединить саму с собой")
+    for c in (keep, drop):
+        if c["duplicate_of"]:
+            raise ValueError(f"«{headline(c)}» уже дубль другой задачи [{c['duplicate_of']}]")
+    if keep["status"] != "open":
+        if drop["status"] == "open":
+            raise ValueError(f"«{headline(keep)}» уже закрыта, а эта — в работе. Объедините наоборот: откройте "
+                             f"«{headline(keep)}» и выберите «Это дубль задачи…» → эту")
+        raise ValueError("Обе задачи закрыты — объединять незачем")
+    return drop, keep
+
+
+def merge_commitments(drop_id: int, keep_id: int, *, note: str | None = None) -> None:
+    """Объединить дубли: drop закрывается как дубль keep. Откуда drop и цитата — в заметку keep; подзадачи, связи
+    «ждёт», а также срок, карточка Kaiten, встреча и основная задача, если у keep их нет, — переходят к keep.
+    Вернуть дубль — «Вернуть» у него (снова самостоятельная задача; перенесённое остаётся у keep)."""
+    from opsdash import proposals
+
+    drop, keep = check_merge(drop_id, keep_id)
+    now = store.utcnow()
+    # откуда известно — в заметку остающейся задачи, чтобы источник дубля не потерялся
+    source = proposals._source_text(f"{drop['source_type']}:{drop['source_ref']}") if drop["source_ref"] else ""
+    line = f"Объединена с дублем «{headline(drop)}»" + (f" ({source})" if source else "")
+    if drop["quote"]:
+        line += f": «{drop['quote']}»"
+    if note:
+        line += f". {note.strip()}"
+    keep_note = "\n".join(filter(None, [keep["note"], line]))
+    # чего нет у остающейся — берём у дубля
+    take = {"due": keep["due"] or drop["due"], "kaiten_card_id": keep["kaiten_card_id"] or drop["kaiten_card_id"],
+            "project_id": keep["project_id"] or drop["project_id"],
+            "event_uid": keep["event_uid"] or drop["event_uid"],
+            "event_info": keep["event_info"] if keep["event_uid"] else drop["event_info"]}
+    parent = keep["parent_id"]
+    if parent == drop_id:  # остающаяся была подзадачей дубля — теперь часть того же, что и он
+        parent = drop["parent_id"]
+    elif not parent and drop["parent_id"] and drop["parent_id"] != keep_id:
+        parent = drop["parent_id"]
+    store.execute("UPDATE commitments SET note=?, due=?, kaiten_card_id=?, event_uid=?, event_info=?, parent_id=?, "
+                  "project_id=?, updated=? WHERE id=?",
+                  (keep_note, take["due"], take["kaiten_card_id"], take["event_uid"], take["event_info"], parent,
+                   take["project_id"], now, keep_id))
+    ancestors, pid = set(), parent
+    while pid and pid not in ancestors:
+        ancestors.add(pid)
+        pid = store.scalar("SELECT parent_id FROM commitments WHERE id=?", (pid,))
+    for kid in store.rows("SELECT id FROM commitments WHERE parent_id=? AND id!=?", (drop_id, keep_id)):
+        # подзадачи дубля — теперь подзадачи keep (кроме той, частью которой keep сама оказалась)
+        store.execute("UPDATE commitments SET parent_id=?, updated=? WHERE id=?",
+                      (drop["parent_id"] if kid["id"] in ancestors else keep_id, now, kid["id"]))
+    # связи «ждёт»: что ждал дубль — теперь ждёт keep, кто ждал дубль — теперь ждёт keep; без связей «сама с собой»,
+    # повторов и замкнутых кругов
+    for r in store.rows("SELECT * FROM task_links WHERE task_id=? OR waits_for=?", (drop_id, drop_id)):
+        task, target = (keep_id if r["task_id"] == drop_id else r["task_id"]), (
+            keep_id if r["waits_for"] == drop_id else r["waits_for"])
+        clash = target and (task == target or store.row(
+            "SELECT 1 FROM task_links WHERE task_id=? AND waits_for=? AND id!=?", (task, target, r["id"]))
+            or _reaches(_waits_graph(), target, task))
+        if clash:
+            store.execute("DELETE FROM task_links WHERE id=?", (r["id"],))
+        else:
+            store.execute("UPDATE task_links SET task_id=?, waits_for=? WHERE id=?", (task, target, r["id"]))
+    # пункты дубля — в конец списка keep (такие же не повторяем, отметки «готово» сохраняются)
+    have = {r["text"].lower() for r in store.rows("SELECT text FROM task_items WHERE task_id=?", (keep_id,))}
+    for r in store.rows("SELECT * FROM task_items WHERE task_id=? ORDER BY sort, id", (drop_id,)):
+        if r["text"].lower() in have:
+            store.execute("DELETE FROM task_items WHERE id=?", (r["id"],))
+        else:
+            store.execute("UPDATE task_items SET task_id=?, sort=sort+1000 WHERE id=?", (keep_id, r["id"]))
+    store.execute("UPDATE commitments SET status='cancelled', duplicate_of=?, closed_at=COALESCE(closed_at, ?), "
+                  "in_work_at=NULL, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?", (keep_id, now, now, now, drop_id))
+    # предложения Claude по дублю больше не ждут ответа; предложение объединить эту пару — выполнено
+    store.execute(
+        "UPDATE proposals SET status='rejected', decided_at=?, result=? WHERE status='pending' "
+        "AND kind IN ('task.done', 'telegram.remind', 'task.meeting', 'task.wait') "
+        "AND json_extract(payload, '$.commitment_id')=?", (now, store.json_col({"note": "задача — дубль"}), drop_id))
+    store.execute(
+        "UPDATE proposals SET status='done', decided_at=?, result=? WHERE status='pending' AND kind='task.merge' "
+        "AND json_extract(payload, '$.commitment_id')=? AND json_extract(payload, '$.into')=?",
+        (now, store.json_col({"note": "объединили вручную"}), drop_id, keep_id))
+
+
+def similar_open(*, direction: str, who: str | None, whom: str | None, title: str | None, what: str | None,
+                 kaiten_card_id: int | None = None, exclude: int | None = None, limit: int = 5) -> list[dict]:
+    """Открытые задачи того же человека и того же типа, похожие по словам, — чтобы при добавлении увидеть
+    возможный дубль: Claude сам решает, то же это или нет. c["similarity"] — доля общих слов, та же карточка
+    Kaiten — 1. Человек: кому обещала директор (mine) или кто делает."""
+    person = _stems(whom if direction == "mine" else who)
+    words = _stems(f"{title or ''} {what or ''}")
+    out = []
+    for c in store.rows("SELECT * FROM commitments WHERE status='open' AND archived_at IS NULL AND direction=? "
+                        "AND id!=?", (direction, exclude or 0)):
+        same_card = bool(kaiten_card_id and c["kaiten_card_id"] == kaiten_card_id)
+        if not same_card and not (person and person & _stems(c["whom"] if direction == "mine" else c["who"])):
+            continue
+        other = _stems(f"{c['title'] or ''} {c['what'] or ''}")
+        score = 1.0 if same_card else (len(words & other) / min(len(words), len(other)) if words and other else 0)
+        if score >= 0.2:
+            c["similarity"], c["headline"], c["route"] = round(score, 2), headline(c), route(c)
+            out.append(c)
+    return sorted(out, key=lambda c: -c["similarity"])[:limit]
+
+
+# --- пункты внутри задачи ---------------------------------------------------------------
+# Большая задача из частей («Схемы процессов склада»: приёмка, хранение, отгрузка, …): пункты показывают,
+# сколько готово, и проект считает такую задачу по долям — 6 из 9 воронок, а не «не сделано».
+
+def _item_texts(texts: list[str] | str) -> list[str]:
+    """«Приёмка; Хранение» или список таких строк → чистые тексты пунктов без пустых и повторов."""
+    parts = [p for t in ([texts] if isinstance(texts, str) else texts) for p in re.split(r"[;\n]", t or "")]
+    return list(dict.fromkeys(" ".join(p.split()) for p in parts if p.strip()))
+
+
+def add_items(task_id: int, texts: list[str] | str, *, by: str = "director") -> list[int]:
+    """Добавить пункты в конец списка; такой пункт уже есть — не повторяем. Возвращает id новых."""
+    if not store.row("SELECT 1 FROM commitments WHERE id=?", (task_id,)):
+        raise ValueError(f"Нет задачи [{task_id}]")
+    have = {r["text"].lower() for r in store.rows("SELECT text FROM task_items WHERE task_id=?", (task_id,))}
+    sort = store.scalar("SELECT COALESCE(MAX(sort), 0) FROM task_items WHERE task_id=?", (task_id,)) or 0
+    out = []
+    for text in _item_texts(texts):
+        if text.lower() in have:
+            continue
+        sort += 1
+        have.add(text.lower())
+        out.append(store.execute("INSERT INTO task_items(task_id, text, sort, added_by, created) VALUES(?,?,?,?,?)",
+                                 (task_id, text[:200], sort, "claude" if by == "claude" else "director",
+                                  store.utcnow())))
+    return out
+
+
+def find_items(task_id: int, text: str) -> list[dict]:
+    """Пункты задачи по тексту (без регистра) — для ./ops: точное совпадение — только он; иначе те, где с этого
+    текста начинается слово («Склад» — «Склад в Казани», но не «Подсклад»)."""
+    q = " ".join((text or "").split()).lower().replace("ё", "е")
+    rows = store.rows("SELECT * FROM task_items WHERE task_id=? ORDER BY sort, id", (task_id,))
+    norm = {r["id"]: r["text"].lower().replace("ё", "е") for r in rows}
+    exact = [r for r in rows if norm[r["id"]] == q]
+    start = re.compile(r"(?<![a-zа-я0-9])" + re.escape(q))
+    return exact or [r for r in rows if q and start.search(norm[r["id"]])]
+
+
+def set_item_done(item_id: int, done: bool = True, note: str | None = None) -> None:
+    store.execute("UPDATE task_items SET done_at=?, note=? WHERE id=?",
+                  (store.utcnow() if done else None, (note or "").strip() or None if done else None, item_id))
+
+
+def remove_item(item_id: int) -> None:
+    store.execute("DELETE FROM task_items WHERE id=?", (item_id,))
+
+
+def _items(items: list[dict]) -> None:
+    """c["checklist"] — пункты задачи по порядку (не «items»: в шаблонах c.items — метод словаря);
+    c["items_done"] / c["items_total"]; c["share"] — какая доля задачи готова: выполненная — 1, открытая
+    с пунктами — доля готовых пунктов, без пунктов — 0."""
+    ids = [c["id"] for c in items]
+    rows = store.rows(f"SELECT * FROM task_items WHERE task_id IN ({','.join('?' * len(ids))}) ORDER BY sort, id", ids)
+    by_task: dict[int, list[dict]] = {}
+    for r in rows:
+        r["done"] = bool(r["done_at"])
+        by_task.setdefault(r["task_id"], []).append(r)
+    for c in items:
+        c["checklist"] = by_task.get(c["id"], [])
+        c["items_total"] = len(c["checklist"])
+        c["items_done"] = sum(1 for r in c["checklist"] if r["done"])
+        c["share"] = 1.0 if c["status"] == "done" else (
+            c["items_done"] / c["items_total"] if c["items_total"] else 0.0)
 
 
 Period = tuple[date | None, date | None]
 
 
 def _filters(person: str | None, q: str | None, created: Period | None, due: Period | None,
-             no_due: bool, unseen: bool = False) -> tuple[str, list]:
-    """Общие условия списка и доски: человек, поиск, дата создания, срок, только новые (директор их не видела)."""
+             no_due: bool, unseen: bool = False, project: int | str | None = None) -> tuple[str, list]:
+    """Общие условия списка и доски: человек, поиск, дата создания, срок, только новые (директор их не видела),
+    проект (id; "none" — задачи вне проектов)."""
     sql, params = "", []
+    if project == "none":
+        sql += " AND project_id IS NULL"
+    elif project:
+        sql += " AND project_id=?"
+        params.append(int(project))
     if unseen:
         sql += " AND status='open' AND seen_at IS NULL"
     if q:
@@ -261,9 +683,10 @@ def _filters(person: str | None, q: str | None, created: Period | None, due: Per
 
 
 def edit_commitment(cid: int, *, title: str, what: str, direction: str, who: str | None, whom: str | None,
-                    due: str | None, parent_id: int | None = None) -> None:
+                    due: str | None, parent_id: int | None = None, project_id: int | None = -1) -> None:
     """Изменить задачу из её карточки: заголовок, суть, тип, кто и кому, срок (пустой срок — без срока), часть
-    какой задачи (пусто — самостоятельная). Без сути заголовок становится и сутью."""
+    какой задачи (пусто — самостоятельная), проект (None — ни в каком, −1 — не менять). Без сути заголовок
+    становится и сутью."""
     if direction not in DIRECTIONS:
         raise ValueError(f"direction должен быть одним из: {', '.join(DIRECTIONS)}")
     title, what = title.strip(), what.strip() or title.strip()
@@ -274,10 +697,14 @@ def edit_commitment(cid: int, *, title: str, what: str, direction: str, who: str
     if parent_id:
         _check_parent(cid, parent_id)
     now = store.utcnow()
+    if project_id and project_id != -1:
+        _check_project(project_id)
     store.execute("UPDATE commitments SET title=?, what=?, direction=?, who=?, whom=?, due=?, parent_id=?, "
                   "seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
                   (title or None, what, direction, (who or "").strip() or None, (whom or "").strip() or None,
                    due or None, parent_id or None, now, now, cid))
+    if project_id != -1:
+        set_project(cid, project_id or None)
 
 
 def headline(c: dict) -> str:
@@ -493,11 +920,11 @@ SORTS = {"due": "по сроку", "created": "сначала новые"}
 def list_commitments(*, status: str | None = "open", direction: str | None = None, person: str | None = None,
                      overdue: bool = False, q: str | None = None, limit: int = 500, created: Period | None = None,
                      due: Period | None = None, no_due: bool = False, unseen: bool = False,
-                     sort: str = "due", archived: bool = False) -> list[dict]:
+                     sort: str = "due", archived: bool = False, project: int | str | None = None) -> list[dict]:
     """sort: due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху.
     Задачи «в работе» — всегда первыми. Архивные — только с archived=True (галочка «Показать архивные»),
     в конце; status="archived" — только архив, любой статус (./ops commitments list)."""
-    where, params = _filters(person, q, created, due, no_due, unseen)
+    where, params = _filters(person, q, created, due, no_due, unseen, project)
     sql = "SELECT * FROM commitments WHERE 1=1" + where
     if status == "archived":
         sql += " AND archived_at IS NOT NULL"
@@ -566,10 +993,31 @@ def _relations(items: list[dict]) -> None:
         r["headline"], r["route"] = headline(r), route(r)
         if r["parent_id"]:
             kids.setdefault(r["parent_id"], []).append(r)
-    hints = {}
-    for p in store.rows("SELECT * FROM proposals WHERE kind='task.done' AND status='pending' ORDER BY id"):
+    hints, merge_hints, wait_hints = {}, {}, {}
+    for p in store.rows("SELECT * FROM proposals WHERE kind IN ('task.done', 'task.merge', 'task.wait') "
+                        "AND status='pending' ORDER BY id"):
         p["payload"] = store.loads(p["payload"], {})
-        hints[p["payload"].get("commitment_id")] = p
+        cid = p["payload"].get("commitment_id")
+        if p["kind"] == "task.done":
+            hints[cid] = p
+        elif p["kind"] == "task.merge":
+            into = store.row("SELECT id, direction, who, whom, title, what FROM commitments WHERE id=?",
+                             (p["payload"].get("into"),))
+            if into:
+                into["headline"], into["route"] = headline(into), route(into)
+            p["into_task"] = into
+            merge_hints.setdefault(cid, p)
+        else:
+            wait_hints.setdefault(cid, []).append(p)
+    _waits(items)
+    _items(items)
+    pids = list({c["project_id"] for c in items if c.get("project_id")})
+    titles = {r["id"]: r for r in store.rows(
+        f"SELECT id, title, status FROM projects WHERE id IN ({','.join('?' * len(pids)) or 'NULL'})", pids)}
+    for c in items:
+        c["project"] = titles.get(c.get("project_id"))
+        c["merge_hint"] = merge_hints.get(c["id"]) if c["status"] == "open" else None
+        c["wait_hints"] = wait_hints.get(c["id"], []) if c["status"] == "open" else []
     for c in items:
         c["parent"] = by_id.get(c.get("parent_id"))
         c["children"] = sorted(kids.get(c["id"], []), key=lambda r: (r["status"] != "open", r["due"] or "9999"))
@@ -584,17 +1032,92 @@ def _relations(items: list[dict]) -> None:
     task_meetings.decorate(items)
 
 
+def _waits(items: list[dict]) -> None:
+    """«Ждёт» на карточках. c["waits"] — что ждёт задача: другие задачи (task) и события (event, until); done —
+    уже готово. c["holds"] — открытые задачи, которые ждут эту. c["blocked"] — ещё есть что ждать, c["waits_open"] —
+    сколько. c["wait_risk"] — почему срок под угрозой: то, что ждём, просрочено или придёт позже срока, или срок
+    уже сегодня. c["duplicate"] — задача, дублем которой оказалась эта."""
+    ids = [c["id"] for c in items]
+    marks = ",".join("?" * len(ids))
+    links = store.rows(f"SELECT * FROM task_links WHERE task_id IN ({marks}) OR waits_for IN ({marks}) ORDER BY id",
+                       [*ids, *ids])
+    want = {l["waits_for"] for l in links if l["waits_for"]} | {l["task_id"] for l in links} | {
+        c["duplicate_of"] for c in items if c.get("duplicate_of")}
+    tasks = {r["id"]: r for r in store.rows(
+        "SELECT id, direction, who, whom, title, what, due, status, closed_at, archived_at, kaiten_card_id "
+        f"FROM commitments WHERE id IN ({','.join('?' * len(want)) or 'NULL'})", list(want))}
+    # блокировки в Kaiten у карточек этих задач: есть ли там уже то, что задача ждёт (kaiten.sync_blockers)
+    cards = [c["kaiten_card_id"] for c in items if c.get("kaiten_card_id")]
+    in_kaiten = {r["id"]: {b.get("blocker_card_id") for b in store.loads(r["blockers"], []) or []}
+                 for r in store.rows(f"SELECT id, blockers FROM kaiten_cards WHERE id IN ({','.join('?' * len(cards)) or 'NULL'})",
+                                     cards)}
+    today = today_local()
+    for r in tasks.values():
+        r["headline"], r["route"], r["doer"] = headline(r), route(r), doer(r)
+        r["overdue"] = bool(r["status"] == "open" and r["due"] and r["due"] < today.isoformat())
+    for c in items:
+        c["waits"], c["holds"] = [], []
+        c["duplicate"] = tasks.get(c.get("duplicate_of"))
+    by_id = {c["id"]: c for c in items}
+    for l in links:
+        if (c := by_id.get(l["task_id"])) is not None:
+            t = tasks.get(l["waits_for"])
+            if l["waits_for"] and not t:
+                continue
+            c["waits"].append({
+                "id": l["id"], "task": t, "event": l["event"], "until": l["until"], "done_at": l["done_at"],
+                "done": (t["status"] != "open") if t else bool(l["done_at"]), "note": l["note"],
+                "by_claude": l["added_by"] == "claude", "by_kaiten": l["added_by"] == "kaiten",
+                # в Kaiten: on — карточку уже блокирует карточка той задачи, can — у обеих есть карточки, можно поставить
+                "kaiten": _kaiten_state(c, t, l, in_kaiten),
+                "late": bool(t and t["overdue"]) or bool(not t and not l["done_at"] and l["until"]
+                                                          and l["until"] < today.isoformat())})
+        if (c := by_id.get(l["waits_for"])) is not None and (t := tasks.get(l["task_id"])) and t["status"] == "open":
+            c["holds"].append({"id": l["id"], "task": t})
+    for c in items:
+        c["waits"].sort(key=lambda w: w["done"])
+        pending = [w for w in c["waits"] if not w["done"]]
+        c["blocked"], c["waits_open"] = bool(pending) and c["status"] == "open", len(pending)
+        c["wait_risk"] = _wait_risk(c, pending, today) if c["blocked"] else None
+
+
+def _kaiten_state(c: dict, t: dict | None, link: dict, in_kaiten: dict) -> str | None:
+    if not t or not c.get("kaiten_card_id") or not t.get("kaiten_card_id"):
+        return None
+    if link["added_by"] == "kaiten" or t["kaiten_card_id"] in in_kaiten.get(c["kaiten_card_id"], set()):
+        return "on"
+    if c["kaiten_card_id"] not in in_kaiten:  # карточки нет в зеркале — блокировку не поставить
+        return None
+    from opsdash.sources import kaiten
+
+    return "can" if kaiten.blockers_supported() else None
+
+
+def _wait_risk(c: dict, pending: list[dict], today: date) -> str | None:
+    for w in pending:
+        name = f"«{w['task']['headline']}»" if w["task"] else w["event"]
+        if w["late"]:
+            return f"{name} — срок уже прошёл, а задача его ждёт"
+        later = (w["task"] or {}).get("due") if w["task"] else w["until"]
+        if c["due"] and later and later > c["due"]:
+            return f"{name} — к {_as_date(later):%d.%m}, позже срока этой задачи"
+    if c["due"] and c["due"] <= today.isoformat():
+        return "срок " + ("сегодня" if c["due"] == today.isoformat() else "прошёл") + ", а задача ещё ждёт"
+    return None
+
+
 def commitments_board(*, person: str | None = None, q: str | None = None, done_days: int = 14,
                       created: Period | None = None, due: Period | None = None,
                       no_due: bool = False, unseen: bool = False, sort: str = "due",
-                      archived: bool = False) -> dict[str, list[dict]]:
+                      archived: bool = False, project: int | str | None = None) -> dict[str, list[dict]]:
     """Доска задач и договорённостей: открытые — по направлению, «Готово» — закрытые за done_days дней
     (последние закрытые сверху при любой сортировке). archived — добавить архивные в конец колонок:
     открытые — в свою, выполненные и отменённые — в «Готово», за любой срок."""
     board = {d: list_commitments(status="open", direction=d, person=person, q=q, created=created, due=due,
-                                 no_due=no_due, unseen=unseen, sort=sort, archived=archived) for d in DIRECTIONS}
+                                 no_due=no_due, unseen=unseen, sort=sort, archived=archived, project=project)
+             for d in DIRECTIONS}
     since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=done_days))
-    where, params = _filters(person, q, created, due, no_due, unseen)
+    where, params = _filters(person, q, created, due, no_due, unseen, project)
     sql = ("SELECT * FROM commitments WHERE status='done' AND archived_at IS NULL "
            "AND COALESCE(closed_at, updated) >= ?" + where)
     board["done"] = _mark(store.rows(sql + " ORDER BY COALESCE(closed_at, updated) DESC LIMIT 300", [since, *params]))

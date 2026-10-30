@@ -475,7 +475,7 @@
 <section class="card"><div class="card-b" style="padding-top:12px">
   <p>Что Claude может делать сам, а что — только после вашего «Да» в боте или на сводке.</p>
   <form method="post" action="/settings/autonomy">
-    {% for key, title in [('kaiten_create_for_me', 'Создавать карточки в Kaiten на вас'), ('kaiten_create_for_others', 'Создавать карточки в Kaiten на коллег'), ('kaiten_comment', 'Писать комментарии в карточки Kaiten'), ('kaiten_update', 'Менять сроки и исполнителей в Kaiten'), ('calendar', 'Создавать и отменять встречи в календаре'), ('task_done', 'Закрывать задачи PULSE, которые по встречам и переписке выглядят выполненными'), ('attention_done', 'Убирать «Нужен ответ», когда по вашему сообщению видно, что вы уже ответили'), ('task_meeting', 'Связывать задачи со встречами в календаре, которые им посвящены')] %}
+    {% for key, title in [('kaiten_create_for_me', 'Создавать карточки в Kaiten на вас'), ('kaiten_create_for_others', 'Создавать карточки в Kaiten на коллег'), ('kaiten_comment', 'Писать комментарии в карточки Kaiten'), ('kaiten_update', 'Менять сроки и исполнителей в Kaiten'), ('calendar', 'Создавать и отменять встречи в календаре'), ('task_done', 'Закрывать задачи PULSE, которые по встречам и переписке выглядят выполненными'), ('attention_done', 'Убирать «Нужен ответ», когда по вашему сообщению видно, что вы уже ответили'), ('task_meeting', 'Связывать задачи со встречами в календаре, которые им посвящены'), ('task_wait', 'Отмечать, что задача ждёт другую задачу или событие, если это не сказано прямо'), ('task_merge', 'Объединять задачи-дубли'), ('project_create', 'Собирать задачи в новый проект')] %}
       <label>{{ title }}</label>
       <select name="{{ key }}" style="max-width:320px"><option value="confirm" {{ 'selected' if settings.autonomy[key] != 'auto' }}>только после подтверждения</option><option value="auto" {{ 'selected' if settings.autonomy[key] == 'auto' }}>сам, без вопросов</option></select>
     {% endfor %}
@@ -503,6 +503,7 @@
       <div><label>Напоминание о задачах без движения</label><input type="time" name="stale_check" value="{{ settings.schedule.stale_check | hhmm }}"></div>
       <div><label>База знаний: обзор недели, по пятницам</label><input type="time" name="anthology_weekly" value="{{ settings.schedule.anthology_weekly | hhmm }}"><div class="hint">Пусто — не делать.</div></div>
       <div><label>Сводка «О компании» для Claude, по понедельникам</label><input type="time" name="context_weekly" value="{{ settings.schedule.context_weekly | hhmm }}"><div class="hint">Пусто — не обновлять.</div></div>
+      <div><label>Сборка проектов, по понедельникам</label><input type="time" name="projects_weekly" value="{{ settings.schedule.projects_weekly | hhmm }}"><div class="hint">Claude предложит проекты, связи «ждёт» и объединение дублей. Пусто — только по кнопке в «Задачи → Проекты».</div></div>
     </div>
     <div class="hint">Пустое время — не отправлять. Если компьютер был выключен, дайджест придёт после включения (в пределах 4 часов).</div>
     <label class="check"><input type="checkbox" name="meeting_processed" {{ 'checked' if settings.notifications.meeting_processed }}> Присылать итог каждой разобранной встречи</label>

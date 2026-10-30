@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 from datetime import date, datetime, time, timedelta, timezone
 
-from opsdash import config, proposals, records, store
+from opsdash import config, projects, proposals, records, store
 from opsdash.sources import kaiten
 
 SOURCE_TITLES = {
@@ -246,6 +246,8 @@ def snapshot(settings: dict | None = None) -> dict:
         "meetings": records.list_meetings(limit=8),
         "health": sources_health(settings),
         "unprocessed": store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0,
+        "unblocked": records.unblocked(),
+        "projects": projects.list_projects(),
     }
 
 
@@ -284,6 +286,16 @@ def today_text(settings: dict | None = None, snap: dict | None = None) -> str:
         lines.append(f"\n<b>🤝 Вам должны: {len(s['to_me'])}</b>" + (f" (просрочено {len(overdue)})" if overdue else ""))
         for c in (overdue + [c for c in s["to_me"] if not c["overdue"]])[:5]:
             lines.append(f"• {_e(c['who'])}: {_e(c['what'])}{_due(c)}")
+    active = [p for p in s["projects"] if p["status"] == "active"]
+    if active:
+        lines.append(f"\n<b>📁 Проекты: {len(active)}</b>")
+        for p in active[:5]:
+            on = f", стоит на: {_e(', '.join(dict.fromkeys(x['whom'] for x in p['stuck_on'])))}" if p["stuck_on"] else ""
+            lines.append(f"• {_e(p['title'])} — {p['percent']}% ({p['done']} из {p['total']}){on}")
+    if s["unblocked"]:
+        lines.append(f"\n<b>🔓 Можно делать: {len(s['unblocked'])}</b> — то, чего ждали, готово")
+        for c in s["unblocked"][:5]:
+            lines.append(f"• {_e(records.headline(c))}{_e(' → ' + c['whom'] if c['direction'] == 'mine' and c['whom'] else '')}")
     if s["stale"]:
         lines.append(f"\n<b>🐌 Без движения в Kaiten: {len(s['stale'])}</b>")
         for c in s["stale"][:5]:
@@ -312,8 +324,28 @@ def overview_markdown(settings: dict | None = None) -> str:
         out += [f"- [commitment {c['id']}] {c['who'] or ''} → {c['whom'] or ''}: {c['what']}"
                 f"{' — до ' + c['due'] if c['due'] else ''}{' (ПРОСРОЧЕНО)' if c['overdue'] else ''}"
                 f"{' · kaiten #' + str(c['kaiten_card_id']) if c['kaiten_card_id'] else ''}"
+                f"{' · проект [project ' + str(c['project_id']) + ']' if c.get('project_id') else ''}"
                 f"{' · часть [commitment ' + str(c['parent_id']) + ']' if c.get('parent_id') else ''}"
+                f"{''.join(_wait_text(w) for w in c['waits'] if not w['done'])}"
+                f"{' · пункты ' + str(c['items_done']) + '/' + str(c['items_total']) if c.get('checklist') else ''}"
+                f"{' · срок под угрозой: ' + c['wait_risk'] if c.get('wait_risk') else ''}"
                 f"{' · предложено закрыть' if c.get('done_hint') else ''}" for c in s[key]] or ["- нет"]
+    out.append("\n## Проекты")
+    for p in s["projects"]:
+        line = (f"- [project {p['id']}] {p['title']} — {p['done']} из {p['total']} ({p['percent']}%)"
+                f"{' · ' + p['status_title'] if p['status'] != 'active' else ''}"
+                f"{' · срок ' + p['due'] if p['due'] else ''}{' (ПРОСРОЧЕН)' if p['late'] else ''}")
+        if p["stuck_on"]:
+            line += " · стоит на: " + "; ".join(f"[commitment {x['task']['id']}] ({x['who']})" for x in p["stuck_on"])
+        if p["blocked"]:
+            line += f" · ждут: {p['blocked']}"
+        out.append(line)
+    if not s["projects"]:
+        out.append("- нет")
+    out.append("\n## Можно делать: то, чего задача ждала, готово (за 2 дня)")
+    out += [f"- [commitment {c['id']}] {c['who'] or ''} → {c['whom'] or ''}: {records.headline(c)} — дождалась "
+            + (f"[commitment {c['freed_by']['task']['id']}] «{c['freed_by']['task']['headline']}»" if c["freed_by"]["task"]
+               else f"события «{c['freed_by']['event']}»") for c in s["unblocked"]] or ["- нет"]
     out.append("\n## Kaiten: без движения")
     out += [f"- #{c['id']} {c['title']} · {c['responsible_name'] or 'без исполнителя'} · {c['column_title']} · "
             f"{c['idle_days']} дн. · {c['url']}" for c in s["stale"]] or ["- нет"]
@@ -323,6 +355,13 @@ def overview_markdown(settings: dict | None = None) -> str:
     out += [f"- {m['id']}: {m['title'] or ''} · {m['status']}" for m in s["meetings"]] or ["- нет"]
     out.append(f"\nНеразобранных сообщений: {s['unprocessed']}")
     return "\n".join(out)
+
+
+def _wait_text(w: dict) -> str:
+    """«ждёт» в строке задачи для Claude: что ещё не готово."""
+    if w["task"]:
+        return f" · ждёт [commitment {w['task']['id']}] ({w['task']['doer']}){' — просрочена' if w['late'] else ''}"
+    return f" · ждёт событие «{w['event']}»" + (f" к {w['until']}" if w["until"] else "")
 
 
 def since(hours: int) -> str:

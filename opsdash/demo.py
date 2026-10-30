@@ -82,7 +82,8 @@ def seed() -> None:
     tz = config.tz()
     now = config.now()
     today = now.date()
-    ids: dict[str, list] = {k: [] for k in ("people", "messages", "commitments", "attention", "proposals", "outbox")}
+    ids: dict[str, list] = {k: [] for k in ("people", "messages", "commitments", "attention", "proposals", "outbox",
+                                            "projects", "task_links", "task_items")}
 
     def d(n: int) -> str:
         return (today + timedelta(days=n)).isoformat()
@@ -218,6 +219,8 @@ def seed() -> None:
         ids["commitments"].append(records.add_commitment(direction=direction, who=who, whom=whom, what=what, due=due,
                                                          source_type=st, source_ref=ref))
 
+    _demo_project(ids, d, src_m)
+
     batch = f"meeting:{mid}"
     proposals_data = [
         ("Карточка «Новый график запуска склада с подрядчиком» → Дмитрий Орлов, до " + d(3)[8:10] + "." + d(3)[5:7],
@@ -249,6 +252,50 @@ def seed() -> None:
         "INSERT OR REPLACE INTO jobs(name, last_run, last_ok, running) VALUES('collect:kaiten', ?, ?, 0)",
         (store.utcnow(), store.utcnow()),
     )
+
+
+def _demo_project(ids: dict, d, src_m: str) -> None:
+    """Проект «Запуск склада в Казани»: цепочка «ждёт», задача с пунктами, выполненная задача и дубль, который
+    Claude предлагает объединить, — чтобы в «Задачи → Проекты» сразу было что посмотреть."""
+    from opsdash import projects, proposals
+
+    st, _, ref = src_m.partition(":")
+    pid = projects.add(title="Запуск склада в Казани", goal="Склад принимает и отгружает заказы с 15.11", due=d(16))
+    ids["projects"].append(pid)
+    by_title = {records.headline(c): c["id"] for c in records.list_commitments(status="open")}
+    schedule = by_title["Новый график запуска склада с подрядчиком"]
+    approve = by_title["Согласовать с собственником перенос запуска склада"]
+
+    def task(direction, who, whom, title, what, due=None):
+        cid = records.add_commitment(direction=direction, who=who, whom=whom, title=title, what=what, due=due,
+                                     source_type=st, source_ref=ref, project_id=pid)
+        ids["commitments"].append(cid)
+        return cid
+
+    schemes = task("to_me", "Дмитрий Орлов", "Анна", "Схемы процессов склада",
+                   "Нарисовать схемы процессов склада для подрядчика: приёмка, хранение, комплектация, отгрузка, "
+                   "возвраты, инвентаризация", d(3))
+    ids["task_items"] += records.add_items(schemes, "Приёмка; Хранение; Комплектация; Отгрузка; Возвраты; Инвентаризация")
+    for item in ids["task_items"][:3]:
+        records.set_item_done(item, note="прислал на планёрке")
+    brief = task("mine", "Анна", "Подрядчик", "Описание процесса подрядчику",
+                 "Собрать из схем Дмитрия описание процесса и передать подрядчику, чтобы он настроил склад", d(5))
+    hire = task("other", "Мария Кузнецова", "Дмитрий Орлов", "Найм кладовщиков к запуску",
+                "Нанять четырёх кладовщиков к новой дате запуска", d(10))
+    budget = task("to_me", "Олег Соколов", "Анна", "Бюджет запуска склада", "Посчитать бюджет запуска склада")
+    records.update_commitment(budget, status="done")
+    dup = task("to_me", "Дмитрий Орлов", "Анна", "Процессы по карте склада",
+               "Описать процессы склада по карте помещения: приёмка и отгрузка в первую очередь")
+    projects.assign(pid, [schedule, approve])
+    ids["task_links"] += [
+        records.add_wait(approve, waits_for=schedule, note="без нового графика нечего согласовывать"),
+        records.add_wait(brief, waits_for=schemes, note="описание собирается из схем"),
+        records.add_wait(hire, waits_for=approve),
+        records.add_wait(hire, event="встреча Олега с собственником по бюджету", until=d(2)),
+    ]
+    ids["proposals"].append(proposals.propose_task_merge(
+        commitment_id=dup, into=schemes, reason="Обе задачи — схемы процессов склада от Дмитрия, записаны дважды",
+        source_ref=src_m)["id"])
 
 
 def clear() -> None:

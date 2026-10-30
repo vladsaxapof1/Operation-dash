@@ -125,6 +125,19 @@ class Kaiten:
     def comment(self, card_id: int, text: str) -> dict:
         return self.post(f"/cards/{card_id}/comments", {"text": text})
 
+    def blockers(self, card_id: int) -> list[dict]:
+        """Блокировки карточки (и снятые — у них released)."""
+        return self.get(f"/cards/{card_id}/blockers") or []
+
+    def block(self, card_id: int, *, blocker_card_id: int | None = None, reason: str | None = None) -> dict:
+        """Заблокировать карточку: другой карточкой (blocker_card_id) и/или причиной текстом."""
+        payload: dict = {}
+        if blocker_card_id:
+            payload["blocker_card_id"] = int(blocker_card_id)
+        if reason:
+            payload["reason"] = reason[:4096]
+        return self.post(f"/cards/{card_id}/blockers", payload)
+
     def update_card(self, card_id: int, fields: dict) -> dict:
         payload = dict(fields)
         if payload.get("due_date"):
@@ -275,7 +288,56 @@ def collect(settings: dict | None = None, transport: httpx.BaseTransport | None 
         store.execute(f"DELETE FROM kaiten_cards WHERE space_id NOT IN ({marks})", tracked_ids)
     else:
         store.execute("DELETE FROM kaiten_cards")
+    try:
+        sync_blockers(kc)
+    except Exception as e:  # noqa: BLE001 — блокировки не должны мешать зеркалу карточек
+        store.log("kaiten", f"блокировки не обновились: {e}", "warning")
     return f"карточек: {total} в {len(tracked)} пространствах"
+
+
+BLOCKERS_LIMIT = 50  # сколько карточек с задачами PULSE опрашивать за раз
+BLOCKERS_PAUSE_DAYS = 7  # тариф без блокировок (402) — столько не спрашиваем
+
+
+def _active(blockers: list[dict]) -> list[dict]:
+    return [{"id": b.get("id"), "blocker_card_id": b.get("blocker_card_id"),
+             "blocker_card_title": b.get("blocker_card_title"), "reason": b.get("reason")}
+            for b in blockers if not b.get("released")]
+
+
+def save_blockers(card_id: int, blockers: list[dict]) -> None:
+    store.execute("UPDATE kaiten_cards SET blockers=? WHERE id=?", (store.json_col(_active(blockers)), card_id))
+
+
+def blockers_supported() -> bool:
+    off = store.parse_ts(store.get_state("kaiten_blockers_off"))
+    return not (off and off > datetime.now(timezone.utc) - timedelta(days=BLOCKERS_PAUSE_DAYS))
+
+
+def sync_blockers(kc: Kaiten) -> int:
+    """Блокировки карточек, к которым привязаны открытые задачи PULSE: в зеркало (kaiten_cards.blockers) и в «ждёт»
+    у задач (records.sync_kaiten_waits). Карточек без задач не опрашиваем — это запрос на каждую."""
+    from opsdash import records
+
+    if not blockers_supported():
+        return 0
+    ids = [r["id"] for r in store.rows(
+        "SELECT DISTINCT k.id FROM kaiten_cards k JOIN commitments c ON c.kaiten_card_id=k.id "
+        "WHERE c.status='open' AND c.archived_at IS NULL ORDER BY k.id LIMIT ?", (BLOCKERS_LIMIT,))]
+    done = []
+    for cid in ids:
+        try:
+            save_blockers(cid, kc.blockers(cid))
+            done.append(cid)
+        except KaitenError as e:
+            if ": 402 " in str(e):  # тариф без блокировок
+                store.set_state("kaiten_blockers_off", store.utcnow())
+                store.log("kaiten", "блокировки карточек недоступны на этом тарифе Kaiten — не спрашиваем неделю")
+                break
+            if ": 403 " not in str(e) and ": 404 " not in str(e):
+                raise
+    records.sync_kaiten_waits(done)
+    return len(done)
 
 
 def check(settings: dict | None = None, transport: httpx.BaseTransport | None = None) -> str:
@@ -357,6 +419,7 @@ def decorate(cards: list[dict], settings: dict | None = None) -> list[dict]:
         c["person"] = c["responsible_name"] or ""
         c["initials"] = _initials(c["responsible_name"] or c["owner_name"])
         c["state_title"] = STATE_TITLES.get(c["state"], "")
+        c["blocked_by"] = store.loads(c.get("blockers"), []) or []  # блокировки в Kaiten (kaiten.sync_blockers)
     return cards
 
 

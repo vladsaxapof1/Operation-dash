@@ -118,7 +118,8 @@ CREATE TABLE IF NOT EXISTS kaiten_cards (
     created TEXT, updated TEXT,
     last_moved_at TEXT, column_changed_at TEXT,
     url TEXT,
-    synced_at TEXT
+    synced_at TEXT,
+    blockers TEXT                    -- JSON [{id, blocker_card_id, blocker_card_title, reason}]: что блокирует карточку
 );
 
 CREATE TABLE IF NOT EXISTS kaiten_boards (
@@ -174,8 +175,48 @@ CREATE TABLE IF NOT EXISTS commitments (
     reminded_at TEXT,                -- когда напомнили исполнителю в Telegram (кнопка «Отправить»)
     in_work_at TEXT,                 -- директор отметила «В работе»: карточка сверху колонки, зелёная
     archived_at TEXT,                -- убрана в архив: не видна на доске, в списках и дайджестах
+    duplicate_of INTEGER,            -- дубль какой задачи: закрыта при объединении (records.merge_commitments)
+    project_id INTEGER,              -- в каком проекте (opsdash.projects); подзадачи получают проект основной
     created TEXT, updated TEXT, closed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS projects (         -- проекты: задачи, объединённые одним результатом (opsdash.projects)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    goal TEXT,                       -- что считаем результатом
+    owner TEXT,                      -- кто ведёт; пусто — директор
+    due TEXT,                        -- YYYY-MM-DD
+    status TEXT DEFAULT 'active',    -- active | paused | done
+    kaiten_card_id INTEGER,          -- карточка проекта в Kaiten, если есть
+    added_by TEXT,                   -- director | claude
+    created TEXT, updated TEXT, closed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS task_links (       -- «ждёт»: задачу нельзя закончить, пока не сделано другое (records)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,        -- какая задача ждёт
+    waits_for INTEGER,               -- какую задачу; пусто — ждёт событие
+    event TEXT,                      -- событие: «встреча Олега с собственником», «остатки от бухгалтерии»
+    until TEXT,                      -- когда событие ожидается, YYYY-MM-DD
+    done_at TEXT,                    -- событие случилось (отметили вручную или Claude)
+    note TEXT,                       -- почему ждёт, откуда известно
+    source_ref TEXT,
+    added_by TEXT,                   -- director | claude
+    created TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_task_links_task ON task_links(task_id);
+CREATE TABLE IF NOT EXISTS task_items (       -- пункты внутри задачи: разделы, этапы, части — прогресс по частям
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    done_at TEXT,
+    note TEXT,                       -- откуда известно, что пункт готов
+    sort INTEGER DEFAULT 0,
+    added_by TEXT,                   -- director | claude
+    created TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_task_items_task ON task_items(task_id);
+CREATE INDEX IF NOT EXISTS ix_task_links_for ON task_links(waits_for);
 
 CREATE TABLE IF NOT EXISTS attention (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -357,6 +398,9 @@ MIGRATIONS = [
     ("commitments", "event_uid", "TEXT"),   # встреча календаря, посвящённая задаче (opsdash.task_meetings)
     ("commitments", "event_info", "TEXT"),  # её название и время на момент связи — JSON
     ("ask_chats", "effort", "TEXT"),
+    ("commitments", "duplicate_of", "INTEGER"),
+    ("commitments", "project_id", "INTEGER"),
+    ("kaiten_cards", "blockers", "TEXT"),
 ]
 
 

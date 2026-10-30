@@ -25,6 +25,8 @@ class FakeKaiten:
         self.comments = []
         self.members = []
         self.requests = []
+        self.blockers = {}  # card_id → [blocker]
+        self.blockers_tariff = True  # False — тариф без блокировок (402)
         for i in range(105):  # больше одной страницы
             self.add_card(10, f"Карточка {i}", state=2 if i % 2 else 1, moved_days=i % 10, responsible=2)
 
@@ -84,6 +86,18 @@ class FakeKaiten:
         if m:
             self.members.append((int(m[1]), int(m[2]), body["type"]))
             return httpx.Response(200, json={"type": body["type"]})
+        m = re.fullmatch(r"/cards/(\d+)/blockers", path)
+        if m and not self.blockers_tariff:
+            return httpx.Response(402, json={"message": "Feature is not supported by tariff"})
+        if m and request.method == "GET":
+            return httpx.Response(200, json=self.blockers.get(int(m[1]), []))
+        if m and request.method == "POST":
+            self.next_id += 1
+            other = self.cards.get(body.get("blocker_card_id"))
+            item = {"id": self.next_id, "card_id": int(m[1]), "reason": body.get("reason"), "released": False,
+                    "blocker_card_id": body.get("blocker_card_id"), "blocker_card_title": other and other["title"]}
+            self.blockers.setdefault(int(m[1]), []).append(item)
+            return httpx.Response(200, json=item)
         m = re.fullmatch(r"/cards/(\d+)/comments", path)
         if m and int(m[1]) not in self.cards:
             return httpx.Response(404, json={"message": "card not found"})

@@ -587,6 +587,8 @@ def _commitment_line(c: dict) -> str:
         line += " · в архиве"
     if c["kaiten_card_id"]:
         line += f" · kaiten #{c['kaiten_card_id']}"
+    if c.get("project"):
+        line += f" · проект [{c['project']['id']}] «{c['project']['title']}»"
     if c["source_type"]:
         line += f" · источник {c['source_type']}:{c['source_ref'] or ''}"
     if c.get("parent"):
@@ -594,8 +596,23 @@ def _commitment_line(c: dict) -> str:
     if c.get("children"):
         line += " · подзадачи: " + ", ".join(f"[{k['id']}] {k['route']}" + (f" ({k['status']})" if k["status"] != "open" else "")
                                             for k in c["children"])
+    if c.get("checklist"):
+        line += f" · пункты {c['items_done']}/{c['items_total']}: " + ", ".join(
+            ("✓" if r["done"] else "☐") + r["text"] for r in c["checklist"])
+    if c.get("duplicate"):
+        line += f" · дубль задачи [{c['duplicate']['id']}] «{c['duplicate']['headline']}»"
+    for w in c.get("waits") or []:
+        state = " — готово" if w["done"] else (" — ПРОСРОЧЕНО" if w["late"] else "")
+        line += (f" · ждёт [{w['task']['id']}] «{w['task']['headline']}» ({w['task']['doer']}){state}" if w["task"]
+                 else f" · ждёт событие «{w['event']}»" + (f" к {w['until']}" if w["until"] else "") + state)
+    if c.get("holds"):
+        line += " · её ждут: " + ", ".join(f"[{h['task']['id']}] «{h['task']['headline']}»" for h in c["holds"])
+    if c.get("wait_risk"):
+        line += f" · срок под угрозой: {c['wait_risk']}"
     if c.get("done_hint"):
         line += " · предложено закрыть, ждёт директора"
+    if c.get("merge_hint"):
+        line += f" · предложено объединить с [{c['merge_hint']['payload'].get('into')}], ждёт директора"
     if c.get("meeting"):
         mt = c["meeting"]
         line += f" · встреча «{mt['title']}» {store.local(mt['start'])}" + (" (прошла)" if mt["past"] else "") \
@@ -619,21 +636,168 @@ def cmd_commitments(a) -> None:
         try:
             cid = records.add_commitment(
                 direction=a.direction, what=a.what, who=a.who, whom=a.whom, due=a.due, source_type=st, source_ref=ref,
-                quote=a.quote, kaiten_card_id=a.card, note=a.note, title=a.title, parent_id=a.parent,
+                quote=a.quote, kaiten_card_id=a.card, note=a.note, title=a.title, parent_id=a.parent, force=a.force,
+                project_id=a.project,
             )
         except ValueError as e:
             fail(str(e))
         out(f"Обещание [{cid}] сохранено" + (f" как часть задачи [{a.parent}]" if a.parent else ""))
+        similar = records.similar_open(direction=a.direction, who=a.who, whom=a.whom, title=a.title, what=a.what,
+                                       kaiten_card_id=a.card, exclude=cid)
+        if similar:
+            out("Похожие открытые задачи того же человека — проверь, не дубль ли это:")
+            for c in similar:
+                out(f"  [{c['id']}] «{c['headline']}» ({c['route']}): {short(c['what'], 160)}")
+            out(f"Если это та же работа — ./ops commitments merge {cid} --into <id> (новую ты только что добавил, "
+                "её можно объединить сразу); если часть — --parent; если другая задача — ничего делать не нужно.")
+    elif a.action == "wait":
+        if not a.waits_for and not a.event:
+            fail("укажите --for <id задачи> или --event \"<событие>\"")
+        try:
+            if a.remove or a.happened:
+                found = records.find_waits(a.id, waits_for=a.waits_for, event=a.event)
+                if not found:
+                    fail("такой связи у задачи нет — ./ops commitments list покажет, чего она ждёт")
+                for link in found:
+                    if a.remove:
+                        records.remove_wait(link["id"])
+                    else:
+                        records.set_event_done(link["id"])
+                out("Связь убрана" if a.remove else "Отмечено: событие случилось")
+                return
+            st, ref = parse_source(a.source)
+            records.add_wait(a.id, waits_for=a.waits_for, event=a.event, until=a.until, note=a.note,
+                             source_ref=f"{st}:{ref}" if ref else None,
+                             by="claude" if os.environ.get("OPSDASH_AGENT") else "director")
+        except ValueError as e:
+            fail(str(e))
+        c = records.get_commitment(a.id)
+        out(f"Задача [{a.id}] ждёт: " + "; ".join(
+            (f"[{w['task']['id']}] «{w['task']['headline']}»" if w["task"] else f"событие «{w['event']}»")
+            + (" — готово" if w["done"] else "") for w in c["waits"]))
+    elif a.action == "items":
+        if not records.get_commitment(a.id):
+            fail(f"нет задачи [{a.id}]")
+        try:
+            if a.add:
+                records.add_items(a.id, a.add, by="claude" if os.environ.get("OPSDASH_AGENT") else "director")
+            for texts, op in ((a.done, "done"), (a.undo, "undo"), (a.remove, "remove")):
+                for text in texts or []:
+                    found = records.find_items(a.id, text)
+                    if not found:
+                        fail(f"у задачи нет пункта «{text}» — ./ops commitments items {a.id} покажет список")
+                    for r in found:
+                        if op == "remove":
+                            records.remove_item(r["id"])
+                        else:
+                            records.set_item_done(r["id"], op == "done", a.note)
+        except ValueError as e:
+            fail(str(e))
+        c = records.get_commitment(a.id)
+        out(f"Пункты задачи [{a.id}] «{records.headline(c)}» — {c['items_done']} из {c['items_total']}:")
+        for r in c["checklist"]:
+            out(f"  {'✓' if r['done'] else '☐'} {r['text']}" + (f" — {r['note']}" if r.get("note") else ""))
+        if not c["checklist"]:
+            out("  пунктов нет — добавить: --add \"Приёмка\" --add \"Хранение\"")
+    elif a.action == "merge":
+        drop = records.get_commitment(a.id)
+        if not drop:
+            fail(f"нет задачи [{a.id}]")
+        if os.environ.get("OPSDASH_AGENT") and drop["seen_at"]:
+            fail("директор эту задачу уже видела — объединять только предложением: "
+                 f"./ops propose merge --commitment {a.id} --into {a.into} --reason \"<почему это одно и то же>\"")
+        try:
+            records.merge_commitments(a.id, a.into, note=a.note)
+        except ValueError as e:
+            fail(str(e))
+        out(f"Задача [{a.id}] закрыта как дубль [{a.into}]: источник, связи и подзадачи — в [{a.into}]")
     elif a.action == "set":
         try:
             records.update_commitment(a.id, status=a.status, due=a.due, kaiten_card_id=a.card, note=a.note, what=a.what,
-                                      title=a.title, who=a.who, whom=a.whom, parent_id=a.parent)
+                                      title=a.title, who=a.who, whom=a.whom, parent_id=a.parent, project_id=a.project)
         except ValueError as e:
             fail(str(e))
         if a.in_work:
             records.set_in_work(a.id, a.in_work == "on")
         if a.archived:
             records.set_archived(a.id, a.archived == "on")
+        out("Сохранено")
+
+
+def _ids(value: str | None) -> list[int]:
+    try:
+        return [int(x) for x in (value or "").replace(" ", ",").split(",") if x.strip()]
+    except ValueError:
+        fail("номера задач — числа через запятую: 57,69,80")
+
+
+def _project_line(p: dict) -> str:
+    line = f"[{p['id']}] «{p['title']}» — {p['done']} из {p['total']} ({p['percent']}%" + (
+        ", с учётом пунктов)" if p["partial"] else ")")
+    if p["status"] != "active":
+        line += f" · {p['status_title']}"
+    if p["due"]:
+        line += f" · срок {p['due']}" + (" (ПРОСРОЧЕН)" if p["late"] else "")
+    if p["owner"]:
+        line += f" · ведёт {p['owner']}"
+    if p["stuck_on"]:
+        line += " · стоит на: " + "; ".join(f"{s['who']} — [{s['task']['id']}] «{records.headline(s['task'])}»"
+                                            for s in p["stuck_on"])
+    if p["blocked"]:
+        line += f" · ждут: {p['blocked']}"
+    if p["overdue"]:
+        line += f" · просрочено: {p['overdue']}"
+    if p.get("goal"):
+        line += f"\n    результат: {p['goal']}"
+    return line
+
+
+def cmd_projects(a) -> None:
+    from opsdash import projects
+
+    if a.action == "list":
+        items = projects.list_projects("all" if a.all else "active")
+        if a.json:
+            return as_json(items)
+        for p in items:
+            out(_project_line(p))
+        if not items:
+            out("Проектов нет.")
+    elif a.action == "show":
+        p = projects.get(a.id)
+        if not p:
+            fail(f"нет проекта [{a.id}]")
+        if a.json:
+            return as_json(p)
+        out(_project_line(p))
+        for n, step in enumerate(p["steps"], 1):
+            out(f"\nШаг {n}" + (" — можно делать сейчас" if n == 1 else " — ждёт предыдущих"))
+            for c in step:
+                out("  " + _commitment_line(c))
+        if p["parked"]:
+            out("\nВ архиве (в прогресс не идут):")
+            for c in p["parked"]:
+                out("  " + _commitment_line(c))
+        out("\nВыполнено:" if p["finished"] else "\nВыполненных пока нет.")
+        for c in p["finished"]:
+            out("  " + _commitment_line(c))
+    elif a.action == "add":
+        if os.environ.get("OPSDASH_AGENT"):
+            fail("новый проект — только предложением: ./ops propose project --title … --tasks … --reason …")
+        try:
+            pid = projects.add(title=a.title, goal=a.goal, owner=a.owner, due=a.due, kaiten_card_id=a.card)
+            found = projects.assign(pid, _ids(a.tasks))
+        except ValueError as e:
+            fail(str(e))
+        out(f"Проект [{pid}] «{a.title}» создан" + (f", задач: {len(found)}" if found else ""))
+    elif a.action == "set":
+        try:
+            projects.update(a.id, title=a.title, goal=a.goal, owner=a.owner, due=a.due, kaiten_card_id=a.card,
+                            status=a.status)
+            if a.tasks:
+                projects.assign(a.id, _ids(a.tasks))
+        except ValueError as e:
+            fail(str(e))
         out("Сохранено")
 
 
@@ -795,6 +959,18 @@ def cmd_propose(a) -> None:
         elif a.kind == "done":
             p = proposals.propose_task_done(commitment_id=a.commitment, quote=a.quote, batch=a.batch, reason=a.reason,
                                             source_ref=source_ref)
+        elif a.kind == "wait":
+            p = proposals.propose_task_wait(commitment_id=a.commitment, waits_for=a.waits_for, event=a.event,
+                                            until=a.until, batch=a.batch, reason=a.reason, source_ref=source_ref)
+        elif a.kind == "merge":
+            p = proposals.propose_task_merge(commitment_id=a.commitment, into=a.into, quote=a.quote, batch=a.batch,
+                                             reason=a.reason, source_ref=source_ref)
+        elif a.kind == "kaiten-block":
+            p = proposals.propose_kaiten_block(card_id=a.card, blocker_card=a.blocker_card, text=a.text, batch=a.batch,
+                                               reason=a.reason, source_ref=source_ref)
+        elif a.kind == "project":
+            p = proposals.propose_project(title=a.title, goal=a.goal, owner=a.owner, due=a.due,
+                                          tasks=_ids(a.tasks), batch=a.batch, reason=a.reason, source_ref=source_ref)
         elif a.kind == "answered":
             p = proposals.propose_answered(attention_id=a.attention, quote=a.quote, batch=a.batch, reason=a.reason,
                                            source_ref=source_ref)
@@ -1105,6 +1281,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--card", type=int, help="карточка Kaiten")
     x.add_argument("--note")
     x.add_argument("--parent", type=int, help="часть задачи с этим id: директор передала её работу дальше")
+    x.add_argument("--force", action="store_true",
+                   help="добавить, даже если у этой карточки Kaiten уже есть открытая задача")
+    x.add_argument("--project", type=int, help="в проект с этим id (./ops projects list)")
     x = ms.add_parser("set")
     x.add_argument("id", type=int)
     x.add_argument("--status", choices=["open", "done", "cancelled"])
@@ -1116,9 +1295,50 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--who")
     x.add_argument("--whom")
     x.add_argument("--parent", type=int, help="сделать частью задачи с этим id (0 — отвязать)")
+    x.add_argument("--project", type=int, help="в проект с этим id (0 — убрать из проекта); подзадачи — следом")
     x.add_argument("--in-work", choices=["on", "off"], help="отметка «В работе» (по просьбе директора)")
     x.add_argument("--archived", choices=["on", "off"], help="убрать в архив или вернуть (по просьбе директора)")
+    x = ms.add_parser("wait", help="задача ждёт другую задачу или событие: без него её не закончить")
+    x.add_argument("id", type=int, help="задача, которая ждёт")
+    x.add_argument("--for", dest="waits_for", type=int, help="id задачи, которую она ждёт")
+    x.add_argument("--event", help="событие, которое она ждёт: «встреча Олега с собственником»; с --remove/--happened — "
+                                   "часть его текста")
+    x.add_argument("--until", help="когда событие ожидается, YYYY-MM-DD")
+    x.add_argument("--note", help="почему ждёт (покажется на карточке)")
+    x.add_argument("--source", help="откуда известно: meeting:<id> | telegram:<id> | pachca:<id> | …")
+    x.add_argument("--remove", action="store_true", help="убрать связь")
+    x.add_argument("--happened", action="store_true", help="событие случилось — задача его больше не ждёт")
+    x = ms.add_parser("items", help="пункты внутри задачи (разделы, этапы, части): прогресс по частям")
+    x.add_argument("id", type=int)
+    x.add_argument("--add", action="append", help="добавить пункт (можно несколько раз или через «;»)")
+    x.add_argument("--done", action="append", help="пункт готов (текст или его часть)")
+    x.add_argument("--undo", action="append", help="пункт снова не готов")
+    x.add_argument("--remove", action="append", help="убрать пункт")
+    x.add_argument("--note", help="откуда известно, что готово (с --done)")
+    x = ms.add_parser("merge", help="задача — дубль другой: закрыть её, источник, связи и подзадачи — в ту")
+    x.add_argument("id", type=int, help="дубль: эта задача закроется")
+    x.add_argument("--into", type=int, required=True, help="задача, которая остаётся")
+    x.add_argument("--note", help="почему это одно и то же")
     s.set_defaults(fn=cmd_commitments)
+
+    s = sub.add_parser("projects", help="проекты: задачи с общим результатом, прогресс и цепочка")
+    ms = s.add_subparsers(dest="action", required=True)
+    x = ms.add_parser("list", help="проекты с прогрессом и тем, на ком они стоят")
+    x.add_argument("--all", action="store_true", help="и завершённые")
+    x = ms.add_parser("show", help="проект: задачи по шагам — что можно делать сейчас, что ждёт")
+    x.add_argument("id", type=int)
+    for name in ("add", "set"):
+        x = ms.add_parser(name, help="новый проект (по просьбе директора)" if name == "add" else "изменить проект")
+        if name == "set":
+            x.add_argument("id", type=int)
+            x.add_argument("--status", choices=["active", "paused", "done"])
+        x.add_argument("--title", required=name == "add", help="название — результат, а не тема")
+        x.add_argument("--goal", help="что считаем готовым")
+        x.add_argument("--owner", help="кто ведёт (пусто — директор)")
+        x.add_argument("--due", help="YYYY-MM-DD")
+        x.add_argument("--card", type=int, help="карточка проекта в Kaiten")
+        x.add_argument("--tasks", help="добавить задачи: id через запятую")
+    s.set_defaults(fn=cmd_projects)
 
     s = sub.add_parser("attention", help="где ждут ответа директора")
     ms = s.add_subparsers(dest="action", required=True)
@@ -1203,6 +1423,27 @@ def build_parser() -> argparse.ArgumentParser:
     x = ps.add_parser("done", parents=[common], help="закрыть задачу PULSE, которая выглядит выполненной")
     x.add_argument("--commitment", type=int, required=True, help="id задачи (./ops commitments list)")
     x.add_argument("--quote", help="дословно, откуда видно, что сделано ([чч:мм:сс] для встречи)")
+    x = ps.add_parser("wait", parents=[common],
+                      help="задача ждёт другую задачу или событие — когда это понятно по смыслу, но не сказано прямо")
+    x.add_argument("--commitment", type=int, required=True, help="id задачи, которая ждёт")
+    x.add_argument("--for", dest="waits_for", type=int, help="id задачи, которую она ждёт")
+    x.add_argument("--event", help="событие, которое она ждёт")
+    x.add_argument("--until", help="когда событие ожидается, YYYY-MM-DD")
+    x = ps.add_parser("merge", parents=[common], help="объединить дубль: одна и та же задача записана дважды")
+    x.add_argument("--commitment", type=int, required=True, help="id дубля — эта задача закроется")
+    x.add_argument("--into", type=int, required=True, help="id задачи, которая остаётся")
+    x.add_argument("--quote", help="дословно, откуда видно, что это одно и то же")
+    x = ps.add_parser("kaiten-block", parents=[common],
+                      help="заблокировать карточку Kaiten: её задача ждёт другую (--blocker-card) или причину (--text)")
+    x.add_argument("--card", type=int, required=True, help="карточка, которая ждёт")
+    x.add_argument("--blocker-card", type=int, help="карточка, которую она ждёт")
+    x.add_argument("--text", help="причина блокировки текстом")
+    x = ps.add_parser("project", parents=[common], help="собрать задачи в новый проект (после «Да» директора)")
+    x.add_argument("--title", required=True, help="название — результат: «Запуск склада в Казани»")
+    x.add_argument("--goal", help="что считаем готовым")
+    x.add_argument("--owner", help="кто ведёт (пусто — директор)")
+    x.add_argument("--due", help="срок проекта, YYYY-MM-DD")
+    x.add_argument("--tasks", required=True, help="id задач через запятую: 57,69,80")
     x = ps.add_parser("answered", parents=[common],
                       help="убрать «нужен ответ»: по её сообщению видно, что директор ответила")
     x.add_argument("--attention", type=int, required=True, help="id пункта (./ops attention list)")

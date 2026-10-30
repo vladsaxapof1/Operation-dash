@@ -2,8 +2,8 @@
 
 Claude никогда не пишет во внешние системы напрямую: он создаёт «предложение»
 (создать карточку, оставить комментарий, назначить встречу). Так же — закрыть задачу PULSE,
-если по переписке или встрече она выглядит выполненной, и пункт «нужен ответ», если директор,
-судя по её сообщению, уже ответила: решает директор. Предложение
+если по переписке или встрече она выглядит выполненной, связать задачи («эта ждёт ту»), объединить
+дубли и закрыть пункт «нужен ответ», если директор, судя по её сообщению, уже ответила: решает директор. Предложение
 выполняется, когда директор нажимает «Да» в боте или в админке — либо сразу,
 если в настройках автономии для этого действия выбрано «auto».
 """
@@ -19,10 +19,14 @@ KINDS = {
     "kaiten.create_card": "Создать карточку в Kaiten",
     "kaiten.comment": "Комментарий в Kaiten",
     "kaiten.update": "Изменить карточку Kaiten",
+    "kaiten.block": "Заблокировать карточку в Kaiten",
     "calendar.create": "Создать встречу в календаре",
     "calendar.cancel": "Отменить встречу",
     "task.done": "Закрыть выполненную задачу",
     "task.meeting": "Связать задачу со встречей",
+    "task.wait": "Задача ждёт другую задачу или событие",
+    "task.merge": "Объединить задачу-дубль",
+    "project.create": "Собрать задачи в проект",
     "attention.done": "Закрыть «нужен ответ» — директор ответила",
     "telegram.remind": "Напомнить коллеге в Telegram",
 }
@@ -168,6 +172,27 @@ def propose_kaiten_update(*, card_id: int, due: str | None = None, title: str | 
                    source_ref=source_ref, batch=batch)
 
 
+def propose_kaiten_block(*, card_id: int, blocker_card: int | None = None, text: str | None = None,
+                         batch: str | None = None, reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Заблокировать карточку в Kaiten: другой карточкой (blocker_card — задача ждёт её) и/или причиной text.
+    Так «ждёт» из PULSE видно и в самой карточке Kaiten."""
+    if not kaiten.blockers_supported():
+        raise ProposalError("На этом тарифе Kaiten нет блокировок карточек")
+    if not blocker_card and not (text or "").strip():
+        raise ProposalError("Укажите карточку, которая блокирует (--blocker-card), или причину (--text)")
+    if blocker_card and int(blocker_card) == int(card_id):
+        raise ProposalError("Карточка не может блокировать сама себя")
+    mirror = store.row("SELECT blockers FROM kaiten_cards WHERE id=?", (card_id,))
+    if mirror and blocker_card and any(b.get("blocker_card_id") == int(blocker_card)
+                                       for b in store.loads(mirror["blockers"], []) or []):
+        raise ProposalError("В Kaiten карточку уже блокирует эта карточка")
+    payload = {"card_id": int(card_id), "blocker_card_id": int(blocker_card) if blocker_card else None,
+               "text": (text or "").strip() or None}
+    what = f"карточкой {_card_title(int(blocker_card))}" if blocker_card else f"причиной «{payload['text']}»"
+    return _create("kaiten.block", f"Kaiten: {_card_title(int(card_id))} — заблокировать {what}", payload,
+                   autonomy_key="kaiten_update", reason=reason, source_ref=source_ref, batch=batch)
+
+
 def propose_calendar_event(*, title: str, start: str, end: str, attendees: list[str] | None = None,
                            description: str = "", calendar: str = "", batch: str | None = None,
                            reason: str | None = None, source_ref: str | None = None,
@@ -251,6 +276,104 @@ def propose_task_meeting(*, commitment_id: int, event_uid: str, batch: str | Non
     label = f"Встреча «{e['title'] or 'Без названия'}» {store.local(e['start'])} — по задаче «{records.headline(c)}»"
     return _create("task.meeting", label, {"commitment_id": c["id"], "event_uid": e["uid"]},
                    autonomy_key="task_meeting", reason=reason, source_ref=source_ref, batch=batch)
+
+
+def propose_task_wait(*, commitment_id: int, waits_for: int | None = None, event: str | None = None,
+                      until: str | None = None, batch: str | None = None, reason: str | None = None,
+                      source_ref: str | None = None) -> dict:
+    """Задача, судя по встрече или переписке, ждёт другую задачу или событие — связать после «да» директора
+    (или сразу — автономия). Прямо прозвучавшую связь Claude ставит сам: ./ops commitments wait."""
+    c = store.row("SELECT * FROM commitments WHERE id=?", (int(commitment_id),))
+    if not c:
+        raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
+    if c["status"] != "open":
+        raise ProposalError(f"Задача [{commitment_id}] уже закрыта")
+    try:
+        records.check_wait(c["id"], waits_for, event, until)
+    except ValueError as e:
+        raise ProposalError(str(e)) from e
+    event = " ".join((event or "").split())
+    if waits_for and records.find_waits(c["id"], waits_for=int(waits_for)):
+        raise ProposalError("Задача уже ждёт эту задачу")
+    payload = {"commitment_id": c["id"], "waits_for": int(waits_for) if waits_for else None,
+               "event": None if waits_for else event, "until": None if waits_for else (until or None)}
+    for p in store.rows("SELECT * FROM proposals WHERE kind='task.wait' AND status IN ('pending', 'rejected') "
+                        "AND json_extract(payload, '$.commitment_id')=?", (c["id"],)):
+        pl = store.loads(p["payload"], {})
+        same = (pl.get("waits_for") == payload["waits_for"] if waits_for
+                else (pl.get("event") or "").lower() == event.lower())
+        if same and p["status"] == "rejected":
+            raise ProposalError("Директор уже ответила «Нет» на эту связь — не предлагай её снова")
+        if same:
+            return get(p["id"])
+    if waits_for:
+        other = store.row("SELECT * FROM commitments WHERE id=?", (int(waits_for),))
+        what = f"«{records.headline(other)}» ({records.route(other)})"
+    else:
+        what = f"событие: {event}" + (f" ({_fmt_date(until)})" if until else "")
+    label = f"«{records.headline(c)}» ждёт {what}"
+    return _create("task.wait", label, payload, autonomy_key="task_wait", reason=reason, source_ref=source_ref,
+                   batch=batch)
+
+
+def propose_task_merge(*, commitment_id: int, into: int, quote: str | None = None, batch: str | None = None,
+                       reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Задача commitment_id — дубль задачи into (одно и то же записано дважды) — объединить после «да» директора:
+    дубль закроется, его источник, связи и подзадачи перейдут в into."""
+    try:
+        c, keep = records.check_merge(int(commitment_id), int(into))
+    except ValueError as e:
+        raise ProposalError(str(e)) from e
+    if not (reason or "").strip():
+        raise ProposalError("Напишите в --reason, почему это одна и та же задача")
+    for p in store.rows("SELECT * FROM proposals WHERE kind='task.merge' AND status IN ('pending', 'rejected') "
+                        "AND json_extract(payload, '$.commitment_id') IN (?, ?)", (c["id"], keep["id"])):
+        pl = store.loads(p["payload"], {})
+        if {pl.get("commitment_id"), pl.get("into")} == {c["id"], keep["id"]}:
+            if p["status"] == "rejected":
+                raise ProposalError("Директор уже ответила «Нет»: это разные задачи — не предлагай снова")
+            return get(p["id"])
+    payload = {"commitment_id": c["id"], "into": keep["id"], "quote": (quote or "").strip()}
+    label = (f"Объединить дубль: «{records.headline(c)}» ({records.route(c)}) → "
+             f"«{records.headline(keep)}» ({records.route(keep)})")
+    return _create("task.merge", label, payload, autonomy_key="task_merge", reason=reason.strip(),
+                   source_ref=source_ref, batch=batch)
+
+
+def propose_project(*, title: str, tasks: list[int], goal: str | None = None, owner: str | None = None,
+                    due: str | None = None, batch: str | None = None, reason: str | None = None,
+                    source_ref: str | None = None) -> dict:
+    """Собрать задачи в новый проект после «да» директора: название — результат («Запуск склада
+    в Казани»), goal — что считаем готовым, tasks — задачи проекта (подзадачи пойдут следом)."""
+    title = " ".join((title or "").split())
+    if not title:
+        raise ProposalError("Назовите проект (--title)")
+    if store.row("SELECT 1 FROM projects WHERE lower(title)=lower(?) AND status!='done'", (title,)):
+        raise ProposalError(f"Проект «{title}» уже есть — добавь задачи в него: ./ops commitments set <id> --project <id>")
+    if due and not records._as_date(due):
+        raise ProposalError("Срок — дата в виде ГГГГ-ММ-ДД")
+    ids = list(dict.fromkeys(int(t) for t in tasks))
+    rows = store.rows(f"SELECT * FROM commitments WHERE id IN ({','.join('?' * len(ids)) or 'NULL'})", ids)
+    missing = set(ids) - {r["id"] for r in rows}
+    if missing:
+        raise ProposalError(f"Нет задач: {', '.join(map(str, sorted(missing)))} (./ops commitments list)")
+    if len(rows) < 2:
+        raise ProposalError("Проект — это хотя бы две задачи с общим результатом")
+    if not (reason or "").strip():
+        raise ProposalError("Напишите в --reason, что объединяет эти задачи")
+    rejected = store.row("SELECT 1 FROM proposals WHERE kind='project.create' AND status='rejected' "
+                         "AND lower(json_extract(payload, '$.title'))=lower(?)", (title,))
+    if rejected:
+        raise ProposalError("Директор уже ответила «Нет» на такой проект — не предлагай его снова")
+    payload = {"title": title, "goal": (goal or "").strip() or None, "owner": (owner or "").strip() or None,
+               "due": due or None, "tasks": ids}
+    return _create("project.create", f"Проект «{title}»: {len(ids)} {_tasks_word(len(ids))}", payload,
+                   autonomy_key="project_create", reason=reason.strip(), source_ref=source_ref, batch=batch)
+
+
+def _tasks_word(n: int) -> str:
+    return "задача" if n % 10 == 1 and n % 100 != 11 else (
+        "задачи" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "задач")
 
 
 def propose_answered(*, attention_id: int, quote: str | None = None, batch: str | None = None,
@@ -376,6 +499,14 @@ def execute(p: dict) -> dict:
     if kind == "kaiten.comment":
         kaiten.client().comment(pl["card_id"], pl["text"])
         return {"card_id": pl["card_id"]}
+    if kind == "kaiten.block":
+        kc = kaiten.client()
+        kc.block(pl["card_id"], blocker_card_id=pl.get("blocker_card_id"), reason=pl.get("text"))
+        try:
+            kaiten.save_blockers(pl["card_id"], kc.blockers(pl["card_id"]))
+        except Exception:  # noqa: BLE001 — зеркало обновится при следующей синхронизации
+            pass
+        return {"card_id": pl["card_id"]}
     if kind == "kaiten.update":
         kc = kaiten.client()
         if pl.get("fields"):
@@ -420,6 +551,21 @@ def execute(p: dict) -> dict:
             raise ProposalError("Встречи уже нет в календаре")
         task_meetings.link(pl["commitment_id"], pl["event_uid"])
         return {"commitment_id": pl["commitment_id"], "event_uid": pl["event_uid"]}
+    if kind == "project.create":
+        from opsdash import projects
+
+        pid = projects.add(title=pl["title"], goal=pl.get("goal"), owner=pl.get("owner"), due=pl.get("due"), by="claude")
+        found = projects.assign(pid, pl.get("tasks") or [])
+        return {"project_id": pid, "tasks": found}
+    if kind == "task.wait":
+        if not store.row("SELECT 1 FROM commitments WHERE id=?", (pl["commitment_id"],)):
+            raise ProposalError("Задачи уже нет")
+        link = records.add_wait(pl["commitment_id"], waits_for=pl.get("waits_for"), event=pl.get("event"),
+                                until=pl.get("until"), note=p.get("reason"), source_ref=p.get("source_ref"), by="claude")
+        return {"commitment_id": pl["commitment_id"], "link_id": link}
+    if kind == "task.merge":
+        records.merge_commitments(pl["commitment_id"], pl["into"], note=p.get("reason"))
+        return {"commitment_id": pl["commitment_id"], "into": pl["into"]}
     if kind == "task.done":
         c = store.row("SELECT status FROM commitments WHERE id=?", (pl["commitment_id"],))
         if not c:
@@ -459,6 +605,11 @@ def links(p: dict) -> list[tuple[str, str]]:
     cid = pl.get("commitment_id")
     if cid:
         out.append(("Задача", f"/commitments?task={cid}"))
+    if p["kind"] == "project.create" and isinstance(p.get("result"), dict) and p["result"].get("project_id"):
+        out.append(("Проект", f"/projects/{p['result']['project_id']}"))
+    other = pl.get("into") or pl.get("waits_for")
+    if other:
+        out.append(("Дубль чего" if pl.get("into") else "Чего ждёт", f"/commitments?task={other}"))
     if pl.get("attention_id"):
         out.append(("Нужен ответ", "/inbox"))
     if p["kind"] == "task.meeting":
@@ -513,6 +664,36 @@ def describe(p: dict) -> str:
             lines.append(f"Источник: {_source_text(p['source_ref'])}")
         lines.append("«Да» — задача закроется в PULSE; карточку в Kaiten, если она есть, это не трогает.")
         return "\n".join(lines)
+    if p["kind"] == "project.create":
+        if pl.get("goal"):
+            lines.append(f"Результат: {pl['goal']}")
+        if p.get("reason"):
+            lines.append(f"Почему вместе: {p['reason']}")
+        rows = store.rows(f"SELECT * FROM commitments WHERE id IN ({','.join('?' * len(pl.get('tasks') or [])) or 'NULL'})",
+                          pl.get("tasks") or [])
+        for c in rows[:12]:
+            lines.append(f"• {records.headline(c)} — {records.route(c)}" + (" (готово)" if c["status"] == "done" else ""))
+        if len(rows) > 12:
+            lines.append(f"• и ещё {len(rows) - 12}")
+        lines.append("«Да» — проект появится в «Задачи → Проекты» с прогрессом и цепочкой задач.")
+        return "\n".join(lines)
+    if p["kind"] == "task.wait":
+        if p.get("reason"):
+            lines.append(f"Почему так думаю: {p['reason']}")
+        if p.get("source_ref"):
+            lines.append(f"Источник: {_source_text(p['source_ref'])}")
+        lines.append("«Да» — на карточке появится «ждёт», а когда то, чего ждём, будет готово, PULSE скажет «Можно делать».")
+        return "\n".join(lines)
+    if p["kind"] == "task.merge":
+        if p.get("reason"):
+            lines.append(f"Почему так думаю: {p['reason']}")
+        if pl.get("quote"):
+            lines.append(f"«{pl['quote'][:400]}»")
+        if p.get("source_ref"):
+            lines.append(f"Источник: {_source_text(p['source_ref'])}")
+        lines.append("«Да» — первая задача закроется как дубль; её источник, цитата, связи и подзадачи перейдут во вторую. "
+                     "Вернуть дубль можно кнопкой «Вернуть» в его окне.")
+        return "\n".join(lines)
     if p["kind"] == "task.meeting":
         if p.get("reason"):
             lines.append(f"Почему так думаю: {p['reason']}")
@@ -527,6 +708,10 @@ def describe(p: dict) -> str:
             lines.append(pl["description"][:500])
     elif p["kind"] == "kaiten.comment":
         lines.append(pl.get("text", "")[:800])
+    elif p["kind"] == "kaiten.block":
+        if pl.get("blocker_card_id") and pl.get("text"):
+            lines.append(f"Причина: {pl['text']}")
+        lines.append("«Да» — в карточке Kaiten появится «Заблокировано» со ссылкой; снимают блокировку в самом Kaiten.")
     elif p["kind"] == "calendar.create":
         if pl.get("attendees"):
             lines.append("Участники: " + ", ".join(pl["attendees"]))
@@ -543,6 +728,14 @@ def result_text(p: dict) -> str:
         return "✅ Задача закрыта"
     if p["status"] == "done" and p["kind"] == "attention.done":
         return "✅ Убрано из «Нужен ответ»"
+    if p["status"] == "done" and p["kind"] == "project.create":
+        return "✅ Проект создан — «Задачи → Проекты»"
+    if p["status"] == "done" and p["kind"] == "kaiten.block":
+        return "✅ Карточка заблокирована в Kaiten"
+    if p["status"] == "done" and p["kind"] == "task.wait":
+        return "✅ Связь «ждёт» — на карточке задачи"
+    if p["status"] == "done" and p["kind"] == "task.merge":
+        return "✅ Дубль объединён с задачей"
     if p["status"] == "done" and p["kind"] == "task.meeting":
         return "✅ Встреча — на карточке задачи"
     if p["status"] == "done" and p["kind"] == "telegram.remind":

@@ -289,6 +289,17 @@ def job_company_context(**_) -> str:
     return "раздел «О компании» обновлён"
 
 
+def job_projects(**_) -> str:
+    settings = config.load_settings()
+    prompt = (
+        "Собери проекты строго по навыку projects (.claude/skills/projects/SKILL.md): какие задачи объединены одним "
+        "результатом, что чего ждёт, где дубли. Это фоновый запуск: директор узнаёт итог только через ./ops notify."
+    )
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="projects", timeout_min=20)
+    n = store.scalar("SELECT COUNT(*) FROM proposals WHERE status='pending' AND batch LIKE 'projects:%'") or 0
+    return f"на подтверждение: {n}" if n else "проекты собраны, новых предложений нет"
+
+
 def job_stale(**_) -> str:
     settings = config.load_settings()
     if not settings["kaiten"].get("enabled") or not settings["notifications"].get("stale_pings", True):
@@ -410,6 +421,7 @@ REGISTRY = {
     "briefs": job_briefs,
     "followup": job_followup,
     "company-context": job_company_context,
+    "projects": job_projects,
     "stale": job_stale,
     "ask": job_ask,
     "voice": job_voice,
@@ -440,6 +452,7 @@ TITLES = {
     "briefs": "Брифы к встречам (Claude)",
     "followup": "Текст итогов встречи (Claude)",
     "company-context": "Сводка «О компании» для Claude",
+    "projects": "Сборка проектов (Claude)",
     "stale": "Напоминания: Kaiten без движения",
     "ask": "Вопрос из Telegram (Claude)",
     "voice": "Голосовое из Telegram",
@@ -677,6 +690,9 @@ def tick(settings: dict | None = None) -> list[str]:
     if (sch.get("context_weekly") and config.now(settings).weekday() == 0  # понедельник, до утреннего дайджеста
             and _daily("company-context", sch["context_weekly"], settings)):
         go("company-context", "heavy")
+    if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
+            and _daily("projects", sch["projects_weekly"], settings)):
+        go("projects", "heavy")
     return started
 
 

@@ -7,9 +7,9 @@
   <div class="actions">
     {% set keep = '&person=' ~ (person | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&created=' ~ created ~ '&created_from=' ~ created_from
        ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to ~ ('&new=1' if new else '')
-       ~ ('&archived=1' if show_archived else '') %}
+       ~ ('&archived=1' if show_archived else '') ~ ('&project=' ~ project if project else '') %}
     <div class="seg">
-      <a href="?view=board{{ keep }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list{{ keep }}" class="{{ 'active' if view == 'list' }}">Список</a><a href="?view=gantt&scale={{ scale }}{{ keep }}" class="{{ 'active' if view == 'gantt' }}">Гант</a>
+      <a href="?view=board{{ keep }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list{{ keep }}" class="{{ 'active' if view == 'list' }}">Список</a><a href="?view=gantt&scale={{ scale }}{{ keep }}" class="{{ 'active' if view == 'gantt' }}">Гант</a><a href="?view=projects" class="{{ 'active' if view == 'projects' }}" title="Задачи с общим результатом: прогресс, на ком стоит, что можно делать">Проекты</a>
     </div>
     <a class="btn primary" href="#add">+ Новая задача</a>
   </div>
@@ -29,11 +29,17 @@
       <label>Подробности <span class="muted small">— необязательно</span></label><textarea name="what" rows="2" placeholder="Что именно сделать, в каком виде, кому прислать"></textarea>
       <label>Часть задачи <span class="muted small">— если передаёте кому-то работу по другой задаче</span></label>
       <input type="text" name="parent" list="task-options" value="{{ parent_task.label if parent_task else '' }}" placeholder="Начните вводить название задачи; пусто — самостоятельная">
+      {% set live_projects = project_options | rejectattr('status', 'equalto', 'done') | list %}
+      {% if live_projects %}
+      <label>Проект <span class="muted small">— необязательно; подзадача попадёт в проект основной задачи сама</span></label>
+      <select name="project"><option value="">без проекта</option>{% for pr in live_projects %}<option value="{{ pr.id }}" {{ 'selected' if project == pr.id | string }}>{{ pr.title }}</option>{% endfor %}</select>
+      {% endif %}
       <div class="form-actions"><button class="btn primary">Добавить</button></div>
     </form>
   </div>
 </section>
 
+{% if view != 'projects' %}
 <form method="get" class="filters">
   <input type="hidden" name="view" value="{{ view }}">{% if view == 'gantt' %}<input type="hidden" name="scale" value="{{ scale }}">{% endif %}
   {% if view == 'list' %}
@@ -50,6 +56,13 @@
   </select>
   {% endif %}
   <input type="text" name="person" value="{{ person }}" placeholder="Человек" list="people-list">
+  {% if project_options %}
+  <select name="project" data-autosubmit class="{{ 'on' if project }}" title="Только задачи проекта">
+    <option value="">Проект: любой</option>
+    {% for pr in project_options %}<option value="{{ pr.id }}" {{ 'selected' if project == pr.id | string }}>Проект: {{ pr.title }}{{ ' (завершён)' if pr.status == 'done' }}</option>{% endfor %}
+    <option value="none" {{ 'selected' if project == 'none' }}>Вне проектов</option>
+  </select>
+  {% endif %}
   {{ ui.period_filter('created', 'Создана', created, created_periods, created_from, created_to) }}
   {{ ui.period_filter('due', 'Срок', due, due_periods, due_from, due_to) }}
   <input type="search" name="q" value="{{ q }}" placeholder="Поиск по задачам">
@@ -65,10 +78,58 @@
   <a class="btn toggle{{ ' on' if new }}" href="?view={{ view }}{% if view == 'gantt' %}&scale={{ scale }}{% endif %}{{ keep_new }}{{ '' if new else '&new=1' }}"
      title="{{ 'Показать все задачи' if new else 'Только задачи, которые добавил Claude и вы ещё не открывали' }}">Новые{% if new_tasks_count %} <span class="badge">{{ new_tasks_count }}</span>{% endif %}</a>
   {% endif %}
-  {% if person or q or direction or status != 'open' or created or due or new or show_archived %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
+  {% if person or q or direction or status != 'open' or created or due or new or show_archived or project %}<a class="btn ghost" href="?view={{ view }}">Сбросить</a>{% endif %}
 </form>
+{% else %}
+<datalist id="people-list">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>
+{% endif %}
 
-{% if view == 'board' %}
+{% if view == 'projects' %}
+{# проекты: задачи, объединённые одним результатом — прогресс, на ком стоит, что можно делать сейчас #}
+<div class="pj-tools">
+  <details class="pj-new">
+    <summary class="btn">+ Новый проект</summary>
+    <form method="post" action="/projects" class="card card-b pj-new-form">
+      <label>Название — результат, а не тема</label><input type="text" name="title" required maxlength="120" placeholder="Запуск склада в Казани">
+      <label>Что считаем готовым <span class="muted small">— необязательно</span></label><input type="text" name="goal" placeholder="Склад принимает и отгружает заказы, подрядчик работает по регламенту">
+      <div class="form-row">
+        <div><label>Кто ведёт</label><input type="text" name="owner" list="people-list" placeholder="пусто — вы"></div>
+        <div><label>Срок</label><input type="date" name="due"></div>
+      </div>
+      <div class="form-actions"><button class="btn primary">Создать</button></div>
+    </form>
+  </details>
+  <form method="post" action="/jobs/run" data-busy="Claude собирает проекты…"><input type="hidden" name="name" value="projects"><button class="btn" title="Claude пройдёт по задачам, встречам и переписке и предложит проекты, связи «ждёт» и объединение дублей — вы подтвердите">Собрать проекты с Claude</button></form>
+  <span class="grow"></span>
+  <a class="btn ghost{{ ' on' if done_projects }}" href="?view=projects{{ '' if done_projects else '&done_projects=1' }}">{{ 'Скрыть завершённые' if done_projects else 'Показать завершённые' }}</a>
+</div>
+<div class="pj-grid">
+  {% for p in projects %}
+  <a class="pj-card{{ ' paused' if p.status == 'paused' }}{{ ' finished' if p.status == 'done' }}" href="/projects/{{ p.id }}">
+    <div class="pj-top">
+      <span class="pj-title">{{ p.title }}</span>
+      {% if p.status != 'active' %}<span class="chip">{{ p.status_title }}</span>{% endif %}
+      {% if p.due %}<span class="chip {{ 'bad' if p.late else 'warn' if p.due_days is not none and p.due_days <= 2 else '' }}">{{ 'просрочен · ' if p.late }}до {{ p.due | date }}</span>{% endif %}
+    </div>
+    {% if p.goal %}<div class="pj-goal">{{ p.goal }}</div>{% endif %}
+    <div class="pj-bar" title="Выполнено {{ p.done }} из {{ p.total }}"><i style="width: {{ p.percent }}%"></i></div>
+    <div class="pj-nums"><b>{{ p.percent }}%</b> <span class="muted">· {{ p.done }} из {{ p.total }} {{ plural(p.total, 'задачи', 'задач', 'задач') }}</span>
+      {% if p.blocked %}<span class="chip wait">ждут {{ p.blocked }}</span>{% endif %}
+      {% if p.overdue %}<span class="chip bad">просрочено {{ p.overdue }}</span>{% endif %}
+      {% if p.at_risk %}<span class="chip bad">под угрозой {{ p.at_risk }}</span>{% endif %}</div>
+    {% if p.stuck_on %}<div class="pj-stuck"><span class="rel-k">стоит на</span>
+      {% for s in p.stuck_on[:3] %}<div>{{ s.whom }} — «{{ s.task.headline }}» <span class="muted">· ждут {{ s.waiting | length }}</span></div>{% endfor %}</div>
+    {% elif p.ready and p.status == 'active' %}<div class="pj-stuck ok"><span class="rel-k">можно делать</span> {{ p.ready | length }} {{ plural(p.ready | length, 'задача', 'задачи', 'задач') }}</div>{% endif %}
+    {% if p.owner %}<div class="muted small">Ведёт: {{ p.owner }}</div>{% endif %}
+  </a>
+  {% else %}
+  <section class="card pj-empty"><div class="card-b">
+    <h2>Соберите задачи в проекты</h2>
+    <p class="muted">Проект — задачи с общим результатом: что уже сделано, что можно делать сейчас и что ждёт других. Создайте проект кнопкой «+ Новый проект» и добавьте в него задачи — или нажмите «Собрать проекты с Claude»: он предложит проекты по вашим задачам, встречам и переписке.</p>
+  </div></section>
+  {% endfor %}
+</div>
+{% elif view == 'board' %}
 <div class="kb">
   {% for key, title, hint in [('mine', 'Мои задачи', 'что пообещали вы'), ('to_me', 'Мне должны', 'что пообещали вам'), ('other', 'Между коллегами', 'важные вам договорённости'), ('done', 'Готово', 'за последние 2 недели')] %}
   {% set col = board[key] %}
@@ -83,7 +144,7 @@
     </div>
     <div class="kb-hint">{{ hint }}</div>
     <div class="kb-cards">
-      {% for c in col %}{{ ui.task_card(c, meetings) }}{% else %}<div class="kb-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endfor %}
+      {% for c in col %}{{ ui.task_card(c, meetings, show_project=not project) }}{% else %}<div class="kb-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endfor %}
     </div>
     <button type="button" class="kb-summary" data-kb-fold title="Показать задачи">
       <span class="kb-summary-n">{{ col | length }}</span>
@@ -99,7 +160,7 @@
 <div class="gantt-tools">
   <div class="seg">{% for key, title in [('day', 'День'), ('week', 'Неделя'), ('month', 'Месяц')] %}<a href="?view=gantt&scale={{ key }}{{ keep }}" class="{{ 'active' if gantt.scale == key }}">{{ title }}</a>{% endfor %}</div>
   <span class="muted small">Полоса — от появления задачи до срока, без срока — до сегодня. Выходные — серым, пунктир — сейчас.
-    Ширину колонки с задачами можно потянуть мышкой за край.</span>
+    Стрелка — «ждёт»: от задачи, которую ждут, к той, что ждёт. Ширину колонки с задачами можно потянуть мышкой за край.</span>
 </div>
 <div class="card gantt">
   <div class="gantt-scroll" data-gantt data-now-x="{{ gantt.now_x }}" style="--gl: {{ gantt_w }}px">
@@ -131,11 +192,12 @@
               {% set title = c | headline %}
               <div class="gantt-label">
                 <button type="button" class="gantt-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ title }}</button>
-                <div class="muted small"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>{{ ui.new_chip(c) }}{{ ui.archive_chip(c) }} {{ ui.task_people(c) }}{% if c.parent %} · ↳ {{ ui.task_ref(c.parent) }}{% endif %}</div>
+                <div class="muted small"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>{{ ui.new_chip(c) }}{{ ui.archive_chip(c) }}{{ ui.wait_chips(c) }} {{ ui.task_people(c) }}{% if c.parent %} · ↳ {{ ui.task_ref(c.parent) }}{% endif %}</div>
                 {{ ui.task_dialog(c, meetings) }}
               </div>
               <div class="gantt-track" style="width: {{ gantt.width }}px">
-                <div class="gantt-bar {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' nodue' if not c.bar.due }}{{ ' archived' if c.archived }}"
+                {% set wids = (c.waits or []) | rejectattr('done') | selectattr('task') | map(attribute='task.id') | list if c.status == 'open' else [] %}
+                <div{% if wids %} data-waits="{{ wids | join(' ') }}"{% endif %} class="gantt-bar {{ c.direction }}{{ ' overdue' if c.overdue }}{{ ' done' if c.status == 'done' }}{{ ' nodue' if not c.bar.due }}{{ ' archived' if c.archived }}"
                      style="left: {{ c.bar.left }}px; width: {{ c.bar.width }}px" data-task-open="{{ c.id }}" role="button" tabindex="0"
                      title="{{ title }} · {{ c.bar.start.strftime('%d.%m') }} → {{ c.bar.end.strftime('%d.%m') if c.bar.due else 'срок не указан' }}">{% if c.bar.width >= 60 %}<span>{{ title }}</span>{% endif %}</div>
               </div>
@@ -158,4 +220,5 @@
 {% if focus %}<span hidden data-focus-task="{{ focus }}"></span>{% endif %}
 {{ ui.task_datalist() }}
 {{ ui.event_datalist() }}
+{{ ui.project_datalist() }}
 {% endblock %}

@@ -32,9 +32,17 @@ def test_all_pages_render_with_demo(client):
         assert r.status_code == 200, url
     home = client.get("/").text
     assert "Ждут вашего «да»" in home and "Ирина" in home and "Запуск склада Казань" in home
+    # демо-проект: цепочка «ждёт», пункты, дубль на подтверждение
+    listing = client.get("/commitments?view=projects").text
+    assert "Запуск склада в Казани" in listing and "стоит на" in listing
+    pid = store.scalar("SELECT id FROM projects")
+    page = client.get(f"/projects/{pid}").text
+    assert "Можно делать сейчас" in page and "3 из 6" in page and "дубль?" in page
     demo.clear()
     assert store.scalar("SELECT COUNT(*) FROM meetings") == 0
     assert store.scalar("SELECT COUNT(*) FROM proposals") == 0
+    assert store.scalar("SELECT COUNT(*) FROM projects") == 0 and store.scalar("SELECT COUNT(*) FROM task_links") == 0
+    assert store.scalar("SELECT COUNT(*) FROM task_items") == 0 and store.scalar("SELECT COUNT(*) FROM commitments") == 0
 
 
 def test_foreign_origin_and_host_rejected(client):

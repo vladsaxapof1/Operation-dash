@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}{{ p.title }}{% endblock %}
+{% block content %}
+{#- проект: прогресс, на ком стоит, задачи по шагам — сначала то, что можно делать сейчас, дальше то, что ждёт
+    предыдущее (связи «ждёт» и подзадачи); выполненные — отдельно #}
+<div class="topline">
+  <div>
+    <div class="muted small"><a href="/commitments?view=projects">← Проекты</a></div>
+    <h1>{{ p.title }}</h1>
+    <div class="muted">{{ p.goal or 'Результат не описан — «Изменить проект»' }}</div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/commitments?view=board&project={{ p.id }}" title="Задачи проекта на доске">На доске</a>
+    <a class="btn" href="/commitments?view=gantt&project={{ p.id }}" title="Задачи проекта на таймлайне">Гант</a>
+    {% if p.status != 'done' %}<a class="btn primary" href="/commitments?add=mine&project={{ p.id }}#add">+ Задача в проект</a>{% endif %}
+  </div>
+</div>
+
+<section class="card pj-head">
+  <div class="card-b">
+    <div class="pj-head-top">
+      <div class="pj-big"><b>{{ p.percent }}%</b> <span class="muted">· выполнено {{ p.done }} из {{ p.total }} {{ plural(p.total, 'задачи', 'задач', 'задач') }}</span></div>
+      <span class="chip {{ 'ok' if p.status == 'done' else '' }}">{{ p.status_title }}</span>
+      {% if p.due %}<span class="chip {{ 'bad' if p.late else 'warn' if p.due_days is not none and p.due_days <= 2 else '' }}">{{ 'просрочен · ' if p.late }}срок {{ p.due | date }}</span>{% endif %}
+      {% if p.owner %}<span class="muted small">Ведёт: {{ p.owner }}</span>{% endif %}
+      {% if p.card %}<a class="chip" href="{{ p.card.url }}" target="_blank" rel="noopener" title="{{ p.card.title }}">Kaiten #{{ p.card.id }} ↗</a>{% elif p.kaiten_card_id %}<span class="chip">Kaiten #{{ p.kaiten_card_id }}</span>{% endif %}
+    </div>
+    <div class="pj-bar big" title="Выполнено {{ p.done }} из {{ p.total }}"><i style="width: {{ p.percent }}%"></i></div>
+    <div class="pj-facts">
+      <span><b>{{ p.ready | length }}</b> можно делать</span>
+      <span><b>{{ p.blocked }}</b> ждут другие</span>
+      {% if p.overdue %}<span class="bad-text"><b>{{ p.overdue }}</b> просрочено</span>{% endif %}
+      {% if p.at_risk %}<span class="bad-text"><b>{{ p.at_risk }}</b> срок под угрозой</span>{% endif %}
+    </div>
+    {% if p.stuck_on %}
+    <div class="pj-stuck big"><span class="rel-k">стоит на</span>
+      {% for s in p.stuck_on %}<div><b>{{ s.whom }}</b> — {{ ui.task_ref(s.task) }} <span class="muted">· её ждут: {% for w in s.waiting %}«{{ w.headline }}»{{ ', ' if not loop.last }}{% endfor %}</span></div>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="pj-actions">
+      <form class="meet-pick" method="post" action="/projects/{{ p.id }}/tasks">
+        <input type="text" name="task" list="task-options" required placeholder="Добавить задачу в проект — начните вводить её название">
+        <button class="btn sm">Добавить</button>
+      </form>
+      <details class="dlg-link pj-edit">
+        <summary>Изменить проект</summary>
+        <form method="post" action="/projects/{{ p.id }}/edit">
+          <label>Название</label><input type="text" name="title" value="{{ p.title }}" required maxlength="120">
+          <label>Что считаем готовым</label><input type="text" name="goal" value="{{ p.goal or '' }}">
+          <div class="form-row">
+            <div><label>Кто ведёт</label><input type="text" name="owner" value="{{ p.owner or '' }}" list="people-list" placeholder="пусто — вы"></div>
+            <div><label>Срок</label><input type="date" name="due" value="{{ p.due or '' }}"></div>
+            <div><label>Карточка Kaiten</label><input type="text" name="card" value="{{ p.kaiten_card_id or '' }}" placeholder="номер"></div>
+          </div>
+          <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+        </form>
+        <div class="actions pj-status">
+          {% for key, title in [('active', 'Снова в работу'), ('paused', 'На паузу'), ('done', 'Завершить проект')] if key != p.status %}
+          <form class="inline" method="post" action="/projects/{{ p.id }}/status"><input type="hidden" name="status" value="{{ key }}"><button class="btn sm{{ ' ok' if key == 'done' }}">{{ title }}</button></form>
+          {% endfor %}
+          <form class="inline" method="post" action="/projects/{{ p.id }}/delete" data-confirm="Удалить проект «{{ p.title }}»? Задачи останутся, просто ни в каком проекте."><button class="btn sm ghost danger">Удалить проект</button></form>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+{% if p.steps %}
+<div class="kb pj-steps" style="grid-template-columns: repeat({{ p.steps | length }}, minmax(250px, 1fr))">
+  {% for step in p.steps %}
+  <section class="kb-col">
+    <div class="kb-h"><span class="kb-title">{{ 'Можно делать сейчас' if loop.first else 'Шаг ' ~ loop.index }}</span><span class="chip">{{ step | length }}</span></div>
+    <div class="kb-hint">{{ 'ничего не ждут' if loop.first else 'ждут то, что левее' }}</div>
+    <div class="kb-cards">{% for c in step %}{{ ui.task_card(c, meetings, show_project=False) }}{% endfor %}</div>
+  </section>
+  {% endfor %}
+</div>
+{% elif p.total %}
+<section class="card"><div class="card-b"><p class="muted">Открытых задач нет — всё выполнено. Если результат получен, завершите проект: «Изменить проект» → «Завершить проект».</p></div></section>
+{% else %}
+<section class="card"><div class="card-b"><p class="muted">В проекте пока нет задач. Добавьте их полем «Добавить задачу в проект» выше, кнопкой «+ Задача в проект» или в окне задачи — поле «Проект».</p></div></section>
+{% endif %}
+
+{% if p.finished %}
+<section class="pj-done">
+  <h2>Выполнено <span class="chip ok">{{ p.finished | length }}</span></h2>
+  <div class="pj-done-cards">{% for c in p.finished %}{{ ui.task_card(c, meetings, show_project=False) }}{% endfor %}</div>
+</section>
+{% endif %}
+{% if p.parked %}
+<section class="pj-done">
+  <h2>В архиве <span class="chip">{{ p.parked | length }}</span> <span class="muted small">— в прогресс не идут</span></h2>
+  <div class="pj-done-cards">{% for c in p.parked %}{{ ui.task_card(c, meetings, show_project=False) }}{% endfor %}</div>
+</section>
+{% endif %}
+
+<datalist id="people-list">{% for person in people %}<option value="{{ person.name }}">{% endfor %}</datalist>
+{{ ui.task_datalist() }}
+{{ ui.event_datalist() }}
+{{ ui.project_datalist() }}
+{% if focus %}<span hidden data-focus-task="{{ focus }}"></span>{% endif %}
+{% endblock %}
