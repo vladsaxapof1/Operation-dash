@@ -543,14 +543,21 @@ BOARD_TITLES = [("mine", "Мои задачи"), ("to_me", "Мне должны"
 BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
 
 
+LIST_GROUPS = {"dir": "кто кому", "project": "по проекту", "person": "по человеку", "none": "без групп"}  # вид «Список»
+KAITEN_PARAMS = ("who", "space", "q", "mine", "only", "created", "created_from", "created_to", "due", "due_from", "due_to",
+                 "kview")
+
+
 @app.get("/commitments", response_class=HTMLResponse)
 def commitments(request: Request, view: str = "board", status: str = "open", direction: str = "", person: str = "",
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
                 due: str = "", due_from: str = "", due_to: str = "", scale: str = "week", sort: str = "",
                 new: str = "", task: int = 0, parent: int = 0, archived: str = "", project: str = "",
-                done_projects: str = ""):
+                done_projects: str = "", done: str = "", group: str = ""):
     from opsdash import gantt, projects
 
+    if view == "kaiten":  # Kaiten — вкладка «Задач» (5.7)
+        return tasks(request, **{k: v for k, v in request.query_params.items() if k in KAITEN_PARAMS})
     view = view if view in ("list", "gantt", "projects") else "board"
     project = project if project == "none" or project.isdigit() else ""
     # «Показать архивные» — архивные задачи добавляются серыми в конец колонок и списка
@@ -569,6 +576,15 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                                       sort=sort, archived=show_archived, project=project or None, **dates)
              if view == "list" else None)
     shown = records.add_links([c for col in board.values() for c in col] if board else (items or []))
+    if items is not None:  # «Список»: группы по проекту и по человеку (5.3)
+        records.with_reminders(items)
+        for c in items:
+            c["project_title"] = (c.get("project") or {}).get("title") or ""
+            c["person_key"] = c["whom"] if c["direction"] == "mine" else c["who"]
+            c["route"] = records.route(c)
+        if group in ("project", "person"):
+            key = "project_title" if group == "project" else "person_key"
+            items.sort(key=lambda c: (not c[key], c[key] or ""))  # groupby — подряд; «вне проектов» в конце
     # ?task=<id> — открыть окно задачи (ссылка со встречи или со сводки); если фильтры её прячут — окно всё равно есть
     extra = None
     if task and not any(c["id"] == task for c in shown):
@@ -583,6 +599,24 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     gantt_w = int(request.cookies["gantt_w"]) if request.cookies.get("gantt_w", "").isdigit() else 300
     timeline = gantt.layout([(key, title, board[key]) for key, title in BOARD_TITLES], scale) if view == "gantt" else None
     parent_task = next((o for o in records.task_options() if o["id"] == parent), None) if parent else None
+    # активные фильтры — строкой под заголовком, у каждого «× снять» (5.2); их число — на кнопке «Фильтр»
+    base = {k: v for k, v in request.query_params.items() if k not in ("msg", "err", "task", "add", "parent") and v}
+
+    def without(*keys: str) -> str:
+        return "?" + "&".join(f"{k}={quote(v)}" for k, v in base.items() if k not in keys)
+
+    period_titles = dict(records.CREATED_PERIODS) | dict(records.DUE_PERIODS) | {"custom": "свой период", "none": "без срока"}
+    proj_title = {str(o["id"]): o["title"] for o in projects.options()}.get(project, "вне проектов" if project == "none" else "")
+    chips = [(label, without(*keys)) for label, keys, on in (
+        (f"проект: {proj_title}", ("project",), bool(project)),
+        (f"человек: {person}", ("person",), bool(person)),
+        (f"создана: {period_titles.get(created, created)}", ("created", "created_from", "created_to"), bool(created)),
+        (f"срок: {period_titles.get(due, due)}", ("due", "due_from", "due_to"), bool(due)),
+        (records.DIRECTIONS.get(direction, direction), ("direction",), view == "list" and bool(direction)),
+        ({"done": "выполненные", "all": "все статусы"}.get(status, status), ("status",), view == "list" and status != "open"),
+        ("с архивными", ("archived",), show_archived),
+        (f"поиск «{q}»", ("q",), bool(q)),
+    ) if on]
     response = render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
                       direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
                       add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
@@ -594,7 +628,12 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0,
                       project=project, project_options=projects.options(),
                       projects=projects.list_projects("all" if done_projects else "active") if view == "projects" else [],
-                      done_projects=bool(done_projects))
+                      done_projects=bool(done_projects), show_done=done == "1",
+                      group=group if group in LIST_GROUPS else "dir", list_groups=LIST_GROUPS,
+                      filter_chips=chips, filter_count=sum(1 for c in chips if not c[0].startswith("поиск")),
+                      in_projects=store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL "
+                                               "AND project_id IS NOT NULL") or 0,
+                      done_projects_count=store.scalar("SELECT COUNT(*) FROM projects WHERE status='done'") or 0)
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
     return response
@@ -625,6 +664,23 @@ def commitment_add(request: Request, direction: str = Form(...), title: str = Fo
 def commitment_update(request: Request, cid: int, status: str = Form(None), due: str = Form(None)):
     records.update_commitment(cid, status=status or None, due=due or None)
     return back(request, "Сохранено")
+
+
+@app.post("/commitments/{cid}/state")
+def commitment_state(request: Request, cid: int, state: str = Form("")):
+    """Статус из окна задачи: Новая / В работе / Ждёт / Готово. «Ждёт» без связи — просим указать, чего ждёт."""
+    c = records.get_commitment(cid)
+    if not c or state not in ("new", "work", "wait", "done"):
+        return back(request, err="Такой задачи нет")
+    if state == "done":
+        records.update_commitment(cid, status="done")
+        return back(request, "Готово")
+    if c["status"] != "open":
+        records.update_commitment(cid, status="open")
+    records.set_in_work(cid, state == "work")
+    if state == "wait" and not records.get_commitment(cid)["blocked"]:
+        return _back_task(request, cid, err="Укажите, чего ждёт задача: «+ связь» в окне задачи")
+    return _back_task(request, cid, {"new": "Задача — новая", "work": "Задача в работе", "wait": "Задача ждёт"}[state])
 
 
 @app.post("/commitments/{cid}/work")
@@ -1465,14 +1521,22 @@ def meeting_title(request: Request, mid: str, title: str = Form(...)):
 
 # --- задачи Kaiten ------------------------------------------------------------------
 
-@app.get("/tasks", response_class=HTMLResponse)
-def tasks(request: Request, who: str = "", space: str = "", q: str = "", view: str = "boards", mine: str = "",
+@app.get("/tasks")
+def tasks_redirect(request: Request):
+    """«Задачи Kaiten» стали вкладкой «Задач» (2.0): старые ссылки (бот, уведомления) ведут туда же, с фильтрами."""
+    query = "&".join(f"{k}={quote(v)}" for k, v in request.query_params.items() if k in KAITEN_PARAMS + ("view",))
+    return RedirectResponse("/commitments?view=kaiten" + ("&" + query.replace("view=", "kview=") if query else ""),
+                            status_code=303)
+
+
+def tasks(request: Request, who: str = "", space: str = "", q: str = "", kview: str = "boards", mine: str = "",
           only: str = "", created: str = "", created_from: str = "", created_to: str = "", due: str = "",
           due_from: str = "", due_to: str = ""):
+    """Вкладка «Kaiten» в «Задачах» (5.7): зеркало досок Kaiten, только чтение."""
     from opsdash.sources import kaiten
 
     settings = config.load_settings()
-    view = "list" if view == "list" else "boards"
+    view = "list" if kview == "list" else "boards"
     sql = "SELECT * FROM kaiten_cards WHERE condition=1 AND state IN (1,2)"
     params: list = []
     if who:
@@ -1514,6 +1578,7 @@ def tasks(request: Request, who: str = "", space: str = "", q: str = "", view: s
     synced = store.scalar("SELECT MAX(synced_at) FROM kaiten_cards")
     domain = (settings["kaiten"].get("domain") or "").strip().rstrip("/")
     return render(request, "tasks.html", nav="tasks", view=view, cards=cards, boards=kaiten.boards_view(cards),
+                  spaces_n=len({c["space_title"] for c in every}), stale_days=settings["kaiten"].get("stale_days"),
                   counts=counts, people=people, spaces=spaces, who=who, space=space, q=q, mine=mine, only=only,
                   synced=synced, kaiten_base=("https://" + domain.removeprefix("https://")) if domain else "",
                   created=created, created_from=created_from, created_to=created_to, due=due, due_from=due_from,

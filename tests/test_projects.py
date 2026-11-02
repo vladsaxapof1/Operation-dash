@@ -165,18 +165,19 @@ def test_web_projects_view_page_and_dialog(client):
     assert "Выберите задачу" in unquote(str(client.post(f"/projects/{pid}/tasks", data={"task": "Схемы"}).url))
 
     listing = client.get("/commitments?view=projects").text
-    assert "Запуск склада в Казани" in listing and "14%" in listing and "стоит на" in listing
-    assert "Собрать проекты с Claude" in listing and 'name="person"' not in listing  # фильтры доски не нужны
+    assert "Запуск склада в Казани" in listing and "1 из 7" in listing and "можно делать" in listing
+    assert "собрать проекты с Claude" in listing and 'name="person"' not in listing  # фильтры доски не нужны
 
     page = client.get(f"/projects/{pid}").text
-    assert "Можно делать сейчас" in page and "Шаг 4" in page and "Выполнено" in page
+    assert "Можно делать сейчас" in page and "Шаг 4" in page and "Показать выполненные" in page
+    assert "14%" in page and "Стоит на:" in page
     assert "Дмитрий Орлов" in page and 'class="chip proj"' not in page  # на странице проекта — без метки проекта
     assert f'id="task-{t["contractor"]}"' in page
 
-    assert 'class="chip proj"' in client.get("/commitments").text
+    assert 'проект <a href="/projects/' in client.get("/commitments").text  # проект — в мете окна задачи
     board = client.get(f"/commitments?project={pid}").text
-    assert 'class="chip proj"' not in board and "Проект: Запуск склада" in board  # фильтр по проекту — метка лишняя
-    assert "Вне проектов" in board
+    assert 'class="chip proj"' not in board and "проект: Запуск склада в Казани" in board  # фильтр — в сводке под заголовком
+    assert "вне проектов" in board
     assert f'value="#{pid} · Запуск склада в Казани"' in board  # поле «Проект» в окне задачи
     assert client.get("/api/project-options").json() == [f"#{pid} · Запуск склада в Казани"]
     records.add_commitment(direction="mine", whom="Пётр Иванов", title="Задача вне проекта", what="Вне проекта")
@@ -198,7 +199,7 @@ def test_web_projects_view_page_and_dialog(client):
     assert store.row("SELECT title, goal, kaiten_card_id FROM projects WHERE id=?", (pid,)) == {
         "title": "Запуск склада", "goal": None, "kaiten_card_id": 4343}
     client.post(f"/projects/{pid}/status", data={"status": "done"})
-    assert "Показать завершённые" in client.get("/commitments?view=projects").text
+    assert "Завершённые · 1" in client.get("/commitments?view=projects").text
     assert "Запуск склада" in client.get("/commitments?view=projects&done_projects=1").text
     client.post(f"/projects/{pid}/delete")
     assert not projects.get(pid) and records.get_commitment(t["contractor"])["project_id"] is None

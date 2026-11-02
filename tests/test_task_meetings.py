@@ -90,7 +90,7 @@ def test_link_from_task_window_and_calendar(client, settings_with, monkeypatch):
     assert "err=" in post(event="нет такой")
     assert "связана" in post(event=label) and records.get_commitment(cid)["meeting"]["uid"] == "lead"
     board = client.get("/commitments").text
-    assert "chip meet" in board and "Отвязать" in board and "Лид-продажа" in board
+    assert "Встреча: " in board and ">отвязать<" in board and "Лид-продажа" in board
     assert "отвязана" in post(action="unlink") and records.get_commitment(cid)["meeting"] is None
 
     # «+ Назначить встречу»: форма календаря заполнена по задаче, созданная встреча — на карточке
@@ -114,7 +114,7 @@ def test_hint_in_task_window_and_calendar_card(client, settings_with):
     _event("lead", "Лид-продажа: пересаживаемся", 2)
     task_meetings.suggest()
     board = client.get("/commitments").text
-    assert "встреча?" in board and "Похоже, встреча по этой задаче" in board
+    assert "Похоже, встреча по этой задаче" in board
     [p] = proposals.list_proposals("pending")
     client.post(f"/proposals/{p['id']}/approve", follow_redirects=False)
     assert records.get_commitment(cid)["meeting"]["uid"] == "lead"

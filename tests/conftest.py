@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,11 @@ from opsdash import config, store  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def clean_home():
+    # задания, запущенные прошлым тестом без очереди (jobs.submit — отдельным потоком), могут ещё писать в базу:
+    # если удалить папку под ними, поток создаст схему в старом файле, а новая база останется без таблиц
+    for t in threading.enumerate():
+        if t is not threading.main_thread() and not t.daemon:
+            t.join(timeout=10)
     for sub in ("data", "config", "secrets"):
         shutil.rmtree(_HOME / sub, ignore_errors=True)
     store._initialized.clear()

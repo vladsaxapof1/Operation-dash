@@ -34,10 +34,10 @@ def test_all_pages_render_with_demo(client):
     assert "Ждут вашего «да»" in home and "Ирина" in home and "Запуск склада Казань" in home
     # демо-проект: цепочка «ждёт», пункты, дубль на подтверждение
     listing = client.get("/commitments?view=projects").text
-    assert "Запуск склада в Казани" in listing and "стоит на" in listing
+    assert "Запуск склада в Казани" in listing and "можно делать" in listing
     pid = store.scalar("SELECT id FROM projects")
     page = client.get(f"/projects/{pid}").text
-    assert "Можно делать сейчас" in page and "3 из 6" in page and "дубль?" in page
+    assert "Можно делать сейчас" in page and "3 из 6" in page and "дубль?" in page and "Стоит на:" in page
     demo.clear()
     assert store.scalar("SELECT COUNT(*) FROM meetings") == 0
     assert store.scalar("SELECT COUNT(*) FROM proposals") == 0
@@ -444,17 +444,17 @@ def test_tasks_board_and_list(client):
     assert board["to_me"][0]["due_today"] and [c["what"] for c in board["done"]] == ["Отправить отчёт"]
 
     page = client.get("/commitments").text  # доска — вид по умолчанию
-    assert "<h1>Задачи</h1>" in page and 'class="kb"' in page
-    assert "просрочено на 2 дня" in page and "осталось " in page and "без срока" in page  # срок и сколько осталось
+    assert "<h1>Задачи</h1>" in page and 'class="board' in page
+    assert "просрочено 2 дня" in page and ">сегодня<" in page and "без срока" in page  # срок словами
     assert "<b>Я</b> → Тимур" in page and "<b>Пётр</b> → мне" in page and "<b>Олег</b> → Ирина" in page
-    assert ">встреча «Анна / Тимур»</a>" in page
+    assert ">«Анна / Тимур»</a>" in page
     # клик по карточке — окно задачи по центру: суть, кто и кому, цитата, правка
-    assert '<dialog class="dlg" id="task-' in page and "[00:02:43] 15 минут" in page and 'name="title"' in page
+    assert '<dialog class="dlg dlg-task" id="task-' in page and "[00:02:43] 15 минут" in page and 'name="title"' in page
     assert "Старое дело" not in page and "Отменённое" not in page
     assert "Прислать прогноз" not in client.get("/commitments?q=сценарий").text
     assert "Согласовать бюджет" in client.get("/commitments?person=Ирина").text
     listing = client.get("/commitments?view=list&direction=mine").text
-    assert "Собрать сценарий" in listing and "Прислать прогноз" not in listing and "моя задача" in listing
+    assert "Собрать сценарий" in listing and "Прислать прогноз" not in listing and "Мои задачи · 1" in listing
     assert '<option value="to_me" selected>Мне должны</option>' in client.get("/commitments?add=to_me").text
 
     # фильтры по сроку и дате создания
@@ -467,10 +467,9 @@ def test_tasks_board_and_list(client):
     assert "Собрать сценарий" not in client.get(f"/commitments?created=custom&created_from={tomorrow}").text
     assert "Собрать сценарий" in client.get("/commitments?created=week").text
 
-    client.cookies.set("kb_folded", "done.other")  # свёрнутые колонки помнит браузер
-    folded = client.get("/commitments").text
-    assert 'class="kb-col kb-done folded"' in folded and 'class="kb-col kb-mine"' in folded
-    client.cookies.clear()
+    # колонка «Готово» — по кнопке «Показать готовые» под доской
+    assert 'data-col="done"' not in client.get("/commitments").text and "Показать готовые · 1" in client.get("/commitments").text
+    assert 'data-col="done"' in client.get("/commitments?done=1").text
 
     client.post(f"/commitments/{late}", data={"due": (today + timedelta(days=3)).isoformat()})
     assert not records.commitments_board()["mine"][0]["overdue"]
@@ -488,7 +487,7 @@ def test_tasks_board_and_list(client):
     c = store.row("SELECT * FROM commitments WHERE id=?", (late,))
     assert (c["title"], c["what"]) == ("Сценарий запуска", "Собрать сценарий запуска: этапы и сроки")
     page = client.get("/commitments").text
-    assert ">Сценарий запуска</button>" in page and '<p class="dlg-what">Собрать сценарий запуска: этапы и сроки</p>' in page
+    assert '<div class="task-what" title="Собрать сценарий запуска: этапы и сроки">Сценарий запуска</div>' in page and '<p class="dlg-what">Собрать сценарий запуска: этапы и сроки</p>' in page
     assert "Сценарий запуска" in client.get("/commitments?q=Сценарий запуска").text  # поиск — и по заголовку
     client.post("/commitments", data={"direction": "mine", "title": "Ответ банку", "what": ""})
     assert store.row("SELECT what FROM commitments WHERE title='Ответ банку'")["what"] == "Ответ банку"
@@ -521,12 +520,11 @@ def test_kaiten_tasks_boards_view(client, settings_with):
             (cid, board, "Аналитика" if board == 11 else "Качество", col, col_title, title, state, resp_id, resp,
              moved, moved, f"https://company.kaiten.ru/space/1/card/{cid}"))
 
-    page = client.get("/tasks").text  # доски — вид по умолчанию
-    assert "<h2>Аналитика</h2>" in page and "<h2>Качество</h2>" in page
+    page = client.get("/tasks").text  # старый адрес ведёт во вкладку «Kaiten» «Задач»; доски — вид по умолчанию
+    assert "<h2>Продажи / Аналитика</h2>" in page and "<h2>Продажи / Качество</h2>" in page
     assert page.index("Ключевое") < page.index(">В работе<")  # колонки — в порядке Kaiten
-    assert page.count('<span class="chip ok">вы</span>') == 2 and "дн. без движения" in page
-    assert '<span class="avatar" title="Anna Smirnova">AS</span>' in page
-    assert "без исполнителя · автор Ольга Белова" in page
+    assert "дн. без движения" in page and "без исполнителя" in page
+    assert client.get("/commitments?view=kaiten&mine=1").text.count('class="task kcard') == 2  # «Только мои»
     assert 'href="https://company.kaiten.ru/space/1"' in page
     stale = client.get("/tasks?only=stale").text
     assert "Распределение работ" in stale and "Бюджет 2027" not in stale
@@ -666,7 +664,7 @@ def test_task_in_work_and_archive_buttons(client):
     other = records.add_commitment(direction="mine", what="Созвониться с юристом")
     client.post(f"/commitments/{cid}/work", data={"on": "1"})
     board = client.get("/commitments").text
-    assert 'class="chip work"' in board and " inwork" in board
+    assert 'acc-text">в работе' in board and 'aria-pressed="true"' in board
     assert board.index("Отчёт для правления") < board.index("Созвониться с юристом"), "«в работе» — сверху колонки"
     client.post(f"/commitments/{cid}/work", data={"on": "0"})
     assert records.get_commitment(cid)["in_work_at"] is None
@@ -677,9 +675,9 @@ def test_task_in_work_and_archive_buttons(client):
     for url in ("/commitments?archived=1", "/commitments?view=list&archived=1", "/commitments?view=gantt&archived=1",
                 "/commitments?view=list&status=archived"):  # status=archived — ссылки из прошлой версии
         page = client.get(url).text
-        assert "Созвониться с юристом" in page and 'class="chip archived"' in page, url
+        assert "Созвониться с юристом" in page and " archived" in page, url
     shown = client.get("/commitments?archived=1").text
-    assert " archived" in shown and "Из архива" in shown
+    assert " archived" in shown and "Вернуть из архива" in shown
     assert shown.index("Отчёт для правления") < shown.index("Созвониться с юристом"), "архивные — в конце колонки"
     client.post(f"/commitments/{other}/archive", data={"on": "0"})
     board = client.get("/commitments").text

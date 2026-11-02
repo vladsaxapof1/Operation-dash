@@ -86,11 +86,11 @@ def test_items_cli_web_and_overview(capsys, client):
     client.post(f"/commitments/{tid}/items/{item}/done", data={"on": "1"})
     assert records.get_commitment(tid)["items_done"] == 1
     page = client.get("/commitments").text
-    assert 'class="task-items"' in page and "1 из 4" in page and 'class="chk"' in page and "Ещё пункт" in page
+    assert "Пункты · 1 из 4" in page and "· 1 из 4" in page and 'class="chk"' in page and "Ещё пункт" in page
     client.post(f"/commitments/{tid}/items/{item}/remove")
     assert records.get_commitment(tid)["items_total"] == 3
     other = records.add_commitment(direction="mine", what="Без пунктов")
-    assert "разбить задачу на части" in client.get(f"/commitments?task={other}").text
+    assert f'data-reveal="items-{other}">+ пункты' in client.get(f"/commitments?task={other}").text
     assert f"[commitment {tid}]" in overview.overview_markdown() and "пункты 0/3" in overview.overview_markdown()
 
 
@@ -99,7 +99,7 @@ def test_gantt_bars_carry_waits(client):
     b = records.add_commitment(direction="mine", whom="Подрядчик", title="Описание", what="Описание", due="2099-11-03")
     records.add_wait(b, waits_for=a)
     page = client.get("/commitments?view=gantt").text
-    assert f'data-waits="{a}" class="gantt-bar' in page and "Стрелка — «ждёт»" in page
+    assert f'data-waits="{a}" class="gantt-bar' in page and "Стрелка «ждёт»" in page
     records.update_commitment(a, status="done")
     assert "data-waits" not in client.get("/commitments?view=gantt").text  # дождались — стрелки нет
 
@@ -113,7 +113,8 @@ def test_kaiten_block_from_pulse_and_sync_back(fake, client):
     link = records.add_wait(contractor, waits_for=schemes)
     w = records.get_commitment(contractor)["waits"][0]
     assert w["kaiten"] == "can"
-    assert "Заблокировать в Kaiten" in client.get(f"/commitments?task={contractor}").text
+    assert f'/wait/{link}/kaiten"><button class="linkish" title="Поставить блокировку' in client.get(
+        f"/commitments?task={contractor}").text
 
     # директор нажала «Заблокировать в Kaiten» — блокировка ставится сразу, зеркало обновляется
     client.post(f"/commitments/{contractor}/wait/{link}/kaiten")
@@ -139,7 +140,7 @@ def test_kaiten_block_from_pulse_and_sync_back(fake, client):
         (contractor, True), ("в Kaiten: Нет доступа к складской программе", True)]
     kaiten.collect()  # повторная синхронизация — без дублей
     assert len(records.get_commitment(third)["waits"]) == 2
-    assert 'class="chip wait"' in client.get("/tasks").text and "заблокирована" in client.get("/tasks").text
+    assert 'title="Заблокирована в Kaiten: ' in client.get("/tasks").text
 
     # в Kaiten сняли блокировки → связь уходит, событие «случилось», уведомление «Можно делать»
     for b in fake.blockers[card_c]:

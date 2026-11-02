@@ -131,8 +131,8 @@ def test_web_focus_seen_subtask_and_meeting_links(client):
                                     source_type="meeting", source_ref="m1")
     store.execute("INSERT INTO meetings(id, title, status) VALUES('m1', 'Обзор продаж', 'processed')")
     page = client.get("/commitments").text
-    assert 'class="chip new"' in page and 'data-new="%d"' % parent in page
-    assert '<span class="badge">1</span>' in page  # «Задачи» в меню и кнопка «Новые»
+    assert 'data-new="%d"' % parent in page  # новая (Claude добавил, вы не открывали): снимется при наведении
+    assert '<span class="badge acc">1</span>' in page  # «Задачи» в меню: сколько задач в работе
 
     # подзадача из окна задачи: «+ Подзадача» открывает форму с заполненным полем «Часть задачи»
     form = client.get(f"/commitments?add=to_me&parent={parent}").text
@@ -147,7 +147,7 @@ def test_web_focus_seen_subtask_and_meeting_links(client):
 
     assert f'data-focus-task="{parent}"' in client.get(f"/commitments?task={parent}").text
     assert client.post(f"/commitments/{parent}/seen").json() == {"ok": True, "unseen": 0}
-    assert 'class="chip new"' not in client.get("/commitments").text
+    assert 'data-new="%d"' % parent not in client.get("/commitments").text
 
     created_first = client.get("/commitments?sort=created")
     assert created_first.cookies.get("task_sort") == "created"

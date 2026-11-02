@@ -238,11 +238,11 @@ def test_web_waits_merge_and_overview(client):
     assert "круг" in unquote(str(client.post(f"/commitments/{schemes}/wait", data={"target": f"#{archive}"}).url))
 
     board = client.get("/commitments").text
-    assert 'class="chip wait"' in board and "её ждут" in board and "Связать с другой задачей" in board
-    assert f'action="/commitments/{archive}/wait/' in board and "✓ Случилось" in board
-    assert "срок под угрозой" in board
-    assert 'class="chip wait"' in client.get("/commitments?view=list").text
-    assert 'class="chip wait"' in client.get("/commitments?view=gantt").text
+    assert 'class="task-wait"' in board and "её ждёт" in board and ">+ связь<" in board
+    assert f'action="/commitments/{archive}/wait/' in board and ">случилось<" in board
+    assert "Срок под угрозой" in board
+    assert '<div class="sub2">ждёт «' in client.get("/commitments?view=list").text
+    assert "· ждёт " in client.get("/commitments?view=gantt").text
 
     event = a["waits"][1]["id"]
     client.post(f"/commitments/{archive}/wait/{event}/done", data={"on": "1"})

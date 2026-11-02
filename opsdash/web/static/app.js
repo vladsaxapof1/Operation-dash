@@ -55,6 +55,9 @@
     };
     toNow();
     window.addEventListener("load", function () { requestAnimationFrame(toNow); });
+    document.querySelectorAll("[data-gantt-today]").forEach(function (b) {  // «Сегодня» в шапке Ганта
+      b.addEventListener("click", function () { kept = null; ganttBox.scrollTo({ left: Math.max(0, Number(ganttBox.dataset.nowX) - (ganttBox.clientWidth - labelW()) / 3), behavior: "smooth" }); });
+    });
 
     // шкала дат едет вместе со страницей: таблица во всю высоту (без своей прокрутки), а шапку сдвигаем вниз,
     // пока таблица на экране (position: sticky тут не работает — таблица листается вбок)
@@ -157,11 +160,8 @@
       el.classList.remove("new");
       el.querySelectorAll(".chip.new").forEach(function (chip) { chip.remove(); });
     });
-    fetch("/commitments/" + id + "/seen", { method: "POST" }).then(function (r) { return r.json(); }).then(function (res) {
-      document.querySelectorAll('.nav a[href="/commitments"] .badge, .btn.toggle .badge').forEach(function (b) {
-        if (res.unseen) b.textContent = res.unseen; else b.remove();
-      });
-    }).catch(function () { /* не получилось — отметка вернётся при следующем открытии страницы */ });
+    fetch("/commitments/" + id + "/seen", { method: "POST" })
+      .catch(function () { /* не получилось — отметка вернётся при следующем открытии страницы */ });
   };
   document.querySelectorAll("[data-new]").forEach(function (el) {
     var timer = null;
@@ -173,16 +173,21 @@
 
   // карточка задачи — окно по центру экрана: клик по задаче (на доске, в списке, на таймлайне) — просмотр,
   // карандаш — сразу правка. Закрыть — ✕, Esc (сам браузер) или клик мимо окна
-  var showTask = function (dlg, edit) {
+  var showTask = function (dlg, edit, remind) {
     dlg.querySelector(".dlg-view").hidden = edit;
     dlg.querySelector(".dlg-edit").hidden = !edit;
+    var rem = dlg.querySelector(".dlg-remind");  // колокольчик на карточке, «напомнить» у связи — окно с напоминанием
+    if (rem && remind) rem.open = true;
     // карточка задачи скрыта (свёрнутые «готовые», фильтр) — окно внутри неё не отрисуется, но модальное
     // окно всё равно заблокирует страницу. Такое окно переносим в body
     if (!dlg.open && !dlg.parentElement.checkVisibility()) document.body.appendChild(dlg);
     if (!dlg.open) dlg.showModal();
     // фокус — на поле заголовка, а при просмотре на само окно (иначе браузер обводит рамкой ✕)
-    (edit ? dlg.querySelector(".dlg-edit [name=title]") : dlg.querySelector(".dlg-box")).focus();
+    (edit ? dlg.querySelector(".dlg-edit [name=title]") : (remind && rem ? rem.querySelector("textarea") : dlg.querySelector(".dlg-box"))).focus();
     markSeen(dlg.id.slice(5));
+  };
+  var closeMenus = function (except) {
+    document.querySelectorAll("details.menu[open]").forEach(function (m) { if (m !== except) m.open = false; });
   };
   var pressedOn = null;  // нажали внутри окна, а отпустили снаружи (выделяли текст) — не закрываем
   document.addEventListener("mousedown", function (e) { pressedOn = e.target; });
@@ -197,26 +202,90 @@
         var other = document.getElementById("task-" + rel.dataset.taskOpen);
         if (other) {
           e.preventDefault();
-          if (other !== dlg) { dlg.close(); showTask(other, false); }
+          if (other !== dlg) { dlg.close(); showTask(other, false, rel.hasAttribute("data-remind")); }
+        }
+        return;
+      }
+      var reveal = t.closest("[data-reveal]");  // «+ связь», «+ пункты»: форма под строкой связей
+      if (reveal) {
+        var pane = document.getElementById(reveal.dataset.reveal);
+        if (pane) {
+          pane.hidden = !pane.hidden;
+          var field = !pane.hidden && pane.querySelector("input[type=text]");
+          if (field) field.focus();
         }
         return;
       }
       if ((t === dlg && pressedOn === dlg) || t.closest("[data-dlg-close]")) dlg.close();
-      else if (t.closest("[data-dlg-edit]")) showTask(dlg, true);
+      else if (t.closest("[data-dlg-edit]")) { closeMenus(); showTask(dlg, true); }
       else if (t.closest("[data-dlg-view]")) showTask(dlg, false);
       return;
     }
     var opener = t.closest("[data-task-open]");
     var card = t.closest("[data-task]");
     if (!opener && (!card || t.closest("a, button, form, input, select, textarea, label, summary"))) return;
+    // карточка на доске раскрывается на месте (зависимости, кнопки, «открыть»); второй клик — сворачивает
+    if (!opener && card.hasAttribute("data-expand")) {
+      var open = card.classList.toggle("open");
+      card.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) markSeen(card.dataset.task);
+      return;
+    }
     var target = document.getElementById("task-" + (opener ? opener.dataset.taskOpen : card.dataset.task));
     if (!target) return;
     e.preventDefault();
-    showTask(target, !!(opener && opener.hasAttribute("data-edit")));
+    showTask(target, !!(opener && opener.hasAttribute("data-edit")), !!(opener && opener.hasAttribute("data-remind")));
   });
-  document.addEventListener("keydown", function (e) {  // полоса на таймлайне — с клавиатуры тоже
-    if (e.key === "Enter" && e.target.matches("[data-task-open][role=button]")) e.target.click();
+  document.addEventListener("keydown", function (e) {  // полоса на таймлайне и карточка доски — с клавиатуры тоже
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-task-open][role=button], [data-expand]")) {
+      e.preventDefault();
+      e.target.click();
+    }
+    if (e.key === "Escape") closeMenus();
   });
+
+  // меню «…» и панель «Фильтр»: открыто одно, закрываются кликом мимо
+  document.addEventListener("click", function (e) {
+    var m = e.target.closest("details.menu");
+    closeMenus(m);
+    if (m && e.target.closest(".menu-i")) setTimeout(function () { m.open = false; }, 0);
+  });
+
+  // статус в окне задачи: Новая / В работе / Ждёт / Готово — сразу сохраняется. «Ждёт» у задачи без связи —
+  // открываем «+ связь»: нужно сказать, чего она ждёт
+  document.querySelectorAll("[data-task-state]").forEach(function (sel) {
+    var was = sel.value;
+    sel.addEventListener("change", function () {
+      if (sel.value === "wait" && sel.dataset.blocked !== "1") {
+        var pane = sel.closest("dialog").querySelector("[id^=link-]");
+        if (pane) { pane.hidden = false; pane.querySelector("input[type=text]").focus(); }
+        sel.value = was;
+        return;
+      }
+      sel.form.submit();
+    });
+  });
+
+  // окна по кнопке ([data-dlg-open]): «+ Задача»; «+» в колонке доски подставляет тип задачи
+  var openDlg = function (dlg, dir) {
+    if (!dlg) return;
+    var sel = dir && dlg.querySelector("select[name=direction]");
+    if (sel) sel.value = dir;
+    if (!dlg.open) dlg.showModal();
+    var first = dlg.querySelector("input[name=title], input[type=text]");
+    if (first) first.focus();
+  };
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-dlg-open]");
+    if (!b) return;
+    e.preventDefault();
+    openDlg(document.getElementById(b.dataset.dlgOpen), b.dataset.addDir);
+  });
+  var addDlg = document.getElementById("add-dlg");
+  if (addDlg && (location.hash === "#add" || addDlg.hasAttribute("data-open-on-load"))) {
+    openDlg(addDlg);
+    history.replaceState(null, "", location.pathname + location.search);
+  }
 
   // поле «Часть задачи»: подсказки (открытые задачи) подгружаем при первом вводе — не держим их в каждой странице
   document.addEventListener("focusin", function (e) {

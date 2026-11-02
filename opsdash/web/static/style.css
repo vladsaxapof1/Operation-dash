@@ -339,14 +339,6 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .kb-col.folded .kb-summary:hover { border-color: var(--accent); }
 .kb-summary-n { font-size: 26px; font-weight: 600; line-height: 1.1; color: var(--text); font-variant-numeric: tabular-nums; }
 .kb-summary-show { margin-top: 2px; color: var(--accent); font-weight: 600; }
-.task { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px;
-  padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; box-shadow: var(--shadow); cursor: pointer; }
-.task:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.task.to_me { border-left-color: var(--ok); }
-.task.other { border-left-color: var(--muted); }
-.task.overdue { border-color: var(--bad); border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, var(--panel)); }
-.task.done { opacity: .7; border-left-color: var(--ok); }
-.task.done .task-what { text-decoration: line-through; }
 .task-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; justify-content: space-between; }
 .task-chips > span { white-space: nowrap; }
 .task-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-height: 20px; }
@@ -366,7 +358,6 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 /* заголовок задачи — кнопка: открывает окно задачи (до .task-what и .gantt-what — они задают начертание) */
 .task-open { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .task-open:hover { color: var(--accent); }
-.task-what { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .task-src { flex: 1 1 90px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn.icon { width: 30px; padding: 0; justify-content: center; }
 .btn.icon svg { display: block; }
@@ -387,21 +378,12 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
   font: 16px/1.5 var(--font); font-weight: 400; text-align: left; white-space: normal; cursor: auto; }
 .dlg::backdrop { background: var(--backdrop); }
 .dlg-box { padding: 22px 28px 24px; display: grid; gap: 14px; outline: none; }  /* клик по полям окна — не «мимо окна» */
-.dlg-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dlg-top .due { margin-left: 0; }
 .dlg-x { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; color: var(--muted);
   font-size: 16px; cursor: pointer; }
 .dlg-x:hover { background: var(--panel-2); color: var(--text); }
 .dlg-view { display: grid; gap: 12px; }
 .dlg-title { font-size: 20px; line-height: 1.3; margin: 0; overflow-wrap: anywhere; }
 .dlg-what { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.dlg-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 18px; margin: 0; font-size: 14px; }
-.dlg-facts dt { color: var(--muted); }
-.dlg-facts dd { margin: 0; overflow-wrap: anywhere; }
-.dlg-quote { margin: 0; padding: 4px 0 4px 12px; border-left: 3px solid var(--line); color: var(--muted); font-style: italic; font-size: 14px; }
-.dlg-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
-.dlg-actions .grow { flex: 1; }
-.dlg-actions .btn svg { margin-right: 2px; }
 .dlg-edit { display: grid; margin: 0; }
 .dlg-edit .dlg-title { margin-bottom: 4px; }
 .dlg-edit input, .dlg-edit select, .dlg-edit textarea { max-width: none; }
@@ -409,11 +391,9 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .cm-actions { margin-top: 2px; }
 /* новая задача (добавил Claude, вы ещё не открывали) — рамка и метка; снимаются при наведении или открытии (app.js) */
 .chip.new { background: var(--accent); color: #fff; border-color: transparent; }
-.task.new { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
 .list > li.cm.new { box-shadow: inset 3px 0 0 var(--accent); }
 /* «в работе» — зелёная карточка сверху колонки; кнопка «В работе» нажата */
 .chip.work { background: var(--ok); color: var(--panel); border-color: transparent; font-weight: 600; }
-.task.inwork { border-color: var(--ok); border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--panel)); }
 .list > li.cm.inwork { box-shadow: inset 3px 0 0 var(--ok); background: color-mix(in srgb, var(--ok) 6%, var(--panel)); }
 .btn.work.on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok-text); }
 /* архив (галочка «Показать архивные») — серые карточки с плашкой «архив», в конце колонок */
@@ -423,9 +403,6 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .meet-pick { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
 .meet-pick input { flex: 1 1 240px; min-width: 0; }
 .chip.archived { background: var(--muted); color: var(--panel); border-color: transparent; font-weight: 600; }
-.task.archived, .list > li.cm.archived { filter: grayscale(1); opacity: .6; }
-.task.archived { border-left-color: var(--muted); box-shadow: none; }
-.task.archived:hover, .list > li.cm.archived:hover { opacity: .85; }
 .gantt-bar.archived { filter: grayscale(1); opacity: .45; }
 /* связи задач: для какой задачи эта работа, кому передана часть — блоком на карточке */
 .task-rel { display: grid; gap: 3px; padding: 6px 8px; border-radius: 8px; background: var(--accent-soft); font-size: 13px; line-height: 1.35; }
@@ -437,7 +414,6 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .gantt-label .muted a { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
 .gantt-label .muted a:hover { color: var(--accent); }
 /* навели на задачу — связанные с ней подсвечиваются, даже если они в другой колонке (app.js) */
-.task.rel-hl { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dlg-kids { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
 /* «ждёт»: задачу не закончить, пока не готово другое — метка на карточке, строки в блоке связей и в окне */
 .chip.wait { background: var(--warn-soft); color: var(--warn-text); border-color: transparent; }
@@ -445,14 +421,8 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .rel-k.ok { color: var(--ok-text); }
 .dlg-kids li.done { opacity: .65; }
 .dlg-kids form.inline { margin-left: 2px; }
-.dlg-link { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
-.dlg-link > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
-.dlg-link form { margin-top: 8px; }
-.dlg-link input[type=date] { flex: 0 0 auto; width: auto; }
 .warn-text { color: var(--warn-text); }
 /* Claude думает, что задача выполнена: доводы и кнопки «Да, закрыть / Нет» в окне задачи */
-.dlg-hint { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--ok-soft); font-size: 14px; }
-.dlg-hint .actions { flex-wrap: wrap; }
 .prop-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .btn.toggle.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .btn .badge { height: 18px; min-width: 18px; margin-left: 2px; font-size: 11px; }
@@ -577,16 +547,6 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* --- задачи Kaiten: доски --- */
 .tile.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.kboard .card-h h2 { margin: 2px 0 0; }
-.kboard-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(260px, 1fr); gap: 12px; padding: 0 16px 16px; overflow-x: auto; align-items: start; }
-.kcard { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px;
-  padding: 10px 12px; display: grid; gap: 6px; box-shadow: var(--shadow); }
-.kcard.work { border-left-color: var(--accent); }
-.kcard.stale { border-color: var(--warn); border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 6%, var(--panel)); }
-.kcard.overdue { border-color: var(--bad); border-left-color: var(--bad); }
-.kcard-title { font-weight: 600; color: var(--text); line-height: 1.35; overflow-wrap: anywhere; }
-.kcard-title:hover { color: var(--accent); }
-.kcard-who { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: 50%;
   background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; vertical-align: middle; }
 
@@ -678,8 +638,6 @@ button.chip.ok { cursor: pointer; }
 .remind .actions { flex-wrap: wrap; }
 .rem-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .rem-h .due { margin-left: auto; }
-.dlg-remind { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
-.dlg-remind > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 /* загрузка людей: строка над доской задач и в «Людях» */
 .load { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; }
 .load-h { font-size: 13px; color: var(--muted); font-weight: 600; margin-right: 2px; }
@@ -981,58 +939,11 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
   input[type=text], input[type=password], input[type=number], select, textarea { max-width: 100%; }
 }
 
-/* --- проекты: задачи с общим результатом (вид «Проекты» и страница проекта) --- */
-.chip.proj { background: transparent; color: var(--accent); border-color: var(--accent-soft); text-decoration: none; }
-.chip.proj:hover { border-color: var(--accent); }
-.pj-tools { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.pj-tools .grow { flex: 1; }
-.pj-new > summary { list-style: none; }
-.pj-new > summary::-webkit-details-marker { display: none; }
-.pj-new[open] { flex-basis: 100%; }
-.pj-new-form { margin: 10px 0 0; max-width: 640px; display: grid; }
-.pj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-.pj-card { display: grid; gap: 8px; align-content: start; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); color: var(--text); }
-.pj-card:hover { text-decoration: none; border-color: var(--accent); }
-.pj-card.paused, .pj-card.finished { opacity: .7; }
-.pj-top, .pj-head-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.pj-title { font-weight: 600; font-size: 16px; flex: 1 1 auto; }
-.pj-goal { color: var(--muted); font-size: 13px; line-height: 1.4; }
-.pj-bar { height: 8px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
-.pj-bar i { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
-.pj-bar.big { height: 12px; margin: 10px 0; }
-.pj-nums { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
-.pj-nums b { font-size: 18px; }
-.pj-stuck { display: grid; gap: 2px; padding: 6px 8px; border-radius: 8px; background: var(--warn-soft); font-size: 13px; line-height: 1.35; }
-.pj-stuck .rel-k { color: var(--warn-text); }
-.pj-stuck.ok { background: var(--ok-soft); }
-.pj-stuck.ok .rel-k { color: var(--ok-text); }
-.pj-stuck.big { font-size: 14px; margin-bottom: 10px; }
-.pj-big b { font-size: 26px; }
-.pj-head-top { margin-bottom: 2px; }
-.pj-facts { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: var(--muted); margin-bottom: 10px; }
-.pj-facts b { color: var(--text); }
-.pj-facts .bad-text, .pj-facts .bad-text b { color: var(--bad-text); }
-.pj-actions { display: grid; gap: 8px; }
-.pj-edit form { display: grid; margin-top: 8px; }
-.pj-status { margin-top: 10px; flex-wrap: wrap; }
-.pj-steps { margin-bottom: 18px; }
-.pj-done h2 { font-size: 16px; display: flex; align-items: center; gap: 8px; }
-.pj-done-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 18px; }
-.pj-empty { grid-column: 1 / -1; }
-@media (max-width: 1150px) { .pj-steps { overflow-x: auto; } }
 
 /* пункты внутри задачи: полоска на карточке, список с отметками в окне задачи */
 .task-items { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .task-items .pj-bar { flex: 1; height: 6px; }
-.dlg-items { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
-.dlg-items-h { font-size: 14px; }
-.dlg-items ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
-.dlg-items li { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.dlg-items li.done .dlg-item-text .t { color: var(--muted); text-decoration: line-through; }
 .dlg-item-text { flex: 1; overflow-wrap: anywhere; }
-.chk { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ok-text); font-weight: 600; font-size: 13px; line-height: 1; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-.chk[aria-pressed="true"] { background: var(--ok-soft); border-color: var(--ok); }
-.chk:hover { border-color: var(--accent); }
 
 /* окно «У PULSE новый дизайн» (один раз после обновления): картинка с пульсом и конфетти, цвета — из темы */
 .dlg-hello { width: min(440px, calc(100vw - 32px)); }
@@ -1069,3 +980,232 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .arch-name .st { font-weight: 400; margin-top: 2px; }
 .arch-what { font-size: 15px; }
 @media (max-width: 760px) { .arch-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+/* ===== Задачи 2.0: шапка с панелью фильтра, доска, карточка, окно задачи ===== */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; }
+.toolbar select, .toolbar input[type=search] { width: auto; height: 38px; font-size: 14px; }
+.tb-search { width: 200px !important; }
+.unfilter { font-size: 14px; white-space: nowrap; }
+/* меню «…» и выпадающие панели: открываются под кнопкой, закрываются кликом мимо (app.js) */
+.menu { position: relative; }
+.menu > summary { list-style: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu[open] > summary { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.menu-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 210px; padding: 6px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-pop); display: grid; }
+.menu-pop form { margin: 0; }
+.menu-i { display: block; width: 100%; padding: 8px 12px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit;
+  font-size: 15px; text-align: left; cursor: pointer; white-space: nowrap; }
+.menu-i:hover { background: var(--panel-2); text-decoration: none; }
+.menu-i.danger { color: var(--bad-text); }
+.menu-sep { height: 1px; background: var(--line); margin: 6px 4px; }
+.filter-pop { left: 0; right: auto; width: 300px; padding: 4px 16px 16px; display: block; }
+.filter-pop label:not(.check) { margin-top: 12px; }
+.filter-pop .check { margin-top: 14px; }
+.filter-pop select, .filter-pop input[type=text] { width: 100%; }
+.filter-pop .period { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.filter-pop .period input { width: auto; min-width: 0; flex: 1; }
+.btn .ico { flex: none; }
+
+/* доска: колонки на «утопленном» фоне, карточки без рамки с лёгкой тенью */
+.board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.board.with-done { grid-template-columns: repeat(4, minmax(270px, 1fr)); overflow-x: auto; padding-bottom: 6px; }
+.col { background: var(--sunken); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.col-h { display: flex; align-items: center; gap: 8px; padding: 4px 6px 6px; white-space: nowrap; }
+.col-h h2 { font-size: 15px; }
+.col-n { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cnt { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600;
+  display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
+.cnt.bad { background: var(--bad-text); } .cnt.warn { background: var(--warn-fill); }
+.col-empty { padding: 14px 8px; text-align: center; color: var(--muted); font-size: 13px; }
+.board-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 16px; }
+.grow { flex: 1; }
+/* иконка-кнопка 28×28 (на карточке) и текстовая кнопка-ссылка */
+.ibtn { width: 28px; height: 28px; padding: 0; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel);
+  color: var(--muted); display: inline-grid; place-items: center; cursor: pointer; flex: none; }
+.ibtn:hover { color: var(--text); border-color: var(--faint); text-decoration: none; }
+.ibtn.ok { color: var(--ok-text); }
+.ibtn.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.ibtn.ghost { border-color: transparent; background: transparent; }
+.ibtn.ghost:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.linkish { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.linkish:hover { text-decoration: underline; }
+.linkish.muted { color: var(--muted); }
+.acc-text { color: var(--accent); }
+
+.task { background: var(--panel); border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow-card); cursor: pointer; color: var(--text);
+  outline: none; }
+.task:hover { box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-card); }
+.task:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+.task.overdue { border-left: 3px solid var(--bad-text); }
+.task.done, .task.archived { background: var(--panel-2); box-shadow: none; }
+.task.done .task-what, .task.archived .task-what { color: var(--muted); }
+.task.open { box-shadow: 0 0 0 2px var(--accent), var(--shadow-raised); cursor: default; }
+.task.rel-hl { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-card); }
+.task-what { font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.task-meta { margin-top: 3px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.task-wait { display: inline-flex; vertical-align: -2px; }
+.task-more { display: none; }
+.task.open .task-more { display: block; }
+.task-dep { display: flex; gap: 6px; margin-top: 8px; font-size: 13px; color: var(--muted); line-height: 1.4; }
+.task-dep .ico, .dep-ico { flex: none; margin-top: 1px; width: 14px; text-align: center; }
+.task-acts { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+.task-open-link { margin-left: auto; font-size: 13px; }
+
+/* окно задачи */
+.dlg-task { width: min(720px, calc(100vw - 32px)); }
+.dlg-view { display: grid; gap: 14px; }
+.dlg-head { display: flex; align-items: flex-start; gap: 12px; }
+.dlg-head .dlg-title { flex: 1; min-width: 0; }
+.dlg-pencil { margin-left: 6px; padding: 0; border: 0; background: none; color: var(--faint); cursor: pointer; vertical-align: -1px; }
+.dlg-pencil:hover { color: var(--accent); }
+.dlg-state { margin: 0; flex: none; }
+.dlg-state select { width: auto; height: 36px; font-size: 14px; }
+.dlg-x { flex: none; margin: 2px -6px 0 0; width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; color: var(--muted);
+  cursor: pointer; display: grid; place-items: center; }
+.dlg-x:hover { background: var(--panel-2); color: var(--text); }
+.dlg-meta { margin-top: -6px; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.dlg-meta b { font-weight: 400; color: inherit; }
+.dlg-what { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dlg-quote { margin: 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--line); color: var(--muted); font-style: italic; font-size: 14px; }
+.dlg-rels { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.rel { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: start; font-size: 15px; }
+.rel > .ico, .rel-ico { margin-top: 3px; color: var(--muted); text-align: center; line-height: 1.2; }
+.rel.done { color: var(--muted); }
+.rel-act { display: flex; gap: 10px; align-items: baseline; font-size: 14px; white-space: nowrap; }
+.dlg-remind > summary { display: contents; cursor: pointer; list-style: none; color: var(--accent); }
+.dlg-remind > summary::-webkit-details-marker { display: none; }
+.dlg-remind > summary .ico { margin-top: 3px; color: var(--muted); }
+.dlg-remind > .remind { grid-column: 2 / -1; }
+.dlg-adds { padding-left: 28px; font-size: 14px; color: var(--muted); }
+.dlg-pane { padding-left: 28px; display: grid; gap: 8px; }
+.dlg-pane[hidden] { display: none; }
+.meet-pick { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 0; }
+.meet-pick input { flex: 1 1 240px; min-width: 0; height: 34px; font-size: 14px; }
+.meet-pick input[type=date] { flex: 0 0 auto; width: auto; }
+.dlg-sec { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.dlg-items { display: grid; gap: 8px; }
+.dlg-items ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.dlg-items li { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.dlg-items li.done .dlg-item-text .t { color: var(--muted); text-decoration: line-through; }
+.chk { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--line-strong); background: var(--panel); color: var(--ok-text);
+  font-weight: 600; font-size: 13px; line-height: 1; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.chk[aria-pressed="true"] { background: var(--ok-soft); border-color: var(--ok); }
+.chk:hover { border-color: var(--accent); }
+.dlg-hint { display: grid; gap: 8px; padding: 12px 14px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-size: 14px; }
+.dlg-hint .actions { flex-wrap: wrap; gap: 8px 12px; }
+.dlg-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
+.dlg-actions .menu-pop { top: auto; bottom: calc(100% + 6px); }
+.dlg-origin { margin-top: -4px; font-size: 13px; color: var(--muted); }
+.dlg-edit { display: grid; margin: 0; }
+.dlg-edit .dlg-title { margin-bottom: 4px; }
+.dlg-edit input, .dlg-edit select, .dlg-edit textarea { max-width: none; }
+.dlg-edit .dlg-actions { margin-top: 16px; }
+#add-dlg input, #add-dlg select, #add-dlg textarea { max-width: none; }
+#add-dlg .dlg-head { margin-bottom: 4px; }
+
+@media (max-width: 1000px) { .board { grid-template-columns: repeat(3, minmax(250px, 1fr)); overflow-x: auto; padding-bottom: 6px; } }
+@media (max-width: 760px) {
+  .toolbar { width: 100%; }
+  .tb-search { flex: 1; width: auto !important; }
+  .board { grid-template-columns: repeat(3, minmax(260px, 86vw)); }
+  .dlg-box { padding: 18px 18px 20px; }
+  .rel { grid-template-columns: 18px minmax(0, 1fr); }
+  .rel-act { grid-column: 2; }
+}
+
+/* список задач: таблица с группами, вторая строка — зависимость, дубль или пункты */
+.tlist { margin-bottom: 0; }
+.tlist .c-what { width: 34%; }
+.tlist tbody tr[data-task] { cursor: pointer; }
+.tlist tbody tr[data-task]:hover td { background: var(--panel-2); }
+.tlist tr.grp th { padding-top: 16px; background: none; color: var(--muted); }
+.tlist .task-open { font-weight: 400; text-align: left; }
+.tlist .sub2 { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.tlist tr.dim td { opacity: 1; color: var(--muted); }
+
+/* Гант 2.0: строки 44px, группы — строками-заголовками, полосы 20px, подпись справа */
+.gantt { margin-bottom: 0; overflow: hidden; }
+.gantt-label { padding: 5px 16px; }
+.gantt-corner { align-items: flex-end; gap: 6px; padding-bottom: 10px; font-size: 13px; }
+.gantt-top span { font-size: 13px; font-weight: 400; }
+.gantt-bottom span { font-size: 11px; }
+.gantt-bottom span.today { font-weight: 600; }
+.gantt-bg i { background: var(--weekend); }
+.gantt-group { border-top: 1px solid var(--line); }
+.gantt-group-h { width: auto; position: relative; display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); z-index: 2; }
+.gantt-group-h > * { position: sticky; left: 16px; }
+.gantt-group-t { font-size: 15px; font-weight: 600; }
+.gantt-row { border-top: 1px solid var(--line); }
+.gantt-group-h + .gantt-rows > .gantt-row:first-child { border-top: 0; }
+.gantt-what { font-size: 14px; font-weight: 400; }
+.gantt-meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gantt-track { height: 44px; }
+.gantt-bar { top: 12px; height: 20px; border-radius: 5px; line-height: 20px; font-size: 11px; font-weight: 400; padding: 0 6px;
+  box-shadow: none; background: var(--accent); }
+.gantt-bar:hover { filter: brightness(1.08); box-shadow: none; }
+.gantt-bar.mine { background: var(--accent); }
+.gantt-bar.to_me { background: var(--ok-text); }
+.gantt-bar.other { background: var(--faint); }
+.gantt-bar.overdue { background: var(--bad-text); }
+.gantt-bar.done { background: color-mix(in srgb, var(--ok) 30%, var(--panel)); color: var(--text); text-decoration: none; }
+.gantt-bar.part { background: linear-gradient(to right, var(--bar) var(--share), color-mix(in srgb, var(--bar) 25%, var(--panel)) var(--share)); }
+.gantt-bar.part.mine { --bar: var(--accent); } .gantt-bar.part.to_me { --bar: var(--ok-text); } .gantt-bar.part.other { --bar: var(--faint); }
+.gantt-bar.dot { width: 10px; height: 10px; top: 17px; padding: 0; border-radius: 50%; background: var(--faint); }
+.gantt-note { position: absolute; top: 12px; line-height: 20px; font-size: 12px; color: var(--muted); white-space: nowrap; pointer-events: none; z-index: 2; }
+.gantt-note a { pointer-events: auto; }
+.gantt-now { border-left: 2px dashed var(--accent); }
+.gantt-links path { stroke: var(--warn-fill); }
+.gantt-links .gl-head { fill: var(--warn-fill); }
+
+/* проекты 2.0: карточки по три в ряд, страница проекта — полоса-сводка и шаги колонками доски */
+.pj-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.pj-card { display: grid; gap: 10px; align-content: start; padding: 18px 20px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); color: var(--text); }
+.pj-card:hover { text-decoration: none; border-color: var(--line-strong); }
+.pj-card.paused, .pj-card.finished { background: var(--panel-2); }
+.pj-top { display: flex; align-items: flex-start; gap: 12px; }
+.pj-title { flex: 1; font-size: 17px; font-weight: 600; line-height: 1.3; }
+.pj-due { font-size: 14px; color: var(--muted); white-space: nowrap; }
+.pj-goal { font-size: 14px; color: var(--muted); line-height: 1.45; }
+.pj-prog { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.pj-bar { flex: 1; display: block; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.pj-bar i { display: block; height: 100%; background: var(--ok-text); border-radius: 999px; }
+.pj-line { font-size: 14px; color: var(--muted); }
+.pj-new { border-style: dashed; border-color: var(--line-strong); background: transparent; align-content: center; min-height: 170px; }
+.pj-new-b { font-size: 16px; text-align: left; }
+.pj-new form { margin: 0; line-height: 1.5; }
+.pj-sum { padding: 18px 20px; }
+.pj-sum-top { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 14px; }
+.pj-pct { font-size: 22px; font-weight: 600; }
+.pj-sum-top .pj-bar { flex: 0 1 380px; min-width: 120px; }
+.pj-stuck { margin-top: 14px; font-size: 14px; }
+.pj-stuck ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.pj-free { margin: 12px 0 0; font-size: 14px; }
+.pj-steps { margin-bottom: 18px; }
+.col-sub { margin: -4px 6px 2px; font-size: 13px; color: var(--muted); }
+.pj-more { margin-bottom: 14px; }
+.pj-more > summary { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; list-style: none; cursor: pointer; }
+.pj-more > summary::-webkit-details-marker { display: none; }
+.pj-more[open] > summary .btn { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.pj-more-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; margin-top: 12px; }
+.dlg-form { display: block; }
+.dlg-form .dlg-actions { margin-top: 20px; }
+.dlg-form input, .dlg-form select, .dlg-form textarea { max-width: none; }
+@media (max-width: 1000px) { .pj-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pj-steps { overflow-x: auto; } }
+@media (max-width: 760px) { .pj-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* вкладка Kaiten: доски блоками, колонки — как на доске задач (больше трёх — переносятся) */
+.kboard { margin-bottom: 26px; }
+.kboard-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+.kboard-h h2 { font-size: 17px; }
+.kboard-h .muted { font-size: 14px; }
+.kboard-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; padding: 0; overflow: visible; }
+a.task { display: block; }
+a.task:hover { text-decoration: none; }
+.tb-check { margin: 0; white-space: nowrap; font-size: 14px; }
+.kaiten-note { margin-top: 18px; }
+@media (max-width: 1000px) { .kboard-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .kboard-cols { grid-template-columns: minmax(0, 1fr); } }
+.page-tasks .tb-search { width: 170px !important; }
