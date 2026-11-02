@@ -1,21 +1,39 @@
-/* Тёмная тема. base.html подключает файл по настройке «Оформление»: всегда, по системе (media) или никогда */
+/* Тёмная тема. base.html подключает файл по настройке «Оформление»: всегда, по системе (media) или никогда.
+   Те же токены, что в style.css: карточки отделены от фона рамкой, мелкий серый текст читается */
 :root {
   --bg: #12151b;
   --panel: #1a1e26;
   --panel-2: #20252f;
+  --sunken: #151920;
   --text: #e6e9ef;
   --muted: #98a1b2;
-  --line: #2c323d;
+  --faint: #5f6878;
+  --line: #343a46;
+  --line-strong: #3d4452;
   --accent: #7b93ff;
   --accent-soft: #232b45;
   --ok: #51cf66;
   --ok-soft: #1b2e21;
+  --ok-text: #69db7c;
   --warn: #ffa94d;
   --warn-soft: #33281a;
+  --warn-text: #ffa94d;
+  --warn-fill: #e08a2e;
   --bad: #ff6b6b;
   --bad-soft: #351f22;
+  --bad-text: #ff6b6b;
+  --today: #1c2233;
+  --weekend: #20252f;
   --shadow: none;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-raised: 0 4px 12px rgba(0, 0, 0, .4);
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, .5);
+  --shadow-dlg: 0 20px 60px rgba(0, 0, 0, .6);
+  --backdrop: rgba(0, 0, 0, .55);
+  --dlg-line: #343a46;      /* на тёмной подложке окну нужна рамка: тень почти не видна */
   --ev-bg: #2b3b73; --ev-fg: #e3e8ff; --ev-line: #7b93ff;
   --evg-bg: #3b2f6b; --evg-fg: #ece6ff; --evg-line: #b197fc;
   color-scheme: dark;
 }
+/* основная кнопка на светлом акценте — тёмный текст, иначе белое на #7b93ff не читается */
+.btn.primary, .badge.acc { color: #0f1424; }
