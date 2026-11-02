@@ -1037,7 +1037,10 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .task.overdue { border-left: 3px solid var(--bad-text); }
 .task.done, .task.archived { background: var(--panel-2); box-shadow: none; }
 .task.done .task-what, .task.archived .task-what { color: var(--muted); }
-.task.open { box-shadow: 0 0 0 2px var(--accent), var(--shadow-raised); cursor: default; }
+/* «в работе» — тонкая зелёная рамка: такие задачи видны в колонке сразу (и стоят в ней первыми) */
+.task.inwork { box-shadow: 0 0 0 1px var(--ok), var(--shadow-card); }
+.task.inwork:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 70%, transparent), var(--shadow-card); }
+.task.open, .task.open:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow-raised); cursor: default; }
 .task.rel-hl { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-card); }
 .task-what { font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .task-meta { margin-top: 3px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
@@ -1120,6 +1123,7 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .tlist .task-open { font-weight: 400; text-align: left; }
 .tlist .sub2 { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .tlist tr.dim td { opacity: 1; color: var(--muted); }
+.tlist tr.inwork td:first-child { box-shadow: inset 3px 0 0 var(--ok); }  /* «в работе» — зелёная черта слева, как рамка на доске */
 
 /* Гант 2.0: строки 44px, группы — строками-заголовками, полосы 20px, подпись справа */
 .gantt { margin-bottom: 0; overflow: hidden; }

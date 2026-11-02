@@ -355,14 +355,14 @@
 {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
 {% set holds = c.holds if c.status == 'open' else [] %}
 {% set person = card_person(c) | trim %}
-<div class="task{{ ' overdue' if c.overdue }}{{ ' done' if c.status != 'open' }}{{ ' archived' if c.archived }}" data-task="{{ c.id }}" data-expand
+<div class="task{{ ' overdue' if c.overdue }}{{ ' inwork' if c.in_work and c.status == 'open' }}{{ ' done' if c.status != 'open' }}{{ ' archived' if c.archived }}" data-task="{{ c.id }}" data-expand
      role="button" tabindex="0" aria-expanded="false"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}{% if rel %} data-rel="{{ rel | join(' ') }}"{% endif %}>
   <div class="task-what" title="{{ c.what }}">{{ c | headline }}</div>
   <div class="task-meta">
     {%- if person %}{{ person }} · {% endif -%}
     {%- if c.status == 'done' %}<span class="ok-text">готово{% if c.closed_at %} {{ c.closed_at | local('%d.%m') }}{% endif %}</span>
     {%- elif c.status != 'open' %}отменена{% else %}{{ due_text(c) }}{% endif -%}
-    {%- if c.in_work and c.status == 'open' %} · <span class="acc-text">в работе</span>{% endif -%}
+    {%- if c.in_work and c.status == 'open' %} · <span class="ok-text">в работе</span>{% endif -%}
     {%- if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif -%}
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}

@@ -255,7 +255,7 @@
       {% if title %}<tr class="grp"><th scope="rowgroup" colspan="5">{{ title }} · {{ rows | length }}</th></tr>{% endif %}
       {% for c in rows %}
       {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
-      <tr data-task="{{ c.id }}" class="{{ 'dim' if c.status != 'open' or c.archived }}{{ ' archived' if c.archived }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
+      <tr data-task="{{ c.id }}" class="{{ 'dim' if c.status != 'open' or c.archived }}{{ ' archived' if c.archived }}{{ ' inwork' if c.in_work and c.status == 'open' }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
         <td class="c-what"><button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
           {%- if c.merge_hint %}<div class="sub2 warn-text">похоже на дубль{% if c.merge_hint.into_task %} «{{ c.merge_hint.into_task.headline }}»{% endif %} · <a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}">объединить</a></div>
           {%- elif open_waits %}{% set w = open_waits[0] %}<div class="sub2">ждёт {% if w.task %}«{{ w.task.headline | truncate(40, True, '…') }}» — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% endif %}{% if w.late %} <span class="bad-text">(просрочено)</span>{% endif %}{% if open_waits | length > 1 %} и ещё {{ open_waits | length - 1 }}{% endif %}</div>
@@ -265,7 +265,7 @@
         <td>{{ c.route }}</td>
         <td class="nowrap">{% if c.due %}{% if c.overdue %}<span class="bad-text">{{ c.due | date }} · просрочено</span>{% elif c.status == 'open' and c.due_days is not none and c.due_days <= 1 %}<span class="warn-text">{{ c.due | date }} · {{ 'сегодня' if c.due_days == 0 else 'завтра' }}</span>{% else %}{{ c.due | date }}{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td>{{ src_cell(c) }}</td>
-        <td>{% if c.overdue and c.remind %}<a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}" data-remind>напомнить</a>{% else %}<span class="muted">{{ ui.task_state_title(c) }}</span>{% endif %}</td>
+        <td>{% if c.overdue and c.remind %}<a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}" data-remind>напомнить</a>{% else %}<span class="{{ 'ok-text' if c.in_work and c.status == 'open' else 'muted' }}">{{ ui.task_state_title(c) }}</span>{% endif %}</td>
       </tr>
       {% else %}<tr><td colspan="5" class="muted small">{{ 'Пусто' if title else 'Ничего не найдено.' }}</td></tr>{% endfor %}
     </tbody>

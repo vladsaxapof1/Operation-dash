@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -664,8 +665,11 @@ def test_task_in_work_and_archive_buttons(client):
     other = records.add_commitment(direction="mine", what="Созвониться с юристом")
     client.post(f"/commitments/{cid}/work", data={"on": "1"})
     board = client.get("/commitments").text
-    assert 'acc-text">в работе' in board and 'aria-pressed="true"' in board
+    assert 'ok-text">в работе' in board and 'aria-pressed="true"' in board
+    assert re.search(r'class="task inwork"[^>]*data-task="%d"' % cid, board)  # зелёная рамка на доске
     assert board.index("Отчёт для правления") < board.index("Созвониться с юристом"), "«в работе» — сверху колонки"
+    listed = client.get("/commitments?view=list").text
+    assert re.search(r'<tr data-task="%d" class="[^"]*inwork' % cid, listed) and 'ok-text">в работе' in listed
     client.post(f"/commitments/{cid}/work", data={"on": "0"})
     assert records.get_commitment(cid)["in_work_at"] is None
 
