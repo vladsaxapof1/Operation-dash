@@ -961,3 +961,31 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .chk { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ok); font-weight: 700; font-size: 13px; line-height: 1; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .chk[aria-pressed="true"] { background: var(--ok-soft); border-color: var(--ok); }
 .chk:hover { border-color: var(--accent); }
+
+/* окно «У PULSE новый дизайн» (один раз после обновления): картинка с пульсом и конфетти, цвета — из темы */
+.dlg-hello { width: min(440px, calc(100vw - 32px)); }
+.hello-box { padding: 26px 28px 24px; display: grid; justify-items: center; gap: 10px; text-align: center; outline: none; }
+.hello-box h2 { font-size: 21px; line-height: 1.3; }
+.hello-box p { margin: 0; }
+.hello-note { color: var(--muted); font-size: 14px; }
+.hello-ok { margin-top: 10px; min-width: 150px; height: 38px; font-size: 15px; }
+.hello-ok:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
+.hello-art { width: min(240px, 100%); height: auto; overflow: visible; }
+.hello-art .glow { fill: var(--accent-soft); }
+.hello-art .badge { fill: var(--accent); }
+.hello-art .beat { fill: none; stroke: #fff; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 90; animation: hello-beat 1s .25s ease-out both; }
+.hello-art .c1 { fill: var(--accent); stroke: var(--accent); }
+.hello-art .c2 { fill: var(--ok); stroke: var(--ok); }
+.hello-art .c3 { fill: var(--warn); stroke: var(--warn); }
+.hello-art .c4 { fill: var(--bad); stroke: var(--bad); }
+.hello-art .c5 { fill: var(--evg-line); stroke: var(--evg-line); }
+.hello-art .cf { stroke-width: 0; transform-box: fill-box; transform-origin: center;
+  animation: hello-pop .55s var(--d, 0s) cubic-bezier(.2, .9, .3, 1.5) both; }
+.hello-art .line { fill: none; stroke-width: 3; stroke-linecap: round; }
+.hello-art .spark { animation: hello-pop .55s var(--d, 0s) cubic-bezier(.2, .9, .3, 1.5) both,
+  hello-twinkle 2.4s calc(var(--d, 0s) + .6s) ease-in-out infinite; }
+@keyframes hello-beat { from { stroke-dashoffset: 90; } to { stroke-dashoffset: 0; } }
+@keyframes hello-pop { from { opacity: 0; transform: scale(.2) translateY(12px); } }
+@keyframes hello-twinkle { 50% { transform: scale(.6); opacity: .6; } }
+@media (prefers-reduced-motion: reduce) { .hello-art .beat, .hello-art .cf { animation: none; } }

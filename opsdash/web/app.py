@@ -229,6 +229,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["nav_collapsed"] = request.cookies.get("nav") == "collapsed"  # меню свёрнуто в иконки (app.js)
     ctx["theme"] = settings["web"].get("theme") or "system"  # system / light / dark — подключение dark.css
     ctx["update_available"] = bool((store.get_state("update_check") or {}).get("available"))
+    ctx["design_intro"] = store.get_state(store.DESIGN_INTRO) == "show"  # окно «У PULSE новый дизайн» — один раз
     from opsdash import notices
 
     ctx["notices"] = notices.recent()  # угол экрана: что PULSE сделал и что делает сейчас
@@ -257,6 +258,13 @@ def notices_dismiss(notice_id: int):
     from opsdash import notices
 
     notices.dismiss(notice_id)
+    return {"ok": True}
+
+
+@app.post("/api/design-intro/seen")
+def design_intro_seen():
+    """Окно «У PULSE новый дизайн» закрыли («Круто», Esc или клик мимо) — больше не показываем."""
+    store.set_state(store.DESIGN_INTRO, "seen")
     return {"ok": True}
 
 

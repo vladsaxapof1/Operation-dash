@@ -635,6 +635,13 @@
     }, 3000);
   }
 
+  // окно «У PULSE новый дизайн» — один раз: как закрыли («Круто», Esc или клик мимо окна), сервер его больше не отдаёт
+  var hello = document.querySelector("[data-design-intro]");
+  if (hello && hello.showModal) {
+    hello.addEventListener("close", function () { fetch("/api/design-intro/seen", { method: "POST" }); }, { once: true });
+    hello.showModal();
+  }
+
   // подсказка справа внизу: «Позже» прячет её на неделю
   document.querySelectorAll("[data-toast-close]").forEach(function (btn) {
     btn.addEventListener("click", function () {

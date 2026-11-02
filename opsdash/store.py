@@ -404,6 +404,9 @@ MIGRATIONS = [
 ]
 
 
+DESIGN_INTRO = "design2_intro"  # окно «У PULSE новый дизайн»: show — показать, seen — уже видели или не нужно
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     for table, column, ddl, *backfill in MIGRATIONS:
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
@@ -419,6 +422,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT INTO state(key, value) VALUES('digests_backfilled', 'true')")
     # до 26.10.2026 для личных чатов Telegram сохранялись ссылки t.me/<человек>/<id> — такие не открываются
     conn.execute("UPDATE messages SET link=NULL WHERE source='telegram' AND chat_id NOT LIKE '-%' AND link IS NOT NULL")
+    # окно «У PULSE новый дизайн» — только тем, кто пользовался старым. Решаем один раз, при первом запуске версии
+    # с новым дизайном: PULSE уже работал (есть журнал, сообщения или встречи) — покажем; новой установке — незачем
+    if not conn.execute(f"SELECT 1 FROM state WHERE key='{DESIGN_INTRO}'").fetchone():
+        used = conn.execute("SELECT EXISTS(SELECT 1 FROM log) OR EXISTS(SELECT 1 FROM messages) "
+                            "OR EXISTS(SELECT 1 FROM meetings)").fetchone()[0]
+        conn.execute("INSERT INTO state(key, value) VALUES(?, ?)", (DESIGN_INTRO, json.dumps("show" if used else "seen")))
 
 
 def utcnow() -> str:
