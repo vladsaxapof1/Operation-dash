@@ -25,7 +25,7 @@
     </span>
     <span class="actions">
       {% if r.status == 'proposed' %}
-      <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="accepted"><button class="btn sm ok">Принять</button></form>
+      <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="accepted"><button class="btn sm primary">Принять</button></form>
       <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="rejected"><button class="btn sm ghost">Отклонить</button></form>
       {% elif r.status == 'accepted' %}
       <form class="inline" method="post" action="/kb/{{ r.id }}" data-confirm="Отметить как устаревшее? Запись останется в истории, но Claude не будет на неё опираться."><input type="hidden" name="status" value="outdated"><button class="btn sm ghost" title="Решение пересмотрели или оно больше не действует">Устарело</button></form>

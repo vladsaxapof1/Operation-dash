@@ -10,7 +10,7 @@
       {% if refs %}<div class="prop-links">{% for label, url in refs %}<a class="btn sm ghost" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}</div>{% endif %}
     </div>
     <div class="actions">
-      <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm ok" title="Выполнить">Да</button></form>
+      <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm primary" title="Выполнить">Да</button></form>
       <form class="inline" method="post" action="/proposals/{{ p.id }}/reject"><button class="btn sm" title="Отклонить">Нет</button></form>
     </div>
   </div>
@@ -35,7 +35,7 @@
     <div><b>Похоже, вы уже ответили.</b> {{ h.reason }}</div>
     {% if h.payload.quote %}<div class="dlg-quote">«{{ h.payload.quote }}»</div>{% endif %}
     <div class="actions">
-      <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm ok">Да, убрать</button></form>
+      <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm">Да, убрать</button></form>
       <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Нет, ещё не ответила</button></form>
       {% for label, url in proposal_links(h) if label != 'Нужен ответ' %}<a class="btn sm ghost" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
     </div>
@@ -235,7 +235,7 @@
     <div><b>Claude предлагает:</b> {{ h.title }}</div>
     {% if h.reason %}<div class="small muted">{{ h.reason }}</div>{% endif %}
     <div class="actions">
-      <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm ok">Да, ждёт</button></form>
+      <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm primary">Да, ждёт</button></form>
       <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Нет</button></form>
     </div>
   </div>

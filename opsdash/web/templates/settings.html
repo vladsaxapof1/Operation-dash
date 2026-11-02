@@ -216,8 +216,8 @@
     {{ enabled_box('telegram_bot', 'Бот включён') }}
     <label>Токен бота от @BotFather</label>{{ secret_input('token', 'TELEGRAM_BOT_TOKEN', '123456:ABC-DEF…') }}
     <div class="form-row">
-      <div><label>Тихие часы с</label><input type="time" name="quiet_start" value="{{ settings.telegram_bot.quiet_hours.start | hhmm }}"></div>
-      <div><label>до</label><input type="time" name="quiet_end" value="{{ settings.telegram_bot.quiet_hours.end | hhmm }}"></div>
+      <div><label>Тихие часы с</label><input type="time" lang="ru" name="quiet_start" value="{{ settings.telegram_bot.quiet_hours.start | hhmm }}"></div>
+      <div><label>до</label><input type="time" lang="ru" name="quiet_end" value="{{ settings.telegram_bot.quiet_hours.end | hhmm }}"></div>
     </div>
     <div class="hint">В тихие часы приходят только срочные сообщения, остальное — утром.</div>
     <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('bot') }}</div>
@@ -520,12 +520,12 @@
       <div><label>Обновлять календарь, каждые … мин</label><input type="number" name="calendar_minutes" value="{{ settings.schedule.calendar_minutes }}" min="10"></div>
     </div>
     <div class="form-row">
-      <div><label>Утренний дайджест</label><input type="time" name="digest_morning" value="{{ settings.schedule.digest_morning | hhmm }}"></div>
-      <div><label>Вечерний дайджест</label><input type="time" name="digest_evening" value="{{ settings.schedule.digest_evening | hhmm }}"></div>
-      <div><label>Напоминание о задачах без движения</label><input type="time" name="stale_check" value="{{ settings.schedule.stale_check | hhmm }}"></div>
-      <div><label>База знаний: обзор недели, по пятницам</label><input type="time" name="anthology_weekly" value="{{ settings.schedule.anthology_weekly | hhmm }}"><div class="hint">Пусто — не делать.</div></div>
-      <div><label>Сводка «О компании» для Claude, по понедельникам</label><input type="time" name="context_weekly" value="{{ settings.schedule.context_weekly | hhmm }}"><div class="hint">Пусто — не обновлять.</div></div>
-      <div><label>Сборка проектов, по понедельникам</label><input type="time" name="projects_weekly" value="{{ settings.schedule.projects_weekly | hhmm }}"><div class="hint">Claude предложит проекты, связи «ждёт» и объединение дублей. Пусто — только по кнопке в «Задачи → Проекты».</div></div>
+      <div><label>Утренний дайджест</label><input type="time" lang="ru" name="digest_morning" value="{{ settings.schedule.digest_morning | hhmm }}"></div>
+      <div><label>Вечерний дайджест</label><input type="time" lang="ru" name="digest_evening" value="{{ settings.schedule.digest_evening | hhmm }}"></div>
+      <div><label>Напоминание о задачах без движения</label><input type="time" lang="ru" name="stale_check" value="{{ settings.schedule.stale_check | hhmm }}"></div>
+      <div><label>База знаний: обзор недели, по пятницам</label><input type="time" lang="ru" name="anthology_weekly" value="{{ settings.schedule.anthology_weekly | hhmm }}"><div class="hint">Пусто — не делать.</div></div>
+      <div><label>Сводка «О компании» для Claude, по понедельникам</label><input type="time" lang="ru" name="context_weekly" value="{{ settings.schedule.context_weekly | hhmm }}"><div class="hint">Пусто — не обновлять.</div></div>
+      <div><label>Сборка проектов, по понедельникам</label><input type="time" lang="ru" name="projects_weekly" value="{{ settings.schedule.projects_weekly | hhmm }}"><div class="hint">Claude предложит проекты, связи «ждёт» и объединение дублей. Пусто — только по кнопке в «Задачи → Проекты».</div></div>
     </div>
     <div class="hint">Пустое время — не отправлять. Если компьютер был выключен, дайджест придёт после включения (в пределах 4 часов).</div>
     <label class="check"><input type="checkbox" name="meeting_processed" {{ 'checked' if settings.notifications.meeting_processed }}> Присылать итог каждой разобранной встречи</label>
@@ -544,8 +544,8 @@
     </div>
     <div class="form-row">
       <div><label>Итоги недели: день</label><select name="weekly_day">{% for d in range(1, 8) %}<option value="{{ d }}" {{ 'selected' if settings.schedule.weekly_day == d }}>{{ ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'][d - 1] }}</option>{% endfor %}</select></div>
-      <div><label>Итоги недели: время</label><input type="time" name="weekly_time" value="{{ settings.schedule.weekly_time | hhmm }}"><div class="hint">Компьютер был выключен — придут при следующем запуске. Пусто — не делать.</div></div>
-      <div><label>Сводка рабочих групп Telegram</label><input type="time" name="groups_digest" value="{{ settings.schedule.groups_digest | hhmm }}"><div class="hint">По рабочим дням. Пусто — не делать.</div></div>
+      <div><label>Итоги недели: время</label><input type="time" lang="ru" name="weekly_time" value="{{ settings.schedule.weekly_time | hhmm }}"><div class="hint">Компьютер был выключен — придут при следующем запуске. Пусто — не делать.</div></div>
+      <div><label>Сводка рабочих групп Telegram</label><input type="time" lang="ru" name="groups_digest" value="{{ settings.schedule.groups_digest | hhmm }}"><div class="hint">По рабочим дням. Пусто — не делать.</div></div>
     </div>
     <label class="check"><input type="checkbox" name="groups_to_telegram" {{ 'checked' if settings.notifications.groups_digest }}> Присылать сводку групп в Telegram (в разделе «Дайджесты» она есть всегда)</label>
     <label>Текст напоминания коллеге</label>
