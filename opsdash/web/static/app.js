@@ -23,6 +23,30 @@
     });
   });
 
+  // Переписка: лента открывается на последнем сообщении (или на сообщении из адреса #m123), открытый чат виден
+  // в списке; прокрутка ленты к верху подгружает более ранние сообщения и оставляет взгляд на том же месте
+  var feed = document.querySelector("[data-chat-feed]");
+  if (feed) {
+    var mark = location.hash && /^#m\d+$/.test(location.hash) ? document.getElementById(location.hash.slice(1)) : null;
+    if (mark && feed.contains(mark)) feed.scrollTop += mark.getBoundingClientRect().top - feed.getBoundingClientRect().top - 40;
+    else feed.scrollTop = feed.scrollHeight;
+    var activeChat = document.querySelector("[data-chat-list] .chat-i.active");
+    if (activeChat) activeChat.scrollIntoView({ block: "nearest" });
+    var loadingEarlier = false;
+    feed.addEventListener("scroll", function () {
+      var link = feed.querySelector("[data-feed-more]");
+      if (!link || loadingEarlier || feed.scrollTop > 150) return;
+      loadingEarlier = true;
+      fetch(link.href, { credentials: "same-origin" }).then(function (r) { return r.text(); }).then(function (html) {
+        var fresh = new DOMParser().parseFromString(html, "text/html").querySelector("[data-chat-feed]");
+        if (!fresh) return;
+        var fromBottom = feed.scrollHeight - feed.scrollTop;
+        feed.innerHTML = fresh.innerHTML;
+        feed.scrollTop = feed.scrollHeight - fromBottom;
+      }).catch(function () {}).then(function () { loadingEarlier = false; });
+    }, { passive: true });
+  }
+
   // телефон: лист «Ещё» закрывается кликом мимо него
   var more = document.querySelector("[data-tabbar-more]");
   if (more) document.addEventListener("click", function (e) { if (more.open && !more.contains(e.target)) more.open = false; });
@@ -1115,6 +1139,23 @@
       remembered[d.dataset.key] = d.open;
       try { localStorage.setItem("office-open", JSON.stringify(remembered)); } catch (err) { /* не запоминаем */ }
     }, true);
+    // плашки офисов: показываем список выбранного офиса на месте — без перезагрузки, картинка остаётся как была.
+    // Адрес и запрос обновления (data-live) — уже с новым офисом, чтобы обновление не вернуло прежний
+    Array.prototype.forEach.call(document.querySelectorAll("[data-office-tab]"), function (tab) {
+      tab.addEventListener("click", function (e) {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;  // в новой вкладке — как обычная ссылка
+        e.preventDefault();
+        var key = tab.dataset.officeTab;
+        Array.prototype.forEach.call(document.querySelectorAll("[data-office-tab]"), function (t) {
+          var on = t === tab;
+          t.classList.toggle("active", on);
+          if (on) t.setAttribute("aria-current", "true"); else t.removeAttribute("aria-current");
+        });
+        Array.prototype.forEach.call(officeBox.querySelectorAll(".office-group[data-key]"), function (g) { g.hidden = g.dataset.key !== "g-" + key; });
+        officeBox.dataset.live = "/office/live?o=" + encodeURIComponent(key);
+        try { history.replaceState(null, "", "?o=" + encodeURIComponent(key)); } catch (err) { /* адрес не меняем */ }
+      });
+    });
     var officeTimer = null;
     var officeActive = function () {
       var mark = officeBox.querySelector("[data-office-active]");

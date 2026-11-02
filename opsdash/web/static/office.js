@@ -1036,6 +1036,9 @@
     e.preventDefault();
     var el = selected && source(selected);
     if (!el) return;
+    var group = el.closest(".office-group[hidden]");  // сотрудник другого офиса — сначала переключаем плашку под картинкой
+    var tab = group && document.querySelector('[data-office-tab="' + group.dataset.key.slice(2) + '"]');
+    if (tab) tab.click();
     for (var d = el.closest("details"); d; d = d.parentElement && d.parentElement.closest("details")) d.open = true;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.add("office-flash");

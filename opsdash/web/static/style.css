@@ -626,7 +626,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .ev-brief-h { font-weight: 600; color: var(--ok-text); }
 .ev-brief form { margin: 0; }
 .dlg-brief { width: min(760px, calc(100vw - 32px)); }
-.brief-doc { max-height: calc(100vh - 260px); overflow-y: auto; font-size: 15px; }
+/* одна прокрутка: окно не выше экрана, шапка и кнопки на месте, крутится только текст (полоса — у края окна) */
+.dlg-brief[open] { display: flex; flex-direction: column; overflow: hidden; }
+.dlg-brief .dlg-box { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.dlg-brief .dlg-head, .dlg-brief .dlg-actions { flex: none; }
+.brief-head { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.brief-doc { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -28px; padding: 0 28px; font-size: 15px; }
 .brief-doc h2, .brief-doc h3 { font-size: 15px; margin: 14px 0 6px; }
 button.chip.ok { cursor: pointer; }
 /* напомнить коллеге: на сводке и в окне задачи */
@@ -1333,7 +1338,7 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 /* Переписка 2.0: чаты слева, выбранный чат справа */
 .chats { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
 .chat-list { margin: 0; overflow: hidden; }
-.chat-i { display: grid; gap: 2px; padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--text); }
+.chat-i { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--text); }
 .chat-i:hover { background: var(--panel-2); text-decoration: none; }
 .chat-i.active { background: var(--accent-soft); }
 .chat-i-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
@@ -1346,7 +1351,15 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .chat-off { margin: 0; padding: 12px 16px; }
 .chat-pane { margin: 0; }
 .chat-h { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 16px 20px; border-bottom: 1px solid var(--line); }
-.chat-feed { padding: 8px 20px 12px; display: grid; gap: 4px; }
+.chat-more > summary { padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--accent); font-size: 14px; cursor: pointer; list-style: none; }
+.chat-more > summary::-webkit-details-marker { display: none; }
+.chat-more > summary::after { content: " ▾"; }
+.chat-more[open] > summary::after { content: " ▴"; }
+.chat-more[open] > summary { color: var(--muted); }
+/* лента: колонка, прижатая к низу (margin-top: auto у первого — так верх не уезжает за край при прокрутке) */
+.chat-feed { padding: 8px 20px 12px; display: flex; flex-direction: column; gap: 4px; }
+.chat-feed > :first-child { margin-top: auto; }
+.chat-earlier { align-self: center; padding: 6px 0; }
 .chat-day { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 6px; }
 .msg { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 8px 10px; border-radius: 10px; }
 .msg .avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2);
@@ -1360,6 +1373,16 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .closed-list { margin: 0 -28px; border-top: 1px solid var(--line); }
 .closed-list > li { padding-left: 28px; padding-right: 28px; }
 @media (max-width: 1000px) { .chats { grid-template-columns: minmax(0, 1fr); } }
+/* широкий экран — как мессенджер: страница не прокручивается, список чатов и лента крутятся каждый сам */
+@media (min-width: 1001px) {
+  .page-chats .main { height: 100vh; display: flex; flex-direction: column; padding-bottom: 24px; }
+  .page-chats .main > .topline, .page-chats .main > .toolbar, .page-chats .main > .alert { flex: none; }
+  .page-chats .chats { flex: 1 1 auto; min-height: 420px; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .page-chats .chat-list { overflow-y: auto; overscroll-behavior: contain; }
+  .page-chats .chat-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .page-chats .chat-h, .page-chats .chat-foot { flex: none; }
+  .page-chats .chat-feed { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+}
 
 /* Календарь 2.0 */
 .cal-top { gap: 10px; margin-bottom: 18px; align-items: center; }
@@ -1478,7 +1501,7 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 
 /* Офис 2.0: плашки офисов, сцена без рамки, агенты таблицей */
 .office-scene { margin-bottom: 20px; }
-.office-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin: -6px 0 16px; }
+.office-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
 .office-tab { display: inline-flex; align-items: baseline; gap: 10px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 10px;
   background: var(--panel); color: var(--text); font-size: 13px; }
 .office-tab b { font-size: 16px; font-weight: 600; }

@@ -170,6 +170,9 @@ def test_office_pages_and_open_only_inside_office_folders(client, claude_home, m
     assert "Секретарь" in client.get("/office").text
     page = client.get("/office").text
     assert "Проект А" in page and "Привет" in page
+    # плашки офисов — под картинкой, переключают список на месте (data-office-tab, app.js), картинку не трогают
+    assert page.index("<canvas") < page.index('data-office-tab="pulse"') < page.index('data-office-tab="f0"')
+    assert 'data-key="g-f0" hidden' in page and 'data-key="g-f0" hidden' not in client.get("/office?o=f0").text
     assert "Проект А" in client.get("/office/live").text and "Секретарь" in client.get("/office/live").text
     assert client.get("/api/office?o=pulse").json()["desks"][0]["key"] == "triage"
     assert [o["kind"] for o in client.get("/api/office").json()["offices"]] == ["pulse", "folder"]

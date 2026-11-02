@@ -614,10 +614,15 @@ def inbox_redirect(request: Request):
     return RedirectResponse("/chats" + ("?" + query if query else ""), status_code=303)
 
 
+CHATS_SHOWN = 8      # в списке слева — столько последних чатов каждого источника, остальные — под «Ещё N чатов»
+CHAT_PAGE = 80       # сообщений чата за раз; более ранние подгружаются при прокрутке вверх (app.js)
+
+
 @app.get("/chats", response_class=HTMLResponse)
-def chats_page(request: Request, chat: str = "", q: str = ""):
-    """Переписка (5.11): окно в чаты, которые PULSE читает. Слева — чаты по источникам, справа — выбранный чат;
-    сообщения, вынесенные в Сводку («ждёт вашего ответа»), подсвечены. Писать в чаты PULSE не умеет."""
+def chats_page(request: Request, chat: str = "", q: str = "", n: int = CHAT_PAGE):
+    """Переписка (5.11): окно в чаты, которые PULSE читает, — как мессенджер. Слева — последние чаты по источникам,
+    справа — выбранный чат: новые сообщения внизу, при прокрутке вверх подгружаются более ранние. Сообщения,
+    вынесенные в Сводку («ждёт вашего ответа»), подсвечены. Писать в чаты PULSE не умеет."""
     from opsdash import jobs, links
 
     settings = config.load_settings()
@@ -630,7 +635,7 @@ def chats_page(request: Request, chat: str = "", q: str = ""):
                   (SELECT sender_name FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id ORDER BY ts DESC LIMIT 1) AS last_sender,
                   (SELECT is_outgoing FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id ORDER BY ts DESC LIMIT 1) AS last_out,
                   (SELECT MIN(ts) FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id) AS first_ts
-           FROM chats c WHERE c.enabled=1 ORDER BY c.last_ts DESC LIMIT 80""")
+           FROM chats c WHERE c.enabled=1 ORDER BY c.last_ts DESC LIMIT 300""")
     for c in chats:
         c["key"] = f"{c['source']}|{c['chat_id']}"
         c["att"] = by_chat.get(c["key"], [])
@@ -642,11 +647,17 @@ def chats_page(request: Request, chat: str = "", q: str = ""):
     if not chat and chats:  # по умолчанию — чат, где ждут ответа, иначе самый свежий
         chat = next((c["key"] for c in chats if c["att"]), chats[0]["key"])
     current = next((c for c in chats if c["key"] == chat), None)
-    messages, chat_link = [], None
+    for items in groups.values():  # под «Ещё» не прячем чаты, где ждут ответа, и открытый чат
+        for i, c in enumerate(items):
+            c["more"] = i >= CHATS_SHOWN and not c["att"] and c["key"] != chat
+    messages, chat_link, more = [], None, 0
+    n = max(CHAT_PAGE, min(n, 2000))
     if chat:
         source, _, chat_id = chat.partition("|")
         messages = list(reversed(store.rows(
-            "SELECT * FROM messages WHERE source=? AND chat_id=? ORDER BY ts DESC LIMIT 80", (source, chat_id))))
+            "SELECT * FROM messages WHERE source=? AND chat_id=? ORDER BY ts DESC LIMIT ?", (source, chat_id, n + 1))))
+        if len(messages) > n:  # есть более ранние — ссылка «показать раньше» сверху ленты
+            messages, more = messages[1:], min(n + CHAT_PAGE * 2, 2000)
         chat_link = links.original(source, chat_id)
         flagged = {a["message_id"]: a for a in attention if a.get("message_id")}
         tz = config.tz(settings)
@@ -670,7 +681,8 @@ def chats_page(request: Request, chat: str = "", q: str = ""):
               "last_ts": last["ts"] if last else None,
               "last": last["message"].split("\n")[0].removeprefix("ок: ") if last else ""}
     return render(request, "inbox.html", nav="chats", groups=groups, chats=chats, current=current, chat=chat,
-                  messages=messages, chat_link=chat_link, closed=closed, triage=triage, attention=attention,
+                  messages=messages, more=more, chat_link=chat_link, closed=closed, triage=triage, attention=attention,
+                  chats_total=store.scalar("SELECT COUNT(*) FROM chats WHERE enabled=1") or 0,
                   off_sources=off, q=q.strip(), results=results,
                   synced=store.scalar("SELECT MAX(last_run) FROM jobs WHERE name LIKE 'collect:%'"))
 
@@ -1551,7 +1563,9 @@ def meetings(request: Request, q: str = ""):
             s, f = store.parse_ts(e["start"]), store.parse_ts(e["end"])
             rows.append({"kind": "event", "e": e, "start": s.astimezone(tz) if s else None,
                          "minutes": int((f - s).total_seconds() // 60) if s and f else 0,
-                         "people": f_people(e["attendees"], 3), "past": bool(f and f <= now)})
+                         "people": f_people(e["attendees"], 3),
+                         # до начала — «запланирована», с начала до конца — «идёт сейчас», после — «записи нет»
+                         "state": "past" if f and f <= now else "now" if s and s <= now else "planned"})
     rows.sort(key=lambda r: r["start"] or now, reverse=True)
     days: list[dict] = []
     for r in rows:

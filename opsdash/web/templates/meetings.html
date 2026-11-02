@@ -56,7 +56,8 @@
   <div class="mrow">
     <div class="mrow-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if r.minutes %}<div class="mrow-x">{{ r.minutes }} мин</div>{% endif %}</div>
     <div class="mrow-main"><div class="mrow-title">{{ e.title or 'Без названия' }}</div><div class="mrow-x">{{ r.people }}{{ ' · ' if r.people }}из календаря</div></div>
-    <div class="st muted"><span class="dot off"></span>{{ 'записи нет' if r.past else 'идёт сейчас' }}</div>
+    {% set est = {'past': ('записи нет', 'off'), 'now': ('идёт сейчас', 'acc'), 'planned': ('запланирована', 'off')}[r.state] %}
+    <div class="st {{ 'acc' if est[1] == 'acc' else 'muted' }}"><span class="dot {{ est[1] }}"></span>{{ est[0] }}</div>
     <div class="mrow-act"><button type="button" class="btn" data-dlg-open="upload-dlg" data-upload-title="{{ e.title }}">Загрузить запись</button></div>
   </div>
   {% endif %}

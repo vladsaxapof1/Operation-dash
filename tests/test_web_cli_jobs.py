@@ -4,7 +4,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import unquote
 
@@ -694,3 +694,64 @@ def test_run_job_records_errors():
     j = store.row("SELECT * FROM jobs WHERE name='collect:kaiten'")
     assert j["last_error"] and not j["running"]
     assert store.row("SELECT * FROM log WHERE job='collect:kaiten' AND level='error'")
+
+
+def test_people_page_with_and_without_due(client):
+    """Мои задачи человеку — со сроком и без: страница «Люди» не падает на сравнении None со строкой."""
+    records.upsert_person("Никита Сухоруков")
+    today = records.today_local()
+    records.add_commitment(direction="mine", whom="Никита Сухоруков", what="Регламенты KPI", due=today.isoformat())
+    records.add_commitment(direction="mine", whom="Никита Сухоруков", what="ОКК в KPI развития")
+    records.add_commitment(direction="mine", whom="Никита Сухоруков", what="Файл KPI тимлида",
+                           due=(today - timedelta(days=2)).isoformat())
+    r = client.get("/people")
+    assert r.status_code == 200 and "Никита Сухоруков" in r.text
+    assert "1 просрочена" in r.text
+
+
+def test_meetings_feed_calendar_states(client):
+    """Встреча календаря без записи: до начала — «запланирована», во время — «идёт сейчас», после — «записи нет»."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    for uid, title, start in (("ev-past", "Прошлая планёрка", now - timedelta(hours=3)),
+                              ("ev-now", "Текущий созвон", now - timedelta(minutes=15)),
+                              ("ev-soon", "Обзор МСБ за неделю", now + timedelta(minutes=34))):
+        store.execute('INSERT INTO events(uid, calendar, title, start, "end", all_day, description, attendees) '
+                      "VALUES(?,?,?,?,?,0,'','[]')", (uid, "Работа", title, start.isoformat(),
+                                                      (start + timedelta(hours=1)).isoformat()))
+    page = client.get("/meetings").text
+    rows = {t: next(r for r in page.split('class="mrow"') if t in r)
+            for t in ("Прошлая планёрка", "Текущий созвон", "Обзор МСБ за неделю")}
+    assert "записи нет" in rows["Прошлая планёрка"]
+    assert "идёт сейчас" in rows["Текущий созвон"]
+    assert "запланирована" in rows["Обзор МСБ за неделю"] and "идёт сейчас" not in rows["Обзор МСБ за неделю"]
+
+
+def test_chats_like_messenger(client):
+    """Переписка: по 8 последних чатов источника (остальные — под «Ещё»), лента — последние сообщения,
+    более ранние — по ссылке/прокрутке вверх."""
+    from opsdash.web import app as web
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    for i in range(12):
+        ts = (now - timedelta(minutes=10 * i)).isoformat()
+        store.upsert_chat("telegram", f"c{i}", f"Чат номер {i:02d}", "private", enabled=1, last_ts=ts)
+        store.add_message({"source": "telegram", "chat_id": f"c{i}", "chat_title": f"Чат номер {i:02d}", "msg_id": "1",
+                           "sender_name": "Коллега", "text": "привет", "ts": ts})
+    for k in range(web.CHAT_PAGE + 5):  # в первом чате сообщений больше, чем помещается за раз
+        store.add_message({"source": "telegram", "chat_id": "c0", "chat_title": "Чат номер 00", "msg_id": f"m{k}",
+                           "sender_name": "Коллега", "text": f"сообщение {k:03d}",
+                           "ts": (now - timedelta(seconds=web.CHAT_PAGE + 5 - k)).isoformat()})
+    page = client.get("/chats").text
+    assert "PULSE читает 12 чатов" in page
+    shown, rest = page.split('<details class="chat-more">')
+    assert "Чат номер 07" in shown and "Чат номер 08" not in shown
+    assert "Ещё 4 чата" in rest and "Чат номер 11" in rest
+    feed = page.split("data-chat-feed>")[1]
+    assert f"сообщение {web.CHAT_PAGE + 4:03d}" in feed and "сообщение 000" not in feed
+    assert feed.index("сообщение 010") < feed.index(f"сообщение {web.CHAT_PAGE + 4:03d}"), "новые — внизу"
+    assert "data-feed-more" in feed and f"&n={web.CHAT_PAGE * 3}" in feed
+
+    opened = client.get("/chats?chat=telegram%7Cc10").text  # открытый чат из-под «Ещё» — в видимой части
+    assert "Чат номер 10" in opened.split('<details class="chat-more">')[0]
+    earlier = client.get(f"/chats?chat=telegram%7Cc0&n={web.CHAT_PAGE * 3}").text.split("data-chat-feed>")[1]
+    assert "сообщение 000" in earlier and "data-feed-more" not in earlier

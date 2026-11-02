@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Офис{% endblock %}
 {% block content %}
-{#- Офис (5.15): переключатель офисов плашками, сцена (её не перерисовываем — static/office.js), под ней — агенты PULSE
+{#- Офис (5.15): сцена (её не перерисовываем — static/office.js), под ней — плашки офисов и агенты PULSE
     таблицей или проекты папки с Claude Code. Всё внутри [data-office-scene]: office.js ищет там кнопки и панель #}
 {% set selected = open_key or (snaps[0].key if snaps else '') %}
 <section class="office-scene" data-office-scene>
@@ -9,18 +9,6 @@
     <div><h1>Офис</h1><p class="sub">Кто из агентов Claude работает и что делает прямо сейчас · обновляется само</p></div>
     <button type="button" class="btn lg" data-scene-toggle>Скрыть картинку</button>
   </div>
-  <nav class="office-tabs" aria-label="Офисы">
-    {% for snap in snaps %}
-    <a class="office-tab{{ ' active' if snap.key == selected }}" href="?o={{ snap.key }}">
-      {% if snap.kind == 'pulse' %}{% set w = snap.desks | selectattr('state', 'equalto', 'working') | list | length %}
-      <b>PULSE</b><span>фоновые задания · {{ snap.desks | length }} {{ plural(snap.desks | length, 'агент', 'агента', 'агентов') }}{% if w %} · {{ w }} {{ plural(w, 'работает', 'работают', 'работают') }}{% endif %}</span>
-      {% else %}
-      <b>{{ snap.name }}</b><span>Claude Code · {{ snap.rooms | length }} {{ plural(snap.rooms | length, 'проект', 'проекта', 'проектов') }}{% if snap.counts.waiting %} · <span class="warn-text">{{ snap.counts.waiting }} {{ plural(snap.counts.waiting, 'ждёт', 'ждут', 'ждут') }} вас</span>{% elif snap.counts.working %} · {{ snap.counts.working }} работает{% endif %}</span>
-      {% endif %}
-    </a>
-    {% endfor %}
-    <a class="office-tab add" href="/settings?tab=office">+ папка с Claude Code</a>
-  </nav>
   <div class="office-scene-wrap" data-scene-wrap>
     <canvas tabindex="0" role="img" aria-label="Офис картинкой: рабочие места и кто чем занят — то же, что в списке ниже. Перетаскивайте мышью, стрелки двигают вид"></canvas>
     <div class="office-zoom">
@@ -35,6 +23,20 @@
     </aside>
   </div>
 </section>
+{#- плашки офисов — под картинкой: переключают список ниже без перезагрузки страницы, картинку не трогают (app.js);
+    без скриптов — обычные ссылки #}
+<nav class="office-tabs" aria-label="Офисы">
+    {% for snap in snaps %}
+    <a class="office-tab{{ ' active' if snap.key == selected }}" href="?o={{ snap.key }}" data-office-tab="{{ snap.key }}"{% if snap.key == selected %} aria-current="true"{% endif %}>
+      {% if snap.kind == 'pulse' %}{% set w = snap.desks | selectattr('state', 'equalto', 'working') | list | length %}
+      <b>PULSE</b><span>фоновые задания · {{ snap.desks | length }} {{ plural(snap.desks | length, 'агент', 'агента', 'агентов') }}{% if w %} · {{ w }} {{ plural(w, 'работает', 'работают', 'работают') }}{% endif %}</span>
+      {% else %}
+      <b>{{ snap.name }}</b><span>Claude Code · {{ snap.rooms | length }} {{ plural(snap.rooms | length, 'проект', 'проекта', 'проектов') }}{% if snap.counts.waiting %} · <span class="warn-text">{{ snap.counts.waiting }} {{ plural(snap.counts.waiting, 'ждёт', 'ждут', 'ждут') }} вас</span>{% elif snap.counts.working %} · {{ snap.counts.working }} работает{% endif %}</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+    <a class="office-tab add" href="/settings?tab=office">+ папка с Claude Code</a>
+</nav>
 <div data-office data-live="/office/live?o={{ selected }}">{% include "_office_body.html" %}</div>
 <script src="/static/office.js?v={{ static_v }}"></script>
 {% endblock %}

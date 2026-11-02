@@ -651,18 +651,19 @@
 {%- endmacro %}
 
 {% macro brief_dialog(e) %}
-{#- бриф целиком — окно по центру экрана, кнопка «Открыть бриф» в карточке встречи (app.js) #}
+{#- бриф целиком — окно по центру экрана, кнопка «Открыть бриф» в карточке встречи (app.js). Шапка (название,
+    крестик справа) и кнопки стоят на месте, прокручивается только текст брифа — одна прокрутка на окно #}
 {% set b = e.brief %}
 {% if b and b.status == 'ready' %}
 <dialog class="dlg dlg-brief" id="brief-{{ e.brief_key }}" aria-label="Бриф: {{ e.title }}">
   <div class="dlg-box" tabindex="-1" data-copy-scope>
-    <div class="dlg-top">
-      <span class="chip ok">бриф</span>
-      <span class="muted small">{{ e.start | local('%d.%m, %H:%M') }}</span>
+    <div class="dlg-head">
+      <div class="brief-head">
+        <h2 class="dlg-title">{{ e.title }}</h2>
+        <div class="muted small">Бриф · {{ e.start | local('%d.%m, %H:%M') }}{% if b.topic %} · {{ b.topic }}{% endif %}</div>
+      </div>
       <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
     </div>
-    <h2 class="dlg-title">{{ e.title }}</h2>
-    {% if b.topic %}<div class="muted">{{ b.topic }}</div>{% endif %}
     <div class="doc brief-doc">{{ b.text | md | safe }}</div>
     <textarea hidden data-copy>{{ b.text | plain }}</textarea>
     <div class="dlg-actions">

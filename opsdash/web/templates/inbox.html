@@ -7,7 +7,7 @@
 <div class="topline">
   <div>
     <h1>Переписка</h1>
-    <p class="sub">PULSE читает {{ chats | length }} {{ plural(chats | length, 'чат', 'чата', 'чатов') }}
+    <p class="sub">PULSE читает {{ chats_total }} {{ plural(chats_total, 'чат', 'чата', 'чатов') }}
       {%- if attention %} · {{ attention | length }} {{ plural(attention | length, 'сообщение ждёт', 'сообщения ждут', 'сообщений ждут') }} вашего ответа в <a href="/">Сводке</a>{% endif %}
       {%- if triage.busy %} · разбираю свежие сообщения{% elif triage.pending %} · {{ triage.pending }} ждут разбора{% else %} · все сообщения разобраны{% endif %}
       {%- if synced %} · обновлено {{ synced | local('%H:%M') }}{% endif %}</p>
@@ -24,17 +24,23 @@
   {% endcall %}
 </div>
 
-<div class="chats">
-  <aside class="card chat-list">
-    {% for source, items in groups.items() %}
-    <div class="mday">{{ SOURCE_TITLES.get(source, source) }}</div>
-    {% for c in items %}
-    <a class="chat-i{{ ' active' if c.key == chat }}" href="?chat={{ c.key | urlencode }}">
+{#- строка чата слева: название и время, ниже — последнее сообщение в одну строку с многоточием #}
+{% macro chat_item(c) %}
+    <a class="chat-i{{ ' active' if c.key == chat }}" href="?chat={{ c.key | urlencode }}"{% if c.key == chat %} aria-current="true"{% endif %}>
       <span class="chat-i-h"><b>{{ c.title }}</b><span class="muted small">{{ c.last_ts | ago if c.last_ts else '' }}</span></span>
-      <span class="chat-i-x"><span class="muted">{% if c.last_text %}{{ 'Вы' if c.last_out else (c.last_sender or '').split(' ')[0] }}: {{ c.last_text | truncate(80, True, '…') }}{% else %}сообщений нет{% endif %}</span>
+      <span class="chat-i-x"><span class="muted">{% if c.last_text %}{{ 'Вы' if c.last_out else (c.last_sender or '').split(' ')[0] }}: {{ c.last_text | truncate(120, True, '…') }}{% else %}сообщений нет{% endif %}</span>
         {% if c.att %}<span class="cnt {{ 'bad' if c.urgent else 'acc' }}" title="Ждут вашего ответа: {{ c.att | length }}">{{ c.att | length }}</span>{% endif %}</span>
     </a>
-    {% endfor %}
+{% endmacro %}
+<div class="chats">
+  {#- как в мессенджере: экран не прокручивается, список чатов и лента сообщений — каждый своей прокруткой #}
+  <aside class="card chat-list" data-chat-list>
+    {% for source, items in groups.items() %}
+    {% set rest = items | selectattr('more') | list %}
+    <div class="mday">{{ SOURCE_TITLES.get(source, source) }}</div>
+    {% for c in items | rejectattr('more') %}{{ chat_item(c) }}{% endfor %}
+    {% if rest %}<details class="chat-more"><summary>Ещё {{ rest | length }} {{ plural(rest | length, 'чат', 'чата', 'чатов') }}</summary>
+      {% for c in rest %}{{ chat_item(c) }}{% endfor %}</details>{% endif %}
     {% else %}
     <p class="empty">PULSE пока не читает ни одного чата. <a href="/settings?tab=connections">Подключить источники</a>.</p>
     {% endfor %}
@@ -62,10 +68,13 @@
         {% endcall %}
       </div>
     </div>
-    <div class="chat-feed">
+    {#- новые — внизу, лента открывается на последнем сообщении; прокрутка к верху подгружает более ранние (app.js),
+        без скриптов — ссылка «Показать более ранние» #}
+    <div class="chat-feed" data-chat-feed>
+      {% if more %}<a class="chat-earlier small" data-feed-more href="?chat={{ chat | urlencode }}&n={{ more }}{% if messages %}#m{{ messages[0].id }}{% endif %}">Показать более ранние</a>{% endif %}
       {% for m in messages %}
       {% if m.day_label %}<div class="chat-day">{{ m.day_label }}</div>{% endif %}
-      <div class="msg{{ ' flagged' if m.att }}{{ ' out' if m.is_outgoing }}">
+      <div class="msg{{ ' flagged' if m.att }}{{ ' out' if m.is_outgoing }}" id="m{{ m.id }}">
         <span class="avatar">{{ 'Я' if m.is_outgoing else ((m.sender_name or '?').split(' ') | map('first') | join('') | upper)[:2] }}</span>
         <div>
           <div class="msg-h">{{ 'Вы' if m.is_outgoing else m.sender_name }} · {{ m.ts | local('%H:%M') }}{% if m.topic %} · {{ m.topic }}{% endif %}</div>
