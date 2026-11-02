@@ -604,15 +604,22 @@
 {%- endmacro %}
 
 {% macro ev_detail(e) %}
-{#- карточка встречи: открывается по нажатию на встречу в сетке (app.js) #}
+{#- поповер встречи (5.8): время и длительность, участники, есть ли запись, задачи; «Загрузить запись» или «Открыть
+    встречу». Открывается по нажатию на встречу в сетке (app.js) #}
 <div class="ev-detail" id="ev-{{ e.n }}" hidden>
   <div class="ev-detail-h">{{ e.title or 'Без названия' }}</div>
-  <div class="muted small">{{ e.start | local('%d.%m') }} · {{ ev_time(e) }} · {{ e.calendar }}</div>
+  {% set who = e.attendees | people(8) %}
+  <div class="muted small">{{ e.start | local('%d.%m') }}, {{ ev_time(e) }}{% if e.minutes %} · {{ e.minutes }} мин{% endif %}{% if who %} · {{ who }}{% endif %}{% if e.calendar %} · {{ e.calendar }}{% endif %}</div>
   {% if e.location %}<div class="small"><span class="muted">Где:</span> {{ e.location | place }}</div>{% endif %}
-  {% set who = e.attendees | people(12) %}{% if who %}<div class="small"><span class="muted">Участники:</span> {{ who }}</div>{% endif %}
   {% if e.description %}<div class="small muted ev-desc">{{ e.description | note }}</div>{% endif %}
-  {% if e.tasks %}<div class="small"><span class="muted">По задаче:</span> {% for t in e.tasks %}<a href="/commitments?task={{ t.id }}">{{ t.headline }}</a>{{ ' (готово)' if t.status == 'done' }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
-  {% if e.url %}<a class="small" href="{{ e.url }}" target="_blank">Открыть в календаре →</a>{% endif %}
+  {% if e.recorded %}<div class="small">{{ 'Запись разобрана.' if e.rec_status == 'processed' else 'Запись есть, разбор ещё впереди.' }}</div>
+  {% elif e.past %}<div class="small">Записи нет. PULSE ждёт файл в папке записей — или загрузите вручную.</div>{% endif %}
+  {% if e.tasks %}<div class="small"><span class="muted">Связано:</span> {% for t in e.tasks %}<a href="/commitments?task={{ t.id }}">{{ t.headline }}</a>{{ ' (готово)' if t.status == 'done' }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+  <div class="actions">
+    {% if e.recorded %}<a class="btn sm primary" href="/meetings/{{ e.recorded }}">{{ 'Открыть разбор' if e.rec_status == 'processed' else 'Открыть встречу' }}</a>
+    {% elif e.past %}<a class="btn sm primary" href="/meetings">Загрузить запись</a>{% endif %}
+    {% if e.url %}<a class="btn sm" href="{{ e.url }}" target="_blank" rel="noopener">В календаре ↗</a>{% endif %}
+  </div>
   {{ ev_brief(e) }}
 </div>
 {% endmacro %}

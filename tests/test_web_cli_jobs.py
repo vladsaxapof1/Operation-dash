@@ -375,7 +375,7 @@ def test_google_calendar_settings_and_marker(client):
                          "start": store.to_utc_iso(start), "end": store.to_utc_iso(start + timedelta(hours=1)),
                          "attendees": "[]"})
     page = client.get("/calendar?view=list").text
-    assert "Созвон с банком" in page and 'title="Google: anna@gmail.com">Google</span>' in page
+    assert "Созвон с банком" in page and 'title="Google: anna@gmail.com">· Google</span>' in page
     week = client.get(f"/calendar?start={start.date().isoformat()}").text  # в неделе Google — своим цветом
     assert 'class="ev google' in week and "Google: anna@gmail.com" in week
 

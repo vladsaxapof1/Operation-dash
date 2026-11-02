@@ -119,7 +119,7 @@ def test_hint_in_task_window_and_calendar_card(client, settings_with):
     client.post(f"/proposals/{p['id']}/approve", follow_redirects=False)
     assert records.get_commitment(cid)["meeting"]["uid"] == "lead"
     week = client.get("/calendar").text
-    assert "По задаче:" in week and f"/commitments?task={cid}" in week
+    assert "Связано:" in week and f"/commitments?task={cid}" in week
 
 
 def test_claude_sees_meeting_tasks(settings_with, capsys, tmp_path):

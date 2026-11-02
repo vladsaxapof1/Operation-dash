@@ -1202,8 +1202,14 @@ MEETING_MINUTES = [15, 30, 45, 60, 90, 120]
 CALENDAR_SOURCES = {"calendar": "Яндекс", "google_calendar": "Google"}
 
 
+MONTHS_NOM = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
+              "Декабрь")
+MONTHS_SHORT = ("янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
+
+
 @app.get("/calendar", response_class=HTMLResponse)
 def calendar_page(request: Request, start: str = "", view: str = "week", task: int = 0):
+    """Календарь (5.8): неделя сеткой 09–20, месяц и список. Встреча — поповер: время, участники, запись, задачи."""
     from opsdash import task_meetings
     from opsdash.sources import calendar
 
@@ -1213,14 +1219,25 @@ def calendar_page(request: Request, start: str = "", view: str = "week", task: i
         first = date.fromisoformat(start) if start else now.date()
     except ValueError:
         first = now.date()
-    view = "list" if view == "list" else "week"
-    if view == "week":  # неделя — с понедельника, как в Google Календаре
+    view = view if view in ("list", "month") else "week"
+    month_first = first.replace(day=1)
+    if view == "month":  # месяц — сеткой 6×7 с понедельника перед первым числом
+        first = month_first - timedelta(days=month_first.weekday())
+    elif view == "week":  # неделя — с понедельника, как в Google Календаре
         first -= timedelta(days=first.weekday())
-    grid = overview.week_grid(first, settings) if view == "week" else None
-    days = overview.calendar_days(first, 7, settings) if view == "list" else None
+    span = 42 if view == "month" else 7
+    grid = overview.week_grid(first, settings, hours=(9, 20)) if view == "week" else None
+    days = overview.calendar_days(first, span, settings) if view != "week" else None
     shown = grid["events"] if grid else [e for d in days for e in d["events"]]
     briefs.for_events(shown)
     task_meetings.for_events(shown)
+    recorded = {m["event_uid"]: m for m in store.rows(
+        "SELECT id, status, event_uid FROM meetings WHERE event_uid IS NOT NULL")}
+    for e in shown:
+        rec = recorded.get(e["uid"])
+        e["recorded"], e["rec_status"] = (rec["id"], rec["status"]) if rec else (None, None)
+        s_, f_ = store.parse_ts(e["start"]), store.parse_ts(e["end"])
+        e["minutes"] = int((f_ - s_).total_seconds() // 60) if s_ and f_ and not e.get("all_day") else 0
     # ?task=<id> — «Назначить встречу» из окна задачи: форма новой встречи заполнена по задаче
     for_task = records.get_commitment(task) if task else None
     if for_task:
@@ -1232,13 +1249,30 @@ def calendar_page(request: Request, start: str = "", view: str = "week", task: i
     sources = [s for s in CALENDAR_SOURCES if settings[s].get("enabled")]
     synced = [(store.row("SELECT last_ok FROM jobs WHERE name=?", (f"collect:{s}",)) or {}).get("last_ok") for s in sources]
     new_at = (now + timedelta(hours=1)).replace(minute=0)  # ближайший целый час
+    last = first + timedelta(days=span - 1)
+    if view == "month":
+        title, prev, nxt = (f"{MONTHS_NOM[month_first.month - 1]} {month_first.year}",
+                            (month_first - timedelta(days=1)).replace(day=1), (month_first + timedelta(days=32)).replace(day=1))
+    else:
+        title = (f"{first.day}{' ' + MONTHS_SHORT[first.month - 1] if first.month != last.month else ''} – "
+                 f"{last.day} {MONTHS_SHORT[last.month - 1]}")
+        prev, nxt = first - timedelta(days=7), first + timedelta(days=7)
+    if not grid:  # месяц и список: номер для поповера встречи и «прошла»
+        tz = config.tz(settings)
+        for i, e in enumerate({e["uid"]: e for e in shown}.values()):
+            e.setdefault("n", f"d{i}")
+            e["s_local"] = store.parse_ts(e["start"]).astimezone(tz)
+            e["past"] = store.parse_ts(e["end"]) <= now
+    count = len({e["uid"] for e in shown if view != "month" or e["s_local"].month == month_first.month})
     return render(request, "calendar.html", nav="calendar", view=view, grid=grid, days=days, first=first,
-                  last=first + timedelta(days=6), today=now.date(), is_current=first <= now.date() <= first + timedelta(days=6),
-                  prev=first - timedelta(days=7), next=first + timedelta(days=7), can_refresh=bool(sources),
+                  last=last, today=now.date(), is_current=first <= now.date() <= last, title=title, count=count,
+                  week_no=first.isocalendar()[1], month=month_first.month,
+                  prev=prev, next=nxt, can_refresh=bool(sources), connected=bool(sources),
                   updated=None if None in synced else min(synced, default=None),  # по самому давнему из календарей
                   new_day=first if first > now.date() else new_at.date(), new_time=new_at.strftime("%H:%M"),
                   minutes=MEETING_MINUTES, people=[p for p in records.list_people() if p.get("email")],
                   write_calendars=calendar.write_calendar_names(settings), for_task=for_task,
+                  hide_cal_banner=request.cookies.get("hide_cal_banner") == "1",
                   google_calendars=(store.get_state("google_calendar_names") or []) if settings["google_calendar"].get("enabled") else [])
 
 

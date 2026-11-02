@@ -1359,3 +1359,51 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .closed-list { margin: 0 -28px; border-top: 1px solid var(--line); }
 .closed-list > li { padding-left: 28px; padding-right: 28px; }
 @media (max-width: 1000px) { .chats { grid-template-columns: minmax(0, 1fr); } }
+
+/* Календарь 2.0 */
+.cal-top { gap: 10px; margin-bottom: 18px; align-items: center; }
+.cal-title { margin: 0; font-size: 26px; font-weight: 600; }
+.cal-nav { display: inline-flex; gap: 6px; margin-left: 8px; }
+.btn.icon { width: 36px; padding: 0; font-size: 18px; }
+.wk-wrap { padding: 0; overflow: hidden; }
+.wk { --hour: 44px; }
+.wk-head { border-radius: 0; }
+.wk-day-h { padding: 12px 0 10px; }
+.wk-dow { font-size: 12px; font-weight: 400; text-transform: uppercase; }
+.wk-num { width: auto; height: auto; line-height: 1.2; margin: 2px 0 0; font-size: 20px; border-radius: 0; }
+.wk-day-h.today { background: var(--today); }
+.wk-day-h.today .wk-dow { color: var(--accent); font-weight: 600; }
+.wk-day-h.today .wk-num { background: none; color: var(--accent); font-weight: 600; }
+.wk-body { padding-top: 12px; }
+.wk-col.today { background-color: var(--today); }
+.wk-hour span { font-size: 12px; }
+.wk-now { background: var(--accent); }
+.wk-now::before { background: var(--accent); }
+.wk-now span { position: absolute; right: calc(100% + 6px); top: -9px; padding: 0 3px; border-radius: 4px; background: var(--panel);
+  color: var(--accent); font-size: 11px; font-weight: 600; line-height: 18px; font-variant-numeric: tabular-nums; }
+.wk-now-all { position: absolute; left: var(--gutter); right: 0; height: 0; border-top: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); z-index: 1; pointer-events: none; }
+.ev-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev.past { opacity: .6; }
+.ev-pop { width: 320px; border-radius: 12px; box-shadow: var(--shadow-pop); padding: 16px 18px; }
+.ev-pop .actions { margin-top: 4px; }
+/* месяц */
+.month { overflow: hidden; }
+.month-h, .month-g { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.month-h div { padding: 10px 10px 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; border-bottom: 1px solid var(--line); }
+.mcell { min-height: 112px; padding: 6px 6px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid;
+  align-content: start; gap: 3px; min-width: 0; }
+.mcell:nth-child(7n) { border-right: 0; }
+.mcell.other { background: var(--panel-2); }
+.mcell.other .mcell-n { color: var(--faint); }
+.mcell.today { background: var(--today); }
+.mcell-n { justify-self: start; padding: 0 4px; font-size: 14px; color: var(--text); }
+.mcell.today .mcell-n { color: var(--accent); font-weight: 600; }
+.mev { display: block; width: 100%; padding: 2px 6px; border: 0; border-left: 3px solid var(--ev-line); border-radius: 4px; background: var(--ev-bg);
+  color: var(--ev-fg); font: inherit; font-size: 12px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.mev.google { background: var(--evg-bg); color: var(--evg-fg); border-left-color: var(--evg-line); }
+.mev.past { opacity: .6; }
+.mev span { opacity: .8; }
+.mev-more { font-size: 12px; padding: 0 6px; }
+.cal-li-t { display: inline-block; min-width: 96px; font-variant-numeric: tabular-nums; }
+.fchip.sm { height: 28px; padding: 0 10px; font-size: 13px; }
+@media (max-width: 760px) { .mcell { min-height: 74px; } .mev span { display: none; } }
