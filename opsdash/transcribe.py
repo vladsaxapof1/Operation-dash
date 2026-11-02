@@ -616,6 +616,12 @@ def _set_paused(tag, on: bool) -> bool:
     return True
 
 
+def live_tags() -> list:
+    """Метки (id встреч), у которых сейчас есть процесс расшифровки — идёт или стоит на паузе."""
+    with _children_lock:
+        return [tag for tag, proc in _tags.items() if proc.is_alive()]
+
+
 def pause(tag) -> bool:
     """Поставить на паузу процесс с этой меткой. False — такого процесса нет."""
     return _set_paused(tag, True)

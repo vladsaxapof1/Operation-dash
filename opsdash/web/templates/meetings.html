@@ -38,28 +38,40 @@
   <div class="mday">{{ d.label }}</div>
   {% for r in d.rows %}
   {% if r.kind == 'rec' %}{% set m = r.m %}
-  {% set st = {'new': ('в очереди на расшифровку', 'off'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка отменена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
+  {% set st = {'new': ('ждёт расшифровки', 'warn'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка отменена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
   <div class="mrow">
     <div class="mrow-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if m.duration_sec %}<div class="mrow-x">{{ (m.duration_sec / 60) | round | int }} мин</div>{% endif %}</div>
     <div class="mrow-main"><a class="mrow-title" href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>
       <div class="mrow-x">{{ m.headline or r.people }}</div>
       {% if m.status == 'failed' and m.error %}<div class="mrow-x bad-text">{{ m.error[:200] }}</div>{% endif %}</div>
-    <div class="st {{ st[1] if st[1] in ('ok', 'bad', 'warn', 'acc') }}" data-meeting-status="{{ m.id }}"><span class="dot {{ st[1] }}"></span>{{ st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}{% if r.pending %} · {{ r.pending }} {{ plural(r.pending, 'ждёт', 'ждут', 'ждут') }} «да»{% endif %}
-      {% if m.status in ('new', 'transcribing', 'paused') %}<span class="tr-actions">{{ ui.transcription_controls(m, compact=True) }}</span>{% endif %}</div>
+    <div class="st {{ st[1] if st[1] in ('ok', 'bad', 'warn', 'acc') }}" data-meeting-status="{{ m.id }}"><span class="dot {{ st[1] }}"></span>{{ r.queue or st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}{% if r.pending %} · {{ r.pending }} {{ plural(r.pending, 'ждёт', 'ждут', 'ждут') }} «да»{% endif %}</div>
     <div class="mrow-act">
       {% if m.status == 'transcribed' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn">Разобрать</button></form>
       {% elif m.status == 'processed' %}<a class="btn" href="/meetings/{{ m.id }}">Открыть разбор</a>
       {% else %}<a class="btn" href="/meetings/{{ m.id }}">Открыть</a>{% endif %}
+      {{ ui.meeting_menu(m) }}
     </div>
   </div>
-  {% else %}{% set e = r.e %}
+  {% else %}{% set e = r.e %}{% set brief = e.brief if e.brief and e.brief.status == 'ready' else none %}
+  {#- встреча календаря без записи: впереди — бриф (открыть или собрать), прошла — «Загрузить запись» #}
+  {% set est = {'past': ('записи нет', 'off'), 'now': ('идёт сейчас', 'acc'), 'planned': ('запланирована', 'off')}[r.state] %}
   <div class="mrow">
     <div class="mrow-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if r.minutes %}<div class="mrow-x">{{ r.minutes }} мин</div>{% endif %}</div>
-    <div class="mrow-main"><div class="mrow-title">{{ e.title or 'Без названия' }}</div><div class="mrow-x">{{ r.people }}{{ ' · ' if r.people }}из календаря</div></div>
-    {% set est = {'past': ('записи нет', 'off'), 'now': ('идёт сейчас', 'acc'), 'planned': ('запланирована', 'off')}[r.state] %}
-    <div class="st {{ 'acc' if est[1] == 'acc' else 'muted' }}"><span class="dot {{ est[1] }}"></span>{{ est[0] }}</div>
-    <div class="mrow-act"><button type="button" class="btn" data-dlg-open="upload-dlg" data-upload-title="{{ e.title }}">Загрузить запись</button></div>
+    <div class="mrow-main"><div class="mrow-title">{{ e.title or 'Без названия' }}</div><div class="mrow-x">{{ r.people }}{{ ' · ' if r.people }}из календаря{% if brief and brief.topic %} · {{ brief.topic }}{% endif %}</div></div>
+    <div class="st {{ 'acc' if est[1] == 'acc' else 'muted' }}"><span class="dot {{ est[1] }}"></span>{{ est[0] }}{% if brief and r.state != 'past' %} · <span class="ok-text">бриф готов</span>{% endif %}</div>
+    <div class="mrow-act">
+      {% if r.state == 'past' %}<button type="button" class="btn" data-dlg-open="upload-dlg" data-upload-title="{{ e.title }}" data-upload-uid="{{ e.uid }}">Загрузить запись</button>
+      {% elif brief %}<button type="button" class="btn" data-brief-open="{{ e.brief_key }}">Открыть бриф</button>
+      {% else %}<form class="inline" method="post" action="/briefs/build" data-busy="Собираю…"><input type="hidden" name="uid" value="{{ e.uid }}"><button class="btn" title="Claude соберёт тему, прошлые встречи, открытые задачи и вопросы к встрече">Собрать бриф</button></form>{% endif %}
+      {% call ui.menu('Ещё о встрече') %}
+        {% if r.state != 'past' %}<button type="button" class="menu-i" data-dlg-open="upload-dlg" data-upload-title="{{ e.title }}" data-upload-uid="{{ e.uid }}">Загрузить запись</button>{% endif %}
+        {% if brief and r.state == 'past' %}<button type="button" class="menu-i" data-brief-open="{{ e.brief_key }}">Открыть бриф</button>{% endif %}
+        {% if brief %}<form method="post" action="/briefs/build"><input type="hidden" name="uid" value="{{ e.uid }}"><button class="menu-i">Собрать бриф заново</button></form>{% endif %}
+        <a class="menu-i" href="/calendar?start={{ r.start.strftime('%Y-%m-%d') if r.start else '' }}">Открыть в календаре</a>
+      {% endcall %}
+    </div>
   </div>
+  {% if brief %}{{ ui.brief_dialog(e) }}{% endif %}
   {% endif %}
   {% endfor %}
   {% else %}
@@ -83,6 +95,7 @@
     <div class="hint">Аудио и видео (m4a, mp3, mp4, webm…) и готовые расшифровки (.txt, .vtt, .srt, .docx).</div>
     <label>Название <span class="muted small">— необязательно</span></label>
     <input type="text" name="title" placeholder="Подставится из календаря" data-upload-title-input>
+    <input type="hidden" name="event_uid" value="" data-upload-uid-input>
     <div class="dlg-actions"><button class="btn primary">Загрузить и разобрать</button><button type="button" class="btn ghost" data-dlg-close>Отмена</button></div>
   </form>
 </dialog>

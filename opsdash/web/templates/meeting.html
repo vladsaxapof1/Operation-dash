@@ -12,7 +12,7 @@
   <h1>{{ m.title or m.id }}<button type="button" class="dlg-pencil" data-reveal="rename" title="Переименовать" aria-label="Переименовать встречу">{{ icons.icon('edit', 18) }}</button></h1>
   <form class="meet-pick rename" id="rename" method="post" action="/meetings/{{ m.id }}/title" hidden><input type="text" name="title" value="{{ m.title }}" aria-label="Название встречи"><button class="btn sm primary">Сохранить</button></form>
   <p class="sub">{{ m.started_at | local('%d.%m, %H:%M') }}{% if m.duration_sec %} · {{ (m.duration_sec / 60) | round | int }} мин{% endif %}{% if m.participants %} · {{ m.participants | join(', ') }}{% endif %}
-    · <span class="st {{ st[1] if st[1] in ('ok', 'bad', 'warn', 'acc') }}" data-meeting-status="{{ m.id }}"><span class="dot {{ st[1] }}"></span>{{ st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span></p>
+    · <span class="st {{ st[1] if st[1] in ('ok', 'bad', 'warn', 'acc') }}" data-meeting-status="{{ m.id }}"><span class="dot {{ st[1] }}"></span>{{ queue_note or st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span></p>
   <div class="toolbar">
     {% if transcript %}<a class="btn lg" href="/ask?meeting={{ m.id }}" title="Задать вопрос по этой встрече — Claude прочитает расшифровку целиком">{{ icons.icon('ask', 16) }}Спросить Claude</a>{% endif %}
     {% if followup %}<a class="btn lg{{ ' on' if tab == 'followup' }}" href="?tab=followup">Текст для отправки</a>{% endif %}

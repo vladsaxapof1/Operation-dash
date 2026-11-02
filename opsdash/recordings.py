@@ -146,12 +146,19 @@ def mark_seen(path: Path, meeting_id: str | None) -> None:
     )
 
 
-def create_meeting(path: Path, title: str | None = None) -> str:
+def create_meeting(path: Path, title: str | None = None, event_uid: str | None = None) -> str:
+    """Новая встреча из файла записи. Сразу связываем её со встречей календаря: event_uid — явно (запись
+    загрузили со строки этой встречи), иначе — по времени записи. Так в ленте встреч нет двух строк
+    («Встреча» и «Обзор за неделю»), пока идёт расшифровка; после неё PULSE сверит связь по длительности."""
     started = time_from_name(path.name) or time_from_name(path.parent.name)
     started_from_name = started is not None
     if not started:
         started = datetime.fromtimestamp(path.stat().st_mtime, tz=config.tz())
-    title = title or clean_title(path)
+    event = store.row("SELECT * FROM events WHERE uid=?", (event_uid,)) if event_uid else None
+    if not event:  # время из названия файла — начало записи, из даты изменения — её конец; длительность пока не знаем
+        event = (match_event(started, started + timedelta(hours=1)) if started_from_name
+                 else match_event(started - timedelta(hours=1), started))
+    title = title or (event and event["title"]) or clean_title(path)
     base = f"{started.astimezone(config.tz()):%Y-%m-%d_%H%M}_{slug(title)}"
     mid, n = base, 2
     while store.row("SELECT 1 FROM meetings WHERE id=?", (mid,)):
@@ -159,11 +166,13 @@ def create_meeting(path: Path, title: str | None = None) -> str:
     records.meeting_dir(mid).mkdir(parents=True, exist_ok=True)
     now = store.utcnow()
     store.execute(
-        """INSERT INTO meetings(id, title, started_at, source_file, status, progress, participants, created, updated)
-           VALUES(?,?,?,?, 'new', 0, '[]', ?, ?)""",
-        (mid, title, store.to_utc_iso(started), str(path), now, now),
+        """INSERT INTO meetings(id, title, started_at, source_file, status, progress, participants, event_uid, created, updated)
+           VALUES(?,?,?,?, 'new', 0, '[]', ?, ?, ?)""",
+        (mid, title, store.to_utc_iso(started), str(path), event["uid"] if event else None, now, now),
     )
     store.set_state(f"meeting_time_from_name:{mid}", started_from_name)
+    if event_uid and event:  # выбрали встречу сами — расшифровка не перепривяжет запись к другой
+        store.set_state(f"meeting_event_pinned:{mid}", event["uid"])
     mark_seen(path, mid)
     store.log("recordings", f"новая запись: {path.name} → встреча {mid}")
     return mid
@@ -193,6 +202,30 @@ class MeetingError(Exception):
 
 
 IN_QUEUE = ("new", "transcribing", "paused")  # расшифровка ждёт очереди, идёт или стоит на паузе
+
+
+def queue_notes() -> dict[str, str]:
+    """Что сказать о встречах, которые ждут расшифровки (status new): расшифровка идёт по одной, поэтому
+    «в очереди» — только если впереди кто-то есть. Пустая очередь — «начинается» (PULSE запускает процесс
+    расшифровки, это несколько секунд). Стоящая на паузе расшифровка держит очередь — так и пишем."""
+    rows = store.rows("SELECT id, title, status, created FROM meetings WHERE status IN ('new', 'transcribing', 'paused') "
+                      "ORDER BY created, id")
+    live = set(transcribe.live_tags())  # у кого запущен процесс расшифровки (идёт или заморожен паузой)
+    busy = [r for r in rows if r["status"] == "transcribing" or (r["status"] == "paused" and r["id"] in live)]
+    notes, earlier = {}, 0
+    for r in rows:
+        if r["status"] != "new":
+            continue
+        held = next((b for b in busy if b["status"] == "paused" and b["id"] != r["id"]), None)
+        ahead = earlier + sum(b["id"] != r["id"] for b in busy)
+        if held:
+            notes[r["id"]] = f"в очереди: на паузе расшифровка «{held['title'] or held['id']}»"
+        elif ahead:
+            notes[r["id"]] = f"в очереди на расшифровку · перед ней {ahead}"
+        else:
+            notes[r["id"]] = "расшифровка начинается"
+        earlier += 1
+    return notes
 
 
 def _remove(meeting_id: str, source_file: str, *, forget_file: bool) -> None:
@@ -421,7 +454,8 @@ def transcribe_meeting(meeting_id: str, settings: dict | None = None) -> dict:
             started = started - timedelta(seconds=duration)
 
     end = started + timedelta(seconds=duration or 3600)
-    event = match_event(started, end)
+    pinned = store.get_state(f"meeting_event_pinned:{meeting_id}")
+    event = (store.row("SELECT * FROM events WHERE uid=?", (pinned,)) if pinned else None) or match_event(started, end)
     title = m["title"]
     participants: list[str] = []
     header = [f"Дата: {started.astimezone(config.tz()):%d.%m.%Y %H:%M}"]

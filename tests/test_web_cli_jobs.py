@@ -11,7 +11,7 @@ from urllib.parse import unquote
 import pytest
 from fastapi.testclient import TestClient
 
-from opsdash import cli, config, demo, jobs, proposals, records, store
+from opsdash import briefs, cli, config, demo, jobs, proposals, records, store
 
 
 @pytest.fixture
@@ -755,3 +755,68 @@ def test_chats_like_messenger(client):
     assert "Чат номер 10" in opened.split('<details class="chat-more">')[0]
     earlier = client.get(f"/chats?chat=telegram%7Cc0&n={web.CHAT_PAGE * 3}").text.split("data-chat-feed>")[1]
     assert "сообщение 000" in earlier and "data-feed-more" not in earlier
+
+
+def _cal(uid, title, start, minutes=60):
+    store.execute('INSERT INTO events(uid, calendar, title, start, "end", all_day, description, attendees) '
+                  "VALUES(?,?,?,?,?,0,'','[]')", (uid, "Работа", title, start.isoformat(),
+                                                  (start + timedelta(minutes=minutes)).isoformat()))
+
+
+def test_recording_links_to_calendar_at_once_and_queue_notes(client, tmp_path, monkeypatch):
+    """Новая запись сразу связана со встречей календаря (в ленте одна строка, а не «Встреча» + «Обзор»);
+    «в очереди» — только если впереди кто-то есть, иначе «расшифровка начинается»."""
+    from opsdash import recordings, transcribe
+
+    now = datetime.now(timezone.utc).replace(microsecond=0, second=0)
+    start = now - timedelta(minutes=5)
+    _cal("ev-msb", "Обзор МСБ за неделю", start - timedelta(minutes=2))
+    _cal("ev-zoom", "Конференция Zoom", start - timedelta(minutes=2), minutes=30)
+    local = start.astimezone(config.tz())
+    rec = tmp_path / f"{local:%Y-%m-%d %H.%M.%S} Встреча.m4a"
+    rec.write_bytes(b"x")
+    mid = recordings.create_meeting(rec)
+    m = records.get_meeting(mid)
+    assert m["event_uid"] == "ev-msb" and m["title"] == "Обзор МСБ за неделю"
+    page = client.get("/meetings").text
+    assert sum("Обзор МСБ за неделю" in r for r in page.split('class="mrow"')[1:]) == 1, "одна строка, а не две"
+    assert "расшифровка начинается" in page and "в очереди" not in page
+
+    (tmp_path / "звонок.txt").write_text("А: да", encoding="utf-8")
+    second = recordings.create_meeting(tmp_path / "звонок.txt")
+    records.update_meeting(mid, status="transcribing")
+    assert recordings.queue_notes()[second] == "в очереди на расшифровку · перед ней 1"
+    records.update_meeting(mid, status="paused")
+    monkeypatch.setattr(transcribe, "live_tags", lambda: [mid])  # пауза держит процесс расшифровки — и очередь
+    assert recordings.queue_notes()[second] == "в очереди: на паузе расшифровка «Обзор МСБ за неделю»"
+    monkeypatch.setattr(transcribe, "live_tags", lambda: [])  # пауза до начала — очередь свободна
+    assert recordings.queue_notes()[second] == "расшифровка начинается"
+
+    # загрузили со строки другой встречи — связь с ней и после расшифровки, даже если по времени ближе другая
+    other = tmp_path / "zoom.txt"
+    other.write_text("Пётр: созвонились", encoding="utf-8")
+    pinned = recordings.create_meeting(other, "Конференция Zoom", event_uid="ev-zoom")
+    records.update_meeting(pinned, started_at=store.to_utc_iso(start))
+    assert recordings.transcribe_meeting(pinned)["event"]["uid"] == "ev-zoom"
+
+
+def test_meetings_feed_briefs_and_menu(client):
+    """Встречи впереди — с брифом («Открыть бриф» / «Собрать бриф»), прошедшие — «Загрузить запись»;
+    пауза, отмена и удаление записи — в меню «…», удаление отдельно от «отменить»."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    _cal("ev-brief", "Обзор с брифом", now + timedelta(minutes=30))
+    _cal("ev-nobrief", "Без брифа", now + timedelta(minutes=50))
+    _cal("ev-past", "Прошедшая", now - timedelta(hours=3))
+    briefs.save("ev-brief", "## Вопросы к встрече\n1. Что со сроками?", topic="сроки")
+    store.execute("INSERT INTO meetings(id, title, started_at, source_file, status, progress, participants, created, updated) "
+                  "VALUES('m-new', 'Встреча', ?, '/tmp/x.m4a', 'new', 0, '[]', ?, ?)",
+                  (now.isoformat(), now.isoformat(), now.isoformat()))
+    page = client.get("/meetings").text
+    rows = {t: next(r for r in page.split('class="mrow"') if t in r) for t in ("Обзор с брифом", "Без брифа", "Прошедшая", ">Встреча<")}
+    assert "Открыть бриф" in rows["Обзор с брифом"] and "бриф готов" in rows["Обзор с брифом"]
+    assert 'class="dlg dlg-brief"' in page
+    assert "Собрать бриф" in rows["Без брифа"] and "запланирована" in rows["Без брифа"]
+    assert "Загрузить запись" in rows["Прошедшая"] and 'data-upload-uid="ev-past"' in rows["Прошедшая"]
+    new = rows[">Встреча<"]
+    assert "Приостановить расшифровку" in new and "Отменить расшифровку — встреча останется" in new
+    assert "Удалить встречу и запись" in new and "tr-actions" not in new

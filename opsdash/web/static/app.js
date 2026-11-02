@@ -364,9 +364,11 @@
     var pn = b.dataset.personName;  // «Claude заметил новых людей»: имя — сразу в форму
     var pi = pn && document.querySelector("#person-new [data-person-name]");
     if (pi) pi.value = pn;
-    var t = b.dataset.uploadTitle;  // «Загрузить запись» у встречи календаря — с её названием
+    var t = b.dataset.uploadTitle;  // «Загрузить запись» у встречи календаря — с её названием и связью с ней
     var ti = t !== undefined && document.querySelector("[data-upload-title-input]");
     if (ti) ti.value = t;
+    var ui = document.querySelector("[data-upload-uid-input]");
+    if (ui) ui.value = b.dataset.uploadUid || "";
   });
 
   // зона «Перетащите запись сюда»: файл бросили или выбрали — сразу загружаем
@@ -858,7 +860,7 @@
   // --- обновлять страницу, пока идёт расшифровка/разбор ---
   var watching = Array.prototype.map.call(document.querySelectorAll("[data-meeting-status]"), function (n) { return n.dataset.meetingStatus; });
   var busy = Array.prototype.some.call(document.querySelectorAll("[data-meeting-status]"), function (n) {
-    return /очеред|расшифровка|разбор/.test(n.textContent);
+    return /очеред|расшифровк|разбор/.test(n.textContent);
   });
   // запись нашлась в папке, но встречи ещё нет — ждём, когда PULSE её возьмёт
   var waitingRec = !!document.querySelector("[data-waiting]");

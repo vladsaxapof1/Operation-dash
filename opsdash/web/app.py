@@ -1550,16 +1550,17 @@ def meetings(request: Request, q: str = ""):
     pending = {r["batch"][8:]: r["n"] for r in store.rows(
         "SELECT batch, COUNT(*) AS n FROM proposals WHERE status='pending' AND batch LIKE 'meeting:%' GROUP BY batch")}
     rows = []
+    queue = recordings.queue_notes()  # «в очереди» — только если впереди кто-то есть
     for m in items:
         start = store.parse_ts(m["started_at"])
-        rows.append({"kind": "rec", "m": m, "start": start.astimezone(tz) if start else None,
+        rows.append({"kind": "rec", "m": m, "start": start.astimezone(tz) if start else None, "queue": queue.get(m["id"]),
                      "people": ", ".join(store.loads(m["participants"], [])[:4]), "pending": pending.get(m["id"], 0)})
-    if not q:  # встречи календаря за неделю без записи — тоже в ленте: «записи нет»
+    if not q:  # встречи календаря за неделю без записи и сегодняшние впереди (с брифами) — тоже в ленте
         recorded = {m["event_uid"] for m in items if m["event_uid"]}
         begin = datetime.combine(now.date() - timedelta(days=7), datetime.min.time(), tz)
-        for e in overview.events_between(begin, now + timedelta(hours=1)):
-            if e["uid"] in recorded or e.get("all_day"):
-                continue
+        until = max(now + timedelta(hours=1), datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tz))
+        events = [e for e in overview.events_between(begin, until) if e["uid"] not in recorded and not e.get("all_day")]
+        for e in briefs.for_events(events):
             s, f = store.parse_ts(e["start"]), store.parse_ts(e["end"])
             rows.append({"kind": "event", "e": e, "start": s.astimezone(tz) if s else None,
                          "minutes": int((f - s).total_seconds() // 60) if s and f else 0,
@@ -1607,7 +1608,7 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
         s["name"] = (meta.get("speaker_names") or {}).get(s["label"]) or (voice.display_name(s["who"]) if s["who"] else "")
     guesses = {k: g for k, g in voice.guesses(mid, meta).items() if k not in who} if speakers else {}
     return render(request, "meeting.html", nav="meetings", m=m, summary=summary, transcript=transcript, tab=tab,
-                  related=related, commitments=commitments_, folder=str(records.meeting_dir(mid)),
+                  queue_note=recordings.queue_notes().get(mid) if m["status"] == "new" else None, related=related, commitments=commitments_, folder=str(records.meeting_dir(mid)),
                   folder_rel=os.path.relpath(records.meeting_dir(mid), config.DATA_DIR.parent).replace(os.sep, "/"),
                   followup=followup, followup_auto=followup_auto,
                   # обрывки (меньше 10 с речи) сворачиваем, только когда спикеров много
@@ -1676,7 +1677,8 @@ async def meeting_me(request: Request, mid: str, speaker: str = Form(...)):
 
 
 @app.post("/meetings/upload")
-async def meeting_upload(request: Request, file: UploadFile = File(...), title: str = Form("")):
+async def meeting_upload(request: Request, file: UploadFile = File(...), title: str = Form(""), event_uid: str = Form("")):
+    """event_uid — запись загрузили со строки встречи календаря: связываем с ней, а не угадываем по времени."""
     from opsdash import jobs, recordings
 
     name = Path(file.filename or "zapis").name
@@ -1688,7 +1690,7 @@ async def meeting_upload(request: Request, file: UploadFile = File(...), title: 
         dest = dest.with_name(f"{config.now():%H%M%S}_{name}")
     with open(dest, "wb") as fh:
         await run_in_threadpool(shutil.copyfileobj, file.file, fh)
-    mid = recordings.create_meeting(dest, title.strip() or None)
+    mid = recordings.create_meeting(dest, title.strip() or None, event_uid=event_uid.strip() or None)
     jobs.submit("transcribe", "transcribe", {"meeting_id": mid})
     return back(request, "Запись загружена — расшифровка началась", to=f"/meetings/{mid}")
 

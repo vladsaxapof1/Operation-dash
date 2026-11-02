@@ -1280,7 +1280,8 @@ a.task:hover { text-decoration: none; }
 .mday { padding: 10px 20px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600;
   color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .mday:not(:first-child) { border-top: 1px solid var(--line); }
-.mrow { display: grid; grid-template-columns: 120px minmax(0, 1fr) 180px 150px; gap: 16px; align-items: center; padding: 14px 20px;
+/* время — узкой колонкой (название ближе), статус, справа — одно действие и «…» (расшифровка, удаление) */
+.mrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) 210px 196px; gap: 16px; align-items: center; padding: 14px 20px;
   border-top: 1px solid var(--line); }
 .mday + .mrow { border-top: 0; }
 .mrow-time { font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -1290,13 +1291,13 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .mrow-main .mrow-x { font-size: 14px; }
 .mrow .st { display: block; white-space: normal; }
 .mrow .st .dot { margin-right: 7px; vertical-align: 1px; }
-.mrow-act { display: flex; justify-content: flex-end; }
+.mrow-act { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .drop { margin-top: 18px; }
 .drop-in { display: flex; align-items: center; gap: 16px; margin: 0; padding: 26px 24px; border: 1.5px dashed var(--line-strong); border-radius: 12px;
   color: var(--muted); font-size: 14px; font-weight: 400; cursor: pointer; text-align: center; justify-content: center; }
 .drop-in:hover, .drop.over .drop-in { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .drop-in input { display: none; }
-@media (max-width: 1000px) { .mrow { grid-template-columns: 70px minmax(0, 1fr) auto; } .mrow-act { grid-column: 2 / -1; justify-content: flex-start; } }
+@media (max-width: 1000px) { .mrow { grid-template-columns: 56px minmax(0, 1fr) auto; } .mrow-act { grid-column: 2 / -1; justify-content: flex-start; } }
 @media (max-width: 760px) { .mrow { grid-template-columns: 56px minmax(0, 1fr); } .mrow .st { grid-column: 2; } }
 
 /* встреча 2.0 */
