@@ -71,10 +71,10 @@ pre { white-space: pre-wrap; word-break: break-word; }
   width: 232px; flex: none; background: var(--panel); border-right: 1px solid var(--line);
   padding: 20px 14px 24px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 20px; font-weight: 600; font-size: 17px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 20px 3px; font-weight: 600; font-size: 17px; }
 .brand-mark { flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 16px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
-.nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--text); white-space: nowrap; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 9px; border-radius: 8px; color: var(--text); white-space: nowrap; }
 .nav a .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .nav .ico { flex: none; color: var(--muted); }
 .nav a.active .ico, .nav a:hover .ico { color: inherit; }
@@ -87,28 +87,25 @@ pre { white-space: pre-wrap; word-break: break-word; }
 .nav-toggle { margin-left: auto; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px;
   background: none; color: var(--muted); cursor: pointer; flex: none; }
 .nav-toggle:hover { background: var(--panel-2); color: var(--text); }
-/* меню свёрнуто в иконки (64px): кнопка «развернуть» под логотипом, группы — короткими линиями, счётчики — точкой
-   в углу иконки. При наведении раскрывается поверх страницы; иконки в обоих состояниях на тех же местах */
+/* меню свёрнуто в иконки (64px) — то же меню, обрезанное по ширине: логотип и иконки стоят на тех же местах, что и
+   в развёрнутом (центр — 32px от края), поэтому при сворачивании ничего не прыгает. Кнопка «развернуть» — справа
+   вверху, как в развёрнутом; видна, когда меню раскрывается поверх страницы (наведение или фокус с клавиатуры).
+   Группы — короткими линиями, счётчики — точкой в углу иконки */
 @media (min-width: 761px) {
-  body.nav-collapsed .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 64px; z-index: 40; overflow-x: hidden; padding: 20px 12px 24px; }
+  body.nav-collapsed .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 64px; z-index: 40; overflow-x: hidden; }
   body.nav-collapsed .main { margin-left: 64px; }
-  body.nav-collapsed .sidebar:hover { width: 232px; box-shadow: 10px 0 30px rgba(0, 0, 0, .18); }
-  body.nav-collapsed .brand { flex-direction: column; align-items: flex-start; gap: 6px; padding: 0 0 12px; }
-  body.nav-collapsed .brand-mark { width: 32px; height: 32px; margin-left: 4px; }
-  body.nav-collapsed .brand .lbl { display: none; }
-  body.nav-collapsed .nav-toggle { margin: 0; width: 40px; height: 40px; }
+  body.nav-collapsed .sidebar:hover, body.nav-collapsed .sidebar:focus-within { width: 232px; box-shadow: 10px 0 30px rgba(0, 0, 0, .18); }
   body.nav-collapsed .nav-toggle svg { transform: scaleX(-1); }
-  body.nav-collapsed .nav a { padding: 10px; position: relative; }
-  body.nav-collapsed .nav .ico { width: 20px; height: 20px; }
-  body.nav-collapsed .sidebar:not(:hover) .lbl { visibility: hidden; }
-  body.nav-collapsed .sidebar:not(:hover) .nav-g { position: relative; }
-  body.nav-collapsed .sidebar:not(:hover) .nav-g::after { content: ""; position: absolute; left: 8px; bottom: 9px; width: 24px; height: 1px; background: var(--line); }
-  body.nav-collapsed .sidebar:not(:hover) .nav-g:first-child::after { display: none; }
-  body.nav-collapsed .sidebar:not(:hover) .nav .sep { width: 24px; margin-left: 8px; }
-  body.nav-collapsed .sidebar:not(:hover) .side-foot { display: none; }
-  body.nav-collapsed .sidebar:not(:hover) .badge { position: absolute; top: 7px; left: 26px; min-width: 0; width: 8px; height: 8px; padding: 0;
+  body.nav-collapsed .nav a { position: relative; }
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .lbl { visibility: hidden; }
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .nav-g { position: relative; }
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .nav-g::after { content: ""; position: absolute; left: 6px; bottom: 9px; width: 24px; height: 1px; background: var(--line); }
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .nav-g:first-child::after { display: none; }
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .nav .sep { width: 24px; margin-left: 6px; }
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .side-foot { display: none; }
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .badge { position: absolute; top: 6px; left: 22px; min-width: 0; width: 8px; height: 8px; padding: 0;
     font-size: 0; border: 0; }
-  body.nav-collapsed .sidebar:not(:hover) .badge:not(.acc):not(.bad) { display: none; }  /* серое число точкой ни о чём не говорит */
+  body.nav-collapsed .sidebar:not(:hover):not(:focus-within) .badge:not(.acc):not(.bad) { display: none; }  /* серое число точкой ни о чём не говорит */
 }
 /* счётчик: по умолчанию нейтральный; синий — у выбранного, красный — только про просрочку и срочное */
 .badge { min-width: 22px; padding: 0 7px; height: 22px; border-radius: 999px; background: var(--line); color: var(--text); font-size: 13px;

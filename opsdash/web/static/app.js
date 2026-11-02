@@ -13,8 +13,10 @@
 
   // боковое меню: свернуть в иконки / закрепить. Помним в cookie — сервер сразу отдаёт нужный вид
   document.querySelectorAll("[data-nav-toggle]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
+    btn.addEventListener("click", function (e) {
       var collapsed = document.body.classList.toggle("nav-collapsed");
+      // свёрнутое меню раскрыто, пока в нём фокус: после щелчка мышью отпускаем кнопку, чтобы меню сразу сложилось
+      if (e.detail) btn.blur();
       btn.title = collapsed ? "Развернуть меню" : "Свернуть меню";
       btn.setAttribute("aria-label", btn.title);
       document.cookie = "nav=" + (collapsed ? "collapsed" : "") + "; path=/; max-age=31536000; samesite=lax";
