@@ -221,6 +221,11 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["pending_count"] = store.scalar("SELECT COUNT(*) FROM proposals WHERE status='pending'") or 0
     ctx["attention_count"] = store.scalar("SELECT COUNT(*) FROM attention WHERE status='open'") or 0
     ctx["new_tasks_count"] = records.unseen_count()
+    # меню: сколько ждёт в «Нужно от вас» (подтвердить, ответить) и есть ли срочное; сколько задач в работе
+    ctx["feed_count"] = ctx["pending_count"] + ctx["attention_count"]
+    ctx["feed_urgent"] = bool(store.scalar("SELECT 1 FROM attention WHERE status='open' AND priority='high' LIMIT 1"))
+    ctx["tasks_count"] = records.active_count()
+    ctx["sections_on"] = {"docs": True, "kb": True}  # архивные разделы — шаг 3 (Настройки → Архивные разделы)
     ctx["needs_setup"] = not any(settings[s].get("enabled")
                                  for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten",
                                            "ymessenger", "pachca"))

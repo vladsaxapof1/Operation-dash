@@ -223,6 +223,11 @@ def unseen_count() -> int:
         "SELECT COUNT(*) FROM commitments WHERE status='open' AND seen_at IS NULL AND archived_at IS NULL") or 0
 
 
+def active_count() -> int:
+    """Сколько задач и договорённостей в работе (открытые, не в архиве) — счётчик у «Задач» в меню."""
+    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL") or 0
+
+
 def set_in_work(cid: int, on: bool) -> None:
     """«В работе»: директор взялась за задачу — карточка сверху своей колонки и зелёная. Снять — on=False."""
     now = store.utcnow()

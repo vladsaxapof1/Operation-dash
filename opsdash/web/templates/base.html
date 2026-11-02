@@ -10,36 +10,34 @@
 </head>
 <body class="{{ 'nav-collapsed' if nav_collapsed }} page-{{ nav or 'other' }}">
 {% import "_icons.html" as icons %}
-{% set nav_items = [
-  ("home", "/", "Сводка", pending_count),
-  ("ask", "/ask", "Спросить Claude", 0),
-  ("office", "/office", "Офис", 0),
-  ("inbox", "/inbox", "Нужен ответ", attention_count),
-  ("commitments", "/commitments", "Задачи", new_tasks_count),
-  ("calendar", "/calendar", "Календарь", 0),
-  ("meetings", "/meetings", "Встречи", 0),
-  ("digests", "/digests", "Дайджесты", 0),
-  ("docs", "/docs", "Документы", 0),
-  ("kb", "/kb", "База знаний", 0),
-  ("tasks", "/tasks", "Задачи Kaiten", 0),
-  ("people", "/people", "Люди", 0),
+{#- меню 2.0: группы «Сегодня · Память · Claude» и системные пункты. Счётчик синий у выбранного раздела,
+    красный — если в «Нужно от вас» есть срочное; остальные — серые #}
+{% set active_key = {'tasks': 'commitments', 'project': 'commitments'}.get(nav, nav) %}
+{% set nav_groups = [
+  ("Сегодня", [("home", "/", "Сводка", feed_count), ("commitments", "/commitments", "Задачи", tasks_count),
+               ("calendar", "/calendar", "Календарь", 0)]),
+  ("Память", [("meetings", "/meetings", "Встречи", 0), ("inbox", "/inbox", "Переписка", 0),
+              ("digests", "/digests", "Дайджесты", 0), ("people", "/people", "Люди", 0)]
+             + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])
+             + ([("kb", "/kb", "База знаний", 0)] if sections_on.kb else [])),
+  ("Claude", [("ask", "/ask", "Спросить Claude", 0), ("office", "/office", "Офис", 0)]),
 ] %}
-<nav class="mobile-nav">
-  {% for key, href, title, n in nav_items %}<a href="{{ href }}" class="{{ 'active' if nav == key }}">{{ title }}{% if n %} · {{ n }}{% endif %}</a>{% endfor %}
-  <a href="/settings" class="{{ 'active' if nav == 'settings' }}">Настройки</a>
-  <a href="/journal" class="{{ 'active' if nav == 'journal' }}">Журнал</a>
-  <a href="/help" class="{{ 'active' if nav == 'help' }}">Справка</a>
-</nav>
+{% set nav_system = [("settings", "/settings", "Настройки", 0), ("journal", "/journal", "Журнал", 0), ("help", "/help", "Справка", 0)] %}
+{% macro nav_link(key, href, title, n) -%}
+<a href="{{ href }}" class="{{ 'active' if active_key == key }}"{% if active_key == key %} aria-current="page"{% endif %} title="{{ title }}">{{ icons.icon(key) }}<span class="lbl">{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'home' and feed_urgent else (' acc' if active_key == key else '') }}">{{ n }}</span>{% endif %}</a>
+{%- endmacro %}
 <div class="layout">
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">P</span><span class="lbl">PULSE</span>
-      <button type="button" class="nav-toggle" data-nav-toggle title="{{ 'Закрепить меню' if nav_collapsed else 'Свернуть меню' }}">{{ icons.icon('panel') }}</button></div>
-    <div class="nav">
-      {% for key, href, title, n in nav_items + [("settings", "/settings", "Настройки", 0), ("journal", "/journal", "Журнал", 0), ("help", "/help", "Справка", 0)] %}
-      {% if key == 'settings' %}<div class="sep"></div>{% endif %}
-      <a href="{{ href }}" class="{{ 'active' if nav == key }}" title="{{ title }}">{{ icons.icon(key) }}<span class="lbl">{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'inbox' }}">{{ n }}</span>{% endif %}</a>
+      <button type="button" class="nav-toggle" data-nav-toggle title="{{ 'Развернуть меню' if nav_collapsed else 'Свернуть меню' }}" aria-label="{{ 'Развернуть меню' if nav_collapsed else 'Свернуть меню' }}">{{ icons.icon('panel') }}</button></div>
+    <nav class="nav" aria-label="Разделы">
+      {% for group, items in nav_groups %}
+      <div class="nav-g"><span class="lbl">{{ group }}</span></div>
+      {% for key, href, title, n in items %}{{ nav_link(key, href, title, n) }}{% endfor %}
       {% endfor %}
-    </div>
+      <div class="sep"></div>
+      {% for key, href, title, n in nav_system %}{{ nav_link(key, href, title, n) }}{% endfor %}
+    </nav>
     <p class="muted small side-foot">Версия {{ version }}{% if build %} · {{ build }}{% endif %}<br>Работает на этом компьютере
       {% if update_available %}<br><a class="update-link" href="/settings?tab=general#updates">● Доступно обновление</a>{% endif %}</p>
   </aside>
@@ -81,6 +79,19 @@
   </aside>
   {% endif %}
 </div>
+{#- телефон: нижняя панель из четырёх пунктов, «Ещё» — лист со всеми остальными (работает и без JS) #}
+<nav class="tabbar" aria-label="Разделы">
+  {% for key, href, title, n in nav_groups[0][1] %}<a href="{{ href }}" class="{{ 'active' if active_key == key }}">{{ icons.icon(key, 20) }}<span>{{ title }}</span>{% if n and key == 'home' %}<i class="tabbar-dot{{ ' bad' if key == 'home' and feed_urgent }}"></i>{% endif %}</a>{% endfor %}
+  <details class="tabbar-more" data-tabbar-more>
+    <summary>{{ icons.icon('more', 20) }}<span>Ещё</span></summary>
+    <div class="tabbar-sheet">
+      {% for group, items in nav_groups[1:] %}<div class="nav-g">{{ group }}</div>
+      {% for key, href, title, n in items %}<a href="{{ href }}" class="{{ 'active' if active_key == key }}">{{ icons.icon(key) }}{{ title }}</a>{% endfor %}{% endfor %}
+      <div class="sep"></div>
+      {% for key, href, title, n in nav_system %}<a href="{{ href }}" class="{{ 'active' if active_key == key }}">{{ icons.icon(key) }}{{ title }}</a>{% endfor %}
+    </div>
+  </details>
+</nav>
 {% if design_intro %}{% include "_design_intro.html" %}{% endif %}
 <script src="/static/app.js?v={{ static_v }}"></script>
 </body>

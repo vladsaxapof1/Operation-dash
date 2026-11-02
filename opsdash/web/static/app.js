@@ -15,10 +15,15 @@
   document.querySelectorAll("[data-nav-toggle]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var collapsed = document.body.classList.toggle("nav-collapsed");
-      btn.title = collapsed ? "Закрепить меню" : "Свернуть меню";
+      btn.title = collapsed ? "Развернуть меню" : "Свернуть меню";
+      btn.setAttribute("aria-label", btn.title);
       document.cookie = "nav=" + (collapsed ? "collapsed" : "") + "; path=/; max-age=31536000; samesite=lax";
     });
   });
+
+  // телефон: лист «Ещё» закрывается кликом мимо него
+  var more = document.querySelector("[data-tabbar-more]");
+  if (more) document.addEventListener("click", function (e) { if (more.open && !more.contains(e.target)) more.open = false; });
 
   // после действия (Готово, Сохранить…) страница перезагружается — возвращаем прокрутку туда, где была,
   // а не в начало страницы. Только для той же страницы и только сразу после отправки
