@@ -131,3 +131,59 @@ def test_scheduler_checks_daily_and_settings_page(tmp_path, repo, monkeypatch):
     assert config.load_settings()["updates"] == {"repo": "me/pulse", "branch": "dev", "auto_check": False}
     r = client.post("/updates/apply", follow_redirects=False)
     assert submitted[-1] == "update" and "updating=1" in unquote(r.headers["location"])
+
+
+# --- папка из git: что мешает git pull — разбираем сами или объясняем ------------------------------------------
+
+def _sh(cwd, *args):
+    import subprocess
+
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture
+def git_pair(tmp_path, monkeypatch):
+    """«GitHub» (up) и папка PULSE (pulse) — клон ветки обновлений; в up уже вышла новая версия."""
+    for k, v in (("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"),
+                 ("GIT_COMMITTER_EMAIL", "t@t")):
+        monkeypatch.setenv(k, v)
+    up, pulse = tmp_path / "up", tmp_path / "pulse"
+    up.mkdir()
+    _sh(up, "init", "-q", "-b", "claude/pult-v1")
+    (up / "app.py").write_text("v1\n", encoding="utf-8")
+    (up / "uv.lock").write_text("lock v1\n", encoding="utf-8")
+    _sh(up, "add", ".")
+    _sh(up, "commit", "-qm", "v1")
+    _sh(tmp_path, "clone", "-q", str(up), str(pulse))
+    (up / "app.py").write_text("v2\n", encoding="utf-8")
+    (up / "uv.lock").write_text("lock v2\n", encoding="utf-8")
+    (up / "Сводка — макет.html").write_text("из релиза", encoding="utf-8")
+    _sh(up, "add", ".")
+    _sh(up, "commit", "-qm", "v2")
+    monkeypatch.setattr(updates, "sync_libraries", lambda r: None)
+    return up, pulse, {"updates": {"repo": "me/pulse", "branch": "claude/pult-v1", "auto_check": True}}
+
+
+def test_git_update_sets_aside_untracked_files_and_restores_uv_lock(git_pair):
+    """Файл с тем же именем, которого нет в git (положили руками), — в data/backup; uv.lock — как в git."""
+    up, pulse, settings = git_pair
+    (pulse / "Сводка — макет.html").write_text("мой черновик", encoding="utf-8")
+    (pulse / "uv.lock").write_text("пересобрал uv\n", encoding="utf-8")
+    updates.apply(settings, root=pulse)
+    assert (pulse / "app.py").read_text(encoding="utf-8") == "v2\n"
+    assert (pulse / "uv.lock").read_text(encoding="utf-8") == "lock v2\n"
+    assert (pulse / "Сводка — макет.html").read_text(encoding="utf-8") == "из релиза"
+    [kept] = (config.DATA_DIR / "backup").glob("update-*/Сводка — макет.html")
+    assert kept.read_text(encoding="utf-8") == "мой черновик"  # ничего не потеряно
+
+
+def test_git_update_explains_local_edits_and_own_commits(git_pair):
+    up, pulse, settings = git_pair
+    (pulse / "app.py").write_text("правлю сам\n", encoding="utf-8")
+    with pytest.raises(updates.UpdateError, match=r"изменены файлы, которые меняет обновление: app\.py"):
+        updates.apply(settings, root=pulse)
+    assert (pulse / "app.py").read_text(encoding="utf-8") == "правлю сам\n"  # правки на месте
+
+    _sh(pulse, "commit", "-qam", "своё")
+    with pytest.raises(updates.UpdateError, match="свои коммиты, которых нет в ветке claude/pult-v1"):
+        updates.apply(settings, root=pulse)

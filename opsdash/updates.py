@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -248,6 +249,70 @@ cli.start_background()
 """
 
 
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    # quotePath=false — русские имена файлов в выводе git как есть, а не «\320\241…»
+    return subprocess.run(["git", "-c", "core.quotePath=false", "-C", str(root), *args], capture_output=True, text=True)
+
+
+def _listed(out: str, marker: str) -> list[str]:
+    """Файлы, которые git перечислил после строки с marker (с отступом, по одному в строке)."""
+    lines, found, files = out.splitlines(), False, []
+    for line in lines:
+        if marker in line:
+            found = True
+        elif found and line[:1] in ("\t", " ") and line.strip():
+            files.append(line.strip())
+        elif found:
+            break
+    return files
+
+
+def _set_aside(root: Path, files: list[str]) -> Path:
+    """Файлы, которых нет в git, но с теми же именами приходят с обновлением, — в data/backup, не удаляем."""
+    dest = config.DATA_DIR / "backup" / f"update-{datetime.now():%Y%m%d-%H%M%S}"
+    for rel in files:
+        src = root / rel
+        if src.exists():
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest / rel))
+    store.log("update", f"отложены файлы, которые мешали обновлению: {', '.join(files)} → {dest}", "warning")
+    return dest
+
+
+def _pull(root: Path, branch: str) -> None:
+    """git pull --ff-only. Что мешает — разбираем сами, где это безопасно: файлы с теми же именами, которых нет
+    в git, откладываем в data/backup; uv.lock (его пересобирает uv) возвращаем как в git. О своих правках
+    в коде и о разошедшейся ветке — говорим по-человечески, ничего не трогая."""
+    for attempt in range(3):
+        res = _git(root, "pull", "--ff-only", "origin", branch)
+        if not res.returncode:
+            return
+        out = f"{res.stderr or ''}\n{res.stdout or ''}"
+        last = attempt == 2
+        blocked = _listed(out, "untracked working tree files would be overwritten")
+        if blocked and not last:
+            _set_aside(root, blocked)
+            continue
+        changed = _listed(out, "local changes to the following files would be overwritten")
+        if changed and set(changed) <= {"uv.lock"} and not last:
+            _git(root, "checkout", "--", "uv.lock")
+            continue
+        raise UpdateError(_explain(out, blocked, changed, branch))
+
+
+def _explain(out: str, blocked: list[str], changed: list[str], branch: str) -> str:
+    if changed:
+        return ("в папке PULSE изменены файлы, которые меняет обновление: " + ", ".join(changed) + ". Сохраните правки "
+                "(git stash) или верните как было (git checkout -- <файл>) и нажмите «Обновить» ещё раз")
+    if blocked:
+        return "мешают файлы в папке PULSE: " + ", ".join(blocked) + ". Переименуйте их и нажмите «Обновить» ещё раз"
+    if "fast-forward" in out or "diverg" in out:
+        return (f"в папке PULSE есть свои коммиты, которых нет в ветке {branch}, — новую версию нельзя просто "
+                "подтянуть. Отправьте их на GitHub или переключите папку на эту ветку")
+    useful = [ln.strip() for ln in out.splitlines() if ln.strip().startswith(("error:", "fatal:"))]
+    return "git pull не удался: " + (" ".join(useful) or out.strip()[-300:])
+
+
 def apply(settings: dict | None = None, root: Path | None = None, transport: httpx.BaseTransport | None = None) -> str:
     """Поставить последнюю версию из ветки. Перезапуск — отдельно (restart)."""
     real = root is None
@@ -255,10 +320,7 @@ def apply(settings: dict | None = None, root: Path | None = None, transport: htt
     opts = _options(settings)
     before = installed(root)
     if (root / ".git").exists():
-        res = subprocess.run(["git", "-C", str(root), "pull", "--ff-only", "origin", opts["branch"]],
-                             capture_output=True, text=True)
-        if res.returncode:
-            raise UpdateError("git pull не удался: " + (res.stderr or res.stdout).strip()[-300:])
+        _pull(root, opts["branch"])
     else:
         with _client(transport) as client:
             head = _head(client, opts)
