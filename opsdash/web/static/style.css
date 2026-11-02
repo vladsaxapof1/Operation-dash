@@ -1407,3 +1407,21 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .cal-li-t { display: inline-block; min-width: 96px; font-variant-numeric: tabular-nums; }
 .fchip.sm { height: 28px; padding: 0 10px; font-size: 13px; }
 @media (max-width: 760px) { .mcell { min-height: 74px; } .mev span { display: none; } }
+
+/* Люди 2.0 */
+.people-t .c-who { width: 32%; }
+.people-t td a { font-weight: 400; }
+.dlg-person { width: min(720px, calc(100vw - 32px)); }
+.avatar.big { width: 48px; height: 48px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2);
+  color: var(--muted); font-size: 16px; font-weight: 600; }
+.dlg-person .dlg-head { align-items: flex-start; gap: 14px; }
+.dlg-person .dlg-head .small { margin-top: 2px; }
+.pp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pp { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; display: grid; gap: 0; align-content: start; }
+.pp h3 { margin: 0 0 6px; }
+.pp-i { padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; overflow-wrap: anywhere; }
+.pp-x { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.pp-foot { display: flex; align-items: baseline; gap: 14px; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 0; }
+.dlg-person .dlg-edit .dlg-actions { margin-top: 18px; }
+@media (max-width: 760px) { .pp-grid { grid-template-columns: minmax(0, 1fr); } }
+.linkish.bad-text { color: var(--bad-text); }

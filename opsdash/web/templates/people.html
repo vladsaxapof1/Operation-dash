@@ -1,81 +1,129 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
 {% block title %}Люди{% endblock %}
 {% block content %}
-<div class="topline">
-  <div><h1>Справочник людей</h1><div class="muted">Связывает одного человека в Telegram, почте и Kaiten. Claude пополняет его сам, вы — поправляете.</div></div>
-</div>
-
-{# форма открывается строкой «+ Добавить человека» (#add) или кнопкой «Изменить» — без скриптов #}
-<section class="card add-panel{{ ' open' if current }}" id="add">
-  <div class="card-h"><h2>{{ 'Изменить: ' ~ current.name if current else 'Новый человек' }}</h2><a class="small" href="/people">свернуть</a></div>
-  <div class="card-b">
-    <form method="post" action="/people">
-      <input type="hidden" name="pid" value="{{ current.id if current else 0 }}">
-      <div class="form-row">
-        <div><label>Имя и фамилия {{ ui.help('Так человек будет называться в задачах, карточках Kaiten и сводках.') }}</label>
-          <input type="text" name="name" required value="{{ current.name if current }}" placeholder="Пётр Иванов"></div>
-        <div><label>Роль {{ ui.help('Кто он в компании. Claude учитывает роль, когда разбирает встречи и решает, кому адресована задача.') }}</label>
-          <input type="text" name="role" value="{{ current.role or '' if current }}" placeholder="например, руководитель продаж"></div>
-      </div>
-      <label>Другие написания {{ ui.help('Как его называют в расшифровках встреч и в чатах: «Петя», «Иванов», «П. Иванов». По ним Claude понимает, что это один и тот же человек. Через запятую.') }}</label>
-      <input type="text" name="aliases" value="{{ current.aliases | join(', ') if current }}" placeholder="Петя, Иванов, П. Иванов">
-      <div class="form-row">
-        <div><label>Telegram {{ ui.help('@username. По нему Claude узнаёт сообщения этого человека в Telegram и связывает их с его задачами.') }}</label>
-          <input type="text" name="telegram" value="{{ current.telegram or '' if current }}" placeholder="@username"></div>
-        <div><label>Я.Мессенджер {{ ui.help('Логин в Яндекс Мессенджере — чтобы узнавать сообщения этого человека там.') }}</label>
-          <input type="text" name="ymessenger" value="{{ current.ymessenger or '' if current }}" placeholder="логин"></div>
-      </div>
-      <div class="form-row">
-        <div><label>Почта {{ ui.help('Чтобы узнавать его письма и звать на встречи: в форме новой встречи в «Календаре» он появится кнопкой «+ Имя».') }}</label>
-          <input type="email" name="email" value="{{ current.email or '' if current }}" placeholder="name@company.ru"></div>
-        <div><label>Пользователь Kaiten {{ ui.help('Кого ставить исполнителем, когда Claude предлагает карточку в Kaiten на этого человека.') }}</label>
-          <select name="kaiten_user_id">
-            <option value="">—</option>
-            {% for u in kusers %}<option value="{{ u.id }}" {{ 'selected' if current and current.kaiten_user_id == u.id }}>{{ u.full_name }} (@{{ u.username }})</option>{% endfor %}
-          </select></div>
-      </div>
-      <label>Заметки {{ ui.help('Всё, что поможет Claude: зона ответственности, с кем работает, как лучше обращаться.') }}</label>
-      <textarea name="notes" rows="2">{{ current.notes or '' if current }}</textarea>
-      {% if current %}
-      <label>Голос {{ ui.help('Запоминается, когда вы подтверждаете на странице встречи, какой спикер — этот человек. Дальше PULSE подписывает его речь в записях сам.') }}</label>
-      <div class="small">{% if voices.get(current.id) %}🎙 Запомнен по {{ voices[current.id] }} {{ plural(voices[current.id], 'записи', 'записям', 'записям') }}{% else %}<span class="muted">Ещё не запомнен — подтвердите его спикера на странице любой встречи.</span>{% endif %}</div>
-      {% endif %}
-      <div class="form-actions">
-        <button class="btn primary">{{ 'Сохранить' if current else 'Добавить' }}</button>
-        <a class="btn ghost" href="/people">Отмена</a>
-      </div>
-    </form>
-    {% if current %}
-    <div class="actions" style="margin-top:10px">
-      {% if voices.get(current.id) %}<form method="post" action="/people/{{ current.id }}/voice/forget" data-confirm="Забыть голос {{ current.name }}?"><button class="btn sm ghost">Забыть голос</button></form>{% endif %}
-      <form method="post" action="/people/{{ current.id }}/delete" data-confirm="Удалить {{ current.name }} из справочника?"><button class="btn sm danger">Удалить из справочника</button></form>
-    </div>
-    {% endif %}
+{#- Люди (5.13): справочник — кто, где найти, кто кому должен, последний контакт; карточка человека — окном #}
+{% macro person_form(p=none) %}
+<form class="dlg-edit dlg-form" method="post" action="/people"{% if p %} hidden{% endif %}>
+  <input type="hidden" name="pid" value="{{ p.id if p else 0 }}">
+  <h2 class="dlg-title">{{ 'Изменить: ' ~ p.name if p else 'Новый человек' }}</h2>
+  <div class="form-row">
+    <div><label>Имя и фамилия {{ ui.help('Так человек будет называться в задачах, карточках Kaiten и сводках.') }}</label>
+      <input type="text" name="name" required value="{{ p.name if p else '' }}" placeholder="Пётр Иванов" data-person-name></div>
+    <div><label>Роль {{ ui.help('Кто он в компании. Claude учитывает роль, когда разбирает встречи и решает, кому адресована задача.') }}</label>
+      <input type="text" name="role" value="{{ (p.role or '') if p else '' }}" placeholder="например, руководитель продаж"></div>
   </div>
-</section>
+  <label>Другие написания {{ ui.help('Как его называют в расшифровках встреч и в чатах: «Петя», «Иванов», «П. Иванов». По ним Claude понимает, что это один и тот же человек. Через запятую.') }}</label>
+  <input type="text" name="aliases" value="{{ (p.aliases | join(', ')) if p else '' }}" placeholder="Петя, Иванов, П. Иванов">
+  <div class="form-row">
+    <div><label>Telegram {{ ui.help('@username. По нему Claude узнаёт сообщения этого человека в Telegram и связывает их с его задачами.') }}</label>
+      <input type="text" name="telegram" value="{{ (p.telegram or '') if p else '' }}" placeholder="@username"></div>
+    <div><label>Я.Мессенджер {{ ui.help('Логин в Яндекс Мессенджере — чтобы узнавать сообщения этого человека там.') }}</label>
+      <input type="text" name="ymessenger" value="{{ (p.ymessenger or '') if p else '' }}" placeholder="логин"></div>
+  </div>
+  <div class="form-row">
+    <div><label>Почта {{ ui.help('Чтобы узнавать его письма и звать на встречи: в форме новой встречи в «Календаре» он появится кнопкой «+ Имя».') }}</label>
+      <input type="email" name="email" value="{{ (p.email or '') if p else '' }}" placeholder="name@company.ru"></div>
+    <div><label>Пользователь Kaiten {{ ui.help('Кого ставить исполнителем, когда Claude предлагает карточку в Kaiten на этого человека.') }}</label>
+      <select name="kaiten_user_id">
+        <option value="">—</option>
+        {% for u in kusers %}<option value="{{ u.id }}" {{ 'selected' if p and p.kaiten_user_id == u.id }}>{{ u.full_name }} (@{{ u.username }})</option>{% endfor %}
+      </select></div>
+  </div>
+  <label>Заметки {{ ui.help('Всё, что поможет Claude: зона ответственности, с кем работает, как лучше обращаться.') }}</label>
+  <textarea name="notes" rows="2">{{ (p.notes or '') if p else '' }}</textarea>
+  {% if p %}
+  <label>Голос {{ ui.help('Запоминается, когда вы подтверждаете на странице встречи, какой спикер — этот человек. Дальше PULSE подписывает его речь в записях сам.') }}</label>
+  <div class="small">{% if voices.get(p.id) %}Запомнен по {{ voices[p.id] }} {{ plural(voices[p.id], 'записи', 'записям', 'записям') }}{% else %}<span class="muted">Ещё не запомнен — подтвердите его спикера на странице любой встречи.</span>{% endif %}</div>
+  {% endif %}
+  <div class="dlg-actions"><button class="btn primary">{{ 'Сохранить' if p else 'Добавить' }}</button><button type="button" class="btn ghost" {{ 'data-dlg-view' if p else 'data-dlg-close' }}>Отмена</button></div>
+</form>
+{% endmacro %}
 
-{{ ui.workload_strip(workload) }}
+<div class="topline">
+  <div><h1>Люди</h1>
+    <p class="sub">{{ everyone | length }} {{ plural(everyone | length, 'человек', 'человека', 'человек') }} · Claude связывает одного человека в Telegram, почте и Kaiten и пополняет справочник сам — вы поправляете</p></div>
+</div>
+<form method="get" class="toolbar page-tools">
+  <input type="search" name="q" value="{{ q }}" placeholder="Имя, @ник, роль" class="tb-search" aria-label="Поиск по людям">
+  <select name="sort" data-autosubmit aria-label="Порядок">{% for key, t in sorts.items() %}<option value="{{ key }}" {{ 'selected' if sort == key }}>{{ t }}</option>{% endfor %}</select>
+  <button type="button" class="btn lg primary" data-dlg-open="person-new">+ Человек</button>
+  {% if q %}<a class="small" href="/people">× снять поиск</a>{% endif %}
+</form>
 
 <section class="card">
-  <a class="add-row" href="/people#add">+ Добавить человека</a>
-  <div class="card-b flush">
-    <div class="table-wrap">
-    <table class="t">
-      <thead><tr><th>Имя</th><th>Где найти {{ ui.help('По этим адресам Claude узнаёт человека в Telegram, Я.Мессенджере, почте и Kaiten.', below=True) }}</th><th>Загрузка {{ ui.help('Открытые задачи, где он исполнитель, и его карточки Kaiten в работе.', below=True) }}</th><th></th></tr></thead>
-      <tbody>
-      {% for p in items %}
-        <tr>
-          <td><strong>{{ p.name }}</strong>{% if p.role %}<div class="meta">{{ p.role }}</div>{% endif %}{% if p.aliases %}<div class="meta">также: {{ p.aliases | join(', ') }}</div>{% endif %}</td>
-          <td class="small">{% if p.telegram %}TG {{ p.telegram }}<br>{% endif %}{% if p.ymessenger %}ЯМ {{ p.ymessenger }}<br>{% endif %}{% if p.email %}{{ p.email }}<br>{% endif %}{% if p.kaiten_user_id %}Kaiten #{{ p.kaiten_user_id }}<br>{% endif %}{% if voices.get(p.id) %}<span title="PULSE узнаёт этот голос в записях встреч">🎙 голос запомнен</span>{% endif %}</td>
-          {% set w = load.get('p' ~ p.id) %}
-          <td class="small nowrap">{% if w %}<a href="/commitments?person={{ w.person_q | urlencode }}">задач {{ w.open }}</a>{% if w.overdue %} · <span class="load-bad">{{ w.overdue }} просроч.</span>{% endif %}{% if w.kaiten %}<br><a href="/tasks?who={{ w.kaiten_q | urlencode }}">Kaiten {{ w.kaiten }}</a>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
-          <td class="right nowrap"><a class="btn sm" href="/people?edit={{ p.id }}#add">Изменить</a></td>
-        </tr>
-      {% else %}<tr><td colspan="4" class="empty">Справочник пуст — он заполнится после первых разборов встреч и чатов.</td></tr>{% endfor %}
-      </tbody>
-    </table>
-    </div>
+  <div class="table-wrap">
+  <table class="t people-t">
+    <thead><tr><th class="c-who">Кто</th><th>Где найти</th><th>Должен мне</th><th>Я должна</th><th>Последний контакт</th></tr></thead>
+    <tbody>
+    {% for p in items %}
+      {% set w = load.get('p' ~ p.id) %}
+      <tr>
+        <td class="c-who"><a href="?person={{ p.id }}" data-dlg-open="person-{{ p.id }}">{{ p.name }}</a>
+          {% if p.role or p.aliases %}<div class="meta">{{ p.role or '' }}{% if p.role and p.aliases %} · {% endif %}{% if p.aliases %}также: {{ p.aliases | join(', ') }}{% endif %}</div>{% endif %}</td>
+        <td class="small">{% if p.telegram %}<div>TG {{ p.telegram }}</div>{% endif %}{% if p.ymessenger %}<div>ЯМ {{ p.ymessenger }}</div>{% endif %}{% if p.kaiten_user_id %}<div>Kaiten #{{ p.kaiten_user_id }}</div>{% endif %}{% if p.email and not (p.telegram and p.kaiten_user_id) %}<div>{{ p.email }}</div>{% endif %}{% if not (p.telegram or p.ymessenger or p.kaiten_user_id or p.email) %}<span class="muted">—</span>{% endif %}</td>
+        {% set late_owe = p.owes_me | selectattr('overdue') | list | length %}
+        <td>{% if p.owes_me %}<a href="/commitments?view=list&direction=to_me&person={{ p.name | urlencode }}">{{ p.owes_me | length }}</a>{% if late_owe %} · <span class="bad-text">{{ late_owe }} {{ plural(late_owe, 'просрочена', 'просрочены', 'просрочено') }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+        {% set mine_first = p.i_owe | sort(attribute='due') | first if p.i_owe %}
+        <td>{% if p.i_owe %}<a href="/commitments?view=list&direction=mine&person={{ p.name | urlencode }}">{{ p.i_owe | length }}</a>{% set late = p.i_owe | selectattr('overdue') | list | length %}{% if late %} · <span class="bad-text">{{ plural(late, 'просрочена', 'просрочены', 'просрочено') }}</span>{% elif p.i_owe | selectattr('due_days', 'le', 1) | list %} · <span class="warn-text">{{ ui.due_text(p.i_owe | selectattr('due_days', 'le', 1) | first) | striptags }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="small">{% if p.last %}{{ p.last.ts | ago }}, {{ SOURCE_TITLES.get(p.last.source, p.last.source) }}{% else %}<span class="muted">—</span>{% endif %}{% if p.waiting %}<div class="bad-text">ждёт ответа</div>{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="5" class="muted">{{ 'Никого не нашлось.' if q else 'Справочник пуст — он заполнится после первых разборов встреч и чатов.' }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
   </div>
 </section>
+{% if fresh %}<p class="muted small">Claude заметил новых людей в переписке: {% for f in fresh %}<button type="button" class="linkish" data-dlg-open="person-new" data-person-name="{{ f.sender_name }}">«{{ f.sender_name }}»</button> <span>(чат {{ f.chat_title }})</span>{{ ', ' if not loop.last }}{% endfor %} — добавить в справочник?</p>{% endif %}
+
+{% for p in everyone %}
+{% set first = p.name.split(' ')[0] %}
+<dialog class="dlg dlg-person" id="person-{{ p.id }}" aria-label="{{ p.name }}"{% if current and current.id == p.id %} data-open-on-load{% if editing %} data-edit-on-load{% endif %}{% endif %}>
+  <div class="dlg-box" tabindex="-1">
+    <div class="dlg-view">
+      <div class="dlg-head">
+        <span class="avatar big" aria-hidden="true">{{ (p.name.split(' ') | map('first') | join(''))[:2] | upper }}</span>
+        <div class="grow">
+          <h2 class="dlg-title">{{ p.name }}<button type="button" class="dlg-pencil" data-dlg-edit title="Изменить" aria-label="Изменить">{{ icons.icon('edit', 16) }}</button></h2>
+          <div class="muted small">{{ p.role or 'роль не указана' }}{% if p.aliases %} · также: {{ p.aliases | join(', ') }}{% endif %}</div>
+          <div class="small">{% if p.telegram %}<a href="https://t.me/{{ p.telegram.lstrip('@') }}" target="_blank" rel="noopener">TG {{ p.telegram }}</a>{% else %}<span class="muted">Telegram не привязан</span>{% endif %}
+            {%- if p.kaiten_user_id %} · Kaiten #{{ p.kaiten_user_id }}{% endif %}
+            {%- if p.email %} · <a href="mailto:{{ p.email }}">{{ p.email }}</a>{% else %} · <span class="muted">почта не привязана</span>{% endif %}
+            {%- if p.ymessenger %} · ЯМ {{ p.ymessenger }}{% endif %}</div>
+        </div>
+        <a class="btn" href="/ask?person={{ p.id }}" title="Спросить Claude об этом человеке: задачи, встречи, переписка">{{ icons.icon('ask', 16) }}Спросить Claude</a>
+        <button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>
+      </div>
+      <div class="pp-grid">
+        <section class="pp"><h3>Должен мне · {{ p.owes_me | length }}</h3>
+          {% for c in p.owes_me[:4] %}<div class="pp-i"><a href="/commitments?task={{ c.id }}">{{ c | headline }}</a><div class="pp-x">{{ ui.due_text(c) }}{% if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif %}{% if c.merge_hint %} · <span class="warn-text">дубль?</span>{% endif %}{% if c.overdue %} · <a href="/commitments?task={{ c.id }}" data-remind>напомнить</a>{% endif %}</div></div>
+          {% else %}<p class="pp-x">Ничего не должен.</p>{% endfor %}
+          {% if p.owes_me | length > 4 %}<a class="small" href="/commitments?view=list&direction=to_me&person={{ p.name | urlencode }}">ещё {{ p.owes_me | length - 4 }} →</a>{% endif %}</section>
+        <section class="pp"><h3>Kaiten · {{ p.kaiten | length }}</h3>
+          {% for k in p.kaiten[:4] %}<div class="pp-i"><a href="{{ k.url }}" target="_blank" rel="noopener">{{ k.title }}</a><div class="pp-x">{{ k.column_title }}{% if k.overdue %} · <span class="bad-text">просрочено {{ k.due_date[:10] | date }}</span>{% elif k.due_date %} · {{ k.due_date[:10] | date }}{% endif %}{% if k.idle_days is not none %} · <span class="warn-text">{{ k.idle_days }} дн. без движения</span>{% endif %}</div></div>
+          {% else %}<p class="pp-x">{{ 'Карточек в работе нет.' if p.kaiten_user_id else 'Пользователь Kaiten не привязан.' }}</p>{% endfor %}
+          {% if p.kaiten | length > 4 %}<a class="small" href="/commitments?view=kaiten&who={{ p.kaiten[0].responsible_name | urlencode }}">ещё {{ p.kaiten | length - 4 }} →</a>{% endif %}</section>
+        <section class="pp"><h3>Ему должны · {{ p.owed_to | length }}</h3>
+          {% for c in p.owed_to[:4] %}<div class="pp-i"><a href="/commitments?task={{ c.id }}">{{ c | headline }}</a><div class="pp-x">{{ 'вы' if c.direction == 'mine' else (c.who or '?') }} · {{ ui.due_text(c) }}</div></div>
+          {% else %}<p class="pp-x">Никто не должен.</p>{% endfor %}</section>
+        <section class="pp"><h3>Встречи и переписка</h3>
+          {% for m in p.meetings %}<div class="pp-i"><a href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a><div class="pp-x">{{ m.started_at | local('%d.%m') }}</div></div>{% endfor %}
+          {% if p.last %}<div class="pp-i"><a href="/chats?chat={{ (p.last.source ~ '|' ~ p.last.chat_id) | urlencode }}">{{ SOURCE_TITLES.get(p.last.source, p.last.source) }}, {{ p.last.chat_title }}</a><div class="pp-x">последнее сообщение {{ p.last.ts | ago }}{% if p.waiting %} · <span class="bad-text">ждёт ответа</span>{% endif %}</div></div>{% endif %}
+          {% if not p.meetings and not p.last %}<p class="pp-x">Пока нет.</p>{% endif %}
+          {% if p.notes %}<div class="pp-i warn-text">{{ p.notes }}</div>{% endif %}</section>
+      </div>
+      <div class="dlg-origin pp-foot">
+        <span>{% if voices.get(p.id) %}Голос запомнен по {{ voices[p.id] }} {{ plural(voices[p.id], 'записи', 'записям', 'записям') }}{% else %}Голос ещё не запомнен{% endif %}</span>
+        <span class="grow"></span>
+        {% if voices.get(p.id) %}<form class="inline" method="post" action="/people/{{ p.id }}/voice/forget" data-confirm="Забыть голос {{ p.name }}?"><button class="linkish muted">забыть голос</button></form>{% endif %}
+        <form class="inline" method="post" action="/people/{{ p.id }}/delete" data-confirm="Удалить {{ p.name }} из справочника?"><button class="linkish bad-text">удалить</button></form>
+      </div>
+    </div>
+    {{ person_form(p) }}
+  </div>
+</dialog>
+{% endfor %}
+<dialog class="dlg dlg-person" id="person-new" aria-label="Новый человек">
+  <div class="dlg-box" tabindex="-1">{{ person_form() }}</div>
+</dialog>
 {% endblock %}

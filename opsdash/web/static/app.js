@@ -183,7 +183,9 @@
     if (!dlg.open && !dlg.parentElement.checkVisibility()) document.body.appendChild(dlg);
     if (!dlg.open) dlg.showModal();
     // фокус — на поле заголовка, а при просмотре на само окно (иначе браузер обводит рамкой ✕)
-    (edit ? dlg.querySelector(".dlg-edit [name=title]") : (remind && rem ? rem.querySelector("textarea") : dlg.querySelector(".dlg-box"))).focus();
+    var first = edit ? (dlg.querySelector(".dlg-edit [name=title]") || dlg.querySelector(".dlg-edit input[type=text]"))
+      : (remind && rem ? rem.querySelector("textarea") : dlg.querySelector(".dlg-box"));
+    if (first) first.focus();
     markSeen(dlg.id.slice(5));
   };
   var closeMenus = function (except) {
@@ -306,6 +308,9 @@
     if (!b) return;
     e.preventDefault();
     openDlg(document.getElementById(b.dataset.dlgOpen), b.dataset.addDir);
+    var pn = b.dataset.personName;  // «Claude заметил новых людей»: имя — сразу в форму
+    var pi = pn && document.querySelector("#person-new [data-person-name]");
+    if (pi) pi.value = pn;
     var t = b.dataset.uploadTitle;  // «Загрузить запись» у встречи календаря — с её названием
     var ti = t !== undefined && document.querySelector("[data-upload-title-input]");
     if (ti) ti.value = t;
@@ -326,6 +331,10 @@
       input.files = e.dataTransfer.files;
       form.submit();
     });
+  });
+  document.querySelectorAll("dialog[data-open-on-load]:not(#add-dlg)").forEach(function (dlg) {
+    if (dlg.querySelector(".dlg-view") && dlg.querySelector(".dlg-edit")) showTask(dlg, dlg.hasAttribute("data-edit-on-load"));
+    else openDlg(dlg);
   });
   var addDlg = document.getElementById("add-dlg");
   if (addDlg && (location.hash === "#add" || addDlg.hasAttribute("data-open-on-load"))) {

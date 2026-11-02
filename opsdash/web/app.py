@@ -1358,12 +1358,12 @@ def _ask_page(request: Request, chat_id: int | None, prefill: list[dict]):
 
 
 @app.get("/ask", response_class=HTMLResponse)
-def ask_page(request: Request, meeting: str = "", task: int = 0, doc: str = "", chat_ref: str = ""):
+def ask_page(request: Request, meeting: str = "", task: int = 0, doc: str = "", chat_ref: str = "", person: int = 0):
     """«Спросить Claude»: новый чат. ?meeting= / ?task= / ?doc= / ?chat_ref= — с этим контекстом (кнопки на страницах)."""
     from opsdash import chat
 
     refs = ([f"meeting:{meeting}"] * bool(meeting) + [f"task:{task}"] * bool(task) + [f"doc:{doc}"] * bool(doc)
-            + [f"chat:{chat_ref}"] * bool(chat_ref))
+            + [f"chat:{chat_ref}"] * bool(chat_ref) + [f"person:{person}"] * bool(person))
     return _ask_page(request, None, chat.parse_refs(refs))
 
 
@@ -1799,17 +1799,64 @@ def task_action(request: Request, card_id: int, action: str, days: int = Form(3)
 
 # --- люди ----------------------------------------------------------------------------
 
-@app.get("/people", response_class=HTMLResponse)
-def people(request: Request, edit: int = 0):
-    from opsdash import voice
+PEOPLE_SORTS = {"load": "По загрузке", "name": "По имени", "contact": "По последнему контакту"}
 
+
+@app.get("/people", response_class=HTMLResponse)
+def people(request: Request, edit: int = 0, person: int = 0, q: str = "", sort: str = "load"):
+    """Люди (5.13): кто, где найти, кто кому должен, последний контакт. Карточка человека — окном поверх списка."""
+    from opsdash import voice
+    from opsdash.sources import kaiten
+
+    settings = config.load_settings()
     items = records.list_people()
     kusers = store.rows("SELECT * FROM kaiten_users ORDER BY full_name")
-    current = next((p for p in items if p["id"] == edit), None)
-    load = records.workload()
-    by_person = {w["key"]: w for w in load}
-    return render(request, "people.html", nav="people", items=items, kusers=kusers, current=current,
-                  voices=voice.voice_counts(), load=by_person, workload=load)
+    load = {w["key"]: w for w in records.workload()}
+    open_tasks = records.list_commitments(status="open")
+    by_id = {p["id"]: p for p in items}
+    for p in items:
+        p.update(owes_me=[], i_owe=[], owed_to=[], kaiten=[], meetings=[], last=None, waiting=0)
+    for c in open_tasks:
+        who = records._person_by_name(c["who"], items) if c["who"] else None
+        whom = records._person_by_name(c["whom"], items) if c["whom"] else None
+        if who and c["direction"] == "to_me":
+            by_id[who["id"]]["owes_me"].append(c)
+        if whom and c["direction"] == "mine":
+            by_id[whom["id"]]["i_owe"].append(c)
+        if whom and c["direction"] in ("mine", "other"):
+            by_id[whom["id"]]["owed_to"].append(c)
+    cards = kaiten.decorate(store.rows("SELECT * FROM kaiten_cards WHERE condition=1 AND state IN (1,2) "
+                                       "AND responsible_id IS NOT NULL ORDER BY state DESC, due_date"), settings)
+    for p in items:
+        names = [p["name"], *(p["aliases"] or [])]
+        marks = ",".join("?" * len(names))
+        p["kaiten"] = [c for c in cards if p.get("kaiten_user_id") and c["responsible_id"] == p["kaiten_user_id"]]
+        p["last"] = store.row(f"SELECT ts, source, chat_id, chat_title FROM messages WHERE is_outgoing=0 AND sender_name IN ({marks}) "
+                              "ORDER BY ts DESC LIMIT 1", names)
+        p["waiting"] = store.scalar(f"SELECT COUNT(*) FROM attention WHERE status='open' AND sender_name IN ({marks})", names) or 0
+        p["meetings"] = store.rows("SELECT id, title, started_at FROM meetings WHERE participants LIKE ? "
+                                   "ORDER BY started_at DESC LIMIT 3", (f"%{p['name']}%",))
+        p["load"] = len(p["owes_me"]) + len(p["i_owe"]) + len(p["kaiten"])
+    query = q.strip().lower()
+    shown = [p for p in items if not query or query in " ".join(
+        [p["name"], p.get("role") or "", p.get("telegram") or "", p.get("email") or "", *(p["aliases"] or [])]).lower()]
+    sort = sort if sort in PEOPLE_SORTS else "load"
+    if sort == "name":
+        shown.sort(key=lambda p: p["name"])
+    elif sort == "contact":
+        shown.sort(key=lambda p: (p["last"] or {}).get("ts") or "", reverse=True)
+    else:
+        shown.sort(key=lambda p: (-p["load"], p["name"]))
+    # Claude заметил новых людей: пишут в читаемые чаты, а в справочнике их нет
+    known = {n.lower() for p in items for n in [p["name"], *(p["aliases"] or [])]}
+    fresh = [r for r in store.rows(
+        "SELECT sender_name, chat_title, COUNT(*) AS n FROM messages WHERE is_outgoing=0 AND sender_name IS NOT NULL "
+        "AND sender_name != '' GROUP BY sender_name ORDER BY n DESC LIMIT 30") if r["sender_name"].lower() not in known
+        and not any(r["sender_name"].lower() in k or k in r["sender_name"].lower() for k in known)][:3]
+    current = by_id.get(edit) or by_id.get(person)
+    return render(request, "people.html", nav="people", items=shown, everyone=items, kusers=kusers, current=current,
+                  editing=bool(edit and current), voices=voice.voice_counts(), load=load, q=q.strip(), sort=sort,
+                  sorts=PEOPLE_SORTS, fresh=fresh)
 
 
 @app.post("/people/{pid}/voice/forget")

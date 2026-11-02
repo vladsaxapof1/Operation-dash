@@ -178,7 +178,7 @@ def test_confirm_person_remembers_voice_and_names_same_voice(tmp_path, settings_
 
     voice.remember("m9", "Спикер 1", _unit([1, 0, 0]), 30)  # голос директора известен — дальше подсказка про догадки
     assert "Кто говорит во встрече?" in client.get("/").text
-    assert "🎙 голос запомнен" in client.get("/people").text
+    assert "Голос запомнен по 1 записи" in client.get("/people").text  # в карточке человека
     client.post(f"/people/{nikita}/voice/forget")
     assert voice.voice_counts() == {}
 
