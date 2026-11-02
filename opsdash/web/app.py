@@ -380,10 +380,44 @@ DIGEST_JOBS = {"daily": "digest", "weekly": "weekly", "groups": "groups"}
 
 
 @app.get("/digests", response_class=HTMLResponse)
-def digests_page(request: Request, tab: str = "daily"):
+def digests_page(request: Request, tab: str = "daily", d: int = 0):
+    """Дайджесты (5.12): слева — список по дням, справа — выбранный, читаемым текстом, с «Копировать»."""
     tab = tab if tab in DIGEST_JOBS else "daily"
-    return render(request, "digests.html", nav="digests", tab=tab, tabs=DIGEST_TABS, items=digests.latest(tab),
-                  counts=digests.counts(), weekdays=overview.WEEKDAYS)
+    items = digests.latest(tab)
+    tz = config.tz()
+    for it in items:
+        it["local"] = store.parse_ts(it["created"]).astimezone(tz)
+        it["day_label"] = _day_label(it["local"].date()).capitalize()
+        it["preview"] = re.sub(r"<[^>]+>", " ", it["text"] or "")
+        it["preview"] = re.sub(r"\s+", " ", it["preview"]).strip()
+    current = next((it for it in items if it["id"] == d), items[0] if items else None)
+    sch = config.load_settings()["schedule"]
+    nxt = None
+    if tab == "daily":
+        now = config.now()
+        for t in (sch.get("digest_morning"), sch.get("digest_evening")):
+            if t:
+                h, m = (int(x) for x in config.hhmm(t).split(":"))
+                at = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                at = at if at > now else at + timedelta(days=1)
+                nxt = at if nxt is None or at < nxt else nxt
+    return render(request, "digests.html", nav="digests", tab=tab, tabs=DIGEST_TABS, items=items, current=current,
+                  counts=digests.counts(), weekdays=overview.WEEKDAYS, next_at=nxt,
+                  next_label=_day_label(nxt.date()).split(",")[0] if nxt else "")
+
+
+@app.post("/digests/{did}/resend")
+def digest_resend(request: Request, did: int):
+    """«Отправить ещё раз»: тот же текст — снова в ваш Telegram-бот."""
+    from opsdash import bot
+
+    d = store.row("SELECT * FROM digests WHERE id=?", (did,))
+    if not d:
+        return back(request, err="Такого дайджеста нет")
+    if not config.load_settings()["telegram_bot"].get("enabled"):
+        return back(request, err="Telegram-бот не подключён — Настройки → Подключения")
+    bot.notify(d["text"])
+    return back(request, "Отправлено в Telegram-бот")
 
 
 @app.post("/digests/run")
@@ -1354,7 +1388,21 @@ def _ask_page(request: Request, chat_id: int | None, prefill: list[dict]):
     return render(request, "ask.html", nav="ask", chats=chats, chat=current,
                   items=chat.messages(chat_id) if current else [], prefill=chat.describe(prefill), meetings=meetings,
                   models=chat.MODELS, model=last.get("model") or "opus", efforts=chat.EFFORTS,
-                  effort=last.get("effort") or "", describe=proposals.describe)
+                  effort=config.load_settings()["claude"].get("chat_effort") or "", describe=proposals.describe,
+                  chat_days=_chat_days(chats), q=request.query_params.get("q", "").strip())
+
+
+def _chat_days(chats: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Разговоры «Спросить Claude» по дням: «Сегодня», «Вчера», дата."""
+    tz, out = config.tz(), []
+    for c in chats:
+        ts = store.parse_ts(c["updated"])
+        label = _day_label(ts.astimezone(tz).date()).split(",")[0].capitalize() if ts else "Раньше"
+        c["time"] = ts.astimezone(tz).strftime("%H:%M") if ts else ""
+        if not out or out[-1][0] != label:
+            out.append((label, []))
+        out[-1][1].append(c)
+    return out
 
 
 @app.get("/ask", response_class=HTMLResponse)
@@ -1896,22 +1944,63 @@ def people_delete(request: Request, pid: int):
 
 # --- журнал ------------------------------------------------------------------------
 
+CLAUDE_JOBS = {"triage", "process-meeting", "followup", "digest", "weekly", "groups", "briefs", "anthology",
+               "company-context", "projects", "ask", "voice", "chat"}
+
+
 @app.get("/journal", response_class=HTMLResponse)
-def journal(request: Request, level: str = ""):
+def journal(request: Request, kind: str = "", limit: int = 120, level: str = ""):
+    """Журнал (5.16): события по дням — что сделал PULSE (сюда же «Лента бота» со Сводки) и задания с «Запустить»."""
     from opsdash import jobs
 
-    sql = "SELECT * FROM log" + (" WHERE level=?" if level else "") + " ORDER BY id DESC LIMIT 300"
-    logs = store.rows(sql, [level] if level else [])
+    settings = config.load_settings()
+    kind = "errors" if level == "error" else kind  # ?level=error — ссылки из прошлой версии
+    limit = max(60, min(int(limit), 2000))
+    events = [{"ts": l["ts"], "kind": "error" if l["level"] == "error" else ("claude" if l["job"] in CLAUDE_JOBS else "job"),
+               "level": l["level"], "title": l["message"].split("\n")[0][:300], "rest": "\n".join(l["message"].split("\n")[1:])[:600],
+               "who": jobs.TITLES.get(l["job"], l["job"]).replace(" (Claude)", ""), "claude": l["job"] in CLAUDE_JOBS}
+              for l in store.rows("SELECT * FROM log ORDER BY id DESC LIMIT ?", (limit,))]
+    events += [{"ts": o["created"], "kind": "notify", "level": "info", "title": "Отправлено в бот: «" +
+                re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", o["text"] or "")).strip()[:160] + "»", "rest": "",
+                "who": "уведомление" if o["sent_at"] else "не отправлено", "claude": False}
+               for o in store.rows("SELECT * FROM outbox ORDER BY id DESC LIMIT ?", (limit // 2,))]
+    events.sort(key=lambda e: e["ts"] or "", reverse=True)
+    counts = {"errors": sum(e["kind"] == "error" for e in events)}
+    shown = [e for e in events if not kind or (kind == "errors" and e["kind"] == "error") or (kind == "notify" and e["kind"] == "notify")
+             or (kind == "claude" and e["claude"])][:limit]
+    tz = config.tz(settings)
+    prev = None
+    for e in shown:
+        ts = store.parse_ts(e["ts"])
+        e["time"] = ts.astimezone(tz).strftime("%H:%M") if ts else ""
+        day = ts.astimezone(tz).date() if ts else None
+        e["day"] = _day_label(day).split(",")[0].capitalize() if day and day != prev else ""
+        prev = day
+    week_ago = store.to_utc_iso(config.now(settings) - timedelta(days=7))
+    errors_week = store.scalar("SELECT COUNT(*) FROM log WHERE level='error' AND ts >= ?", (week_ago,)) or 0
     job_rows = {j["name"]: j for j in store.rows("SELECT * FROM jobs")}
-    runnable = ["collect:telegram", "collect:ymessenger", "collect:pachca", "collect:mail", "collect:gmail",
-                "collect:calendar", "collect:google_calendar", "collect:kaiten", "docs-index", "anthology", "company-context",
-                "projects",
-                "recordings", "triage", "digest", "stale"]
-    off = config.archived_jobs()  # задания архивных разделов не показываем — о них строка под списком
-    runnable = [j for j in runnable if j not in off]
-    return render(request, "journal.html", nav="journal", logs=logs, jobs=job_rows, runnable=runnable,
-                  titles=jobs.TITLES, queued=jobs.queued(), level=level,
-                  archived_sections=[config.SECTIONS[n]["title"] for n in config.SECTIONS if not config.section_on(n)])
+    off = config.archived_jobs(settings)  # задания архивных разделов не показываем — о них строка под списком
+    sch = settings["schedule"]
+    sources = ("telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten")
+    every = lambda m: f"каждые {m} мин"  # noqa: E731
+    collect = [(f"collect:{src}", {"calendar": sch["calendar_minutes"], "google_calendar": sch["calendar_minutes"],
+                                   "kaiten": sch["kaiten_minutes"]}.get(src, sch["collect_minutes"]))
+               for src in sources if settings[src].get("enabled")]
+    groups = [
+        ("Сбор", [(name, every(m)) for name, m in collect] + [("recordings", "следит за папкой записей")]
+                 + ([("docs-index", every(sch.get("docs_minutes") or 30))] if settings["knowledge"].get("folders") else [])),
+        ("Claude", [("triage", every(sch["triage_minutes"]) + " в рабочее время"),
+                    ("digest", " и ".join(config.hhmm(t) for t in (sch.get("digest_morning"), sch.get("digest_evening")) if t) or "выключен"),
+                    ("projects", "по понедельникам"), ("anthology", "по пятницам"), ("company-context", "по понедельникам")]),
+        ("Напоминания", [("stale", f"каждый день в {config.hhmm(sch.get('stale_check'))}" if sch.get("stale_check") else "выключено")]),
+    ]
+    groups = [(g, [(n, w) for n, w in items if n not in off]) for g, items in groups]
+    not_connected = [overview.SOURCE_TITLES.get(s_, s_) for s_ in sources if not settings[s_].get("enabled")]
+    nxt = _next_collect(settings)
+    return render(request, "journal.html", nav="journal", events=shown, counts=counts, kind=kind, limit=limit,
+                  more=len(events) > len(shown) or len(shown) >= limit, jobs=job_rows, groups=groups, titles=jobs.TITLES,
+                  queued=jobs.queued(), errors_week=errors_week, next_collect=nxt, not_connected=not_connected,
+                  archived_sections=[config.SECTIONS[n]["title"] for n in config.SECTIONS if not config.section_on(n, settings)])
 
 
 # --- офис ----------------------------------------------------------------------------
@@ -1926,11 +2015,11 @@ def office_page(request: Request, o: str = ""):
 
 
 @app.get("/office/live", response_class=HTMLResponse)
-def office_live(request: Request):
-    """Списки и данные картинки — страница подменяет их сама, пока открыта (app.js)."""
+def office_live(request: Request, o: str = ""):
+    """Списки и данные картинки — страница подменяет их сама, пока открыта (app.js); o — какой офис выбран."""
     from opsdash import office
 
-    return templates.TemplateResponse(request, "_office_body.html", {"snaps": office.everything(), "open_key": ""})
+    return templates.TemplateResponse(request, "_office_body.html", {"snaps": office.everything(), "open_key": o})
 
 
 @app.get("/api/office")

@@ -57,6 +57,7 @@ DEFAULTS: dict = {
         "model_digest": "sonnet",
         "model_ask": "sonnet",
         "model_briefs": "sonnet",
+        "chat_effort": "",  # «Спросить Claude»: сколько думать перед ответом (Настройки → Claude), пусто — как решит Claude
         "timeout_minutes": 30,
     },
     "schedule": {

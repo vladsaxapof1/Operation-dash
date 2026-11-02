@@ -222,8 +222,12 @@ def test_model_and_reasoning(fake_claude, client):
     _done(answer)
     args = fake_claude["calls"]()[-1]["args"]
     assert args[args.index("--model") + 1] == "fable" and args[args.index("--effort") + 1] == "high"
-    page = client.get("/ask").text  # новый чат — с моделью и рассуждением прошлого разговора
-    assert '<option value="fable" selected>' in page and '<option value="high" selected>' in page
+    page = client.get("/ask").text  # новый чат — с моделью прошлого разговора
+    assert '<option value="fable" selected>' in page
+    from opsdash import config
+
+    config.update_settings("claude", {"chat_effort": "high"})  # рассуждение — в Настройки → Claude (2.0)
+    assert '<input type="hidden" name="effort" value="high">' in client.get("/ask").text
     _, second = chat.ask(chat_id, "Ещё", [], "sonnet", "")
     _done(second)
     assert "--effort" not in fake_claude["calls"]()[-1]["args"] and chat.get(chat_id)["effort"] == ""

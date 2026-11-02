@@ -1,25 +1,43 @@
 {% extends "base.html" %}
+{% import "_icons.html" as icons %}
 {% block title %}Дайджесты{% endblock %}
 {% block content %}
+{#- Дайджесты (5.12): что PULSE присылал в Telegram — слева список по дням, справа выбранный, читаемым текстом #}
+{% set sch = settings.schedule %}
 <div class="topline">
-  <div><h1>Дайджесты</h1><div class="muted">Утренний и вечерний дайджест, итоги недели и сводка рабочих групп Telegram — всё, что собирает Claude, в одном месте.</div></div>
-  <div class="actions">
-    <form class="inline" method="post" action="/digests/run" data-busy="Запускаю…"><input type="hidden" name="tab" value="{{ tab }}"><button class="btn">Собрать сейчас</button></form>
-    <a class="btn ghost" href="/settings?tab=schedule#digests" title="Когда собирать">Расписание</a>
-  </div>
+  <div><h1>Дайджесты</h1>
+    <p class="sub">{% if sch.digest_morning or sch.digest_evening %}{% if sch.digest_morning %}Утром в {{ sch.digest_morning | hhmm }}{% endif %}{% if sch.digest_morning and sch.digest_evening %} и вечером{% elif sch.digest_evening %}Вечером{% endif %}{% if sch.digest_evening %} в {{ sch.digest_evening | hhmm }}{% endif %} в Telegram-бот{% else %}Ежедневные дайджесты выключены{% endif %}
+      {%- if sch.weekly_time %} · итоги недели {{ ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'][(sch.weekly_day or 5) - 1] }}{% endif %}
+      {%- if sch.groups_digest %} · сводка групп в {{ sch.groups_digest | hhmm }}{% endif %} · <a href="/settings?tab=schedule#digests">расписание</a></p></div>
 </div>
-<div class="tabs">
-  {% for key, title in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}">{{ title }}{% if counts[key] %} <span class="muted small">{{ counts[key] }}</span>{% endif %}</a>{% endfor %}
+<div class="toolbar page-tools">
+  <nav class="seg" aria-label="Какие дайджесты">{% for key, title in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}">{{ title }}{% if counts[key] %}&nbsp;<span class="muted">· {{ counts[key] }}</span>{% endif %}</a>{% endfor %}</nav>
+  <form class="inline" method="post" action="/digests/run" data-busy="Запускаю…"><input type="hidden" name="tab" value="{{ tab }}"><button class="btn lg primary">Собрать сейчас</button></form>
 </div>
-{% if tab == 'weekly' %}<p class="muted small">Приходят {{ ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'][(settings.schedule.weekly_day or 5) - 1] }} в {{ settings.schedule.weekly_time | hhmm }}{% if not settings.schedule.weekly_time %} (выключено){% endif %}. Если компьютер был выключен — при следующем запуске.</p>
-{% elif tab == 'groups' %}<p class="muted small">Что решали в рабочих группах Telegram за день и где ждут вас. Собирается {% if settings.schedule.groups_digest %}по рабочим дням в {{ settings.schedule.groups_digest | hhmm }}{% else %}только по кнопке (в расписании выключено){% endif %}{% if not settings.notifications.groups_digest %}, в Telegram не присылается{% endif %}.</p>
-{% else %}<p class="muted small">То же, что приходит в Telegram: утром в {{ settings.schedule.digest_morning | hhmm or '—' }}, вечером в {{ settings.schedule.digest_evening | hhmm or '—' }}.</p>{% endif %}
-{% for d in items %}
-<section class="card digest">
-  <div class="card-h"><h2>{{ d.title }}</h2><span class="muted small">{{ d.created | local('%d.%m.%Y, %H:%M') }}</span></div>
-  <div class="card-b digest-text">{{ d.text | tg }}</div>
-</section>
+
+{% if items %}
+<div class="dg">
+  <aside class="card dg-list">
+    {% for d in items %}
+    {% if loop.first or d.day_label != loop.previtem.day_label %}<div class="mday">{{ d.day_label }}</div>{% endif %}
+    <a class="dg-i{{ ' active' if current and d.id == current.id }}" href="?tab={{ tab }}&d={{ d.id }}">
+      <span class="dg-i-h"><b>{{ d.title }}</b><span class="muted small">{{ d.local.strftime('%H:%M') }}</span></span>
+      <span class="dg-i-x muted">{{ d.preview | truncate(90, True, '…') }}</span>
+    </a>
+    {% endfor %}
+  </aside>
+  <section class="card dg-doc" data-copy-scope>
+    <h2>{{ current.title }} · {{ current.day_label | lower }}</h2>
+    <p class="muted small">Собран в {{ current.local.strftime('%H:%M') }}{% if tab != 'groups' or settings.notifications.groups_digest %} · то же ушло в Telegram-бот{% endif %}</p>
+    <div class="actions">
+      <button type="button" class="btn" data-copy-btn>Копировать</button>
+      <form class="inline" method="post" action="/digests/{{ current.id }}/resend" data-confirm="Отправить этот дайджест в Telegram-бот ещё раз?"><button class="btn">Отправить ещё раз</button></form>
+    </div>
+    <div class="digest-text" data-copy>{{ current.text | tg }}</div>
+    <p class="muted small dg-foot">{% if next_at %}Следующий дайджест — {{ next_label }} в {{ next_at.strftime('%H:%M') }}. {% endif %}Что включать и когда — в <a href="/settings?tab=schedule#digests">расписании</a>.</p>
+  </section>
+</div>
 {% else %}
-<section class="card"><div class="card-b empty">{% if tab == 'weekly' %}Итогов недели пока не было.{% elif tab == 'groups' %}Сводок групп пока не было — нужны рабочие группы, которые PULSE читает (Настройки → Telegram).{% else %}Дайджестов пока не было.{% endif %}</div></section>
-{% endfor %}
+<section class="card"><p class="empty">{% if tab == 'weekly' %}Итогов недели пока не было.{% elif tab == 'groups' %}Сводок групп пока не было — нужны рабочие группы, которые PULSE читает (Настройки → Telegram).{% else %}Дайджестов пока не было.{% endif %}</p></section>
+{% endif %}
 {% endblock %}

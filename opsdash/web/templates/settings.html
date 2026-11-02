@@ -569,6 +569,9 @@
       {% endfor %}
     </div>
     <div class="hint">opus — самый вдумчивый (встречи), sonnet — быстрый и экономный, haiku — самый лёгкий. Всё идёт в рамках вашей подписки Claude.</div>
+    <label>Рассуждение в «Спросить Claude»</label>
+    <select name="chat_effort" style="max-width:320px">{% for key, t in efforts.items() %}<option value="{{ key }}" {{ 'selected' if (settings.claude.chat_effort or '') == key }}>{{ t.replace('Рассуждение: ', '') }}</option>{% endfor %}</select>
+    <div class="hint">Сколько Claude думает перед ответом в разделе «Спросить Claude»: глубже — точнее, но дольше. «Авто» — решает сам Claude.</div>
     <label>Ограничение по времени на один запуск, мин</label><input type="number" name="timeout_minutes" value="{{ settings.claude.timeout_minutes }}" min="5" style="max-width:120px">
     <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('claude') }}</div>
   </form>

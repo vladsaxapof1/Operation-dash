@@ -138,6 +138,10 @@ def register(app: FastAPI, render, back) -> None:
                "whisper_models": WHISPER_MODELS, "themes": THEMES}
         if tab == "archive":
             ctx["sections"] = archive_rows(settings)
+        if tab == "claude":
+            from opsdash import chat
+
+            ctx["efforts"] = chat.EFFORTS
         if tab == "connections":
             ctx["connections"], ctx["claude_health"] = connection_rows(settings)
         if tab == "general":
@@ -732,11 +736,15 @@ def register(app: FastAPI, render, back) -> None:
     @app.post("/settings/claude")
     def claude_save(request: Request, path: str = Form(""), git_bash_path: str = Form(""),
                     model_meetings: str = Form("opus"), model_triage: str = Form("sonnet"),
-                    model_digest: str = Form("sonnet"), model_ask: str = Form("sonnet"), timeout_minutes: int = Form(30)):
+                    model_digest: str = Form("sonnet"), model_ask: str = Form("sonnet"), timeout_minutes: int = Form(30),
+                    chat_effort: str = Form("")):
+        from opsdash import chat
+
         config.update_settings("claude", {
             "path": path.strip().strip('"'), "git_bash_path": git_bash_path.strip().strip('"'),
             "model_meetings": model_meetings, "model_triage": model_triage, "model_digest": model_digest,
             "model_ask": model_ask, "timeout_minutes": max(5, int(timeout_minutes)),
+            "chat_effort": chat_effort if chat_effort in chat.EFFORTS else "",
         })
         return back(request, "Сохранено")
 

@@ -254,6 +254,17 @@
     if (pane) { pane.hidden = false; pane.closest(".frow").scrollIntoView({ block: "center" }); }
   }
 
+  // «Спросить Claude»: поиск по разговорам — прячем непохожие, пустые дни тоже
+  var askFind = document.querySelector("[data-ask-find]");
+  if (askFind) askFind.addEventListener("input", function () {
+    var q = askFind.value.trim().toLowerCase();
+    document.querySelectorAll("[data-ask-item]").forEach(function (li) { li.hidden = !!q && li.dataset.askItem.indexOf(q) < 0; });
+    document.querySelectorAll("[data-ask-day]").forEach(function (h) {
+      var list = h.nextElementSibling;
+      h.hidden = list && !list.querySelector("[data-ask-item]:not([hidden])");
+    });
+  });
+
   // лента «Нужно от вас»: фильтр по типу — подтвердить, ответить, напомнить
   document.querySelectorAll("[data-feed-filter]").forEach(function (chip) {
     chip.addEventListener("click", function () {
