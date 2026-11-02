@@ -67,7 +67,7 @@ def test_this_is_me_relabels_cleans_up_and_reprocesses(tmp_path, settings_with, 
     monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: submitted.append((name, args)) or True)
     client = TestClient(app, base_url="http://localhost:8765")
 
-    page = client.get(f"/meetings/{mid}").text
+    page = client.get(f"/meetings/{mid}?tab=record").text
     assert "Кто в записи" in page and "«15 минут, по 15 сделаю в каждом канале»" in page
 
     r = client.post(f"/meetings/{mid}/me", data={"speaker": "Спикер 2"}, follow_redirects=False)
@@ -81,7 +81,7 @@ def test_this_is_me_relabels_cleans_up_and_reprocesses(tmp_path, settings_with, 
     assert proposals.get(p["id"])["status"] == "rejected"
     assert voice.samples()[mid]["speaker"] == "Спикер 2"
     assert submitted == [("process-meeting", {"meeting_id": mid})]
-    assert "<span class=\"chip acc\">вы</span>" in client.get(f"/meetings/{mid}").text
+    assert "<span class=\"st acc small\">· вы</span>" in client.get(f"/meetings/{mid}?tab=record").text
 
     client.post(f"/meetings/{mid}/me", data={"speaker": "Спикер 1"})  # передумал — переотметка заменяет прежнюю
     md = (records.meeting_dir(mid) / "transcript.md").read_text(encoding="utf-8")
@@ -165,7 +165,7 @@ def test_confirm_person_remembers_voice_and_names_same_voice(tmp_path, settings_
     assert "Научите PULSE узнавать ваш голос" not in client.get("/").text  # «Позже»
     client.cookies.clear()
 
-    page = client.get(f"/meetings/{mid}").text
+    page = client.get(f"/meetings/{mid}?tab=record").text
     assert "Claude думает, это <b>Пётр Иванов</b> — про закупки" in page and "Да, это Пётр" in page
 
     r = client.post(f"/meetings/{mid}/speaker", data={"speaker": "Спикер 2", "name": "Никита"}, follow_redirects=False)

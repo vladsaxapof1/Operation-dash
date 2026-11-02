@@ -75,7 +75,7 @@
   <aside class="toast" data-toast="{{ voice_tip.id }}" role="status">
     <div class="toast-h">🎙 {{ voice_tip.title }}</div>
     <div class="small">{{ voice_tip.text }}</div>
-    <div class="actions"><a class="btn sm primary" href="/meetings/{{ voice_tip.meeting }}#who">{{ voice_tip.button }}</a><button type="button" class="btn sm ghost" data-toast-close>Позже</button></div>
+    <div class="actions"><a class="btn sm primary" href="/meetings/{{ voice_tip.meeting }}?tab=record#who">{{ voice_tip.button }}</a><button type="button" class="btn sm ghost" data-toast-close>Позже</button></div>
   </aside>
   {% endif %}
 </div>

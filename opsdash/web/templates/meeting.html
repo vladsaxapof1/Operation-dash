@@ -1,23 +1,41 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
 {% block title %}{{ m.title or m.id }}{% endblock %}
 {% block content %}
-<div class="topline">
-  <div>
-    <div class="small"><a href="/meetings">← Встречи</a></div>
-    <h1>{{ m.title or m.id }}</h1>
-    <div class="muted">{{ m.started_at | local('%d.%m.%Y %H:%M') }}{% if m.duration_sec %} · {{ (m.duration_sec / 60) | round | int }} мин{% endif %}{% if m.participants %} · {{ m.participants | join(', ') }}{% endif %}</div>
-  </div>
-  <div class="actions">
-    {{ ui.meeting_status(m) }}
-    {% set in_queue = m.status in ('new', 'transcribing', 'paused') %}
-    {% if transcript %}<a class="btn sm" href="/ask?meeting={{ m.id }}" title="Задать вопрос по этой встрече — Claude прочитает расшифровку целиком">Спросить Claude</a>{% endif %}
-    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn sm" {{ 'disabled' if in_queue or not transcript }}>Разобрать заново</button></form>
-    <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="btn sm ghost" {{ 'disabled' if in_queue or recording.size is none }} {% if recording.size is none %}title="Файла записи больше нет"{% endif %}>Расшифровать заново</button></form>
+{#- встреча (5.10): шапка (название с карандашом, одна строка меты, «Спросить Claude», «Текст для отправки», «…»),
+    вкладки Разбор · Расшифровка · Запись; справа — что ждёт вашего «да» и задачи из встречи #}
+{% set in_queue = m.status in ('new', 'transcribing', 'paused') %}
+{% set st = {'new': ('в очереди на расшифровку', 'off'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка отменена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
+<div class="mhead">
+  <a class="small" href="/meetings">← Встречи</a>
+  <h1>{{ m.title or m.id }}<button type="button" class="dlg-pencil" data-reveal="rename" title="Переименовать" aria-label="Переименовать встречу">{{ icons.icon('edit', 18) }}</button></h1>
+  <form class="meet-pick rename" id="rename" method="post" action="/meetings/{{ m.id }}/title" hidden><input type="text" name="title" value="{{ m.title }}" aria-label="Название встречи"><button class="btn sm primary">Сохранить</button></form>
+  <p class="sub">{{ m.started_at | local('%d.%m, %H:%M') }}{% if m.duration_sec %} · {{ (m.duration_sec / 60) | round | int }} мин{% endif %}{% if m.participants %} · {{ m.participants | join(', ') }}{% endif %}
+    · <span class="st {{ st[1] if st[1] in ('ok', 'bad', 'warn', 'acc') }}" data-meeting-status="{{ m.id }}"><span class="dot {{ st[1] }}"></span>{{ st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span></p>
+  <div class="toolbar">
+    {% if transcript %}<a class="btn lg" href="/ask?meeting={{ m.id }}" title="Задать вопрос по этой встрече — Claude прочитает расшифровку целиком">{{ icons.icon('ask', 16) }}Спросить Claude</a>{% endif %}
+    {% if followup %}<a class="btn lg{{ ' on' if tab == 'followup' }}" href="?tab=followup">Текст для отправки</a>{% endif %}
+    {% call ui.menu('Ещё о встрече') %}
+      <form method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="menu-i" {{ 'disabled' if in_queue or not transcript }}>Разобрать заново</button></form>
+      <form method="post" action="/meetings/{{ m.id }}/rerun" data-confirm="Расшифровать запись заново? Это может занять время."><input type="hidden" name="step" value="transcribe"><button class="menu-i" {{ 'disabled' if in_queue or recording.size is none }}{% if recording.size is none %} title="Файла записи больше нет"{% endif %}>Расшифровать заново</button></form>
+      <div class="menu-sep"></div>
+      {% if recording.size is not none and transcript and not in_queue %}
+      <form method="post" action="/meetings/{{ m.id }}/delete" data-confirm="Удалить файл записи «{{ recording.name }}» ({{ recording.size | size }}) с диска? Расшифровка, разбор и задачи останутся, но расшифровать встречу заново будет нельзя."><input type="hidden" name="what" value="recording"><button class="menu-i">Удалить только запись · {{ recording.size | size }}</button></form>
+      {% endif %}
+      {% set confirm_all -%}
+        Удалить встречу «{{ m.title or m.id }}» целиком? Удалятся файл записи, расшифровка и разбор
+        {%- if memory.commitments %}, задачи и договорённости с неё ({{ memory.commitments }}){% endif %}
+        {%- if memory.proposals %}, предложения ({{ memory.proposals }}){% endif %}
+        {%- if memory.kb %}, записи базы знаний ({{ memory.kb }}){% endif %}, образцы голосов.
+        {%- if memory.in_kaiten %} Карточки в Kaiten ({{ memory.in_kaiten }}) останутся — их удаляют в Kaiten.{% endif %} Вернуть будет нельзя.
+      {%- endset %}
+      <form method="post" action="/meetings/{{ m.id }}/delete" data-confirm="{{ confirm_all }}" data-busy="Удаляю…"><input type="hidden" name="what" value="all"><button class="menu-i danger">Удалить встречу</button></form>
+    {% endcall %}
   </div>
 </div>
 
-{% if in_queue %}<div class="card"><div class="card-b" style="padding-top:14px">
+{% if in_queue %}<div class="card"><div class="card-b" style="padding-top:16px">
   {% if m.status == 'transcribing' %}Идёт расшифровка…{% elif m.status == 'paused' %}Расшифровка на паузе{% else %}Ждёт очереди на расшифровку{% endif %}
   {% if m.status != 'new' %}<div class="progress{{ ' paused' if m.status == 'paused' }}"><div style="width: {{ ((m.progress or 0) * 100) | round }}%" data-meeting-progress="{{ m.id }}"></div></div>{% endif %}
   <div class="actions" style="margin-top:10px">{{ ui.transcription_controls(m) }}</div>
@@ -29,45 +47,45 @@
 {% if m.status == 'processing' %}<div class="alert info">Claude разбирает встречу — обычно это 2–5 минут. Итог придёт в Telegram.</div>{% endif %}
 {% if m.status == 'failed' %}<div class="alert bad">Ошибка: {{ m.error }}</div>{% endif %}
 
-<div class="grid">
-  <div>
+<div class="mpage">
+  <div class="mpage-main">
     <div class="tabs">
-      <a href="?tab=summary" class="{{ 'active' if tab == 'summary' }}">Разбор</a>
-      <a href="?tab=followup" class="{{ 'active' if tab == 'followup' }}">Текст для отправки</a>
-      <a href="?tab=transcript" class="{{ 'active' if tab == 'transcript' }}">Расшифровка</a>
+      <a href="?tab=summary" class="{{ 'active' if tab in ('summary', 'followup') }}">Разбор</a>
+      <a href="?tab=transcript" class="{{ 'active' if tab == 'transcript' }}">Расшифровка{% if m.duration_sec %} <span class="tab-note">{{ (m.duration_sec / 60) | round | int }} мин</span>{% endif %}</a>
+      <a href="?tab=record" class="{{ 'active' if tab == 'record' }}">Запись</a>
     </div>
-    <section class="card">
-      <div class="card-b" style="padding-top:14px">
-        {% if tab == 'followup' %}
-          {% if followup %}
-          <div data-copy-scope>
-            <p class="muted small">Итоги для участников: что решили, следующие шаги, задачи — кто кому и к какому сроку. Скопируйте и отправьте в чат встречи.</p>
-            <div class="draft followup" data-copy>{{ followup }}</div>
-            <div class="actions" style="margin-top:10px">
-              <button type="button" class="btn primary" data-copy-btn>Копировать текст</button>
-              <form class="inline" method="post" action="/meetings/{{ m.id }}/followup" data-busy="Готовлю…"><button class="btn" title="Claude перепишет текст по разбору и задачам встречи">{{ 'Подготовить с Claude' if followup_auto else 'Переписать заново' }}</button></form>
-            </div>
-            {% if followup_auto %}<p class="hint">Текст собран автоматически из разбора — у встреч, разобранных раньше, его не было. Claude сделает его короче и точнее.</p>{% endif %}
-          </div>
-          {% else %}<div class="muted">Текст появится, когда встреча будет разобрана.</div>{% endif %}
-        {% elif tab == 'transcript' %}
-          {% if transcript %}<div class="doc transcript">{{ transcript | md | safe }}</div>{% else %}<div class="muted">Расшифровки ещё нет.</div>{% endif %}
-        {% else %}
-          {% if summary %}<div class="doc">{{ summary | md | safe }}</div>{% else %}<div class="muted">Разбора ещё нет{% if transcript %} — <a href="?tab=transcript">расшифровка готова</a>{% endif %}.</div>{% endif %}
-        {% endif %}
+    {% if tab == 'followup' %}
+    <section class="card"><div class="card-b" style="padding-top:18px">
+      {% if followup %}
+      <div data-copy-scope>
+        <p class="muted small" style="margin-top:0">Итоги для участников: что решили, следующие шаги, задачи — кто кому и к какому сроку. Скопируйте и отправьте в чат встречи.</p>
+        <div class="draft followup" data-copy>{{ followup }}</div>
+        <div class="actions" style="margin-top:12px">
+          <button type="button" class="btn primary" data-copy-btn>Копировать текст</button>
+          <form class="inline" method="post" action="/meetings/{{ m.id }}/followup" data-busy="Готовлю…"><button class="btn" title="Claude перепишет текст по разбору и задачам встречи">{{ 'Подготовить с Claude' if followup_auto else 'Переписать заново' }}</button></form>
+          <a class="btn ghost" href="?tab=summary">К разбору</a>
+        </div>
+        {% if followup_auto %}<p class="hint">Текст собран автоматически из разбора — у встреч, разобранных раньше, его не было. Claude сделает его короче и точнее.</p>{% endif %}
       </div>
-    </section>
-    <p class="muted small">Файлы встречи: <code>{{ folder }}</code></p>
-  </div>
-  <div>
+      {% else %}<div class="muted">Текст появится, когда встреча будет разобрана.</div>{% endif %}
+    </div></section>
+    {% elif tab == 'transcript' %}
+    <section class="card"><div class="card-b" style="padding-top:18px">
+      {% if transcript %}<div class="doc transcript">{{ transcript | md | safe }}</div>{% else %}<div class="muted">Расшифровки ещё нет.</div>{% endif %}
+    </div></section>
+    {% elif tab == 'record' %}
+    <section class="card"><div class="card-b" style="padding-top:18px">
+      {% if recording.size is not none %}<p style="margin:0">Файл записи: <b>{{ recording.name }}</b> · {{ recording.size | size }}</p>
+      {% else %}<p class="muted" style="margin:0">Файла записи уже нет{% if recording.name %}: {{ recording.name }}{% endif %}. Расшифровка и разбор остались.</p>{% endif %}
+    </div></section>
     {% if speakers or short_speakers %}
     {% macro spk_form(s, value='', primary=False) %}
     {#- кто это: имя из справочника или новое (тогда человек добавится); «Это я» — отдельно, оно ещё и разбирает встречу заново #}
     <div class="spk-forms">
       <form class="spk-form" method="post" action="/meetings/{{ m.id }}/speaker" data-busy="Запоминаю…">
         <input type="hidden" name="speaker" value="{{ s.label }}">
-        <input type="text" name="name" list="people-names" value="{{ value }}" placeholder="Кто это?" required>
-        <button class="btn sm {{ 'ok' if primary }}">{{ 'Да, это ' ~ value.split(' ')[0] if primary else 'Запомнить' }}</button>
+        <input type="text" name="name" list="people-names" value="{{ value }}" placeholder="Кто это?" required aria-label="Кто это">
+        <button class="btn sm{{ ' primary' if primary }}">{{ 'Да, это ' ~ value.split(' ')[0] if primary else 'Запомнить' }}</button>
       </form>
       {% if s.who != 'me' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/me" data-busy="Запоминаю голос…"><input type="hidden" name="speaker" value="{{ s.label }}"><button class="btn sm ghost">Это я</button></form>{% endif %}
     </div>
@@ -76,87 +94,86 @@
       <div class="card-h"><h2>Кто в записи</h2>
         {% if can_tidy %}<form class="inline" method="post" action="/meetings/{{ m.id }}/speakers/tidy" data-busy="Сравниваю голоса…"><button class="btn sm" title="Склеить части одного голоса и узнать знакомых — без новой расшифровки">Уточнить спикеров</button></form>{% endif %}
       </div>
-      <div class="card-b flush">
-        <ul class="list">
-        {% for s in speakers %}
-          {% set guess = guesses.get(s.label) %}
-          <li class="spk{{ ' known' if s.who }}">
-            <div class="spk-h">
-              <b>{{ s.name or s.label }}</b>{% if s.name %} <span class="muted small">{{ s.label }}</span>{% endif %}
-              {% if s.who == 'me' %}<span class="chip acc">вы</span>{% elif s.who %}<span class="chip ok" title="{{ s.how }}">{{ 'по голосу' if s.how.startswith('узнан') else 'подтверждено' }}</span>{% endif %}
-              <span class="muted small">· {{ (s.seconds / 60) | round(1) if s.seconds >= 60 else s.seconds | round | int }} {{ 'мин' if s.seconds >= 60 else 'с' }}</span>
-            </div>
-            {% if s.sample %}<div class="meta">[{{ s.at }}] «{{ s.sample }}»</div>{% endif %}
-            {% if s.who %}
-            <details class="spk-fix"><summary class="small muted">не {{ 'вы' if s.who == 'me' else s.name.split(' ')[0] }}?</summary>{{ spk_form(s) }}</details>
-            {% else %}
-            {% if guess %}<div class="spk-guess">Claude думает, это <b>{{ guess.name }}</b>{% if guess.why %} — {{ guess.why }}{% endif %}. Подтвердите — и PULSE запомнит голос.</div>{% endif %}
-            {{ spk_form(s, guess.name if guess else '', primary=guess) }}
-            {% endif %}
-          </li>
-        {% endfor %}
-        </ul>
-        {% if short_speakers %}
-        <details class="spk-short"><summary class="small muted">Ещё {{ short_speakers | length }} {{ plural(short_speakers | length, 'спикер', 'спикера', 'спикеров') }} с короткими репликами — обычно это обрывки чужих голосов</summary>
-          <ul class="list">{% for s in short_speakers %}<li><b>{{ s.label }}</b> <span class="muted small">· {{ s.seconds | round | int }} с</span>{% if s.sample %}<div class="meta">[{{ s.at }}] «{{ s.sample }}»</div>{% endif %}</li>{% endfor %}</ul>
-        </details>
-        {% endif %}
-        <datalist id="people-names">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>
-        <p class="hint" style="padding: 0 16px 12px">Подтвердите, кто говорит: PULSE запомнит голоса и в следующих записях подпишет знакомых сам. «Это я» ещё и разбирает встречу заново.</p>
-      </div>
+      <ul class="list">
+      {% for s in speakers %}
+        {% set guess = guesses.get(s.label) %}
+        <li class="spk{{ ' known' if s.who }}">
+          <div class="spk-h">
+            <b>{{ s.name or s.label }}</b>{% if s.name %} <span class="muted small">{{ s.label }}</span>{% endif %}
+            {% if s.who == 'me' %}<span class="st acc small">· вы</span>{% elif s.who %}<span class="st ok small" title="{{ s.how }}">· {{ 'узнан по голосу' if s.how.startswith('узнан') else 'подтверждено' }}</span>{% endif %}
+            <span class="muted small">· {{ (s.seconds / 60) | round(1) if s.seconds >= 60 else s.seconds | round | int }} {{ 'мин' if s.seconds >= 60 else 'с' }}</span>
+          </div>
+          {% if s.sample %}<div class="meta">[{{ s.at }}] «{{ s.sample }}»</div>{% endif %}
+          {% if s.who %}
+          <details class="spk-fix"><summary class="small muted">не {{ 'вы' if s.who == 'me' else s.name.split(' ')[0] }}?</summary>{{ spk_form(s) }}</details>
+          {% else %}
+          {% if guess %}<div class="spk-guess">Claude думает, это <b>{{ guess.name }}</b>{% if guess.why %} — {{ guess.why }}{% endif %}. Подтвердите — и PULSE запомнит голос.</div>{% endif %}
+          {{ spk_form(s, guess.name if guess else '', primary=guess) }}
+          {% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+      {% if short_speakers %}
+      <details class="spk-short"><summary class="small muted">Ещё {{ short_speakers | length }} {{ plural(short_speakers | length, 'спикер', 'спикера', 'спикеров') }} с короткими репликами — обычно это обрывки чужих голосов</summary>
+        <ul class="list">{% for s in short_speakers %}<li><b>{{ s.label }}</b> <span class="muted small">· {{ s.seconds | round | int }} с</span>{% if s.sample %}<div class="meta">[{{ s.at }}] «{{ s.sample }}»</div>{% endif %}</li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+      <datalist id="people-names">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>
+      <p class="hint" style="padding: 0 20px 14px">Подтвердите, кто говорит: PULSE запомнит голоса и в следующих записях подпишет знакомых сам. «Это я» ещё и разбирает встречу заново.</p>
     </section>
     {% endif %}
-    <section class="card">
-      <div class="card-h"><h2>Предложения по встрече</h2></div>
-      <div class="card-b flush">
-        {% set pending = related | selectattr('status', 'equalto', 'pending') | list %}
-        {% if pending|length > 1 %}<div style="padding:10px 16px 0"><form method="post" action="/proposals/batch"><input type="hidden" name="batch" value="meeting:{{ m.id }}"><input type="hidden" name="top" value="{{ pending | map(attribute='id') | max }}"><button class="btn sm ok">Да — все {{ pending|length }}</button></form></div>{% endif %}
-        <ul class="list">
-        {% for p in related %}
-          {% if p.status == 'pending' %}{{ ui.proposal(p, describe) }}
-          {% else %}<li><div>{{ p.title }}</div><div class="meta">{% if p.status == 'done' %}<span class="chip ok">выполнено</span>{% if p.result and p.result.url %} <a href="{{ p.result.url }}" target="_blank">открыть</a>{% endif %}{% elif p.status == 'rejected' %}<span class="chip">отклонено</span>{% else %}<span class="chip bad">{{ p.status }}</span> {{ p.result.error if p.result and p.result.error }}{% endif %}</div></li>{% endif %}
-        {% else %}<li class="empty">Предложений нет.</li>{% endfor %}
-        </ul>
-      </div>
-    </section>
-    <section class="card">
-      <div class="card-h"><h2>Задачи</h2>{% if commitments %}<span class="chip">{{ commitments | length }}</span>{% endif %}<span class="grow"></span><a class="small" href="/commitments">все задачи →</a></div>
-      <div class="card-b flush"><ul class="list">{% for c in commitments %}
-        <li class="mtask">
-          {#- ссылка ведёт в «Задачи» и сразу открывает окно этой задачи #}
-          <div>{{ ui.new_chip(c) }} <a href="/commitments?task={{ c.id }}" title="{{ c.what }}">{{ c | headline }}</a></div>
-          <div class="meta">{{ c | route }}{% for h in c.helpers %} + {{ h }}{% endfor %}{% if c.due %} · до {{ c.due | date }}{% endif %}
-            · {% if c.status == 'done' %}<span class="chip ok">выполнена</span>{% elif c.status == 'cancelled' %}отменена{% elif c.overdue %}<span class="chip bad">просрочена</span>{% else %}в работе{% endif %}
-            {%- if c.source_ref != m.id %} · закрыта по итогам встречи{% endif %}
-            {%- if c.done_hint %} · <span class="chip ok" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif %}
-            {%- if c.parent %}<br>↳ часть «{{ c.parent.headline }}»{% endif %}
-            {%- if c.children %}<br>подзадачи: {% for k in c.children %}{{ k.route }}{{ ' (готово)' if k.status == 'done' }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</div>
-        </li>{% else %}<li class="empty">Нет.</li>{% endfor %}</ul></div>
-    </section>
-    <section class="card">
-      <div class="card-h"><h2>Название</h2></div>
-      <div class="card-b"><form method="post" action="/meetings/{{ m.id }}/title"><input type="text" name="title" value="{{ m.title }}"><div class="form-actions"><button class="btn sm">Сохранить</button></div></form></div>
-    </section>
-    <section class="card">
-      <div class="card-h"><h2>Удалить</h2></div>
-      <div class="card-b">
-        {% if recording.size is none %}
-        <p class="muted small" style="margin-top:0">Файла записи уже нет{% if recording.name %}: {{ recording.name }}{% endif %}.</p>
-        {% elif transcript and not in_queue %}
-        <form method="post" action="/meetings/{{ m.id }}/delete" data-confirm="Удалить файл записи «{{ recording.name }}» ({{ recording.size | size }}) с диска? Расшифровка, разбор и задачи останутся, но расшифровать встречу заново будет нельзя."><input type="hidden" name="what" value="recording"><button class="btn sm">Удалить только запись · {{ recording.size | size }}</button></form>
-        <p class="hint">Освободит место на диске. Расшифровка, разбор и задачи останутся.</p>
-        {% endif %}
-        {% set confirm_all -%}
-          Удалить встречу «{{ m.title or m.id }}» целиком? Удалятся файл записи, расшифровка и разбор
-          {%- if memory.commitments %}, задачи и договорённости с неё ({{ memory.commitments }}){% endif %}
-          {%- if memory.proposals %}, предложения ({{ memory.proposals }}){% endif %}
-          {%- if memory.kb %}, записи базы знаний ({{ memory.kb }}){% endif %}, образцы голосов.
-          {%- if memory.in_kaiten %} Карточки в Kaiten ({{ memory.in_kaiten }}) останутся — их удаляют в Kaiten.{% endif %} Вернуть будет нельзя.
-        {%- endset %}
-        <form method="post" action="/meetings/{{ m.id }}/delete" data-confirm="{{ confirm_all }}" data-busy="Удаляю…"><input type="hidden" name="what" value="all"><button class="btn sm danger">Удалить встречу целиком</button></form>
-        <p class="hint">PULSE забудет встречу: файл записи, расшифровку и разбор, задачи и договорённости с неё, предложения, записи базы знаний, образцы голосов. Карточки, уже созданные в Kaiten, останутся там; упоминания в отправленных дайджестах и в сводке контекста Claude — тоже.</p>
-      </div>
-    </section>
+    {% else %}
+    <section class="card"><div class="card-b" style="padding-top:18px">
+      {% if summary %}<div class="doc summary">{{ summary | md | timecodes }}</div>{% else %}<div class="muted">Разбора ещё нет{% if transcript %} — <a href="?tab=transcript">расшифровка готова</a>{% endif %}.</div>{% endif %}
+    </div></section>
+    {% endif %}
+    <p class="muted small">Файлы встречи: {{ folder_rel }}{% if m.updated and m.status == 'processed' %} · разбор сделан {{ m.updated | local('%d.%m в %H:%M') }}{% endif %}</p>
   </div>
+
+  <aside class="mpage-side">
+    {% set pending = related | selectattr('status', 'equalto', 'pending') | list %}
+    {% set handled = related | rejectattr('status', 'equalto', 'pending') | list %}
+    {% if related %}
+    <section class="card side-card">
+      <div class="side-h"><h2>Ждут вашего «да» <span class="col-n">{{ pending | length }}</span></h2>
+        {% if pending | length > 1 %}<form method="post" action="/proposals/batch" class="inline"><input type="hidden" name="batch" value="meeting:{{ m.id }}"><input type="hidden" name="top" value="{{ pending | map(attribute='id') | max }}"><button class="btn sm primary">Да — все {{ pending | length }}</button></form>{% endif %}</div>
+      {% for p in pending %}
+      {% set links = proposal_links(p) | rejectattr(1, 'equalto', '/meetings/' ~ m.id) | list %}
+      <div class="side-row">
+        <div class="grow">
+          {% if links %}<a class="side-t" href="{{ links[0][1] }}"{% if links[0][1].startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ p.title }}</a>{% else %}<button type="button" class="linkish side-t" data-reveal="pp-{{ p.id }}">{{ p.title }}</button>{% endif %}
+          <div class="side-x">{{ p.reason or '' }}{% for label, url in links[1:] %}{{ ' · ' if p.reason or not loop.first }}<a href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}{% if not links %}{{ ' · ' if p.reason }}<button type="button" class="linkish" data-reveal="pp-{{ p.id }}">предпросмотр</button>{% endif %}</div>
+          <div class="side-x side-pre" id="pp-{{ p.id }}" hidden>{% for line in describe(p).split('\n')[1:] %}<div>{{ line }}</div>{% endfor %}</div>
+        </div>
+        <div class="side-acts">
+          <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm primary">Да</button></form>
+          <form class="inline" method="post" action="/proposals/{{ p.id }}/reject"><button class="btn sm">Нет</button></form>
+        </div>
+      </div>
+      {% else %}<p class="side-x" style="margin:4px 0 0">Всё подтверждено.</p>{% endfor %}
+      {% if handled %}
+      <details class="side-more"><summary class="small">ещё {{ handled | length }} {{ plural(handled | length, 'обработано', 'обработаны', 'обработано') }}</summary>
+        {% for p in handled %}<div class="side-row"><div class="grow"><span class="side-t muted">{{ p.title }}</span>
+          <div class="side-x">{% if p.status == 'done' %}<span class="ok-text">выполнено</span>{% if p.result and p.result.url %} · <a href="{{ p.result.url }}" target="_blank" rel="noopener">открыть ↗</a>{% endif %}{% elif p.status == 'rejected' %}отклонено{% else %}<span class="bad-text">{{ p.status }}</span>{% if p.result and p.result.error %} · {{ p.result.error }}{% endif %}{% endif %}</div></div></div>{% endfor %}
+      </details>
+      {% endif %}
+    </section>
+    {% endif %}
+    <section class="card side-card">
+      <div class="side-h"><h2>Задачи из встречи <span class="col-n">{{ commitments | length }}</span></h2>{% if commitments %}<a class="small" href="/commitments">на доске →</a>{% endif %}</div>
+      {% for c in commitments %}
+      {% if loop.index == 6 %}<details class="side-more"><summary class="small">ещё {{ commitments | length - 5 }}{% set n_done = commitments | selectattr('status', 'equalto', 'done') | list | length %}{% if n_done %} · {{ n_done }} {{ plural(n_done, 'выполнена', 'выполнены', 'выполнено') }}{% endif %}</summary>{% endif %}
+      <div class="side-row{{ ' done' if c.status != 'open' }}"><div class="grow">
+        <a class="side-t" href="/commitments?task={{ c.id }}" title="{{ c.what }}">{{ c | headline }}</a>
+        <div class="side-x">{{ c | route }}{% for h in c.helpers %} + {{ h }}{% endfor %}
+          {%- if c.status == 'done' %} · <span class="ok-text">выполнена</span>{% elif c.status == 'cancelled' %} · отменена{% elif c.due %} · {{ ui.due_text(c) }}{% endif %}
+          {%- if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif %}
+          {%- if c.source_ref != m.id %} · закрыта по итогам встречи{% endif %}
+          {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif %}</div>
+      </div></div>
+      {% if loop.last and loop.length > 5 %}</details>{% endif %}
+      {% else %}<p class="side-x" style="margin:4px 0 0">Задач нет.</p>{% endfor %}
+    </section>
+  </aside>
 </div>
 {% endblock %}

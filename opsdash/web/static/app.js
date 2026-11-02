@@ -300,6 +300,26 @@
     if (!b) return;
     e.preventDefault();
     openDlg(document.getElementById(b.dataset.dlgOpen), b.dataset.addDir);
+    var t = b.dataset.uploadTitle;  // «Загрузить запись» у встречи календаря — с её названием
+    var ti = t !== undefined && document.querySelector("[data-upload-title-input]");
+    if (ti) ti.value = t;
+  });
+
+  // зона «Перетащите запись сюда»: файл бросили или выбрали — сразу загружаем
+  document.querySelectorAll("[data-drop]").forEach(function (form) {
+    var input = form.querySelector("[data-drop-input]");
+    input.addEventListener("change", function () { if (input.files.length) form.submit(); });
+    ["dragenter", "dragover"].forEach(function (ev) {
+      form.addEventListener(ev, function (e) { e.preventDefault(); form.classList.add("over"); });
+    });
+    ["dragleave", "drop"].forEach(function (ev) {
+      form.addEventListener(ev, function (e) { e.preventDefault(); form.classList.remove("over"); });
+    });
+    form.addEventListener("drop", function (e) {
+      if (!e.dataTransfer.files.length) return;
+      input.files = e.dataTransfer.files;
+      form.submit();
+    });
   });
   var addDlg = document.getElementById("add-dlg");
   if (addDlg && (location.hash === "#add" || addDlg.hasAttribute("data-open-on-load"))) {

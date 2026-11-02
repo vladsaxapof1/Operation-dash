@@ -1,61 +1,88 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
 {% block title %}Встречи{% endblock %}
 {% block content %}
+{#- встречи (5.9): одна лента по дням — время и длительность, название и участники, статус точкой, одно действие.
+    Встречи календаря без записи — тоже здесь: «записи нет · Загрузить запись» #}
 <div class="topline">
-  <div><h1>Встречи</h1><div class="muted">Записи расшифровываются на этом компьютере, затем Claude разбирает решения, задачи и обещания</div></div>
-</div>
-
-<div class="grid">
-  <section class="card">
-    <div class="card-b flush">
-      <div class="table-wrap">
-      <table class="t">
-        <thead><tr><th>Когда</th><th>Встреча</th><th>Статус</th></tr></thead>
-        <tbody>
-        {% for w in waiting %}
-          <tr data-waiting>
-            <td class="nowrap">{{ w.started_at | local('%d.%m.%Y %H:%M') }}</td>
-            <td>{{ w.title }}<div class="meta">{{ w.name }} · {{ 'запись ещё идёт — расшифровка начнётся через минуту после её окончания' if w.growing else 'файл дописан — через минуту встреча появится и начнётся расшифровка' }}</div></td>
-            <td><span class="chip" title="PULSE видит файл в папке и ждёт, пока он перестанет меняться">{{ 'идёт запись' if w.growing else 'найдена' }}</span></td>
-          </tr>
-        {% endfor %}
-        {% for m in items %}
-          <tr>
-            <td class="nowrap">{{ m.started_at | local('%d.%m.%Y %H:%M') }}{% if m.duration_sec %}<div class="meta">{{ (m.duration_sec / 60) | round | int }} мин</div>{% endif %}</td>
-            <td><a href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>{% if m.headline %}<div class="meta">{{ m.headline }}</div>{% endif %}
-              {% if m.status == 'failed' and m.error %}<div class="meta" style="color:var(--bad)">{{ m.error[:200] }}</div>{% endif %}</td>
-            <td><div class="tr-status">{{ ui.meeting_status(m) }}{% if m.status in ('new', 'transcribing', 'paused', 'cancelled', 'failed') %}<span class="tr-actions">{{ ui.transcription_controls(m, compact=True) }}</span>{% endif %}</div></td>
-          </tr>
-        {% else %}
-          {% if not waiting %}<tr><td colspan="3" class="empty">Записей пока нет.</td></tr>{% endif %}
-        {% endfor %}
-        </tbody>
-      </table>
-      </div>
-    </div>
-  </section>
-
   <div>
-    <section class="card">
-      <div class="card-h"><h2>Загрузить запись</h2></div>
-      <div class="card-b">
-        <form method="post" action="/meetings/upload" enctype="multipart/form-data">
-          <input type="file" name="file" required accept="audio/*,video/*,.txt,.vtt,.srt,.docx,.md">
-          <label>Название (необязательно)</label>
-          <input type="text" name="title" placeholder="Подставится из календаря">
-          <div class="form-actions"><button class="btn primary">Загрузить и разобрать</button></div>
-          <div class="hint">Подходят аудио и видео (m4a, mp3, mp4, webm…) и готовые расшифровки (.txt, .vtt, .srt, .docx).</div>
-        </form>
-      </div>
-    </section>
-    <section class="card">
-      <div class="card-h"><h2>Папки, за которыми я слежу</h2></div>
-      <div class="card-b">
-        {% for f in folders %}<div><code>{{ f }}</code></div>{% else %}<div class="muted">Папки не найдены.</div>{% endfor %}
-        <div class="hint" style="margin-top:8px">Новые файлы из этих папок разбираются автоматически: файл появляется в списке сразу, расшифровка начинается через минуту после окончания записи. Изменить — <a href="/settings?tab=recordings">Настройки → Записи встреч</a>.</div>
-      </div>
-    </section>
+    <h1>Встречи</h1>
+    <p class="sub">{{ stats.total }} {{ plural(stats.total, 'запись', 'записи', 'записей') }}{% if stats.processed %} · {{ stats.processed }} {{ plural(stats.processed, 'разобрана', 'разобраны', 'разобрано') }}{% endif %}{% if stats.waiting %} · {{ stats.waiting }} {{ plural(stats.waiting, 'ждёт', 'ждут', 'ждут') }} разбора{% endif %}{% if stats.work %} · {{ stats.work }} в работе{% endif %}
+      {%- if folders %} · папка записей отслеживается, новые файлы разбираются сами{% endif %}</p>
   </div>
 </div>
+<div class="toolbar page-tools">
+  <form method="get" class="inline"><input type="search" name="q" value="{{ q }}" placeholder="Поиск по названию и расшифровке" class="tb-search wide" aria-label="Поиск по встречам"></form>
+  <button type="button" class="btn lg primary" data-dlg-open="upload-dlg">Загрузить запись</button>
+  {% call ui.menu('Папки записей') %}
+    <a class="menu-i" href="/settings?tab=recordings">Папки, за которыми я слежу</a>
+    {% for f in folders %}<div class="menu-note" title="{{ f }}">{{ f }}</div>{% endfor %}
+  {% endcall %}
+  {% if q %}<a class="small" href="/meetings">× снять поиск «{{ q }}»</a>{% endif %}
+</div>
+
+<section class="card mlist">
+  {% if waiting %}
+  <div class="mday">Сейчас</div>
+  {% for w in waiting %}
+  <div class="mrow">
+    <div class="mrow-time">{{ w.started_at | local('%H:%M') }}</div>
+    <div class="mrow-main"><div class="mrow-title">{{ w.title }}</div><div class="mrow-x">{{ w.name }} · {{ 'запись ещё идёт — расшифровка начнётся через минуту после её окончания' if w.growing else 'файл дописан — через минуту встреча появится и начнётся расшифровка' }}</div></div>
+    <div class="st"><span class="dot warn"></span>{{ 'идёт запись' if w.growing else 'найдена' }}</div>
+    <div></div>
+  </div>
+  {% endfor %}
+  {% endif %}
+  {% for d in days %}
+  <div class="mday">{{ d.label }}</div>
+  {% for r in d.rows %}
+  {% if r.kind == 'rec' %}{% set m = r.m %}
+  {% set st = {'new': ('в очереди на расшифровку', 'off'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка отменена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
+  <div class="mrow">
+    <div class="mrow-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if m.duration_sec %}<div class="mrow-x">{{ (m.duration_sec / 60) | round | int }} мин</div>{% endif %}</div>
+    <div class="mrow-main"><a class="mrow-title" href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>
+      <div class="mrow-x">{{ m.headline or r.people }}</div>
+      {% if m.status == 'failed' and m.error %}<div class="mrow-x bad-text">{{ m.error[:200] }}</div>{% endif %}</div>
+    <div class="st {{ st[1] if st[1] in ('ok', 'bad', 'warn', 'acc') }}" data-meeting-status="{{ m.id }}"><span class="dot {{ st[1] }}"></span>{{ st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}{% if r.pending %} · {{ r.pending }} {{ plural(r.pending, 'ждёт', 'ждут', 'ждут') }} «да»{% endif %}
+      {% if m.status in ('new', 'transcribing', 'paused') %}<span class="tr-actions">{{ ui.transcription_controls(m, compact=True) }}</span>{% endif %}</div>
+    <div class="mrow-act">
+      {% if m.status == 'transcribed' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn">Разобрать</button></form>
+      {% elif m.status == 'processed' %}<a class="btn" href="/meetings/{{ m.id }}">Открыть разбор</a>
+      {% else %}<a class="btn" href="/meetings/{{ m.id }}">Открыть</a>{% endif %}
+    </div>
+  </div>
+  {% else %}{% set e = r.e %}
+  <div class="mrow">
+    <div class="mrow-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if r.minutes %}<div class="mrow-x">{{ r.minutes }} мин</div>{% endif %}</div>
+    <div class="mrow-main"><div class="mrow-title">{{ e.title or 'Без названия' }}</div><div class="mrow-x">{{ r.people }}{{ ' · ' if r.people }}из календаря</div></div>
+    <div class="st muted"><span class="dot off"></span>{{ 'записи нет' if r.past else 'идёт сейчас' }}</div>
+    <div class="mrow-act"><button type="button" class="btn" data-dlg-open="upload-dlg" data-upload-title="{{ e.title }}">Загрузить запись</button></div>
+  </div>
+  {% endif %}
+  {% endfor %}
+  {% else %}
+  {% if not waiting %}<p class="empty">{{ 'Ничего не нашлось.' if q else 'Записей пока нет.' }}</p>{% endif %}
+  {% endfor %}
+</section>
+
+{#- перетащить запись — сюда; клик — выбрать файл. Без скриптов — кнопка «Загрузить запись» #}
+<form class="drop" method="post" action="/meetings/upload" enctype="multipart/form-data" data-drop>
+  <label class="drop-in">
+    {{ icons.icon('upload', 20) }}
+    <span>Перетащите запись сюда — m4a, mp3, mp4, webm или готовую расшифровку txt, vtt, srt, docx. Название подставится из календаря. <a href="/settings?tab=recordings">Папки, за которыми я слежу</a></span>
+    <input type="file" name="file" accept="audio/*,video/*,.txt,.vtt,.srt,.docx,.md" data-drop-input>
+  </label>
+</form>
+
+<dialog class="dlg" id="upload-dlg" aria-labelledby="upload-title">
+  <form class="dlg-box dlg-form" method="post" action="/meetings/upload" enctype="multipart/form-data" tabindex="-1">
+    <div class="dlg-head"><h2 class="dlg-title" id="upload-title">Загрузить запись</h2><button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    <label>Файл</label><input type="file" name="file" required accept="audio/*,video/*,.txt,.vtt,.srt,.docx,.md">
+    <div class="hint">Аудио и видео (m4a, mp3, mp4, webm…) и готовые расшифровки (.txt, .vtt, .srt, .docx).</div>
+    <label>Название <span class="muted small">— необязательно</span></label>
+    <input type="text" name="title" placeholder="Подставится из календаря" data-upload-title-input>
+    <div class="dlg-actions"><button class="btn primary">Загрузить и разобрать</button><button type="button" class="btn ghost" data-dlg-close>Отмена</button></div>
+  </form>
+</dialog>
 {% endblock %}

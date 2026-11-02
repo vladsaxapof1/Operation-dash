@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import markdown as md
+from markupsafe import Markup
 from markdown.extensions.toc import slugify_unicode
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
@@ -199,6 +200,12 @@ def f_size(n: int | None) -> str:
     return f"{n / 1024 ** 3:.1f} ГБ".replace(".", ",")
 
 
+def f_timecodes(html_text: str) -> Markup:
+    """Тайм-коды «[00:12:40]» в разборе встречи — серым и мельче, как в макете 2.0."""
+    return Markup(re.sub(r"\[(\d{1,2}:\d{2}:\d{2})\]", r'<span class="tc">\1</span>', str(html_text)))
+
+
+templates.env.filters.update(timecodes=f_timecodes)
 templates.env.filters.update(local=f_local, date=f_date, md=f_md, ago=f_ago, tg=f_tg_html, hhmm=config.hhmm,
                              people=f_people, place=f_place, note=f_note, hl=f_hl, size=f_size,
                              headline=records.headline, route=records.route, plain=f_plain)
@@ -1384,14 +1391,50 @@ async def ask_voice(audio: UploadFile = File(...), prompt: str = Form("")):
 # --- встречи ---------------------------------------------------------------------
 
 @app.get("/meetings", response_class=HTMLResponse)
-def meetings(request: Request):
+def meetings(request: Request, q: str = ""):
+    """Встречи (5.9): одна лента по дням — записи и встречи календаря без записи; поиск по названию и расшифровке."""
     from opsdash import recordings
 
     settings = config.load_settings()
+    tz, now = config.tz(settings), config.now(settings)
     items = records.list_meetings(limit=200)
+    q = q.strip()
+    if q:
+        low = q.lower()
+        items = [m for m in items if low in (m["title"] or "").lower() or low in (m["headline"] or "").lower()
+                 or any(low in records.read_meeting_file(m["id"], f).lower() for f in ("summary.md", "transcript.md"))]
+    pending = {r["batch"][8:]: r["n"] for r in store.rows(
+        "SELECT batch, COUNT(*) AS n FROM proposals WHERE status='pending' AND batch LIKE 'meeting:%' GROUP BY batch")}
+    rows = []
+    for m in items:
+        start = store.parse_ts(m["started_at"])
+        rows.append({"kind": "rec", "m": m, "start": start.astimezone(tz) if start else None,
+                     "people": ", ".join(store.loads(m["participants"], [])[:4]), "pending": pending.get(m["id"], 0)})
+    if not q:  # встречи календаря за неделю без записи — тоже в ленте: «записи нет»
+        recorded = {m["event_uid"] for m in items if m["event_uid"]}
+        begin = datetime.combine(now.date() - timedelta(days=7), datetime.min.time(), tz)
+        for e in overview.events_between(begin, now + timedelta(hours=1)):
+            if e["uid"] in recorded or e.get("all_day"):
+                continue
+            s, f = store.parse_ts(e["start"]), store.parse_ts(e["end"])
+            rows.append({"kind": "event", "e": e, "start": s.astimezone(tz) if s else None,
+                         "minutes": int((f - s).total_seconds() // 60) if s and f else 0,
+                         "people": f_people(e["attendees"], 3), "past": bool(f and f <= now)})
+    rows.sort(key=lambda r: r["start"] or now, reverse=True)
+    days: list[dict] = []
+    for r in rows:
+        d = (r["start"] or now).date()
+        if not days or days[-1]["date"] != d:
+            label = ("Сегодня" if d == now.date() else "Вчера" if d == now.date() - timedelta(days=1)
+                     else WEEKDAYS_FULL[d.weekday()])
+            days.append({"date": d, "label": f"{label}, {d.day} {MONTHS_GEN[d.month - 1]}", "rows": []})
+        days[-1]["rows"].append(r)
+    stats = {"total": len(items), "processed": sum(m["status"] == "processed" for m in items),
+             "waiting": sum(m["status"] == "transcribed" for m in items),
+             "work": sum(m["status"] in ("new", "transcribing", "paused", "processing") for m in items)}
     folders = [str(p) for p in recordings.watch_folders(settings)]
-    return render(request, "meetings.html", nav="meetings", items=items, folders=folders,
-                  waiting=recordings.waiting(settings))
+    return render(request, "meetings.html", nav="meetings", days=days, folders=folders, q=q, stats=stats,
+                  waiting=recordings.waiting(settings), formats=", ".join(sorted(e.lstrip(".") for e in recordings.ALL)))
 
 
 @app.get("/meetings/{mid}", response_class=HTMLResponse)
@@ -1419,6 +1462,7 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
     guesses = {k: g for k, g in voice.guesses(mid, meta).items() if k not in who} if speakers else {}
     return render(request, "meeting.html", nav="meetings", m=m, summary=summary, transcript=transcript, tab=tab,
                   related=related, commitments=commitments_, folder=str(records.meeting_dir(mid)),
+                  folder_rel=os.path.relpath(records.meeting_dir(mid), config.DATA_DIR.parent).replace(os.sep, "/"),
                   followup=followup, followup_auto=followup_auto,
                   # обрывки (меньше 10 с речи) сворачиваем, только когда спикеров много
                   describe=proposals.describe, speakers=[s for s in speakers if len(speakers) <= 4 or not s["short"] or s["who"]],

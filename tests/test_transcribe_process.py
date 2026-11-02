@@ -349,7 +349,7 @@ def test_meeting_page_controls_and_delete(tmp_path, settings_with, monkeypatch):
         return unquote(client.post(f"/meetings/{mid}/{path}", data=data, follow_redirects=False).headers["location"])
 
     page = client.get(f"/meetings/{mid}").text
-    assert "Ждёт очереди" in page and 'value="pause"' in page and "Удалить встречу целиком" in page
+    assert "Ждёт очереди" in page and 'value="pause"' in page and ">Удалить встречу</button>" in page
     assert "Удалить только запись" not in page  # расшифровки нет — только целиком
     assert 'value="pause"' in client.get("/meetings").text
     assert "на паузе" in post("transcription", action="pause")
@@ -364,7 +364,7 @@ def test_meeting_page_controls_and_delete(tmp_path, settings_with, monkeypatch):
     records.update_meeting(mid, status="transcribed")
     assert "Удалить только запись" in client.get(f"/meetings/{mid}").text
     assert "Файл записи" in post("delete", what="recording") and not rec.exists()
-    page = client.get(f"/meetings/{mid}").text
+    page = client.get(f"/meetings/{mid}?tab=record").text
     assert "Файла записи уже нет" in page and records.get_meeting(mid)["status"] == "transcribed"
     assert post("delete", what="all").startswith("/meetings?msg=Встреча") and records.get_meeting(mid) is None
 
