@@ -26,8 +26,35 @@ TABS = [
     ("autonomy", "Автономия"),
     ("schedule", "Расписание"),
     ("claude", "Claude"),
+    ("archive", "Архивные разделы"),
 ]
 TAB_NOTES = {"telegram": "личный аккаунт", "bot": "уведомления"}  # приписка серым — чтобы не путать два Telegram
+def archive_rows(settings: dict) -> list[dict]:
+    """Строки «Архивных разделов»: включён ли, с какого времени в архиве, сколько данных осталось."""
+    from opsdash import anthology, docs
+
+    stamps = settings["sections"].get("archived_at") or {}
+    out = []
+    for name, sec in config.SECTIONS.items():
+        if name == "docs":
+            st = docs.stats()
+            data = (f"{st['indexed']} {plural(st['indexed'], 'документ', 'документа', 'документов')} в индексе"
+                    if st["indexed"] else "индекс пуст")
+        else:
+            n = sum(v for k, v in anthology.counts().items() if k != "proposed")
+            data = f"{n} {plural(n, 'запись', 'записи', 'записей')}" if n else "записей нет"
+        out.append({"name": name, **sec, "on": config.section_on(name, settings), "since": stamps.get(name, ""),
+                    "data": data})
+    return out
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    n = abs(n) % 100
+    if 11 <= n <= 19:
+        return many
+    return one if n % 10 == 1 else few if 2 <= n % 10 <= 4 else many
+
+
 THEMES = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}  # оформление (dark.css, base.html)
 CHAT_KINDS = {"private": "Личные", "group": "Группы", "channel": "Каналы", "bot": "Боты"}
 
@@ -79,8 +106,11 @@ def register(app: FastAPI, render, back) -> None:
 
         settings = config.load_settings()
         secrets = config.load_secrets()
-        ctx = {"tab": tab, "tabs": TABS, "tab_notes": TAB_NOTES, "secrets": {k: config.mask(v) for k, v in secrets.items()},
+        tabs = [t for t in TABS if t[0] != "knowledge" or config.section_on("docs", settings)]  # папки — часть «Документов»
+        ctx = {"tab": tab, "tabs": tabs, "tab_notes": TAB_NOTES, "secrets": {k: config.mask(v) for k, v in secrets.items()},
                "whisper_models": WHISPER_MODELS, "themes": THEMES}
+        if tab == "archive":
+            ctx["sections"] = archive_rows(settings)
         if tab == "general":
             from opsdash import updates
 
@@ -166,6 +196,26 @@ def register(app: FastAPI, render, back) -> None:
         })
         config.update_settings("web", {"port": int(port)})
         return back(request, "Сохранено")
+
+    @app.post("/settings/sections/{name}")
+    def save_section(request: Request, name: str, on: str = Form("")):
+        """Включить архивный раздел или вернуть его в архив. Данные в data/ при этом не трогаются."""
+        from opsdash import daemon
+
+        if name not in config.SECTIONS:
+            return back(request, err="Нет такого раздела", to="/settings?tab=archive")
+        settings = config.load_settings()
+        stamps = dict(settings["sections"].get("archived_at") or {})
+        if on:
+            stamps.pop(name, None)
+        else:
+            stamps[name] = store.utcnow()
+        settings["sections"] = {**settings["sections"], name: "on" if on else "archived", "archived_at": stamps}
+        config.save_settings(settings)
+        daemon.sync_claude_settings()
+        title = config.SECTIONS[name]["title"]
+        return back(request, f"Раздел «{title}» включён — он снова в меню, его задания работают" if on
+                    else f"Раздел «{title}» в архиве. Данные сохранены", to="/settings?tab=archive")
 
     @app.post("/settings/theme")
     def save_theme(request: Request, theme: str = Form("system")):
@@ -575,7 +625,7 @@ def register(app: FastAPI, render, back) -> None:
 
         config.update_settings("knowledge", {"folders": lines(folders),
                                              **({"exclude": lines(exclude)} if exclude is not None else {})})
-        if lines(folders) and jobs.in_daemon():
+        if lines(folders) and jobs.in_daemon() and config.section_on("docs"):
             jobs.submit("docs-index")  # сразу, а не через полчаса
         daemon.sync_claude_settings()
         missing = [f for f in lines(folders) if not config.resolve_path(f).exists()]

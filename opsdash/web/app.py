@@ -225,7 +225,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["feed_count"] = ctx["pending_count"] + ctx["attention_count"]
     ctx["feed_urgent"] = bool(store.scalar("SELECT 1 FROM attention WHERE status='open' AND priority='high' LIMIT 1"))
     ctx["tasks_count"] = records.active_count()
-    ctx["sections_on"] = {"docs": True, "kb": True}  # архивные разделы — шаг 3 (Настройки → Архивные разделы)
+    ctx["sections_on"] = {name: config.section_on(name, settings) for name in config.SECTIONS}  # архивные — не в меню
     ctx["needs_setup"] = not any(settings[s].get("enabled")
                                  for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten",
                                            "ymessenger", "pachca"))
@@ -331,6 +331,22 @@ SECURITY_HEADERS = {
     # не no-referrer: при нём браузер шлёт у наших же форм «Origin: null», и проверка ниже их отклоняет
     "Referrer-Policy": "same-origin",
 }
+
+
+def _archived_section(path: str) -> str:
+    """Страница архивного раздела (Документы, База знаний) — или пусто. Сводка контекста (/kb/context) — не раздел."""
+    for name, prefix in (("docs", "/docs"), ("kb", "/kb")):
+        if (path == prefix or path.startswith(prefix + "/")) and path != "/kb/context" and not config.section_on(name):
+            return name
+    return ""
+
+
+@app.middleware("http")
+async def archived_sections(request: Request, call_next):
+    """Архивный раздел не открывается: ведём в Настройки → Архивные разделы, где его можно включить."""
+    if _archived_section(request.url.path):
+        return RedirectResponse("/settings?tab=archive", status_code=303)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -1588,8 +1604,11 @@ def journal(request: Request, level: str = ""):
                 "collect:calendar", "collect:google_calendar", "collect:kaiten", "docs-index", "anthology", "company-context",
                 "projects",
                 "recordings", "triage", "digest", "stale"]
+    off = config.archived_jobs()  # задания архивных разделов не показываем — о них строка под списком
+    runnable = [j for j in runnable if j not in off]
     return render(request, "journal.html", nav="journal", logs=logs, jobs=job_rows, runnable=runnable,
-                  titles=jobs.TITLES, queued=jobs.queued(), level=level)
+                  titles=jobs.TITLES, queued=jobs.queued(), level=level,
+                  archived_sections=[config.SECTIONS[n]["title"] for n in config.SECTIONS if not config.section_on(n)])
 
 
 # --- офис ----------------------------------------------------------------------------
@@ -1632,6 +1651,9 @@ def office_open(request: Request, path: str = Form(...), reveal: str = Form(""))
 def job_run(request: Request, name: str = Form(...)):
     from opsdash import jobs
 
+    if name in config.archived_jobs():
+        return back(request, err=f"«{jobs.TITLES.get(name, name)}» — задание архивного раздела. Включите раздел в "
+                                 "Настройки → Архивные разделы")
     args = {"force": True} if name == "triage" else None
     heavy = name in ("triage", "digest", "anthology", "company-context", "projects")  # запуски Claude — не мешать сбору
     jobs.submit(name, "heavy" if heavy else "light", args)

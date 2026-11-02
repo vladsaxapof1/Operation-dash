@@ -155,7 +155,7 @@ def test_docs_pages_and_open(tmp_path, settings_with, monkeypatch):
     from opsdash.web import app as web
 
     root = library(tmp_path / "Компания")
-    settings_with(knowledge={"folders": [str(root)]})
+    settings_with(knowledge={"folders": [str(root)]}, sections={"docs": "on", "kb": "on"})
     docs.index()
     client = TestClient(web.app, base_url="http://localhost:8765")
     assert "Изменились за неделю" in client.get("/docs").text

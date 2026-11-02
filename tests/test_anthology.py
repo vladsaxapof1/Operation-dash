@@ -92,7 +92,10 @@ def test_cli_kb(monkeypatch, capsys):
 
 
 def test_kb_page():
+    from opsdash import config
     from opsdash.web.app import app
+
+    config.update_settings("sections", {"docs": "on", "kb": "on"})  # раздел в архиве с версии 2.0 — для проверки включаем
 
     store.execute("INSERT INTO meetings(id, title, status) VALUES('m1', 'План МСБ', 'processed')")
     anthology.add(kind="decision", title="Цели конверсии розницы ставим по новому маппингу", project="Розница",
@@ -117,6 +120,8 @@ def test_weekly_review_runs_on_friday(monkeypatch, settings_with):
     from datetime import datetime
 
     from opsdash import jobs
+
+    settings_with(sections={"docs": "on", "kb": "on"})
 
     settings_with(schedule={"anthology_weekly": "16:00", "digest_morning": "", "digest_evening": "", "stale_check": ""})
     submitted = []

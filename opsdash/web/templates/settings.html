@@ -626,5 +626,26 @@
       haiku для сообщений и дайджестов заметно экономнее.</div>
   </div>
 </section>
+{% elif tab == 'archive' %}
+{#- архивные разделы (PULSE 2.0): выключены целиком — нет в меню, страницы не открываются, задания не запускаются #}
+<section class="card">
+  <div class="card-h"><h2>Архивные разделы</h2></div>
+  <p class="card-b muted" style="margin:0">Разделы, которыми почти не пользовались. Их нет в меню, страницы не открываются,
+    фоновые задания не запускаются. Данные в папке <code>data/</code> не удаляются — включите раздел, и он вернётся
+    вместе с заданиями и рабочим местом в «Офисе».</p>
+  <ul class="list arch-list">
+    {% for s in sections %}
+    <li class="arch-row">
+      <div class="arch-name">{{ s.title }}
+        <div class="st {{ 'ok' if s.on else '' }} muted small">{% if s.on %}<span class="dot ok"></span>включён{% else %}<span class="dot off"></span>в архиве {{ ('с ' ~ (s.since | date)) if s.since else 'с версии 2.0' }}{% endif %}</div></div>
+      <div class="arch-what">{{ s.what }}.<div class="muted small">Осталось: {{ s.data }}</div></div>
+      <form method="post" action="/settings/sections/{{ s.name }}" class="arch-act">
+        {% if s.on %}<button class="btn ghost">Вернуть в архив</button>
+        {% else %}<input type="hidden" name="on" value="1"><button class="btn">Включить</button>{% endif %}
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
 {% endif %}
 {% endblock %}

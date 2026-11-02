@@ -45,6 +45,9 @@ DEFAULTS: dict = {
         "work_hours": {"start": "09:00", "end": "20:00", "days": [1, 2, 3, 4, 5]},
     },
     "web": {"port": 8765, "theme": "system"},  # theme: system / light / dark
+    # архивные разделы (PULSE 2.0): нет в меню, страницы не открываются, их задания не запускаются; данные в data/
+    # остаются. Включить — Настройки → Архивные разделы. archived_at — когда выключили кнопкой (пусто — с версии 2.0)
+    "sections": {"docs": "archived", "kb": "archived", "archived_at": {}},
     # откуда брать новые версии PULSE (opsdash.updates); закрытый репозиторий — с токеном GITHUB_TOKEN в secrets
     "updates": {"repo": "vladsaxapof1/Operation-dash", "branch": "claude/pult-v1", "auto_check": True},
     "claude": {
@@ -251,6 +254,26 @@ def save_settings(settings: dict) -> None:
         tmp.write_text(header + body, encoding="utf-8")
         _replace(tmp, SETTINGS_FILE)
         _cache["key"] = None
+
+
+SECTIONS = {  # архивные разделы: название, что это, какие фоновые задания им принадлежат
+    "docs": {"title": "Документы", "jobs": ["docs-index", "company-context"],
+             "what": "Поиск по вашим презентациям, таблицам и документам; из них же Claude раз в неделю обновлял "
+                     "раздел «О компании» в своей сводке контекста"},
+    "kb": {"title": "База знаний", "jobs": ["anthology"],
+           "what": "Решения, уроки и удачи — Claude по пятницам предлагал записи недели"},
+}
+
+
+def section_on(name: str, settings: dict | None = None) -> bool:
+    """Раздел включён (не в архиве). Архивные — Документы и База знаний — по умолчанию в архиве."""
+    return (settings or load_settings())["sections"].get(name) != "archived"
+
+
+def archived_jobs(settings: dict | None = None) -> set[str]:
+    """Фоновые задания архивных разделов — планировщик их не запускает, «Журнал» и «Офис» не показывают."""
+    settings = settings or load_settings()
+    return {job for name, sec in SECTIONS.items() if not section_on(name, settings) for job in sec["jobs"]}
 
 
 def update_settings(section: str, values: dict) -> dict:

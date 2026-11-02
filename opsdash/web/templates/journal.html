@@ -23,6 +23,7 @@
       </tbody>
     </table>
     </div>
+    {% if archived_sections %}<p class="muted small" style="margin:0;padding:10px 20px 14px">Задания архивных разделов ({{ archived_sections | join(', ') }}) не запускаются — <a href="/settings?tab=archive">включить</a>.</p>{% endif %}
   </div>
 </section>
 <section class="card">

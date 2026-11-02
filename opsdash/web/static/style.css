@@ -1061,3 +1061,11 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 @keyframes hello-pop { from { opacity: 0; transform: scale(.2) translateY(12px); } }
 @keyframes hello-twinkle { 50% { transform: scale(.6); opacity: .6; } }
 @media (prefers-reduced-motion: reduce) { .hello-art .beat, .hello-art .cf { animation: none; } }
+
+/* Настройки → Архивные разделы */
+.arch-list { border-top: 1px solid var(--line); margin-top: 14px; }
+.arch-row { display: grid; grid-template-columns: 220px minmax(0, 1fr) auto; gap: 16px; align-items: center; }
+.arch-name { font-weight: 600; }
+.arch-name .st { font-weight: 400; margin-top: 2px; }
+.arch-what { font-size: 15px; }
+@media (max-width: 760px) { .arch-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } }

@@ -47,6 +47,7 @@ def test_summary_goes_into_every_claude_run(tmp_path, settings_with, monkeypatch
 def test_monday_context_job_and_page(monkeypatch, settings_with):
     from opsdash.web.app import app
 
+    settings_with(sections={"docs": "on", "kb": "on"})
     settings_with(schedule={"context_weekly": "08:00", "digest_morning": "", "digest_evening": "", "stale_check": "",
                             "anthology_weekly": ""})
     submitted = []

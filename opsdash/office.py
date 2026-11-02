@@ -158,7 +158,9 @@ def pulse(settings: dict | None = None) -> list[dict]:
             st = "error"
         else:
             st = "off" if off and not done else "idle"
-        out.append({**desk, "state": st, "state_title": STATES[st], "current": current,
+        if key_archived := (desk["key"] == "kb" and not config.section_on("kb", settings)):
+            desk = {**desk, "run": [], "link": ("/settings?tab=archive", "Включить")}  # раздел в архиве — запускать нечего
+        out.append({**desk, "state": st, "state_title": STATES[st], "current": current, "archived": key_archived,
                     "detail": details.get(current["job"], "") if current else "", "last": done[0] if done else None,
                     "history": done[:10], "off": off, "next": "" if off else _next(desk["key"], settings)})
     out.append(_courier(settings, state, queued))
@@ -199,6 +201,8 @@ def _off(key: str, settings: dict) -> str:
         return "Telegram-бот не подключён"
     if key == "briefs" and not settings["briefs"].get("enabled"):
         return "Брифы выключены"
+    if key == "kb" and not config.section_on("kb", settings):
+        return "В архиве вместе с разделом «База знаний»"
     if key == "triage" and not any(settings[s].get("enabled") for s in ("telegram", "ymessenger", "pachca", "mail", "gmail")):
         return "Не подключены ни мессенджеры, ни почта"
     return ""

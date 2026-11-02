@@ -655,7 +655,8 @@ def tick(settings: dict | None = None) -> list[str]:
             go(f"collect:{src}")
     if _due("recordings", 1):
         go("recordings")
-    if settings["knowledge"].get("folders") and _due("docs-index", sch.get("docs_minutes") or 30):
+    off = config.archived_jobs(settings)  # задания архивных разделов (Документы, База знаний) не запускаем
+    if settings["knowledge"].get("folders") and "docs-index" not in off and _due("docs-index", sch.get("docs_minutes") or 30):
         go("docs-index")
     if _due("housekeeping", 5):
         go("housekeeping")
@@ -684,10 +685,11 @@ def tick(settings: dict | None = None) -> list[str]:
 
         if briefs.pending(settings, limit=1):
             go("briefs", "heavy")
-    if (sch.get("anthology_weekly") and config.now(settings).weekday() == 4  # пятница
+    if (sch.get("anthology_weekly") and "anthology" not in off and config.now(settings).weekday() == 4  # пятница
             and _daily("anthology", sch["anthology_weekly"], settings)):
         go("anthology", "heavy")
-    if (sch.get("context_weekly") and config.now(settings).weekday() == 0  # понедельник, до утреннего дайджеста
+    if (sch.get("context_weekly") and "company-context" not in off
+            and config.now(settings).weekday() == 0  # понедельник, до утреннего дайджеста
             and _daily("company-context", sch["context_weekly"], settings)):
         go("company-context", "heavy")
     if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
