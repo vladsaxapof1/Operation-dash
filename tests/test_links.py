@@ -37,10 +37,11 @@ def test_attention_and_chat_show_original_button():
     mid = store.scalar("SELECT id FROM messages WHERE msg_id='694666'")
     records.add_attention(summary="Согласовать метрики", message_id=mid)
     client = TestClient(app, base_url="http://localhost:8765")
-    page = client.get("/inbox").text
+    page = client.get("/").text  # «нужен ответ» — строкой ленты на Сводке
     assert 'href="https://web.telegram.org/a/#-4900000001"' in page and "↗ Группа в Telegram Web" in page
-    chat = client.get("/inbox?chat=telegram|-4900000001").text
-    assert chat.count("Группа в Telegram Web") == 2  # и у карточки, и у выбранного чата
+    chat = client.get("/inbox?chat=telegram|-4900000001").text  # старый адрес — в «Переписку»
+    assert 'href="https://web.telegram.org/a/#-4900000001"' in chat and "открыть в Telegram ↗" in chat
+    assert "PULSE: ждёт вашего ответа" in chat  # сообщение, вынесенное в Сводку, подсвечено
 
 
 def test_broken_private_links_cleared():

@@ -1328,3 +1328,34 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .doc .tc { font-size: 13px; color: var(--muted); }
 .side-t.linkish { text-align: left; }
 .side-pre { margin-top: 6px; padding: 8px 10px; background: var(--panel-2); border-radius: 8px; }
+
+/* Переписка 2.0: чаты слева, выбранный чат справа */
+.chats { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
+.chat-list { margin: 0; overflow: hidden; }
+.chat-i { display: grid; gap: 2px; padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--text); }
+.chat-i:hover { background: var(--panel-2); text-decoration: none; }
+.chat-i.active { background: var(--accent-soft); }
+.chat-i-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.chat-i-h b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chat-i-h .small { flex: none; }
+.chat-i-x .cnt { flex: none; }
+.chat-i-x { display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: 14px; }
+.chat-i-x .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cnt.acc { background: var(--accent); }
+.chat-off { margin: 0; padding: 12px 16px; }
+.chat-pane { margin: 0; }
+.chat-h { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.chat-feed { padding: 8px 20px 12px; display: grid; gap: 4px; }
+.chat-day { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 6px; }
+.msg { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 8px 10px; border-radius: 10px; }
+.msg .avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2);
+  color: var(--muted); font-size: 12px; font-weight: 600; }
+.msg.out .avatar { background: var(--accent-soft); color: var(--accent); }
+.msg-h { font-size: 13px; color: var(--muted); }
+.msg-t { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.flagged { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn-fill); }
+.msg-flag { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 14px; }
+.chat-foot { margin: 0; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
+.closed-list { margin: 0 -28px; border-top: 1px solid var(--line); }
+.closed-list > li { padding-left: 28px; padding-right: 28px; }
+@media (max-width: 1000px) { .chats { grid-template-columns: minmax(0, 1fr); } }

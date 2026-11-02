@@ -573,32 +573,81 @@ def proposal_batch(request: Request, batch: str = Form(...), top: int = Form(...
 
 # --- нужен ответ ------------------------------------------------------------------
 
-@app.get("/inbox", response_class=HTMLResponse)
-def inbox(request: Request, chat: str = ""):
-    items = records.list_attention("open")
-    chats = store.rows(
-        """SELECT c.*, (SELECT COUNT(*) FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id) AS n
-           FROM chats c WHERE c.enabled=1 ORDER BY c.last_ts DESC LIMIT 60""")
-    from opsdash import links
+@app.get("/inbox")
+def inbox_redirect(request: Request):
+    """«Нужен ответ» растворился в Сводке, переписка — в разделе «Переписка» (2.0); старые ссылки из бота ведут туда."""
+    query = str(request.url.query)
+    return RedirectResponse("/chats" + ("?" + query if query else ""), status_code=303)
 
+
+@app.get("/chats", response_class=HTMLResponse)
+def chats_page(request: Request, chat: str = "", q: str = ""):
+    """Переписка (5.11): окно в чаты, которые PULSE читает. Слева — чаты по источникам, справа — выбранный чат;
+    сообщения, вынесенные в Сводку («ждёт вашего ответа»), подсвечены. Писать в чаты PULSE не умеет."""
+    from opsdash import jobs, links
+
+    settings = config.load_settings()
+    attention = records.list_attention("open")
+    by_chat: dict[str, list] = {}
+    for a in attention:
+        by_chat.setdefault(f"{a.get('source')}|{a.get('chat_id')}", []).append(a)
+    chats = store.rows(
+        """SELECT c.*, (SELECT text FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id ORDER BY ts DESC LIMIT 1) AS last_text,
+                  (SELECT sender_name FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id ORDER BY ts DESC LIMIT 1) AS last_sender,
+                  (SELECT is_outgoing FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id ORDER BY ts DESC LIMIT 1) AS last_out,
+                  (SELECT MIN(ts) FROM messages m WHERE m.source=c.source AND m.chat_id=c.chat_id) AS first_ts
+           FROM chats c WHERE c.enabled=1 ORDER BY c.last_ts DESC LIMIT 80""")
+    for c in chats:
+        c["key"] = f"{c['source']}|{c['chat_id']}"
+        c["att"] = by_chat.get(c["key"], [])
+        c["urgent"] = any(a["priority"] == "high" for a in c["att"])
+    groups: dict[str, list] = {}
+    order = {"telegram": 0, "mail": 1, "gmail": 2, "pachca": 3, "ymessenger": 4}
+    for c in sorted(chats, key=lambda c: order.get(c["source"], 9)):
+        groups.setdefault(c["source"], []).append(c)
+    if not chat and chats:  # по умолчанию — чат, где ждут ответа, иначе самый свежий
+        chat = next((c["key"] for c in chats if c["att"]), chats[0]["key"])
+    current = next((c for c in chats if c["key"] == chat), None)
     messages, chat_link = [], None
     if chat:
         source, _, chat_id = chat.partition("|")
         messages = list(reversed(store.rows(
             "SELECT * FROM messages WHERE source=? AND chat_id=? ORDER BY ts DESC LIMIT 80", (source, chat_id))))
         chat_link = links.original(source, chat_id)
+        flagged = {a["message_id"]: a for a in attention if a.get("message_id")}
+        tz = config.tz(settings)
+        prev_day = None
+        for m in messages:
+            m["att"] = flagged.get(m["id"])
+            ts = store.parse_ts(m["ts"])
+            day = ts.astimezone(tz).date() if ts else None
+            m["day_label"] = _day_label(day) if day and day != prev_day else ""
+            prev_day = day
+    results = []
+    if q.strip():
+        results = store.rows("SELECT * FROM messages WHERE text LIKE ? ORDER BY ts DESC LIMIT 60", (f"%{q.strip()}%",))
     closed = store.rows("SELECT * FROM attention WHERE status!='open' ORDER BY updated DESC LIMIT 15")
-    from opsdash import jobs
-
-    # чем кончился последний разбор — после кнопки «Разобрать» иначе не видно, что сообщений просто не было
+    off = [overview.SOURCE_TITLES.get(k, k) for k in ("telegram", "pachca", "ymessenger") if not settings[k].get("enabled")]
+    off += ["почта"] if not (settings["mail"].get("enabled") or settings["gmail"].get("enabled")) else []
     last = store.row("SELECT ts, message FROM log WHERE job='triage' AND (message LIKE 'ок:%' OR level='error') "
                      "ORDER BY id DESC LIMIT 1")
     triage = {"busy": any(k.partition("|")[0] == "triage" for k in jobs.queued()),
               "pending": store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0,
               "last_ts": last["ts"] if last else None,
               "last": last["message"].split("\n")[0].removeprefix("ок: ") if last else ""}
-    return render(request, "inbox.html", nav="inbox", items=items, chats=chats, messages=messages, chat=chat,
-                  chat_link=chat_link, closed=closed, triage=triage)
+    return render(request, "inbox.html", nav="chats", groups=groups, chats=chats, current=current, chat=chat,
+                  messages=messages, chat_link=chat_link, closed=closed, triage=triage, attention=attention,
+                  off_sources=off, q=q.strip(), results=results,
+                  synced=store.scalar("SELECT MAX(last_run) FROM jobs WHERE name LIKE 'collect:%'"))
+
+
+def _day_label(d: date) -> str:
+    today = config.now().date()
+    if d == today:
+        return "сегодня"
+    if d == today - timedelta(days=1):
+        return f"вчера, {d.day} {MONTHS_GEN[d.month - 1]}"
+    return f"{d.day} {MONTHS_GEN[d.month - 1]}"
 
 
 @app.post("/attention/{aid}/{action}")
@@ -1275,11 +1324,12 @@ def _ask_page(request: Request, chat_id: int | None, prefill: list[dict]):
 
 
 @app.get("/ask", response_class=HTMLResponse)
-def ask_page(request: Request, meeting: str = "", task: int = 0, doc: str = ""):
-    """«Спросить Claude»: новый чат. ?meeting= / ?task= / ?doc= — с этим контекстом (кнопки на страницах)."""
+def ask_page(request: Request, meeting: str = "", task: int = 0, doc: str = "", chat_ref: str = ""):
+    """«Спросить Claude»: новый чат. ?meeting= / ?task= / ?doc= / ?chat_ref= — с этим контекстом (кнопки на страницах)."""
     from opsdash import chat
 
-    refs = [f"meeting:{meeting}"] * bool(meeting) + [f"task:{task}"] * bool(task) + [f"doc:{doc}"] * bool(doc)
+    refs = ([f"meeting:{meeting}"] * bool(meeting) + [f"task:{task}"] * bool(task) + [f"doc:{doc}"] * bool(doc)
+            + [f"chat:{chat_ref}"] * bool(chat_ref))
     return _ask_page(request, None, chat.parse_refs(refs))
 
 

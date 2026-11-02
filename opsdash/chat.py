@@ -90,6 +90,9 @@ def parse_refs(values: list[str]) -> list[dict]:
             out.append({"type": "task", "id": int(ref)})
         elif kind == "doc" and store.row("SELECT 1 FROM docs WHERE path=?", (ref,)):
             out.append({"type": "doc", "path": ref})
+        elif kind == "chat" and "|" in ref and store.row("SELECT 1 FROM chats WHERE source=? AND chat_id=?",
+                                                         tuple(ref.split("|", 1))):
+            out.append({"type": "chat", "ref": ref})
         else:
             continue
         seen.add((kind, ref))
@@ -152,6 +155,10 @@ def describe(items: list[dict]) -> list[dict]:
             d = store.row("SELECT rel, title FROM docs WHERE path=?", (c["path"],))
             c["label"] = f"документ «{(d or {}).get('rel') or Path(c['path']).name}»"
             c["href"] = f"/docs/view?path={quote(c['path'])}" if d else None
+        elif c["type"] == "chat":
+            ch = store.row("SELECT title FROM chats WHERE source=? AND chat_id=?", tuple(c["ref"].split("|", 1)))
+            c["label"] = f"чат «{(ch or {}).get('title') or c['ref']}»"
+            c["href"] = f"/chats?chat={quote(c['ref'])}" if ch else None
         else:
             c["label"] = f"файл «{c['name']}»"
             c["href"] = None
@@ -187,6 +194,12 @@ def _context_prompt(items: list[dict]) -> str:
             d = store.row("SELECT rel FROM docs WHERE path=?", (c["path"],))
             lines.append(f"- Документ «{(d or {}).get('rel') or c['path']}»: ./ops docs show \"{c['path']}\" "
                          "(нужное место — --part).")
+        elif c["type"] == "chat":
+            source, _, chat_id = c["ref"].partition("|")
+            ch = store.row("SELECT title FROM chats WHERE source=? AND chat_id=?", (source, chat_id))
+            if ch:
+                lines.append(f"- Чат «{ch['title']}» ({source}): ./ops messages chat \"{ch['title']}\" --days 30 "
+                             "(при нужде — больше дней или --limit).")
         elif c["type"] == "file":
             if c.get("error"):
                 lines.append(f"- Файл «{c['name']}» ({c['path']}) — прочитать не получилось: {c['error']}.")

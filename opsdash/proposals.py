@@ -611,7 +611,7 @@ def links(p: dict) -> list[tuple[str, str]]:
     if other:
         out.append(("Дубль чего" if pl.get("into") else "Чего ждёт", f"/commitments?task={other}"))
     if pl.get("attention_id"):
-        out.append(("Нужен ответ", "/inbox"))
+        out.append(("Нужен ответ", "/"))
     if p["kind"] == "task.meeting":
         start = store.scalar("SELECT start FROM events WHERE uid=?", (pl.get("event_uid"),))
         if start:

@@ -78,10 +78,10 @@ def _triage_link(result: str) -> str:
     found = {k: int(n) for k, n in re.findall(r"(нужен ответ|задач|на подтверждение): \+(\d+)", result)}
     replies, tasks = found.get("нужен ответ", 0), found.get("задач", 0)
     if replies > tasks:
-        return "/inbox"
+        return "/"  # ответы — в ленте «Нужно от вас» на Сводке
     if tasks:
         return "/commitments?new=1"
-    return "/" if found.get("на подтверждение") else "/inbox"
+    return "/"
 
 
 def _meeting(meeting_id: str | None) -> dict:

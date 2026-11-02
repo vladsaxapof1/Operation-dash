@@ -651,11 +651,11 @@ def test_triage_button_collects_fresh_messages_first(monkeypatch, settings_with,
         stop.set()
         worker.join(5)
 
-    page = client.get("/inbox").text
-    assert "последний разбор" not in page  # job_triage вызван напрямую — в журнал не писал
+    page = client.get("/chats").text
+    assert "Последний разбор" not in page  # job_triage вызван напрямую — в журнал не писал
     store.log("triage", "ок: новых сообщений нет")
-    page = client.get("/inbox").text
-    assert "Все собранные сообщения разобраны" in page and "последний разбор" in page
+    page = client.get("/chats").text
+    assert "все сообщения разобраны" in page and "Последний разбор" in page
     assert "новых сообщений нет" in page
 
 

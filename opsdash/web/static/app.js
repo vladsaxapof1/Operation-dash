@@ -246,6 +246,12 @@
     if (field) field.focus();
   });
 
+  // «Ответить из Сводки» в Переписке ведёт на /#att-<id>: раскрываем черновик этого ответа
+  if (/^#att-\d+$/.test(location.hash)) {
+    var pane = document.getElementById(location.hash.slice(1));
+    if (pane) { pane.hidden = false; pane.closest(".frow").scrollIntoView({ block: "center" }); }
+  }
+
   // лента «Нужно от вас»: фильтр по типу — подтвердить, ответить, напомнить
   document.querySelectorAll("[data-feed-filter]").forEach(function (chip) {
     chip.addEventListener("click", function () {

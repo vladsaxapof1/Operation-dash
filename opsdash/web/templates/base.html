@@ -16,7 +16,7 @@
 {% set nav_groups = [
   ("Сегодня", [("home", "/", "Сводка", feed_count), ("commitments", "/commitments", "Задачи", tasks_count),
                ("calendar", "/calendar", "Календарь", 0)]),
-  ("Память", [("meetings", "/meetings", "Встречи", 0), ("inbox", "/inbox", "Переписка", 0),
+  ("Память", [("meetings", "/meetings", "Встречи", 0), ("chats", "/chats", "Переписка", 0),
               ("digests", "/digests", "Дайджесты", 0), ("people", "/people", "Люди", 0)]
              + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])
              + ([("kb", "/kb", "База знаний", 0)] if sections_on.kb else [])),
