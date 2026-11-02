@@ -265,6 +265,22 @@
     });
   });
 
+  // справка: у каждого блока кода — «Копировать»
+  document.querySelectorAll("[data-help-doc] pre").forEach(function (pre) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn sm copy-code";
+    b.textContent = "Копировать";
+    b.addEventListener("click", function () {
+      var code = pre.querySelector("code") || pre;
+      if (navigator.clipboard) navigator.clipboard.writeText(code.innerText).then(function () {
+        b.textContent = "Скопировано ✓";
+        setTimeout(function () { b.textContent = "Копировать"; }, 1800);
+      });
+    });
+    pre.appendChild(b);
+  });
+
   // лента «Нужно от вас»: фильтр по типу — подтвердить, ответить, напомнить
   document.querySelectorAll("[data-feed-filter]").forEach(function (chip) {
     chip.addEventListener("click", function () {

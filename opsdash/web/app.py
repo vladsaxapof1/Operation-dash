@@ -452,9 +452,9 @@ async def updates_check(request: Request):
     try:
         res = await run_in_threadpool(updates.check)
     except updates.UpdateError as e:
-        return back(request, err=f"Не удалось проверить обновления: {e}", to="/settings?tab=general#updates")
+        return back(request, err=f"Не удалось проверить обновления: {e}", to="/settings?tab=updates")
     return back(request, "Доступна новая версия — можно обновить" if res["available"] else "Стоит последняя версия",
-                to="/settings?tab=general#updates")
+                to="/settings?tab=updates")
 
 
 @app.post("/updates/apply")
@@ -462,7 +462,7 @@ def updates_apply(request: Request):
     from opsdash import jobs
 
     jobs.submit("update", "interactive")
-    return back(request, to="/settings?tab=general&updating=1#updates")
+    return back(request, to="/settings?tab=updates&updating=1")
 
 
 @app.post("/api/shutdown")
@@ -2080,7 +2080,20 @@ def help_page(request: Request, slug: str = "", example: str = ""):
     text = path.read_text(encoding="utf-8")
     text = re.sub(r"\]\((\d\d-[^)#]+)\.md(#[^)]*)?\)", r"](/help/\1\2)", text)
     text = re.sub(r"\]\(examples/([^)]+)\.md\)", r"](/help/examples/\1)", text)
-    return render(request, "help.html", nav="help", docs=docs, body=f_md(text), slug=slug)
+    body = f_md(text)
+    # оглавление текущего раздела — вложенными пунктами подменю (5.18): заголовки второго уровня
+    toc = [{"id": m.group(1), "title": re.sub(r"<[^>]+>", "", m.group(2))}
+           for m in re.finditer(r'<h2 id="([^"]+)">(.*?)</h2>', body)]
+    q = request.query_params.get("q", "").strip()
+    hits = []
+    if q:  # поиск по справке: строки разделов, где есть слова запроса
+        for d in docs:
+            for line in (DOCS_DIR / f"{d['slug']}.md").read_text(encoding="utf-8").splitlines():
+                if q.lower() in line.lower() and line.strip():
+                    hits.append({"slug": d["slug"], "doc": d["title"], "line": re.sub(r"[#*`>|]", "", line).strip()[:200]})
+                    if len(hits) >= 40:
+                        break
+    return render(request, "help.html", nav="help", docs=docs, body=body, slug=slug, toc=toc, q=q, hits=hits)
 
 
 # --- настройки -------------------------------------------------------------------

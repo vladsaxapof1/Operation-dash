@@ -43,34 +43,56 @@
 </form>
 {% endmacro %}
 {% block content %}
-<div class="topline"><div><h1>Настройки</h1><div class="muted">Подключения и правила работы. Всё хранится на этом компьютере.</div></div></div>
-<div class="tabs">{% for key, title in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}">{{ title }}{% if tab_notes.get(key) %} <span class="tab-note">({{ tab_notes[key] }})</span>{% endif %}</a>{% endfor %}</div>
+<div class="topline"><div><h1>Настройки</h1><p class="sub">Подключения и правила работы. Всё хранится на этом компьютере.</p></div></div>
+{#- подменю слева (3.10): без подписей групп; вложенные источники — сдвигом с направляющей; системные — после черты #}
+{% set conn_tabs = menu[1].subs | map(attribute='tab') | list %}
+<div class="settings">
+<nav class="subnav" aria-label="Разделы настроек">
+  {% for m in menu %}
+  {% if m.sep %}<div class="subnav-sep"></div>
+  {% else %}
+  <a href="?tab={{ m.tab }}" class="{{ 'active' if tab == m.tab }}"{% if tab == m.tab %} aria-current="page"{% endif %}><span>{{ m.title }}</span>{% if m.note %}<span class="subnav-n">{{ m.note }}</span>{% endif %}</a>
+  {% if m.subs and (tab == m.tab or tab in conn_tabs or true) %}
+  <div class="subnav-sub">
+    {% for s in m.subs %}<a href="?tab={{ s.tab }}" class="{{ 'active' if tab == s.tab }}"{% if tab == s.tab %} aria-current="page"{% endif %}{% if tab_notes.get(s.tab) %} title="{{ s.title }} ({{ tab_notes[s.tab] }})"{% endif %}><span>{{ s.title }}</span><span class="subnav-n {{ 'ok-text' if s.on }}">{{ 'есть' if s.on else 'нет' }}</span></a>{% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+  {% endfor %}
+</nav>
+<div class="settings-b">
 
 {% if tab == 'general' %}
-<section class="card"><div class="card-b" style="padding-top:12px">
-  <form method="post" action="/settings/general">
-    <label>Как вас зовут</label><input type="text" name="name" value="{{ settings.owner.name }}" placeholder="Анна Смирнова">
-    <div class="hint">Claude будет знать, чьи это задачи и сообщения.</div>
-    <label>Часовой пояс</label><input type="text" name="timezone" value="{{ settings.owner.timezone }}">
-    <div class="hint">Например Europe/Moscow, Asia/Yekaterinburg.</div>
-    <div class="form-row">
-      <div><label>Рабочий день с</label><input type="time" name="work_start" value="{{ settings.owner.work_hours.start | hhmm }}"></div>
-      <div><label>до</label><input type="time" name="work_end" value="{{ settings.owner.work_hours.end | hhmm }}"></div>
+<section class="card"><div class="card-h"><h2>Основное</h2></div><div class="card-b">
+  <form method="post" action="/settings/general" class="general-f">
+    <div class="form-row two">
+      <div><label>Как вас зовут</label><input type="text" name="name" value="{{ settings.owner.name }}" placeholder="Анна Смирнова">
+        <div class="hint">Claude будет знать, чьи это задачи и сообщения.</div></div>
+      <div><label>Часовой пояс</label><input type="text" name="timezone" value="{{ settings.owner.timezone }}">
+        <div class="hint">Например Europe/Moscow, Asia/Yekaterinburg.</div></div>
     </div>
-    <label>Рабочие дни</label>
-    <div class="actions">{% for d, n in [(1,'Пн'),(2,'Вт'),(3,'Ср'),(4,'Чт'),(5,'Пт'),(6,'Сб'),(7,'Вс')] %}<label class="check"><input type="checkbox" name="days" value="{{ d }}" {{ 'checked' if d in settings.owner.work_hours.days }}> {{ n }}</label>{% endfor %}</div>
-    <div class="hint">В рабочее время Claude разбирает сообщения; дайджесты и напоминания — только в рабочие дни.</div>
-    <label>Порт админки</label><input type="number" name="port" value="{{ settings.web.port }}" style="max-width:140px">
-    <div class="hint">Менять, только если 8765 занят другой программой. Вступит в силу после перезапуска PULSE.</div>
+    <div class="form-row two">
+      <div><label>Рабочий день</label>
+        <div class="time-range"><input type="time" lang="ru" name="work_start" value="{{ settings.owner.work_hours.start | hhmm }}" aria-label="Рабочий день с"><span>—</span><input type="time" lang="ru" name="work_end" value="{{ settings.owner.work_hours.end | hhmm }}" aria-label="Рабочий день до"></div>
+        <div class="hint">В рабочее время Claude разбирает сообщения.</div></div>
+      <div><label>Рабочие дни</label>
+        <div class="days">{% for d, n in [(1,'Пн'),(2,'Вт'),(3,'Ср'),(4,'Чт'),(5,'Пт'),(6,'Сб'),(7,'Вс')] %}<label class="wday"><input type="checkbox" name="days" value="{{ d }}" {{ 'checked' if d in settings.owner.work_hours.days }}><span>{{ n }}</span></label>{% endfor %}</div>
+        <div class="hint">Дайджесты и напоминания — только в рабочие дни.</div></div>
+    </div>
+    <details class="more-f"><summary>Дополнительно <span class="muted small">· порт админки {{ settings.web.port }}</span></summary>
+      <label>Порт админки</label><input type="number" name="port" value="{{ settings.web.port }}" style="max-width:140px">
+      <div class="hint">Менять, только если 8765 занят другой программой. Вступит в силу после перезапуска PULSE.</div>
+    </details>
     <div class="form-actions"><button class="btn primary">Сохранить</button></div>
   </form>
 </div></section>
 
 <section class="card" id="theme"><div class="card-b theme-row">
-  <div><b>Оформление</b><div class="muted small">«Как в системе» — PULSE повторяет светлое или тёмное оформление компьютера.</div></div>
+  <div><h2>Оформление</h2><div class="muted small">«Как в системе» — PULSE повторяет светлое или тёмное оформление компьютера.</div></div>
   <form method="post" action="/settings/theme" class="seg">{% for key, title in themes.items() %}<button name="theme" value="{{ key }}" class="{{ 'active' if theme == key }}">{{ title }}</button>{% endfor %}</form>
 </div></section>
 
+{% elif tab == 'updates' %}
 <section class="card" id="updates"><div class="card-h"><h2>Обновления PULSE</h2>
   {% if upd.checked_at %}<span class="muted small">проверено {{ upd.checked_at | ago }}</span>{% endif %}</div>
 <div class="card-b">
@@ -674,4 +696,6 @@
   </ul>
 </section>
 {% endif %}
+</div>
+</div>
 {% endblock %}

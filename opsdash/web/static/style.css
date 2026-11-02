@@ -1523,3 +1523,43 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .jr-job { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); font-size: 15px; }
 .jr-off { margin: 0; padding: 10px 20px; border-bottom: 1px solid var(--line); }
 @media (max-width: 1000px) { .jr { grid-template-columns: minmax(0, 1fr); } }
+
+/* Настройки 2.0: подменю слева 220px */
+.settings { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: start; }
+.subnav { display: grid; gap: 2px; position: sticky; top: 20px; }
+.subnav > a, .subnav-sub > a { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; border-radius: 8px; color: var(--text); }
+.subnav > a { padding: 8px 10px; font-size: 15px; }
+.subnav a:hover { background: var(--panel); text-decoration: none; }
+.subnav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.subnav-n { font-size: 13px; color: var(--muted); font-weight: 400; white-space: nowrap; }
+.subnav-sub { display: grid; gap: 0; margin: 2px 0 4px 14px; border-left: 2px solid var(--line); }
+.subnav-sub > a { padding: 5px 10px 5px 14px; font-size: 14px; border-radius: 0 8px 8px 0; margin-left: -2px; border-left: 2px solid transparent; }
+.subnav-sub > a.active { border-left-color: var(--accent); }
+.subnav-sep { height: 1px; background: var(--line); margin: 10px 10px; }
+.settings-b { min-width: 0; }
+.settings-b > .card:first-child { margin-top: 0; }
+.form-row.two > div { flex: 1 1 260px; }
+.time-range { display: flex; align-items: center; gap: 10px; }
+.time-range input { width: 130px; }
+.days { display: flex; gap: 6px; flex-wrap: wrap; }
+.wday { margin: 0; flex: none; }
+.wday input { position: absolute; opacity: 0; width: 0; height: 0; }
+.wday span { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--line-strong); border-radius: 8px;
+  font-size: 14px; font-weight: 400; color: var(--muted); cursor: pointer; }
+.wday input:checked + span { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.wday input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.more-f { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.more-f > summary { cursor: pointer; font-size: 15px; }
+.theme-row h2 { font-size: 16px; }
+@media (max-width: 1000px) { .settings { grid-template-columns: minmax(0, 1fr); } .subnav { position: static; } }
+
+/* Справка 2.0 */
+.help-doc { max-width: 760px; padding: 24px 32px; }
+.help-doc .doc { font-size: 16px; line-height: 1.6; }
+.help-doc .doc h1 { font-size: 24px; margin-top: 0; }
+.help-doc .doc h2 { font-size: 19px; margin-top: 28px; scroll-margin-top: 16px; }
+.help-doc .doc pre { position: relative; background: var(--bg); border-radius: 8px; padding: 12px 14px; }
+.help-doc .doc pre code { background: none; padding: 0; }
+.copy-code { position: absolute; top: 6px; right: 6px; }
+.help-hit { margin: 0 0 10px; font-size: 15px; }
+.help-page .subnav-sub > a { white-space: normal; }

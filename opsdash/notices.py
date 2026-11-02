@@ -160,5 +160,5 @@ def summary(name: str, args: dict, result: str, error: str | None) -> dict | Non
             if m:
                 return done("Claude ответил", f"«{m['title']}»", f"/ask/{m['id']}")
     elif name == "update":
-        return done("PULSE обновлён", result, "/settings?tab=general#updates")
+        return done("PULSE обновлён", result, "/settings?tab=updates")
     return None

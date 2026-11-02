@@ -214,7 +214,7 @@ def test_chat_list_sorted_by_last_message_and_saved_instantly(client):
     store.upsert_chat("telegram", "3", "Вера", "private")
     store.upsert_chat("telegram", "2", None, None, last_ts="2026-10-01T00:00:00+00:00")  # старее — не затирает
     page = client.get("/settings?tab=telegram").text
-    assert "Telegram <span class=\"tab-note\">(личный аккаунт)</span>" in page and "(уведомления)" in page
+    assert 'title="Telegram (личный аккаунт)"' in page and 'title="Telegram-бот (уведомления)"' in page  # подменю
     assert page.index("Борис") < page.index("«Альфа» чат") < page.index("Вера")  # свежие сверху, без сообщений — внизу
     assert 'data-kind="private">Личные <span class="muted" data-kind-count="private">2</span>' in page  # фильтр по типу
     assert 'data-kind="bot"' not in page.split("<table")[0]  # ботов нет — и кнопки «Боты» нет

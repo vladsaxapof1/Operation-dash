@@ -121,7 +121,7 @@ def test_scheduler_checks_daily_and_settings_page(tmp_path, repo, monkeypatch):
     monkeypatch.setattr(config, "APP_DIR", install(tmp_path))
     updates.check(transport=github())
     client = TestClient(app, base_url="http://localhost:8765")
-    page = client.get("/settings?tab=general").text
+    page = client.get("/settings?tab=updates").text
     assert "Обновления PULSE" in page and f"Доступна новая версия {NEW[:7]}" in page and "Доска задач: узкий экран" in page
     assert "● Доступно обновление" in client.get("/").text  # в меню на любой странице
 

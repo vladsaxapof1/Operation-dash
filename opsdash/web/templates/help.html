@@ -1,8 +1,28 @@
 {% extends "base.html" %}
 {% block title %}Справка{% endblock %}
 {% block content %}
-<div class="tabs">
-  {% for d in docs %}<a href="/help/{{ d.slug }}" class="{{ 'active' if d.slug == slug }}">{{ d.title }}</a>{% endfor %}
+{#- Справка (5.18): подменю слева — разделы, у открытого — его оглавление; текст карточкой до 760px. Тексты docs/ не меняем #}
+<div class="topline">
+  <div><h1>Справка</h1><p class="sub">Как установить, подключить и пользоваться PULSE</p></div>
+  <form method="get" class="inline"><input type="search" name="q" value="{{ q }}" placeholder="Поиск по справке" class="tb-search wide" aria-label="Поиск по справке"></form>
 </div>
-<section class="card"><div class="card-b" style="padding-top:16px"><div class="doc">{{ body | safe }}</div></div></section>
+<div class="settings help-page">
+  <nav class="subnav" aria-label="Разделы справки">
+    {% for d in docs %}
+    {% if loop.last and d.slug.startswith('06') %}<div class="subnav-sep"></div>{% endif %}
+    <a href="/help/{{ d.slug }}" class="{{ 'active' if d.slug == slug and not q }}"><span>{{ d.title }}</span>{% if d.slug.startswith('06') %}<span class="subnav-n">{{ version }}</span>{% endif %}</a>
+    {% if d.slug == slug and toc and not q %}<div class="subnav-sub">{% for t in toc %}<a href="#{{ t.id }}"><span>{{ t.title }}</span></a>{% endfor %}</div>{% endif %}
+    {% endfor %}
+  </nav>
+  <div class="settings-b">
+    {% if q %}
+    <section class="card help-doc"><h2>Поиск «{{ q }}»</h2>
+      {% for h in hits %}<p class="help-hit"><a href="/help/{{ h.slug }}">{{ h.doc }}</a> — {{ h.line }}</p>
+      {% else %}<p class="muted">Ничего не нашлось. <a href="/help">Вся справка</a></p>{% endfor %}
+    </section>
+    {% else %}
+    <section class="card help-doc"><div class="doc" data-help-doc>{{ body | safe }}</div></section>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

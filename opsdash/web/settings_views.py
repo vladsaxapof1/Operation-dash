@@ -13,6 +13,7 @@ from opsdash import config, store
 
 TABS = [
     ("general", "Основное"),
+    ("updates", "Обновления"),
     ("connections", "Подключения"),
     ("telegram", "Telegram"),
     ("bot", "Telegram-бот"),
@@ -54,6 +55,27 @@ def connection_rows(settings: dict) -> tuple[list[dict], dict]:
         rows.append({"tab": tab, "title": title, "what": what, **best,
                      "service": best["title"] if len(keys) > 1 and best["status"] != "off" else ""})
     return rows, health.get("claude") or {}
+
+
+def settings_menu(settings: dict) -> list[dict]:
+    """Подменю Настроек (3.10): пункты и вложенные источники с «есть / нет»; разделитель перед системными."""
+    from opsdash import __version__
+
+    subs = []
+    for tab, title, keys, _ in CONNECTIONS:
+        on = any(settings["telegram_bot" if k == "bot" else k].get("enabled") for k in keys)
+        subs.append({"tab": tab, "title": title, "on": on})
+    on = sum(s["on"] for s in subs)
+    menu = [{"tab": "general", "title": "Основное"},
+            {"tab": "connections", "title": "Подключения", "note": f"{on} из {len(subs)}", "subs": subs},
+            {"tab": "recordings", "title": "Записи встреч"}, {"tab": "schedule", "title": "Расписание"},
+            {"tab": "autonomy", "title": "Автономия"}, {"tab": "claude", "title": "Claude"}, {"tab": "office", "title": "Офис"}]
+    if config.section_on("docs", settings):
+        menu.append({"tab": "knowledge", "title": "Документы"})
+    archived = sum(not config.section_on(n, settings) for n in config.SECTIONS)
+    menu += [{"sep": True}, {"tab": "updates", "title": "Обновления", "note": __version__},
+             {"tab": "archive", "title": "Архивные разделы", "note": str(archived) if archived else ""}]
+    return menu
 
 
 def archive_rows(settings: dict) -> list[dict]:
@@ -144,7 +166,8 @@ def register(app: FastAPI, render, back) -> None:
             ctx["efforts"] = chat.EFFORTS
         if tab == "connections":
             ctx["connections"], ctx["claude_health"] = connection_rows(settings)
-        if tab == "general":
+        ctx["menu"] = settings_menu(settings)
+        if tab == "updates":
             from opsdash import updates
 
             ctx["upd"], ctx["installed"] = updates.last_check(), updates.installed()
@@ -263,12 +286,12 @@ def register(app: FastAPI, render, back) -> None:
         repo = repo.strip().removeprefix("https://github.com/").strip("/").removesuffix(".git")
         if repo and not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
             return back(request, err="Репозиторий — в виде «владелец/название», например vladsaxapof1/Operation-dash",
-                        to="/settings?tab=general#updates")
+                        to="/settings?tab=updates")
         config.update_settings("updates", {"repo": repo, "branch": branch.strip() or "main",
                                            "auto_check": checkbox(auto_check)})
         if token.strip():
             config.set_secret("GITHUB_TOKEN", token.strip())
-        return back(request, "Сохранено", to="/settings?tab=general#updates")
+        return back(request, "Сохранено", to="/settings?tab=updates")
 
     # --- Telegram (аккаунт) ---
 
