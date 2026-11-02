@@ -206,16 +206,6 @@
         }
         return;
       }
-      var reveal = t.closest("[data-reveal]");  // «+ связь», «+ пункты»: форма под строкой связей
-      if (reveal) {
-        var pane = document.getElementById(reveal.dataset.reveal);
-        if (pane) {
-          pane.hidden = !pane.hidden;
-          var field = !pane.hidden && pane.querySelector("input[type=text]");
-          if (field) field.focus();
-        }
-        return;
-      }
       if ((t === dlg && pressedOn === dlg) || t.closest("[data-dlg-close]")) dlg.close();
       else if (t.closest("[data-dlg-edit]")) { closeMenus(); showTask(dlg, true); }
       else if (t.closest("[data-dlg-view]")) showTask(dlg, false);
@@ -242,6 +232,36 @@
       e.target.click();
     }
     if (e.key === "Escape") closeMenus();
+  });
+
+  // раскрывашки [data-reveal]: «+ связь», «+ пункты» в окне задачи, черновик ответа и напоминание в ленте Сводки
+  document.addEventListener("click", function (e) {
+    var reveal = e.target.closest("[data-reveal]");
+    if (!reveal) return;
+    var pane = document.getElementById(reveal.dataset.reveal);
+    if (!pane) return;
+    e.preventDefault();
+    pane.hidden = !pane.hidden;
+    var field = !pane.hidden && pane.querySelector("input[type=text], textarea");
+    if (field) field.focus();
+  });
+
+  // лента «Нужно от вас»: фильтр по типу — подтвердить, ответить, напомнить
+  document.querySelectorAll("[data-feed-filter]").forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      var kind = chip.dataset.feedFilter;
+      document.querySelectorAll("[data-feed-filter]").forEach(function (c) { c.classList.toggle("active", c === chip); });
+      document.querySelectorAll(".frow[data-kind]").forEach(function (row) { row.hidden = !!kind && row.dataset.kind !== kind; });
+    });
+  });
+
+  // закрываемые подсказки: «×» прячет и запоминает (cookie на год)
+  document.querySelectorAll("[data-dismiss-btn]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var box = b.closest("[data-dismiss]");
+      box.hidden = true;
+      document.cookie = box.dataset.dismiss + "=1; path=/; max-age=31536000; samesite=lax";
+    });
   });
 
   // меню «…» и панель «Фильтр»: открыто одно, закрываются кликом мимо

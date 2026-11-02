@@ -626,6 +626,29 @@
       haiku для сообщений и дайджестов заметно экономнее.</div>
   </div>
 </section>
+{% elif tab == 'connections' %}
+{#- Подключения (5.17): все источники одной таблицей — статус точкой и фактом, что даёт, «Подключить / Настроить» #}
+{% set on = connections | rejectattr('status', 'equalto', 'off') | list | length %}
+<section class="card">
+  <div class="card-h"><h2>Подключения</h2>
+    <span class="muted small">подключено {{ on }} из {{ connections | length }} · Claude: <span class="{{ 'bad-text' if claude_health.status == 'error' else 'ok-text' }}">{{ claude_health.note }}</span>{% if claude_health.status == 'error' %} · <a href="/settings?tab=claude">настроить Claude</a>{% endif %}</span></div>
+  <ul class="list conn-list">
+    {% for r in connections %}
+    <li class="conn-row">
+      <div><div class="conn-name">{{ r.title }}</div>
+        <div class="st small {{ 'ok' if r.status == 'ok' else ('bad' if r.status == 'error' else '') }}"><span class="dot {{ 'ok' if r.status == 'ok' else ('bad' if r.status == 'error' else ('warn' if r.status == 'pending' else 'off')) }}"></span>
+          {%- if r.status == 'off' %}<span class="muted">не подключено</span>
+          {%- elif r.status == 'error' %}<span title="{{ r.error }}">{{ r.note or 'ошибка' }}</span>
+          {%- elif r.status == 'pending' %}<span class="muted">{{ r.note or 'ожидает первого сбора' }}</span>
+          {%- else %}{{ r.note or 'подключено' }}{% if r.last_ok %}, обновлено {{ r.last_ok | ago }}{% endif %}{% if r.service %} · {{ r.service }}{% endif %}{% endif %}</div></div>
+      <div class="conn-what">{{ r.what }}</div>
+      <a class="btn" href="/settings?tab={{ r.tab }}">{{ 'Подключить' if r.status == 'off' else 'Настроить' }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+<p class="muted small">Порядок подключения, если с нуля: Telegram-бот → Kaiten → Telegram → почта → календарь. Пошагово — в <a href="/help/02-подключения">справке</a>.</p>
+
 {% elif tab == 'archive' %}
 {#- архивные разделы (PULSE 2.0): выключены целиком — нет в меню, страницы не открываются, задания не запускаются #}
 <section class="card">

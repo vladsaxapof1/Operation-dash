@@ -185,7 +185,7 @@ def test_pages_show_briefs_reminders_workload_followup(client, monkeypatch):
     briefs.save("ev-1", "## Вопросы к встрече\n1. **Что** с планом?", topic="Продажи")
 
     home = client.get("/").text
-    assert "Напомните коллегам" in home and "https://t.me/petr" in home and "договаривались на сегодня" in home
+    assert "Напомнить · срок сегодня" in home and "https://t.me/petr" in home and "договаривались на сегодня" in home
     assert 'class="ev-ok"' in home and "Открыть бриф" in home and "• **" not in home and "1. Что с планом?" in home
     week = client.get("/calendar").text
     assert 'class="ev-ok"' in week and 'class="dlg dlg-brief"' in week

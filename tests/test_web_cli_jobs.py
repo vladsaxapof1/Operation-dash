@@ -31,7 +31,7 @@ def test_all_pages_render_with_demo(client):
         r = client.get(url)
         assert r.status_code == 200, url
     home = client.get("/").text
-    assert "Ждут вашего «да»" in home and "Ирина" in home and "Запуск склада Казань" in home
+    assert "Нужно от вас" in home and "Подтвердить · 4" in home and "Ирина" in home and "Запуск склада Казань" in home
     # демо-проект: цепочка «ждёт», пункты, дубль на подтверждение
     listing = client.get("/commitments?view=projects").text
     assert "Запуск склада в Казани" in listing and "можно делать" in listing
@@ -272,8 +272,8 @@ def test_sources_card_bot_and_claude(client, monkeypatch, settings_with):
 
     monkeypatch.setattr(brain, "find_claude", lambda *a, **k: "/x/claude")
     monkeypatch.setattr(brain, "login_status", lambda *a, **k: {"loggedIn": False})
-    home = client.get("/").text
-    assert "нужен вход" in home and "подключён" in home and "ожидает" not in home
+    page = client.get("/settings?tab=connections").text  # источники и Claude — в Настройки → Подключения
+    assert "нужен вход" in page and "подключён" in page and "ожидает" not in page
     monkeypatch.setattr(brain, "login_status", lambda *a, **k: {"loggedIn": True})
     assert {h["key"]: h for h in overview.sources_health()}["claude"]["status"] == "ok"
 

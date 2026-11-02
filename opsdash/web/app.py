@@ -15,7 +15,7 @@ import re
 import shutil
 import sys
 import threading
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -221,9 +221,9 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["pending_count"] = store.scalar("SELECT COUNT(*) FROM proposals WHERE status='pending'") or 0
     ctx["attention_count"] = store.scalar("SELECT COUNT(*) FROM attention WHERE status='open'") or 0
     ctx["new_tasks_count"] = records.unseen_count()
-    # меню: сколько ждёт в «Нужно от вас» (подтвердить, ответить) и есть ли срочное; сколько задач в работе
-    ctx["feed_count"] = ctx["pending_count"] + ctx["attention_count"]
-    ctx["feed_urgent"] = bool(store.scalar("SELECT 1 FROM attention WHERE status='open' AND priority='high' LIMIT 1"))
+    # меню: сколько ждёт в «Нужно от вас» (подтвердить, ответить, напомнить) и есть ли срочное; сколько задач в работе
+    feed = ctx.get("feed") or needs_from_you()
+    ctx["feed_count"], ctx["feed_urgent"] = feed["total"], feed["urgent"]
     ctx["tasks_count"] = records.active_count()
     ctx["sections_on"] = {name: config.section_on(name, settings) for name in config.SECTIONS}  # архивные — не в меню
     ctx["needs_setup"] = not any(settings[s].get("enabled")
@@ -447,22 +447,85 @@ def api_status(waiting: int = 0):
 
 # --- главная --------------------------------------------------------------------
 
+WEEKDAYS_FULL = ("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье")
+MONTHS_GEN = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября",
+              "ноября", "декабря")
+
+
+def needs_from_you(snap: dict | None = None) -> dict:
+    """«Нужно от вас» (5.1): всё, что ждёт директора, одной лентой — подтвердить, ответить, напомнить. Срочное и
+    просроченное сверху, потом подтверждения, ответы, напоминания, карточки Kaiten без движения."""
+    from opsdash.sources import kaiten
+
+    settings = config.load_settings()
+    props = snap["proposals"] if snap else proposals.list_proposals("pending")
+    attention = snap["attention"] if snap else records.list_attention("open")
+    stale = snap["stale"] if snap else kaiten.stale_cards(settings)
+    reminders = records.reminders()
+    items: list[dict] = []
+    for a in attention:
+        items.append({"kind": "answer", "a": a, "urgent": a["priority"] == "high",
+                      "order": 0 if a["priority"] == "high" else (3 if a["priority"] == "low" else 2)})
+    for c in reminders:
+        items.append({"kind": "remind", "c": c, "urgent": c["overdue"], "order": 0 if c["overdue"] else 4})
+    batches: dict[str, list] = {}
+    for p in props:
+        batches.setdefault(p["batch"] or f"single:{p['id']}", []).append(p)
+    for batch, group in batches.items():
+        if len(group) > 1:
+            items.append({"kind": "confirm", "batch": batch, "group": group, "urgent": False, "order": 1})
+        else:
+            items.append({"kind": "confirm", "p": group[0], "urgent": False, "order": 1})
+    for k in stale:
+        items.append({"kind": "remind", "kaiten": k, "urgent": False, "order": 5})
+    items.sort(key=lambda i: i["order"])
+    counts = {"confirm": len(props), "answer": len(attention), "remind": len(reminders) + len(stale)}
+    return {"items": items, "counts": counts, "total": sum(counts.values()), "urgent": any(i["urgent"] for i in items)}
+
+
+def _next_collect(settings: dict) -> datetime | None:
+    """Когда PULSE в следующий раз соберёт сообщения и встречи — для строки «Следующий сбор в …»."""
+    sch, best = settings["schedule"], None
+    for src, minutes in (("telegram", sch["collect_minutes"]), ("ymessenger", sch["collect_minutes"]),
+                         ("pachca", sch["collect_minutes"]), ("mail", sch["collect_minutes"]),
+                         ("gmail", sch["collect_minutes"]), ("calendar", sch["calendar_minutes"]),
+                         ("google_calendar", sch["calendar_minutes"]), ("kaiten", sch["kaiten_minutes"])):
+        if not settings[src].get("enabled"):
+            continue
+        last = store.parse_ts((store.row("SELECT last_run FROM jobs WHERE name=?", (f"collect:{src}",)) or {}).get("last_run"))
+        due = last + timedelta(minutes=minutes) if last else datetime.now(config.tz(settings))
+        best = due if best is None or due < best else best
+    return best.astimezone(config.tz(settings)) if best else None
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    from opsdash import task_meetings
+    from opsdash import notices, task_meetings
 
+    settings = config.load_settings()
     snap = overview.snapshot()
-    feed = store.rows("SELECT * FROM outbox ORDER BY id DESC LIMIT 8")
-    batches: dict[str, list] = {}
-    for p in snap["proposals"]:
-        batches.setdefault(p["batch"] or "", []).append(p)
-    overdue = len([c for c in snap["mine"] + snap["to_me"] if c["overdue"]])
-    records.add_links(snap["mine"][:6] + snap["to_me"][:6])  # кнопка «↗ Telegram» у задач на сводке
+    feed = needs_from_you(snap)
+    meeting_ids = {i["batch"][8:] for i in feed["items"] if i.get("batch", "").startswith("meeting:")}
+    meetings = {m["id"]: m for m in store.rows(
+        f"SELECT id, title, started_at FROM meetings WHERE id IN ({','.join('?' * len(meeting_ids))})",
+        list(meeting_ids))} if meeting_ids else {}
     day = overview.day_grid()
     briefs.for_events(day["events"])
     task_meetings.for_events(day["events"])
-    return render(request, "home.html", nav="home", s=snap, feed=feed, batches=batches, overdue=overdue,
-                  describe=proposals.describe, day=day, reminders=records.reminders())
+    now = snap["now"]
+    timed = [e for e in day["events"] if not e["all_day"]]
+    busy_min = sum(int((e["e_local"] - e["s_local"]).total_seconds() // 60) for e in timed if e.get("e_local"))
+    left = [e for e in timed if (e.get("e_local") or e["s_local"]) > now]
+    end_h, end_m = (int(x) for x in (settings["owner"]["work_hours"].get("end") or "20:00").split(":"))
+    start_h, start_m = (int(x) for x in (settings["owner"]["work_hours"].get("start") or "09:00").split(":"))
+    work_left = int((now.replace(hour=end_h, minute=end_m, second=0, microsecond=0) - now).total_seconds() // 60)
+    before_start = now.hour * 60 + now.minute < start_h * 60 + start_m
+    return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings,
+                  describe=proposals.describe, day=day, busy_min=busy_min, left=left, work_left=work_left,
+                  before_start=before_start, work_start=f"{start_h:02d}:{start_m:02d}",
+                  weekday=WEEKDAYS_FULL[now.weekday()], date_text=f"{now.day} {MONTHS_GEN[now.month - 1]}",
+                  log=[n for n in notices.recent(limit=8) if n["level"] != "bad"][:4],
+                  next_collect=_next_collect(settings), hide_setup=request.cookies.get("hide_setup") == "1")
 
 
 @app.post("/refresh")

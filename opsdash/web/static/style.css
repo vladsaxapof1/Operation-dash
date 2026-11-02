@@ -1209,3 +1209,59 @@ a.task:hover { text-decoration: none; }
 @media (max-width: 1000px) { .kboard-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .kboard-cols { grid-template-columns: minmax(0, 1fr); } }
 .page-tasks .tb-search { width: 170px !important; }
+
+/* Сводка 2.0: лента «Нужно от вас» слева, день и «Пока вас не было» справа */
+.home { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+.home-main { flex: 999 1 560px; min-width: 0; }
+.home-side { flex: 1 1 320px; max-width: 340px; display: grid; gap: 22px; }
+.home-top .btn .ico { color: var(--muted); }
+.feed-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+.feed-h h2 { margin-right: 4px; }
+.feed-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.feed { overflow: visible; margin-bottom: 0; }
+.frow { display: flex; gap: 16px; align-items: flex-start; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+.frow[hidden] { display: none; }
+.frow-ico { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); }
+.frow.urgent .frow-ico { background: var(--bad-soft); color: var(--bad-text); }
+.frow-b { flex: 1; min-width: 0; }
+.frow-t { font-size: 14px; color: var(--muted); }
+.frow.urgent .frow-t { color: var(--bad-text); }
+.frow-t.warn-text { color: var(--warn-text); }
+.frow-title { margin: 2px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: var(--text); text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.frow-title a { color: var(--text); }
+.frow-title a:hover { color: var(--accent); }
+.frow-titles { margin: 4px 0 0; padding-left: 18px; font-size: 15px; font-weight: 600; line-height: 1.45; }
+.frow-x { margin: 4px 0 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.frow-pane { margin-top: 12px; display: grid; gap: 10px; }
+.frow-pane[hidden] { display: none; }
+.frow-pane p { margin: 0; }
+.frow-props { border: 1px solid var(--line); border-radius: 10px; }
+.frow-props > li { padding: 10px 14px; }
+.frow-act { flex: none; display: flex; gap: 8px; align-items: center; }
+.feed-foot { padding: 16px 22px; font-size: 14px; color: var(--muted); }
+.today { margin: 0; padding-bottom: 8px; }
+.today-h { display: flex; align-items: baseline; gap: 8px; padding: 16px 20px 6px; flex-wrap: wrap; }
+.today-h h2 { font-size: 17px; }
+.today-h .muted { font-size: 13px; }
+.today-h { flex-wrap: nowrap; white-space: nowrap; }
+.today .day { padding: 6px 16px 10px 0; }
+.away h3 { margin: 0 0 10px; }
+.away p { margin: 0 0 10px; font-size: 15px; line-height: 1.45; }
+.alert-x-wrap { position: relative; padding-right: 44px; }
+.alert-x { position: absolute; top: 9px; right: 10px; width: 28px; height: 28px; border: 0; border-radius: 6px; background: none;
+  color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.alert-x:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+@media (max-width: 1000px) { .home-side { max-width: none; } }
+@media (max-width: 760px) {
+  .frow { padding: 14px 14px; gap: 12px; flex-wrap: wrap; }
+  .frow-ico { width: 30px; height: 30px; }
+  .frow-act { width: 100%; padding-left: 42px; }
+}
+
+/* Настройки → Подключения */
+.conn-row { display: grid; grid-template-columns: 190px minmax(0, 1fr) auto; gap: 16px; align-items: center; }
+.conn-name { font-size: 15px; }
+.conn-row .st { white-space: normal; align-items: baseline; }
+.conn-what { font-size: 14px; color: var(--muted); }
+@media (max-width: 760px) { .conn-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } .conn-row .btn { justify-self: start; } }

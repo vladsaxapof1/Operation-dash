@@ -1,158 +1,179 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
 {% block title %}Сводка{% endblock %}
 {% block content %}
-<div class="topline">
+{% macro loop_id(it) -%}{{ it.batch | replace(':', '-') | replace(' ', '-') | replace('|', '-') }}{%- endmacro %}
+{% macro feed_row(it) %}
+{#- строка ленты: значок типа, «тип · срочность», название, одна строка контекста; справа одна кнопка и «…».
+    Кнопка раскрывает под строкой черновик ответа или текст напоминания #}
+{% set k = it.kind %}
+<article class="frow{{ ' urgent' if it.urgent }}" data-kind="{{ k }}">
+  <span class="frow-ico" aria-hidden="true">{{ icons.icon({'answer': 'inbox', 'remind': 'journal', 'confirm': 'check'}[k], 18) }}</span>
+  <div class="frow-b">
+  {% if k == 'answer' %}{% set a = it.a %}
+    <div class="frow-t">Ответить{% if a.priority == 'high' %} · срочно{% elif a.priority == 'low' %} · не к спеху{% endif %}</div>
+    <h3 class="frow-title">{{ a.summary }}</h3>
+    <p class="frow-x">{{ a.sender_name or a.chat_title }} · {{ SOURCE_TITLES.get(a.source, a.source or '') }}{% if a.chat_title and a.chat_title != a.sender_name %}, {{ a.chat_title }}{% endif %} · {{ a.msg_ts | ago if a.msg_ts else a.created | ago }}{% if a.draft %} · черновик: «{{ a.draft | truncate(110, True, '…') }}»{% endif %}{% if a.done_hint %} · <span class="ok-text">похоже, вы уже ответили</span>{% endif %}</p>
+    <div class="frow-pane" id="att-{{ a.id }}" data-copy-scope hidden>
+      {% if a.why %}<p class="muted small">Почему важно: {{ a.why }}</p>{% endif %}
+      {% if a.msg_text %}<blockquote class="dlg-quote">{{ a.msg_text[:400] }}{% if a.msg_text | length > 400 %}…{% endif %}</blockquote>{% endif %}
+      {% if a.draft %}<div class="draft" data-copy>{{ a.draft }}</div>{% endif %}
+      {% if a.done_hint %}{% set h = a.done_hint %}<div class="dlg-hint"><div><b>Похоже, вы уже ответили.</b> {{ h.reason }}</div>
+        <div class="actions"><form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm">Да, убрать</button></form><form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm ghost">Нет, ещё не ответила</button></form></div></div>{% endif %}
+      <div class="actions">
+        {% if a.draft %}<button type="button" class="btn sm" data-copy-btn>Копировать ответ</button>{% endif %}
+        {% if a.orig_url %}<a class="btn sm" href="{{ a.orig_url }}" target="_blank" rel="noopener">↗ {{ a.orig_label }}</a>{% endif %}
+        <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">{{ icons.icon('check', 14) }} Ответила</button></form>
+      </div>
+    </div>
+  </div>
+  <div class="frow-act">
+    {% if a.draft %}<button type="button" class="btn{{ ' primary' if a.priority == 'high' }}" data-reveal="att-{{ a.id }}">Ответить</button>
+    {% elif a.orig_url %}<a class="btn{{ ' primary' if a.priority == 'high' }}" href="{{ a.orig_url }}" target="_blank" rel="noopener">{{ 'Открыть письмо' if a.source in ('mail', 'gmail') else 'Открыть чат' }}</a>
+    {% else %}<button type="button" class="btn" data-reveal="att-{{ a.id }}">Подробнее</button>{% endif %}
+    {% call ui.menu() %}
+      <button type="button" class="menu-i" data-reveal="att-{{ a.id }}">Показать сообщение</button>
+      <form method="post" action="/attention/{{ a.id }}/done"><button class="menu-i">Ответила</button></form>
+      <form method="post" action="/attention/{{ a.id }}/dismiss"><button class="menu-i">Скрыть</button></form>
+      <a class="menu-i" href="/inbox">Вся переписка</a>
+    {% endcall %}
+  </div>
+  {% elif k == 'remind' and it.c %}{% set c = it.c %}
+    <div class="frow-t">Напомнить · {% if c.overdue %}просрочено на {{ -c.due_days }} {{ plural(-c.due_days, 'день', 'дня', 'дней') }}{% elif c.due_days == 0 %}срок сегодня{% else %}срок завтра{% endif %}</div>
+    <h3 class="frow-title"><a href="/commitments?task={{ c.id }}">{{ c | headline }}</a></h3>
+    <p class="frow-x">{{ c.who }} · срок {{ 'был ' if c.overdue }}{{ c.due | date }}{% if c.reminded_at %} · напоминали {{ c.reminded_at | ago }}{% endif %} · напоминание готово</p>
+    <div class="frow-pane" id="rem-{{ c.id }}" hidden>{{ ui.remind_form(c) }}</div>
+  </div>
+  <div class="frow-act">
+    <button type="button" class="btn{{ ' primary' if c.overdue }}" data-reveal="rem-{{ c.id }}">{{ 'Напомнить в Telegram' if c.remind and c.remind.to else 'Напомнить' }}</button>
+    {% call ui.menu() %}
+      <a class="menu-i" href="/commitments?task={{ c.id }}">Открыть задачу</a>
+      <form method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="menu-i">Уже сделано — закрыть</button></form>
+    {% endcall %}
+  </div>
+  {% elif k == 'remind' %}{% set kc = it.kaiten %}
+    <div class="frow-t warn-text">Напомнить · Kaiten · {{ kc.idle_days }} дн. без движения</div>
+    <h3 class="frow-title"><a href="{{ kc.url }}" target="_blank" rel="noopener">{{ kc.title }} ↗</a></h3>
+    <p class="frow-x">{{ kc.responsible_name or 'без исполнителя' }} · «{{ kc.column_title }}» · {{ kc.space_title }} / {{ kc.board_title }}{% if kc.due_date %} · срок {{ kc.due_date[:10] | date }}{% endif %}</p>
+  </div>
+  <div class="frow-act">
+    <form class="inline" method="post" action="/tasks/{{ kc.id }}/nudge" data-confirm="Оставить в карточке комментарий-напоминание для исполнителя?"><button class="btn">Напомнить в Kaiten</button></form>
+    {% call ui.menu() %}
+      <form method="post" action="/tasks/{{ kc.id }}/snooze"><input type="hidden" name="days" value="3"><button class="menu-i">Не напоминать 3 дня</button></form>
+      <a class="menu-i" href="{{ kc.url }}" target="_blank" rel="noopener">Открыть в Kaiten ↗</a>
+    {% endcall %}
+  </div>
+  {% elif it.group %}{% set group = it.group %}{% set mid = it.batch[8:] if it.batch.startswith('meeting:') else '' %}{% set m = meetings.get(mid) %}
+    <div class="frow-t">Подтвердить · {{ group | length }} {{ plural(group | length, 'предложение', 'предложения', 'предложений') }}{% if mid %} по встрече{% if m %} <a href="/meetings/{{ mid }}">«{{ m.title or mid }}»</a>{% endif %}{% elif it.batch.startswith('ask:') %} из разговора в Telegram{% endif %}</div>
+    <ul class="frow-titles">{% for p in group %}<li>{{ p.title }}</li>{% endfor %}</ul>
+    {% set reasons = group | map(attribute='reason') | select | unique | list %}
+    <p class="frow-x">{% if reasons | length == 1 %}{{ reasons[0] }} · {% endif %}<button type="button" class="linkish" data-reveal="pb-{{ loop_id(it) }}">посмотреть по одному</button></p>
+    <ul class="frow-pane list frow-props" id="pb-{{ loop_id(it) }}" hidden>{% for p in group %}{{ ui.proposal(p, describe) }}{% endfor %}</ul>
+  </div>
+  <div class="frow-act">
+    <form class="inline" method="post" action="/proposals/batch"><input type="hidden" name="batch" value="{{ it.batch }}"><input type="hidden" name="top" value="{{ group | map(attribute='id') | max }}"><button class="btn primary">Да, все {{ group | length }}</button></form>
+    {% call ui.menu() %}
+      <button type="button" class="menu-i" data-reveal="pb-{{ loop_id(it) }}">Посмотреть по одному</button>
+      <form method="post" action="/proposals/batch" data-confirm="Отклонить все {{ group | length }}?"><input type="hidden" name="batch" value="{{ it.batch }}"><input type="hidden" name="top" value="{{ group | map(attribute='id') | max }}"><input type="hidden" name="action" value="reject"><button class="menu-i">Нет, все</button></form>
+    {% endcall %}
+  </div>
+  {% else %}{% set p = it.p %}
+    {% set d = describe(p).split('\n')[1:] %}
+    <div class="frow-t">Подтвердить{% if p.kind == 'task.merge' %} · похоже на дубль{% elif p.kind == 'task.done' %} · похоже, сделано{% elif p.kind == 'task.wait' %} · связь «ждёт»{% endif %}</div>
+    <h3 class="frow-title">{{ p.title }}</h3>
+    <p class="frow-x">{% if p.reason %}{{ p.reason | truncate(140, True, '…') }}{% endif %}{% for label, url in proposal_links(p) %}{{ ' · ' if p.reason or not loop.first }}<a href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
+      {%- if d | length > 1 or (d and not p.reason) %} · <button type="button" class="linkish" data-reveal="pd-{{ p.id }}">{{ 'почему так думаю' if p.kind == 'task.merge' else 'подробнее' }}</button>{% endif %}</p>
+    <div class="frow-pane muted small" id="pd-{{ p.id }}" hidden>{% for line in d %}<p>{{ line }}</p>{% endfor %}</div>
+  </div>
+  <div class="frow-act">
+    <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn primary">{{ 'Объединить' if p.kind == 'task.merge' else 'Закрыть' if p.kind == 'task.done' else 'Да' }}</button></form>
+    {% call ui.menu() %}
+      <form method="post" action="/proposals/{{ p.id }}/reject"><button class="menu-i">{{ 'Это не дубль' if p.kind == 'task.merge' else 'Нет' }}</button></form>
+    {% endcall %}
+  </div>
+  {% endif %}
+</article>
+{% endmacro %}
+{#- Сводка (5.1): шапка во всю ширину; слева — одна лента «Нужно от вас» (подтвердить, ответить, напомнить) с фильтрами,
+    справа — сегодняшний день часовой сеткой и «Пока вас не было» #}
+<div class="topline home-top">
   <div>
     <h1>{% if s.now.hour < 12 %}Доброе утро{% elif s.now.hour < 18 %}Добрый день{% else %}Добрый вечер{% endif %}{% if s.owner %}, {{ s.owner.split(' ')[0] }}{% endif %}</h1>
-    <div class="muted">{{ s.now.strftime('%d.%m.%Y, %H:%M') }}{% if s.unprocessed %} · {{ s.unprocessed }} {{ plural(s.unprocessed, 'новое сообщение ждёт', 'новых сообщения ждут', 'новых сообщений ждут') }} разбора{% endif %}</div>
+    <p class="sub">{{ weekday }}, {{ date_text }} ·
+      {% if not day.events %}встреч сегодня нет{% elif left %}{{ 'ещё ' if left | length < (day.events | rejectattr('all_day') | list | length) }}{{ left | length }} {{ plural(left | length, 'встреча', 'встречи', 'встреч') }}{% else %}встреч больше нет{% endif %}
+      {%- if before_start %} · рабочий день с {{ work_start }}{% elif work_left > 0 %} · до конца рабочего дня {% if work_left >= 60 %}{{ work_left // 60 }} ч {% endif %}{{ work_left % 60 }} мин{% else %} · рабочий день закончился{% endif %}</p>
   </div>
-  <form method="post" action="/refresh"><button class="btn">↻ Собрать сейчас</button></form>
+  <div class="actions">
+    <a class="btn lg" href="/ask">{{ icons.icon('ask', 16) }}Спросить Claude</a>
+    <form method="post" action="/refresh" class="inline"><button class="btn lg">Собрать сейчас</button></form>
+  </div>
 </div>
 
-{% if needs_setup %}
-<div class="alert info">Источники ещё не подключены. Начните с <a href="/settings?tab=bot">Telegram-бота</a> и <a href="/settings?tab=kaiten">Kaiten</a>, затем — <a href="/settings?tab=telegram">Telegram</a>, <a href="/settings?tab=pachca">Пачка</a>, <a href="/settings?tab=mail">почта</a> и <a href="/settings?tab=calendar">календарь</a>. Пошагово — в <a href="/help/02-подключения">справке</a>.</div>
+{% if needs_setup and not hide_setup %}
+<div class="alert info alert-x-wrap" data-dismiss="hide_setup">Источники ещё не подключены. Начните с <a href="/settings?tab=bot">Telegram-бота</a> и <a href="/settings?tab=kaiten">Kaiten</a>, затем — <a href="/settings?tab=telegram">Telegram</a>, <a href="/settings?tab=pachca">Пачка</a>, <a href="/settings?tab=mail">почта</a> и <a href="/settings?tab=calendar">календарь</a>. Пошагово — в <a href="/help/02-подключения">справке</a>.
+  <button type="button" class="alert-x" data-dismiss-btn aria-label="Скрыть" title="Скрыть">{{ icons.icon('close', 16) }}</button></div>
 {% endif %}
 
-<div class="tiles">
-  <a class="tile {{ 'warn' if s.proposals }}" href="#approvals"><div class="n">{{ s.proposals|length }}</div><div class="l">ждут вашего «да»</div></a>
-  <a class="tile {{ 'bad' if s.attention }}" href="/inbox"><div class="n">{{ s.attention|length }}</div><div class="l">ждут вашего ответа</div></a>
-  <a class="tile {{ 'bad' if overdue }}" href="/commitments"><div class="n">{{ overdue }}</div><div class="l">{{ plural(overdue, 'задача просрочена', 'задачи просрочены', 'задач просрочено') }}</div></a>
-  <a class="tile {{ 'warn' if s.stale }}" href="/tasks"><div class="n">{{ s.stale|length }}</div><div class="l">задач без движения</div></a>
-</div>
-
-<div class="grid">
-  <div>
-    <section class="card" id="approvals">
-      <div class="card-h"><h2>Ждут вашего «да»</h2><span class="muted small">выполнятся только после подтверждения</span></div>
-      <div class="card-b flush">
-        {% if not s.proposals %}<div class="empty">Ничего не ждёт подтверждения.</div>{% endif %}
-        {% for batch, items in batches.items() %}
-          {% if batch %}
-          <div class="row" style="padding: 10px 16px 0">
-            <div class="meta grow">{% if batch.startswith('meeting:') %}По встрече <a href="/meetings/{{ batch[8:] }}">{{ batch[8:] }}</a>{% elif batch.startswith('ask:') %}Из разговора в Telegram{% else %}{{ batch }}{% endif %}</div>
-            {% if items|length > 1 %}
-            <form class="inline" method="post" action="/proposals/batch"><input type="hidden" name="batch" value="{{ batch }}"><input type="hidden" name="top" value="{{ items | map(attribute='id') | max }}"><button class="btn sm ok">Да — все {{ items|length }}</button></form>
-            {% endif %}
-          </div>
-          {% endif %}
-          <ul class="list">{% for p in items %}{{ ui.proposal(p, describe) }}{% endfor %}</ul>
-        {% endfor %}
+<div class="home">
+  <div class="home-main">
+    <div class="feed-h">
+      <h2>Нужно от вас</h2>
+      <div class="feed-filters" role="group" aria-label="Что показать">
+        <button type="button" class="fchip active" data-feed-filter="">Всё · {{ feed.total }}</button>
+        {% for key, t in [('confirm', 'Подтвердить'), ('answer', 'Ответить'), ('remind', 'Напомнить')] if feed.counts[key] %}<button type="button" class="fchip" data-feed-filter="{{ key }}">{{ t }} · {{ feed.counts[key] }}</button>{% endfor %}
       </div>
-    </section>
-
-    <section class="card">
-      <div class="card-h"><h2>Ждут вашего ответа</h2><a class="small" href="/inbox">все →</a></div>
-      <div class="card-b flush">
-        <ul class="list">{% for a in s.attention[:6] %}{{ ui.attention(a) }}{% else %}<li class="empty">Никто не ждёт ответа.</li>{% endfor %}</ul>
-      </div>
-    </section>
-
-    <section class="card" id="remind">
-      <div class="card-h"><h2>Напомните коллегам</h2>{% if reminders %}<span class="chip warn">{{ reminders | length }}</span>{% endif %}<span class="grow"></span><span class="muted small">вам должны: срок сегодня, завтра или прошёл</span></div>
-      <div class="card-b flush">
-        <ul class="list">
-        {% for c in reminders %}
-          <li class="rem">
-            <div class="rem-h"><strong>{{ c.remind.to.label if c.remind.to else c.who }}</strong>
-              <a href="/commitments?task={{ c.id }}" title="{{ c.what }}">{{ c | headline }}</a>{{ ui.due_badge(c) }}</div>
-            {{ ui.remind_form(c, compact=True) }}
-          </li>
-        {% else %}<li class="empty">Напоминать некому: сроков по задачам «мне должны» на сегодня и завтра нет.</li>{% endfor %}
-        </ul>
-      </div>
-    </section>
-
-    <div class="grid-2">
-      <section class="card">
-        <div class="card-h"><h2>Мои задачи</h2><span class="chip">{{ s.mine|length }}</span><span class="grow"></span><a class="small" href="/commitments">доска →</a></div>
-        <div class="card-b flush"><ul class="list">{% for c in s.mine[:6] %}{{ ui.commitment(c, compact=True) }}{% else %}<li class="empty">Открытых задач нет.</li>{% endfor %}</ul></div>
-      </section>
-      <section class="card">
-        <div class="card-h"><h2>Мне должны</h2><span class="chip">{{ s.to_me|length }}</span></div>
-        <div class="card-b flush"><ul class="list">{% for c in s.to_me[:6] %}{{ ui.commitment(c, compact=True) }}{% else %}<li class="empty">Открытых задач нет.</li>{% endfor %}</ul></div>
-      </section>
     </div>
+    <section class="card feed">
+      {% for it in feed['items'] %}{{ feed_row(it) }}{% endfor %}
+      <div class="feed-foot">{% if feed['items'] %}Остальные задачи и договорённости не требуют действий сегодня{% else %}От вас сейчас ничего не ждут{% endif %} · <a href="/commitments">Все {{ tasks_count }} на доске →</a></div>
+    </section>
     {{ ui.task_datalist() }}
     {{ ui.event_datalist() }}
   </div>
 
-  <div>
-    <section class="card">
-      <div class="card-h">
+  <aside class="home-side">
+    <section class="card today">
+      <div class="today-h">
         <h2>Сегодня</h2>
-        {% if day.events %}<span class="chip">{{ day.events | length }} {{ plural(day.events | length, 'встреча', 'встречи', 'встреч') }}</span>{% endif %}
-        <span class="grow"></span>
-        {% if day.next %}<span class="muted small" title="{{ day.next.title }}">следующая через {% if day.next_in >= 60 %}{{ day.next_in // 60 }} ч {% endif %}{{ day.next_in % 60 }} мин</span>{% endif %}
-        <a class="small" href="/calendar">неделя →</a>
+        <span class="muted">{% if day.events %}{{ day.events | length }} {{ plural(day.events | length, 'встреча', 'встречи', 'встреч') }}{% if busy_min %} · {% if busy_min >= 60 %}{{ busy_min // 60 }} ч {% endif %}{% if busy_min % 60 %}{{ busy_min % 60 }} мин{% endif %}{% endif %}{% else %}встреч нет{% endif %}</span>
+        <span class="grow"></span><a class="small" href="/calendar">неделя →</a>
       </div>
       {% set today = day.days[0] %}
       {% if day.allday %}
       <div class="day-allday">{% for a in day.allday %}<button type="button" class="ev ev-allday{{ ' google' if a.ev.google }}" data-ev="{{ a.ev.n }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>{% endfor %}</div>
       {% endif %}
-      {% if today.events %}
+      {% if settings.calendar.enabled or settings.google_calendar.enabled or day.events %}
       <div class="day" style="--hour: {{ day.hour_px }}px">
         <div class="wk-hours">{% for h in day.hours %}<div class="wk-hour"><span>{{ '%02d:00' % h }}</span></div>{% endfor %}</div>
         <div class="day-col" style="height: {{ day.height }}px">
           {% for g in today.events %}
-          {% set who = g.ev.attendees | people(2) %}
           <button type="button" class="ev{{ ' google' if g.ev.google }}{{ ' past' if g.ev.past }}{{ ' now' if g.ev.now }}{{ ' short' if g.short }}" data-ev="{{ g.ev.n }}"
                   style="top: {{ g.top }}px; height: {{ g.height }}px; left: calc({{ '%.4f' % (g.left * 100) }}% + 4px); width: calc({{ '%.4f' % (g.width * 100) }}% - 6px)"
                   title="{{ g.ev.title or 'Без названия' }} · {{ ui.ev_time(g.ev) }}">
-            <span class="ev-t">{{ ui.brief_mark(g.ev) }}{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time">, {{ g.ev.start | local('%H:%M') }}</span>{% endif %}</span>
-            {% if not g.short %}<span class="ev-time">{{ ui.ev_time(g.ev) }}{% if g.ev.now %} · идёт{% endif %}</span>{% endif %}
-            {% if g.tall and who %}<span class="ev-time">{{ who }}</span>{% endif %}
+            <span class="ev-t">{{ ui.brief_mark(g.ev) }}{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time"> · {{ ui.ev_time(g.ev) }}</span>{% endif %}</span>
+            {% if not g.short %}<span class="ev-time">{{ ui.ev_time(g.ev) }}{% if g.ev.past %} · {{ 'разобрана' if g.ev.recorded else 'прошла' }}{% elif g.ev.now %} · идёт{% endif %}</span>{% endif %}
           </button>
           {% endfor %}
           {% if day.now_top is not none %}<div class="day-now" style="top: {{ day.now_top }}px" data-now="{{ day.now_top }}" data-now-min="{{ day.now.hour * 60 + day.now.minute }}"><span data-now-label>{{ day.now.strftime('%H:%M') }}</span></div>{% endif %}
         </div>
       </div>
-      {% elif not day.allday %}
-      <div class="empty">{% if settings.calendar.enabled or settings.google_calendar.enabled %}Встреч нет.{% else %}Календарь не подключён.{% endif %}</div>
+      {% else %}
+      <p class="empty">Календарь не подключён — <a href="/settings?tab=calendar">подключить</a>.</p>
       {% endif %}
       {% for e in day.events %}{{ ui.ev_detail(e) }}{{ ui.brief_dialog(e) }}{% endfor %}
       <div class="ev-pop" hidden data-ev-pop></div>
     </section>
 
-    <section class="card">
-      <div class="card-h"><h2>Без движения в Kaiten</h2><a class="small" href="/tasks">все →</a></div>
-      <div class="card-b flush"><ul class="list">{% for c in s.stale[:5] %}{{ ui.stale_card(c, buttons=False) }}{% else %}<li class="empty">Всё движется.</li>{% endfor %}</ul></div>
+    <section class="away">
+      <h3>Пока вас не было</h3>
+      {% for n in log %}
+      <p>{% if n.link %}<a href="{{ n.link }}">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}{% if n.text %}: {{ n.text }}{% endif %}</p>
+      {% endfor %}
+      {% if s.unprocessed %}<p>{{ s.unprocessed }} {{ plural(s.unprocessed, 'новое сообщение ждёт', 'новых сообщения ждут', 'новых сообщений ждут') }} разбора.</p>{% endif %}
+      {% if not log and not s.unprocessed %}<p class="muted">Ничего нового.</p>{% endif %}
+      <p class="muted small">{% if next_collect %}Следующий сбор в {{ next_collect.strftime('%H:%M') }} · {% endif %}<a href="/journal">журнал</a></p>
     </section>
-
-    <section class="card">
-      <div class="card-h"><h2>Последние встречи</h2><a class="small" href="/meetings">все →</a></div>
-      <div class="card-b flush">
-        <ul class="list">
-        {% for m in s.meetings[:5] %}
-          <li><div class="row"><div class="grow"><a href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>
-            <div class="meta">{{ m.started_at | local }}{% if m.headline %} · {{ m.headline }}{% endif %}</div></div>{{ ui.meeting_status(m) }}</div></li>
-        {% else %}<li class="empty">Записей пока нет — положите файл в папку записей или загрузите на странице «Встречи».</li>{% endfor %}
-        </ul>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-h"><h2>Лента бота</h2></div>
-      <div class="card-b flush">
-        <ul class="list feed">
-        {% for f in feed %}
-          <li><div class="meta">{{ f.created | local }}{% if not f.sent_at %} · <span class="chip warn">не отправлено</span>{% endif %}</div>{{ f.text | tg }}</li>
-        {% else %}<li class="empty">Сообщений пока не было.</li>{% endfor %}
-        </ul>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-h"><h2>Источники</h2><a class="small" href="/settings">настроить →</a></div>
-      <div class="card-b flush">
-        <ul class="list">
-        {% for h in s.health %}
-          <li><div class="row"><div class="grow"><span class="dot {{ h.status }}"></span> {{ h.title }}</div>
-          <div class="meta">{% if h.status == 'off' %}не подключено{% elif h.status == 'error' %}<span style="color:var(--bad)" title="{{ h.error }}">{{ h.note or 'ошибка' }}</span>{% elif h.last_ok %}{{ h.last_ok | ago }}{% else %}{{ h.note or 'ожидает' }}{% endif %}</div></div></li>
-        {% endfor %}
-        </ul>
-      </div>
-    </section>
-  </div>
+  </aside>
 </div>
 {% endblock %}

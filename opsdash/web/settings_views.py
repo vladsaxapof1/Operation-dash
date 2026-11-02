@@ -13,6 +13,7 @@ from opsdash import config, store
 
 TABS = [
     ("general", "Основное"),
+    ("connections", "Подключения"),
     ("telegram", "Telegram"),
     ("bot", "Telegram-бот"),
     ("ymessenger", "Я.Мессенджер"),
@@ -29,6 +30,32 @@ TABS = [
     ("archive", "Архивные разделы"),
 ]
 TAB_NOTES = {"telegram": "личный аккаунт", "bot": "уведомления"}  # приписка серым — чтобы не путать два Telegram
+# Настройки → Подключения (5.17): семь источников — статус, что даёт, куда нажать. Почта и календарь — по два сервиса
+CONNECTIONS = [
+    ("bot", "Telegram-бот", ("bot",), "Уведомления, дайджесты, кнопки «Да/Нет» и вопросы голосом в Telegram"),
+    ("kaiten", "Kaiten", ("kaiten",), "Зеркало отслеживаемых пространств: задачи, карточки без движения"),
+    ("telegram", "Telegram", ("telegram",), "Читать чаты, которые вы разрешите; Claude готовит черновики, отправляете вы"),
+    ("mail", "Почта", ("mail", "gmail"), "Входящие Яндекс Почты или Gmail: просьбы, сроки, вложения"),
+    ("calendar", "Календарь", ("calendar", "google_calendar"), "Яндекс или Google Календарь: встречи в Сводке и Календаре, брифы"),
+    ("pachca", "Пачка", ("pachca",), "Рабочие чаты Пачки — как Telegram"),
+    ("ymessenger", "Я.Мессенджер", ("ymessenger",), "Чаты Яндекс Мессенджера — как Telegram"),
+]
+RANK = {"ok": 3, "error": 2, "pending": 1, "off": 0}
+
+
+def connection_rows(settings: dict) -> tuple[list[dict], dict]:
+    """Строки «Подключений» и состояние Claude: из нескольких сервисов источника — самый «живой»."""
+    from opsdash import overview
+
+    health = {h["key"]: h for h in overview.sources_health(settings)}
+    rows = []
+    for tab, title, keys, what in CONNECTIONS:
+        best = max((health[k] for k in keys if k in health), key=lambda h: RANK[h["status"]])
+        rows.append({"tab": tab, "title": title, "what": what, **best,
+                     "service": best["title"] if len(keys) > 1 and best["status"] != "off" else ""})
+    return rows, health.get("claude") or {}
+
+
 def archive_rows(settings: dict) -> list[dict]:
     """Строки «Архивных разделов»: включён ли, с какого времени в архиве, сколько данных осталось."""
     from opsdash import anthology, docs
@@ -111,6 +138,8 @@ def register(app: FastAPI, render, back) -> None:
                "whisper_models": WHISPER_MODELS, "themes": THEMES}
         if tab == "archive":
             ctx["sections"] = archive_rows(settings)
+        if tab == "connections":
+            ctx["connections"], ctx["claude_health"] = connection_rows(settings)
         if tab == "general":
             from opsdash import updates
 

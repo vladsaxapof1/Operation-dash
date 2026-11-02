@@ -163,14 +163,14 @@ def week_grid(monday: date, settings: dict | None = None, *, ndays: int = 7, hou
     }
 
 
-DAY_HOUR_PX = 44  # высота часа в расписании на сводке
+DAY_HOUR_PX = 36  # высота часа в расписании на сводке (5.1)
 
 
 def day_grid(settings: dict | None = None) -> dict:
     """Сегодня — расписанием, как день в календаре. Всегда видно 9:00–18:00 и текущий час (днём и вечером),
     чтобы линия «сейчас» показывала, что уже прошло, а что впереди."""
     now = config.now(settings)
-    lo, hi = 9, 18
+    lo, hi = 9, 19
     if 7 <= now.hour < 23:
         lo, hi = min(lo, now.hour), max(hi, now.hour + 1)
     grid = week_grid(now.date(), settings, ndays=1, hour_px=DAY_HOUR_PX, hours=(lo, hi))
