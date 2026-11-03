@@ -177,6 +177,46 @@ def test_git_update_sets_aside_untracked_files_and_restores_uv_lock(git_pair):
     assert kept.read_text(encoding="utf-8") == "мой черновик"  # ничего не потеряно
 
 
+@pytest.fixture
+def windows_console(monkeypatch):
+    """Как на Windows у директора: вывод программ Python читает в кодировке системы (cp1251), если не сказать иначе,
+    а Git для Windows на русской системе отвечает по-русски."""
+    import subprocess
+
+    real = subprocess.run
+
+    def run(*args, **kw):
+        if kw.get("text") and not kw.get("encoding"):
+            kw["encoding"] = "cp1251"
+        return real(*args, **kw)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LANGUAGE", "ru")
+
+
+def test_git_update_on_windows_console(git_pair, windows_console):
+    """Было: русское имя файла из вывода git читалось искажённым, файл не откладывался, и после трёх попыток
+    обновление сдавалось с ошибкой про uv.lock."""
+    test_git_update_sets_aside_untracked_files_and_restores_uv_lock(git_pair)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="в Windows имя файла не может кончаться пробелом")
+def test_git_update_names_blocker_it_cannot_set_aside(git_pair):
+    """Файл, который не вышло отложить, — называем его, а не uv.lock."""
+    up, pulse, settings = git_pair
+    (up / "черновик.html ").write_text("из релиза", encoding="utf-8")
+    _sh(up, "add", ".")
+    _sh(up, "commit", "-qm", "v3")
+    (pulse / "черновик.html ").write_text("мой", encoding="utf-8")
+    (pulse / "uv.lock").write_text("пересобрал uv\n", encoding="utf-8")
+    with pytest.raises(updates.UpdateError, match="мешают файлы в папке PULSE: черновик.html"):
+        updates.apply(settings, root=pulse)
+    assert (pulse / "черновик.html ").read_text(encoding="utf-8") == "мой"
+    assert (pulse / "uv.lock").read_text(encoding="utf-8") == "lock v1\n"  # uv.lock вернули: он не мешает
+
+
 def test_git_update_explains_local_edits_and_own_commits(git_pair):
     up, pulse, settings = git_pair
     (pulse / "app.py").write_text("правлю сам\n", encoding="utf-8")

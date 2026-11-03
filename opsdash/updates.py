@@ -250,8 +250,11 @@ cli.start_background()
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
-    # quotePath=false — русские имена файлов в выводе git как есть, а не «\320\241…»
-    return subprocess.run(["git", "-c", "core.quotePath=false", "-C", str(root), *args], capture_output=True, text=True)
+    # quotePath=false — русские имена файлов в выводе git как есть, а не «\320\241…». Читаем вывод как UTF-8 (так
+    # пишет git): иначе Windows прочтёт его в кодировке системы (cp1251) и исказит имена. LC_ALL=C — сообщения
+    # по-английски: по ним _pull понимает, что мешает, а Git для Windows на русской системе отвечает по-русски
+    return subprocess.run(["git", "-c", "core.quotePath=false", "-C", str(root), *args], capture_output=True,
+                          encoding="utf-8", errors="replace", env={**os.environ, "LC_ALL": "C"})
 
 
 def _listed(out: str, marker: str) -> list[str]:
@@ -267,22 +270,27 @@ def _listed(out: str, marker: str) -> list[str]:
     return files
 
 
-def _set_aside(root: Path, files: list[str]) -> Path:
-    """Файлы, которых нет в git, но с теми же именами приходят с обновлением, — в data/backup, не удаляем."""
+def _set_aside(root: Path, files: list[str]) -> list[str]:
+    """Файлы, которых нет в git, но с теми же именами приходят с обновлением, — в data/backup, не удаляем.
+    Возвращает, что удалось отложить."""
     dest = config.DATA_DIR / "backup" / f"update-{datetime.now():%Y%m%d-%H%M%S}"
+    moved = []
     for rel in files:
         src = root / rel
         if src.exists():
             (dest / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dest / rel))
-    store.log("update", f"отложены файлы, которые мешали обновлению: {', '.join(files)} → {dest}", "warning")
-    return dest
+            moved.append(rel)
+    if moved:
+        store.log("update", f"отложены файлы, которые мешали обновлению: {', '.join(moved)} → {dest}", "warning")
+    return moved
 
 
 def _pull(root: Path, branch: str) -> None:
     """git pull --ff-only. Что мешает — разбираем сами, где это безопасно: файлы с теми же именами, которых нет
     в git, откладываем в data/backup; uv.lock (его пересобирает uv) возвращаем как в git. О своих правках
-    в коде и о разошедшейся ветке — говорим по-человечески, ничего не трогая."""
+    в коде и о разошедшейся ветке — говорим по-человечески, ничего не трогая. Файл, который не вышло отложить,
+    называем в ошибке сами — а не uv.lock, который мешал рядом с ним."""
     for attempt in range(3):
         res = _git(root, "pull", "--ff-only", "origin", branch)
         if not res.returncode:
@@ -290,8 +298,7 @@ def _pull(root: Path, branch: str) -> None:
         out = f"{res.stderr or ''}\n{res.stdout or ''}"
         last = attempt == 2
         blocked = _listed(out, "untracked working tree files would be overwritten")
-        if blocked and not last:
-            _set_aside(root, blocked)
+        if blocked and not last and _set_aside(root, blocked):
             continue
         changed = _listed(out, "local changes to the following files would be overwritten")
         if changed and set(changed) <= {"uv.lock"} and not last:
