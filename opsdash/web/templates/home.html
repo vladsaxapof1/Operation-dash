@@ -67,7 +67,7 @@
   {% elif k == 'due' %}{% set due = it.tasks %}
     {#- задачи без срока — одной строкой: «Разобрать» открывает их по одной (ui.due_dialog) #}
     {% set parts = [] %}
-    {% for key, t in [('mine', 'ваших'), ('to_me', 'вам должны'), ('other', 'между коллегами')] %}{% set n = due | selectattr('direction', 'equalto', key) | list | length %}{% if n %}{% set _ = parts.append(t ~ ' — ' ~ n) %}{% endif %}{% endfor %}
+    {% for key, t in [('mine', 'ваших'), ('to_me', 'вам должны')] %}{% set n = due | selectattr('direction', 'equalto', key) | list | length %}{% if n %}{% set _ = parts.append(t ~ ' — ' ~ n) %}{% endif %}{% endfor %}
     <div class="frow-t">Уточнить срок · {{ due | length }} {{ plural(due | length, 'задача', 'задачи', 'задач') }} без срока</div>
     <ul class="frow-titles">{% for c in due[:3] %}<li>{{ c | headline }}</li>{% endfor %}</ul>
     <p class="frow-x">{{ parts | join(' · ') }}</p>

@@ -1050,6 +1050,18 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
   display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
 .cnt.bad { background: var(--bad-text); } .cnt.warn { background: var(--warn-fill); }
 .col-empty { padding: 14px 8px; text-align: center; color: var(--muted); font-size: 13px; }
+/* дальние сроки: пунктирная плашка «Ещё N задач со сроком после …» внизу колонки, группы списка или Ганта;
+   раскрытые задачи — под ней */
+.later-tile { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 9px 10px;
+  border: 1px dashed var(--line-strong); border-radius: 8px; background: transparent; color: var(--muted); font: inherit;
+  font-size: 13px; text-align: center; cursor: pointer; }
+.later-tile:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.later-tile .new-dot { flex: none; margin: 0; }
+.later-tile .lt-hide, .later-tile[aria-expanded="true"] .lt-show, .later-tile[aria-expanded="true"] .new-dot { display: none; }
+.later-tile[aria-expanded="true"] .lt-hide { display: inline; }
+.col > .later-items { display: flex; flex-direction: column; gap: 8px; }
+.gantt-later { position: sticky; left: 0; width: var(--gl, 300px); padding: 8px 14px; border-top: 1px solid var(--line); }
+.tlist tr.later-row td { padding-top: 10px; padding-bottom: 10px; background: none; }
 .board-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 16px; }
 .grow { flex: 1; }
 /* иконка-кнопка 28×28 (на карточке) и текстовая кнопка-ссылка */

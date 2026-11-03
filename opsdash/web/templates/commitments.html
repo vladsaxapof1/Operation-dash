@@ -8,6 +8,17 @@
    ~ ('&archived=1' if show_archived else '') ~ ('&project=' ~ project if project else '') ~ ('&new=1' if new else '') %}
 {% set open_cards = (board.mine + board.to_me + board.other) if board else (items or []) | selectattr('status', 'equalto', 'open') | list %}
 {% set n_late = open_cards | selectattr('overdue') | list | length %}
+{#- дальние сроки: задачи со сроком больше чем через две недели — в конце колонки доски (группы списка, Ганта)
+    под пунктирной плашкой; щелчок раскрывает их под ней, второй — прячет (app.js) #}
+{% macro later_tile(far, box) -%}
+{%- set after = later_after.strftime('%d.%m') -%}
+<button type="button" class="later-tile" data-later aria-controls="{{ box }}" aria-expanded="false"
+        title="Срок больше чем через две недели — сейчас не в фокусе">
+  {%- if far | rejectattr('seen_at') | list %}<i class="new-dot" title="Среди них есть новые"></i>{% endif -%}
+  <span class="lt-show">Ещё {{ far | length }} {{ plural(far | length, 'задача', 'задачи', 'задач') }} со сроком после {{ after }}</span>
+  <span class="lt-hide">Скрыть задачи со сроком после {{ after }}</span>
+</button>
+{%- endmacro %}
 {#- шапка «Задач» одной строкой (5.2): слева заголовок и сводка с активными фильтрами, справа поиск, фильтр, сортировка,
     вид и «+ Задача» #}
 <div class="topline">
@@ -166,7 +177,10 @@
       <span class="grow"></span>
       {% if key != 'done' %}<a class="ibtn ghost" href="?view=board&add={{ key }}#add" data-dlg-open="add-dlg" data-add-dir="{{ key }}" title="Добавить в «{{ title }}»" aria-label="Добавить в «{{ title }}»">{{ icons.icon('plus', 16) }}</a>{% endif %}
     </div>
-    {% for c in col %}{{ ui.task_card(c, meetings) }}{% else %}<div class="col-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endfor %}
+    {% set far = col | selectattr('later') | list %}
+    {% for c in col | rejectattr('later') %}{{ ui.task_card(c, meetings) }}{% else %}{% if not far %}<div class="col-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endif %}{% endfor %}
+    {% if far %}{{ later_tile(far, 'later-' ~ key) }}
+    <div class="later-items" id="later-{{ key }}" hidden>{% for c in far %}{{ ui.task_card(c, meetings) }}{% endfor %}</div>{% endif %}
   </section>
   {% endfor %}
 </div>
@@ -177,6 +191,37 @@
 {% elif view == 'gantt' %}
 {#- Гант (5.5): полоса — от появления задачи до срока; подпись справа от полосы, внутри — только у длинных; без срока — точка.
     Цвет: просрочено — красный, мои — синий, мне должны — зелёный, между коллегами — серый. Стрелки «ждёт» рисует app.js #}
+{#- строка Ганта: название и кто делает слева, полоса или точка «без срока» на шкале #}
+{% macro gantt_row(c) %}
+  {% set title = c | headline %}
+  {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
+  {% set person = ui.card_person(c) | trim %}
+  <div class="gantt-row">
+    <div class="gantt-label">
+      <button type="button" class="gantt-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ title }}</button>
+      <div class="gantt-meta">{{ person }}
+        {%- if open_waits %}{{ ' · ' if person }}ждёт {% if open_waits | length > 1 %}{{ open_waits | length }} {{ plural(open_waits | length, 'задачу', 'задачи', 'задач') }}{% elif open_waits[0].task %}«{{ open_waits[0].task.headline | truncate(24, True, '…') }}»{% else %}{{ open_waits[0].event | truncate(24, True, '…') }}{% endif %}{% endif %}
+        {%- if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif %}
+        {%- if c.merge_hint %} · <span class="warn-text">дубль?</span>{% endif %}</div>
+      {{ ui.task_dialog(c, meetings) }}
+    </div>
+    <div class="gantt-track" style="width: {{ gantt.width }}px">
+      {% set wids = open_waits | selectattr('task') | map(attribute='task.id') | list %}
+      {% set kind = 'overdue' if c.overdue else ('done' if c.status != 'open' else c.direction) %}
+      {% set share = (c.items_done * 100 / c.items_total) | round | int if c.items_total else none %}
+      {% set label %}{% if c.status != 'open' %}{{ 'готово' if c.status == 'done' else 'отменена' }}{% elif not c.bar.due %}без срока{% elif c.overdue or (c.due_days is not none and c.due_days <= 1) %}{{ ui.due_text(c) }}{% else %}{{ c.due | date }}{% endif %}{% if c.items_total and c.status == 'open' %} · {{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}{% endif %}{% endset %}
+      {% if c.bar.due or c.status != 'open' %}
+      <div{% if wids %} data-waits="{{ wids | join(' ') }}"{% endif %} class="gantt-bar {{ kind }}{{ ' part' if share is not none and c.status == 'open' }}{{ ' archived' if c.archived }}"
+           style="left: {{ c.bar.left }}px; width: {{ c.bar.width }}px{% if share is not none %}; --share: {{ share }}%{% endif %}" data-task-open="{{ c.id }}" role="button" tabindex="0"
+           title="{{ title }} · {{ c.bar.start.strftime('%d.%m') }} → {{ c.bar.end.strftime('%d.%m') }}">{% if c.bar.width >= 120 and c.status == 'open' and not c.overdue %}<span>до {{ c.due | date }}</span>{% endif %}</div>
+      <span class="gantt-note" style="left: {{ c.bar.left + c.bar.width + 6 }}px">{% if not (c.bar.width >= 120 and c.status == 'open' and not c.overdue) %}{{ label }}{% elif c.items_total %}{{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}{% endif %}{% if c.overdue and c.remind %} · <a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}" data-remind>напомнить</a>{% endif %}</span>
+      {% else %}
+      <div{% if wids %} data-waits="{{ wids | join(' ') }}"{% endif %} class="gantt-bar dot{{ ' archived' if c.archived }}" style="left: {{ c.bar.left + c.bar.width - 10 }}px" data-task-open="{{ c.id }}" role="button" tabindex="0" title="{{ title }} · срок не указан"></div>
+      <span class="gantt-note" style="left: {{ c.bar.left + c.bar.width + 6 }}px">без срока</span>
+      {% endif %}
+    </div>
+  </div>
+{% endmacro %}
 <div class="card gantt">
   <div class="gantt-scroll" data-gantt data-now-x="{{ gantt.now_x }}" style="--gl: {{ gantt_w }}px">
     <div class="gantt-inner" style="width: calc(var(--gl) + {{ gantt.width }}px)">
@@ -199,36 +244,10 @@
         <section class="gantt-group" data-kb-col="{{ g.key }}">
           <div class="gantt-group-h"><span class="gantt-group-t">{{ g.title }}</span><span class="col-n">{{ g['items'] | length }}</span>{% if late %}<span class="cnt bad" title="{{ late }} просрочено">{{ late }}</span>{% endif %}</div>
           <div class="gantt-rows">
-            {% for c in g['items'] %}
-            {% set title = c | headline %}
-            {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
-            {% set person = ui.card_person(c) | trim %}
-            <div class="gantt-row">
-              <div class="gantt-label">
-                <button type="button" class="gantt-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ title }}</button>
-                <div class="gantt-meta">{{ person }}
-                  {%- if open_waits %}{{ ' · ' if person }}ждёт {% if open_waits | length > 1 %}{{ open_waits | length }} {{ plural(open_waits | length, 'задачу', 'задачи', 'задач') }}{% elif open_waits[0].task %}«{{ open_waits[0].task.headline | truncate(24, True, '…') }}»{% else %}{{ open_waits[0].event | truncate(24, True, '…') }}{% endif %}{% endif %}
-                  {%- if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif %}
-                  {%- if c.merge_hint %} · <span class="warn-text">дубль?</span>{% endif %}</div>
-                {{ ui.task_dialog(c, meetings) }}
-              </div>
-              <div class="gantt-track" style="width: {{ gantt.width }}px">
-                {% set wids = open_waits | selectattr('task') | map(attribute='task.id') | list %}
-                {% set kind = 'overdue' if c.overdue else ('done' if c.status != 'open' else c.direction) %}
-                {% set share = (c.items_done * 100 / c.items_total) | round | int if c.items_total else none %}
-                {% set label %}{% if c.status != 'open' %}{{ 'готово' if c.status == 'done' else 'отменена' }}{% elif not c.bar.due %}без срока{% elif c.overdue or (c.due_days is not none and c.due_days <= 1) %}{{ ui.due_text(c) }}{% else %}{{ c.due | date }}{% endif %}{% if c.items_total and c.status == 'open' %} · {{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}{% endif %}{% endset %}
-                {% if c.bar.due or c.status != 'open' %}
-                <div{% if wids %} data-waits="{{ wids | join(' ') }}"{% endif %} class="gantt-bar {{ kind }}{{ ' part' if share is not none and c.status == 'open' }}{{ ' archived' if c.archived }}"
-                     style="left: {{ c.bar.left }}px; width: {{ c.bar.width }}px{% if share is not none %}; --share: {{ share }}%{% endif %}" data-task-open="{{ c.id }}" role="button" tabindex="0"
-                     title="{{ title }} · {{ c.bar.start.strftime('%d.%m') }} → {{ c.bar.end.strftime('%d.%m') }}">{% if c.bar.width >= 120 and c.status == 'open' and not c.overdue %}<span>до {{ c.due | date }}</span>{% endif %}</div>
-                <span class="gantt-note" style="left: {{ c.bar.left + c.bar.width + 6 }}px">{% if not (c.bar.width >= 120 and c.status == 'open' and not c.overdue) %}{{ label }}{% elif c.items_total %}{{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}{% endif %}{% if c.overdue and c.remind %} · <a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}" data-remind>напомнить</a>{% endif %}</span>
-                {% else %}
-                <div{% if wids %} data-waits="{{ wids | join(' ') }}"{% endif %} class="gantt-bar dot{{ ' archived' if c.archived }}" style="left: {{ c.bar.left + c.bar.width - 10 }}px" data-task-open="{{ c.id }}" role="button" tabindex="0" title="{{ title }} · срок не указан"></div>
-                <span class="gantt-note" style="left: {{ c.bar.left + c.bar.width + 6 }}px">без срока</span>
-                {% endif %}
-              </div>
-            </div>
-            {% else %}<div class="gantt-empty">Пусто</div>{% endfor %}
+            {% set far = g['items'] | selectattr('later') | list %}
+            {% for c in g['items'] | rejectattr('later') %}{{ gantt_row(c) }}{% else %}{% if not far %}<div class="gantt-empty">Пусто</div>{% endif %}{% endfor %}
+            {% if far %}<div class="gantt-later">{{ later_tile(far, 'later-g-' ~ g.key) }}</div>
+            <div class="later-items" id="later-g-{{ g.key }}" hidden>{% for c in far %}{{ gantt_row(c) }}{% endfor %}</div>{% endif %}
           </div>
         </section>
         {% endfor %}
@@ -249,6 +268,21 @@
 {%- elif c.source_type and c.source_type != 'manual' %}{{ SOURCE_TITLES.get(c.source_type, c.source_type) }}
 {%- else %}<span class="muted">вручную</span>{% endif -%}
 {%- endmacro %}
+{% macro list_row(c) %}
+  {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
+  <tr data-task="{{ c.id }}" class="{{ 'dim' if c.status != 'open' or c.archived }}{{ ' archived' if c.archived }}{{ ' inwork' if c.in_work and c.status == 'open' }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
+    <td class="c-what"><button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
+      {%- if c.merge_hint %}<div class="sub2 warn-text">похоже на дубль{% if c.merge_hint.into_task %} «{{ c.merge_hint.into_task.headline }}»{% endif %} · <a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}">объединить</a></div>
+      {%- elif open_waits %}{% set w = open_waits[0] %}<div class="sub2">ждёт {% if w.task %}«{{ w.task.headline | truncate(40, True, '…') }}» — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% endif %}{% if w.late %} <span class="bad-text">(просрочено)</span>{% endif %}{% if open_waits | length > 1 %} и ещё {{ open_waits | length - 1 }}{% endif %}</div>
+      {%- elif c.holds and c.status == 'open' %}<div class="sub2">её ждёт «{{ c.holds[0].task.headline | truncate(40, True, '…') }}»</div>
+      {%- elif c.items_total %}<div class="sub2">{{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}</div>{% endif %}
+      {{ ui.task_dialog(c, meetings) }}</td>
+    <td>{{ c.route }}</td>
+    <td class="nowrap">{% if c.due %}{% if c.overdue %}<span class="bad-text">{{ c.due | date }} · просрочено</span>{% elif c.status == 'open' and c.due_days is not none and c.due_days <= 1 %}<span class="warn-text">{{ c.due | date }} · {{ 'сегодня' if c.due_days == 0 else 'завтра' }}</span>{% else %}{{ c.due | date }}{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td>{{ src_cell(c) }}</td>
+    <td>{% if c.overdue and c.remind %}<a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}" data-remind>напомнить</a>{% else %}<span class="{{ 'ok-text' if c.in_work and c.status == 'open' else 'muted' }}">{{ ui.task_state_title(c) }}</span>{% endif %}</td>
+  </tr>
+{% endmacro %}
 {% set groups = [] %}
 {% if group == 'dir' %}
   {% for key, t in [('mine', 'Мои задачи'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}{% set _ = groups.append((t, items | selectattr('direction', 'equalto', key) | selectattr('status', 'equalto', 'open') | list)) %}{% endfor %}
@@ -265,22 +299,11 @@
     {% for title, rows in groups if rows or group == 'dir' %}
     <tbody>
       {% if title %}<tr class="grp"><th scope="rowgroup" colspan="5">{{ title }} · {{ rows | length }}</th></tr>{% endif %}
-      {% for c in rows %}
-      {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
-      <tr data-task="{{ c.id }}" class="{{ 'dim' if c.status != 'open' or c.archived }}{{ ' archived' if c.archived }}{{ ' inwork' if c.in_work and c.status == 'open' }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
-        <td class="c-what"><button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
-          {%- if c.merge_hint %}<div class="sub2 warn-text">похоже на дубль{% if c.merge_hint.into_task %} «{{ c.merge_hint.into_task.headline }}»{% endif %} · <a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}">объединить</a></div>
-          {%- elif open_waits %}{% set w = open_waits[0] %}<div class="sub2">ждёт {% if w.task %}«{{ w.task.headline | truncate(40, True, '…') }}» — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% endif %}{% if w.late %} <span class="bad-text">(просрочено)</span>{% endif %}{% if open_waits | length > 1 %} и ещё {{ open_waits | length - 1 }}{% endif %}</div>
-          {%- elif c.holds and c.status == 'open' %}<div class="sub2">её ждёт «{{ c.holds[0].task.headline | truncate(40, True, '…') }}»</div>
-          {%- elif c.items_total %}<div class="sub2">{{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}</div>{% endif %}
-          {{ ui.task_dialog(c, meetings) }}</td>
-        <td>{{ c.route }}</td>
-        <td class="nowrap">{% if c.due %}{% if c.overdue %}<span class="bad-text">{{ c.due | date }} · просрочено</span>{% elif c.status == 'open' and c.due_days is not none and c.due_days <= 1 %}<span class="warn-text">{{ c.due | date }} · {{ 'сегодня' if c.due_days == 0 else 'завтра' }}</span>{% else %}{{ c.due | date }}{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td>{{ src_cell(c) }}</td>
-        <td>{% if c.overdue and c.remind %}<a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}" data-remind>напомнить</a>{% else %}<span class="{{ 'ok-text' if c.in_work and c.status == 'open' else 'muted' }}">{{ ui.task_state_title(c) }}</span>{% endif %}</td>
-      </tr>
-      {% else %}<tr><td colspan="5" class="muted small">{{ 'Пусто' if title else 'Ничего не найдено.' }}</td></tr>{% endfor %}
+      {% set far = rows | selectattr('later') | list %}
+      {% for c in rows | rejectattr('later') %}{{ list_row(c) }}{% else %}{% if not far %}<tr><td colspan="5" class="muted small">{{ 'Пусто' if title else 'Ничего не найдено.' }}</td></tr>{% endif %}{% endfor %}
+      {% if far %}<tr class="later-row"><td colspan="5">{{ later_tile(far, 'later-l' ~ loop.index) }}</td></tr>{% endif %}
     </tbody>
+    {% if far %}<tbody class="later-items" id="later-l{{ loop.index }}" hidden>{% for c in far %}{{ list_row(c) }}{% endfor %}</tbody>{% endif %}
     {% endfor %}
   </table>
   </div>

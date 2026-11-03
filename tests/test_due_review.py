@@ -45,9 +45,9 @@ def test_queue_order_set_and_skip():
     records.update_commitment(done, status="done")
     archived = records.add_commitment(direction="mine", whom="Тимур", title="В архиве", what="Задача в архиве")
     records.set_archived(archived, True)
-    # сначала ваши задачи, потом что вам должны, потом между коллегами; со сроком, закрытые и архивные — не в разборе
-    assert [c["id"] for c in records.due_queue()] == [mine, to_me, other]
-    assert records.no_due_count() == 3
+    # сначала ваши задачи, потом что вам должны; между коллегами, со сроком, закрытые и архивные — не в разборе
+    assert [c["id"] for c in records.due_queue()] == [mine, to_me]
+    assert records.no_due_count() == 3  # а в фильтре «Без срока» договорённость коллег есть
 
     records.set_due(mine, "2026-11-06")
     c = records.get_commitment(mine)
@@ -55,7 +55,7 @@ def test_queue_order_set_and_skip():
     records.set_due(to_me, None)  # «оставить без срока» — больше не спрашивать, но в фильтре «Без срока» она есть
     c = records.get_commitment(to_me)
     assert c["due"] is None and c["no_due_at"] and c["seen_at"]
-    assert [c["id"] for c in records.due_queue()] == [other] and records.no_due_count() == 2
+    assert records.due_queue() == [] and records.no_due_count() == 2
     with pytest.raises(ValueError):
         records.set_due(other, "06.11")
 
@@ -63,16 +63,17 @@ def test_queue_order_set_and_skip():
 def test_home_feed_row_and_dialog(client):
     mine, to_me, other, _ = _tasks()
     page = client.get("/").text
-    assert "Уточнить срок · 3 задачи без срока" in page and 'data-feed-filter="due">Уточнить срок · 3' in page
-    assert "ваших — 1 · вам должны — 1 · между коллегами — 1" in page
+    assert "Уточнить срок · 2 задачи без срока" in page and 'data-feed-filter="due">Уточнить срок · 2' in page
+    assert "ваших — 1 · вам должны — 1</p>" in page and "между коллегами —" not in page
     assert 'id="due-dlg"' in page and f'action="/commitments/{mine}/due"' in page
-    assert page.index(f"/commitments/{mine}/due") < page.index(f"/commitments/{to_me}/due") < page.index(f"/commitments/{other}/due")
+    assert page.index(f"/commitments/{mine}/due") < page.index(f"/commitments/{to_me}/due")
+    assert f"/commitments/{other}/due" not in page  # сроки договорённостей коллег директор не разбирает
     assert 'data-due-pick="' in page and "До конца недели" in page
-    assert "Всё · 3" in page
+    assert "Всё · 2" in page
     # в меню у «Сводки» задачи без срока не считаются: там — то, что ждёт действия
     from opsdash.web.app import needs_from_you
 
-    assert needs_from_you()["total"] == 0 and needs_from_you(due=True)["counts"]["due"] == 3
+    assert needs_from_you()["total"] == 0 and needs_from_you(due=True)["counts"]["due"] == 2
 
 
 def test_due_endpoint_json_and_form(client):
@@ -109,6 +110,7 @@ def test_tasks_toggles_new_and_no_due(client):
 
     no_due = client.get("/commitments?due=none").text
     assert "План найма" not in no_due and "Разобрать сроки по одной" in no_due and 'id="due-dlg"' in no_due
+    assert "Свести графики" in no_due and f'action="/commitments/{other}/due"' not in no_due  # коллег — не в разборе
     # в разборе на странице «Задач» — все показанные без срока, и те, что уже оставляли без срока
     records.set_due(to_me, None)
     no_due = client.get("/commitments?due=none&view=list").text

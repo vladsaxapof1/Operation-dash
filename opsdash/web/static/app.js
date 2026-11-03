@@ -51,8 +51,21 @@
   var more = document.querySelector("[data-tabbar-more]");
   if (more) document.addEventListener("click", function (e) { if (more.open && !more.contains(e.target)) more.open = false; });
 
+  // «Задачи»: пунктирная плашка «Ещё N задач со сроком после …» внизу колонки доски, группы списка или Ганта
+  // раскрывает дальние задачи под собой, второй щелчок — прячет
+  var showLater = function (btn, open) {
+    var box = btn && document.getElementById(btn.getAttribute("aria-controls"));
+    if (!box) return;
+    box.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  var laterBtn = function (id) { return document.querySelector('[data-later][aria-controls="' + id + '"]'); };
+  document.querySelectorAll("[data-later]").forEach(function (btn) {
+    btn.addEventListener("click", function () { showLater(btn, btn.getAttribute("aria-expanded") !== "true"); });
+  });
+
   // после действия (Готово, Сохранить…) страница перезагружается — возвращаем прокрутку туда, где была,
-  // а не в начало страницы. Только для той же страницы и только сразу после отправки
+  // а не в начало страницы, и раскрытые дальние задачи. Только для той же страницы и только сразу после отправки
   var kept = null;
   try { kept = JSON.parse(sessionStorage.getItem("keep_scroll") || "null"); sessionStorage.removeItem("keep_scroll"); } catch (e) { kept = null; }
   if (kept && (kept.path !== location.pathname || Date.now() - kept.t > 20000)) kept = null;
@@ -62,10 +75,13 @@
     var box = document.querySelector("[data-gantt]");
     try {
       sessionStorage.setItem("keep_scroll", JSON.stringify({ path: location.pathname, t: Date.now(), y: window.scrollY,
-        gx: box ? box.scrollLeft : null }));
+        gx: box ? box.scrollLeft : null,
+        later: Array.prototype.map.call(document.querySelectorAll('[data-later][aria-expanded="true"]'),
+                                        function (b) { return b.getAttribute("aria-controls"); }) }));
     } catch (err) { /* приватный режим — просто без возврата прокрутки */ }
   });
   if (kept) {
+    (kept.later || []).forEach(function (id) { showLater(laterBtn(id), true); });
     window.scrollTo(0, kept.y);
     window.addEventListener("load", function () { window.scrollTo(0, kept.y); });
   }
@@ -490,6 +506,8 @@
   if (focus) {
     var fid = focus.dataset.focusTask;
     var spot = document.querySelector('.task[data-task="' + fid + '"], li[data-task="' + fid + '"], .gantt-bar[data-task-open="' + fid + '"]');
+    var far = spot && spot.closest(".later-items[hidden]");  // задача с дальним сроком — раскрыть её плашку
+    if (far) showLater(laterBtn(far.id), true);
     if (spot) {
       spot.scrollIntoView({ block: "center" });
       spot.classList.add("flash");

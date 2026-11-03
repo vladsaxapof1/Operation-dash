@@ -726,6 +726,7 @@ BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
 
 
 LIST_GROUPS = {"dir": "кто кому", "project": "по проекту", "person": "по человеку", "none": "без групп"}  # вид «Список»
+FOCUS_DAYS = 14  # задачи со сроком дальше — в конце колонки под пунктирной плашкой «Ещё N со сроком после …»
 KAITEN_PARAMS = ("who", "space", "q", "mine", "only", "created", "created_from", "created_to", "due", "due_from", "due_to",
                  "kview")
 
@@ -767,6 +768,14 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
         if group in ("project", "person"):
             key = "project_title" if group == "project" else "person_key"
             items.sort(key=lambda c: (not c[key], c[key] or ""))  # groupby — подряд; «вне проектов» в конце
+    # дальние сроки: открытые задачи со сроком позже чем через FOCUS_DAYS дней сейчас не в фокусе — в конце колонки
+    # (группы списка, Ганта) под пунктирной плашкой, по щелчку раскрываются. «В работе» не прячем; при фильтре
+    # по сроку и поиске показываем всё — их просили явно
+    horizon = records.today_local() + timedelta(days=FOCUS_DAYS)
+    fold = not q and not (due and due != "none")
+    for c in shown:
+        c["later"] = bool(fold and c["status"] == "open" and not c["archived"] and not c["in_work"]
+                          and c["due"] and c["due"] > horizon.isoformat())
     # ?task=<id> — открыть окно задачи (ссылка со встречи или со сводки); если фильтры её прячут — окно всё равно есть
     extra = None
     if task and not any(c["id"] == task for c in shown):
@@ -799,9 +808,11 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
         ("с архивными", ("archived",), show_archived),
         (f"поиск «{q}»", ("q",), bool(q)),
     ) if on]
-    # «Без срока»: кнопка «Разобрать по одной» — окно «Уточнить срок» с показанными открытыми задачами без срока
-    no_due = [c for c in ([c for key in ("mine", "to_me", "other") for c in board[key]] if board else items or [])
-              if c["status"] == "open" and not c["due"] and not c["archived"]] if due == "none" else []
+    # «Без срока»: кнопка «Разобрать по одной» — окно «Уточнить срок» с показанными открытыми задачами без срока,
+    # ваши и что вам должны: сроки договорённостей между коллегами директор не разбирает
+    no_due = [c for c in ((board["mine"] + board["to_me"]) if board else items or [])
+              if c["status"] == "open" and not c["due"] and not c["archived"] and c["direction"] != "other"
+              ] if due == "none" else []
     # переключатели «Новые» и «Без срока» под заголовком (вместо «× снять» у этих двух фильтров): второй щелчок снимает
     toggles = {key: (without(*keys) + ("" if on else add)).replace("?&", "?", 1) for key, keys, on, add in (
         ("new", ("new",), new == "1", "&new=1"), ("no_due", ("due", "due_from", "due_to"), due == "none", "&due=none"))}
@@ -820,7 +831,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       group=group if group in LIST_GROUPS else "dir", list_groups=LIST_GROUPS,
                       filter_chips=chips, filter_count=sum(1 for c in chips if not c[0].startswith("поиск")),
                       no_due_count=records.no_due_count(), no_due=no_due, due_choices=due_choices() if no_due else [],
-                      toggles=toggles,
+                      toggles=toggles, later_after=horizon,
                       in_projects=store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL "
                                                "AND project_id IS NOT NULL") or 0,
                       done_projects_count=store.scalar("SELECT COUNT(*) FROM projects WHERE status='done'") or 0)

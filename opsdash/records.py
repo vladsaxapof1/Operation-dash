@@ -236,10 +236,11 @@ def no_due_count() -> int:
 
 def due_queue() -> list[dict]:
     """«Уточнить срок» на Сводке: открытые задачи без срока, про которые директор ещё не решила «пусть без срока».
-    Сначала её задачи, потом что ей должны, потом между коллегами; внутри — последние добавленные сверху."""
+    Только её задачи и что ей должны (сроки договорённостей между коллегами она не разбирает): сначала её,
+    внутри — последние добавленные сверху."""
     return _mark(store.rows(
         "SELECT * FROM commitments WHERE status='open' AND due IS NULL AND no_due_at IS NULL AND archived_at IS NULL "
-        "ORDER BY CASE direction WHEN 'mine' THEN 0 WHEN 'to_me' THEN 1 ELSE 2 END, created DESC, id DESC"))
+        "AND direction IN ('mine', 'to_me') ORDER BY direction='to_me', created DESC, id DESC"))
 
 
 def set_due(cid: int, due: str | None) -> None:
