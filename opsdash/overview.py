@@ -218,8 +218,21 @@ def sources_health(settings: dict | None = None) -> list[dict]:
 
 
 def _claude_health(settings: dict) -> dict:
+    """Состояние того, кто сейчас работает в PULSE: Claude или ChatGPT (Настройки → Claude / ChatGPT)."""
     from opsdash import brain
 
+    if brain.engine(settings) == "chatgpt":
+        from opsdash import codex
+
+        item = {"key": "claude", "title": "ChatGPT", "status": "ok", "last_ok": None, "error": None, "note": "подключён"}
+        path = codex.find(settings)
+        login = codex.login_status(path, settings, max_age=60) if path else None
+        if not path:
+            item.update(status="error", note="не найден", error="Codex (ChatGPT) не найден — Настройки → Claude / ChatGPT")
+        elif login and not login["loggedIn"]:
+            item.update(status="error", note="нужен вход",
+                        error="Вход в ChatGPT не выполнен — Настройки → Claude / ChatGPT → «Войти в ChatGPT»")
+        return item
     item = {"key": "claude", "title": "Claude", "status": "ok", "last_ok": None, "error": None, "note": "подключён"}
     path = brain.find_claude(settings)
     login = brain.login_status(path, settings, max_age=60) if path else None

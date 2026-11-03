@@ -247,6 +247,9 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
 
     ctx["notices"] = notices.recent()  # угол экрана: что PULSE сделал и что делает сейчас
     ctx["running_now"] = notices.running()
+    from opsdash import brain
+
+    ctx["ai_name"] = brain.name(settings)  # кто работает: «Claude» или «ChatGPT» — в меню и в «Спросить»
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -1455,7 +1458,7 @@ def _ask_page(request: Request, chat_id: int | None, prefill: list[dict]):
     last = current or (chats[0] if chats else {})  # новый чат — с моделью и рассуждением прошлого разговора
     return render(request, "ask.html", nav="ask", chats=chats, chat=current,
                   items=chat.messages(chat_id) if current else [], prefill=chat.describe(prefill), meetings=meetings,
-                  models=chat.MODELS, model=last.get("model") or "opus", efforts=chat.EFFORTS,
+                  models=chat.model_labels(), model=last.get("model") or "opus", efforts=chat.EFFORTS,
                   effort=config.load_settings()["claude"].get("chat_effort") or "", describe=proposals.describe,
                   chat_days=_chat_days(chats), q=request.query_params.get("q", "").strip())
 

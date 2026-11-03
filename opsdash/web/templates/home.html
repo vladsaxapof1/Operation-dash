@@ -119,7 +119,7 @@
       {%- if before_start %} · рабочий день с {{ work_start }}{% elif work_left > 0 %} · до конца рабочего дня {% if work_left >= 60 %}{{ work_left // 60 }} ч {% endif %}{{ work_left % 60 }} мин{% else %} · рабочий день закончился{% endif %}</p>
   </div>
   <div class="actions">
-    <a class="btn lg" href="/ask">{{ icons.icon('ask', 16) }}Спросить Claude</a>
+    <a class="btn lg" href="/ask">{{ icons.icon('ask', 16) }}Спросить {{ ai_name or 'Claude' }}</a>
     <form method="post" action="/refresh" class="inline"><button class="btn lg">Собрать сейчас</button></form>
   </div>
 </div>

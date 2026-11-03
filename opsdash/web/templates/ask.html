@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
-{% block title %}{{ chat.title if chat else 'Спросить Claude' }}{% endblock %}
+{% block title %}{{ chat.title if chat else 'Спросить ' ~ ai_name }}{% endblock %}
 {% macro ctx_chip(c) -%}
 {%- if c.href %}<a class="chip acc ctx-chip" href="{{ c.href }}">{{ c.label }}</a>{% else %}<span class="chip acc ctx-chip">{{ c.label }}</span>{% endif -%}
 {%- endmacro %}
 {% block content %}
 {#- «Спросить Claude» (5.14): без заголовка страницы; слева разговоры по дням, справа — разговор карточкой #}
-<h1 class="sr-only">Спросить Claude</h1>
+<h1 class="sr-only">Спросить {{ ai_name }}</h1>
 <div class="ask">
   <aside class="ask-side">
     <a class="btn ask-new-b" href="/ask">{{ ui.plus_ico() }} Новый разговор</a>
@@ -45,12 +45,12 @@
         <div class="ask-steps" data-live-steps>{% for s in m.steps %}<div>{{ s }}</div>{% endfor %}</div>
         <div class="ask-live-text" data-live-text>{{ m.text }}</div>
         <div class="ask-thinking"><span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          Claude <span data-live-state>{{ 'пишет ответ' if m.text else 'думает' }}</span>…
+          {{ ai_name }} <span data-live-state>{{ 'пишет ответ' if m.text else 'думает' }}</span>…
           <form class="inline" method="post" action="/ask/{{ chat.id }}/stop"><button class="btn sm ghost">Остановить</button></form></div>
       </div>
       {% else %}
       <div class="ask-a" data-copy-scope>
-        {% if m.steps %}<details class="ask-steps-done"><summary>Что делал Claude · {{ m.steps | length }} {{ plural(m.steps | length, 'шаг', 'шага', 'шагов') }}</summary>
+        {% if m.steps %}<details class="ask-steps-done"><summary>Что делал {{ ai_name }} · {{ m.steps | length }} {{ plural(m.steps | length, 'шаг', 'шага', 'шагов') }}</summary>
           {% for s in m.steps %}<div>{{ s }}</div>{% endfor %}</details>{% endif %}
         {% if m.text %}<div class="doc ask-text">{{ m.text | md | safe }}</div><textarea hidden data-copy>{{ m.text }}</textarea>{% endif %}
         {% if m.status == 'failed' %}
@@ -74,7 +74,7 @@
     {#- пустой чат: подсказка и примеры — маленькими серыми кнопками по центру; поле ввода — внизу #}
     <div class="ask-empty">
       <p class="muted">Спросите о встречах, задачах, переписке и документах. Через «＋» приложите встречу —
-        Claude прочитает расшифровку целиком, а не только разбор.</p>
+        {{ ai_name }} прочитает расшифровку целиком, а не только разбор.</p>
       <div class="ask-examples">
         {% for label, q in [('Решения встречи по каждой метрике', 'Распиши решения этой встречи по каждой метрике: что было, на что поменяли, кто предложил — с отметками времени'),
                             ('Что я обещала на этой неделе?', 'Что я обещала на этой неделе и что из этого просрочено?'),
@@ -92,7 +92,7 @@
         {% if chat %}<input type="hidden" name="chat_id" value="{{ chat.id }}">{% endif %}
         <div class="ask-box">
           <div class="ask-ctx" data-ctx-list>{% for c in prefill %}<span class="chip acc ctx-chip">{{ c.label }}<input type="hidden" name="ctx" value="{{ c.type }}:{{ c.ref or c.id or c.path }}"><button type="button" data-ctx-remove aria-label="Убрать">✕</button></span>{% endfor %}</div>
-          <textarea name="text" rows="1" data-ask-text placeholder="{{ 'Спросите ещё — Claude помнит этот разговор' if chat else 'Спросите о встречах, задачах, переписке, документах…' }}"{{ ' autofocus' if not chat or prefill }}></textarea>
+          <textarea name="text" rows="1" data-ask-text placeholder="{{ 'Спросите ещё — ' ~ ai_name ~ ' помнит этот разговор' if chat else 'Спросите о встречах, задачах, переписке, документах…' }}"{{ ' autofocus' if not chat or prefill }}></textarea>
           <div class="ask-bar">
             <details class="ask-add" data-ask-add>
               <summary class="ask-icon" title="Приложить встречу, задачу, документ или файл" aria-label="Приложить контекст">{{ ui.plus_ico() }}</summary>
@@ -110,7 +110,7 @@
             </details>
             <span class="small muted ask-mic-status" data-mic-status></span>
             <span class="grow"></span>
-            <select name="model" class="ask-sel" title="Модель Claude: Fable и Opus — для разборов и длинных ответов, Sonnet и Haiku — для коротких вопросов" aria-label="Модель">
+            <select name="model" class="ask-sel" title="{{ 'Насколько глубоко думать ChatGPT: «максимум» и «подробно» — для разборов и длинных ответов, «быстро» — для коротких вопросов' if ai_name == 'ChatGPT' else 'Модель Claude: Fable и Opus — для разборов и длинных ответов, Sonnet и Haiku — для коротких вопросов' }}" aria-label="Модель">
               {% for key, title in models.items() %}<option value="{{ key }}" {{ 'selected' if model == key }}>{{ title }}</option>{% endfor %}</select>
             <button type="button" class="ask-icon ask-mic" data-mic title="Надиктовать — текст появляется по фразам; распознаёт Whisper на этом компьютере" aria-label="Надиктовать">{{ ui.mic_ico() }}</button>
             <button class="ask-send" data-ask-send title="Отправить (Ctrl+Enter)" aria-label="Отправить">{{ ui.send_ico() }}</button>
@@ -118,7 +118,7 @@
         </div>
         <input type="hidden" name="effort" value="{{ effort }}">
         <div class="ask-under">
-          <span class="muted" title="Карточки, встречи и сообщения коллегам Claude только предлагает — под ответом будут «Да / Нет»">Ctrl+Enter — отправить · Claude отвечает только по вашим данным и называет источник</span>
+          <span class="muted" title="Карточки, встречи и сообщения коллегам {{ ai_name }} только предлагает — под ответом будут «Да / Нет»">Ctrl+Enter — отправить · {{ ai_name }} отвечает только по вашим данным и называет источник</span>
         </div>
       </form>
     </div>

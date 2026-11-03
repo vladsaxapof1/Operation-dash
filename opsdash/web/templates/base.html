@@ -20,7 +20,7 @@
               ("digests", "/digests", "Дайджесты", 0), ("people", "/people", "Люди", 0)]
              + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])
              + ([("kb", "/kb", "База знаний", 0)] if sections_on.kb else [])),
-  ("Claude", [("ask", "/ask", "Спросить Claude", 0), ("office", "/office", "Офис", 0)]),
+  (ai_name or "Claude", [("ask", "/ask", "Спросить " ~ (ai_name or "Claude"), 0), ("office", "/office", "Офис", 0)]),
 ] %}
 {% set nav_system = [("settings", "/settings", "Настройки", 0), ("journal", "/journal", "Журнал", 0), ("help", "/help", "Справка", 0)] %}
 {% macro nav_link(key, href, title, n) -%}

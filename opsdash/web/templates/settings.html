@@ -556,7 +556,19 @@
 </div></section>
 
 {% elif tab == 'claude' %}
-<section class="card"><div class="card-b" style="padding-top:12px">
+{#- кто работает в PULSE: Claude Code или ChatGPT (Codex) — одновременно только один (brain.turn) #}
+{% set claude_ready = claude_path and not (claude_login and not claude_login.loggedIn) %}
+{% set codex_ready = codex_path and not (codex_login and not codex_login.loggedIn) %}
+<section class="card" id="engine"><div class="card-h"><h2>Кто работает в PULSE</h2></div><div class="card-b">
+  <form method="post" action="/settings/ai" class="seg" aria-label="Кто работает в PULSE">{% for key, title in engines.items() %}<button name="engine" value="{{ key }}" class="{{ 'active' if engine == key }}"{% if engine == key %} aria-pressed="true"{% endif %}>{{ title }}</button>{% endfor %}</form>
+  <p class="small" style="margin-bottom:0">Встречи, сообщения, дайджесты, брифы, вопросы из Telegram и «Спросить» сейчас разбирает
+    <b>{{ engines[engine] }}</b> — {{ 'Codex из приложения ChatGPT, в рамках подписки ChatGPT' if engine == 'chatgpt' else 'Claude Code, в рамках подписки Claude' }}.
+    {% if not (codex_ready if engine == 'chatgpt' else claude_ready) %}<span class="bad-text">{{ engines[engine] }} ещё не подключён — настройте его ниже.</span>{% endif %}</p>
+  {% if engine_busy and engine_busy != engine %}<p class="small warn-text" style="margin-bottom:0">{{ engines[engine_busy] }} доделывает начатое — {{ engines[engine] }} начнёт, как только он закончит.</p>{% endif %}
+  <div class="hint">Одновременно работает только один. Если переключить посреди задания, его доделает прежний, а следующие возьмёт выбранный. Разговоры в «Спросить» продолжатся: новый помощник получит их начало пересказом.</div>
+</div></section>
+
+<section class="card" id="claude"><div class="card-h"><h2>Claude</h2></div><div class="card-b">
   {% if not claude_path %}
     <p>⚠ Claude Code не найден.</p>
     <ol class="small">
@@ -597,6 +609,40 @@
     <label>Ограничение по времени на один запуск, мин</label><input type="number" name="timeout_minutes" value="{{ settings.claude.timeout_minutes }}" min="5" style="max-width:120px">
     <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('claude') }}</div>
   </form>
+</div></section>
+
+<section class="card" id="chatgpt"><div class="card-h"><h2>ChatGPT</h2></div><div class="card-b">
+  {% if not codex_path %}
+    <p>⚠ Codex не найден — это помощник ChatGPT, который работает на компьютере.</p>
+    <ol class="small">
+      <li>Установите приложение <b>ChatGPT</b> (chatgpt.com/download) и войдите своим аккаунтом — Codex входит в него.{% if not is_mac %} Или поставьте Codex отдельно: <code>npm install -g @openai/codex</code>{% endif %}</li>
+      <li>Обновите эту страницу — PULSE найдёт Codex сам.</li>
+    </ol>
+  {% elif codex_login and not codex_login.loggedIn %}
+    <p>⚠ Codex найден, но <b>вход не выполнен</b> — без него ChatGPT не сможет работать в PULSE.</p>
+    {% if is_mac or is_windows %}
+    <form method="post" action="/settings/chatgpt/login"><button class="btn primary">Войти в ChatGPT</button></form>
+    <div class="hint">Откроется {{ 'Терминал' if is_mac else 'окно PowerShell' }}, а за ним браузер: войдите аккаунтом ChatGPT и обновите эту страницу.</div>
+    {% else %}
+    <div class="hint">Выполните в терминале <code>"{{ codex_path }}" login</code>, войдите в браузере и обновите эту страницу.</div>
+    {% endif %}
+  {% else %}
+    <p>✅ Codex найден{% if codex_login and codex_login.how %}, вход: <b>{{ codex_login.how }}</b>{% endif %}.</p>
+  {% endif %}
+  <div class="hint">Где лежит: <code>{{ codex_path or 'не найден' }}</code></div>
+  <form method="post" action="/settings/chatgpt">
+    <label>Путь к codex (если не находится сам)</label><input type="text" name="path" value="{{ settings.chatgpt.path }}" placeholder="{{ '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex' if is_mac else 'C:\\Users\\…\\AppData\\Roaming\\npm\\codex.cmd' }}">
+    <div class="hint">Обычно не нужен: PULSE сам находит Codex в приложении ChatGPT и установленный отдельно.</div>
+    <label>Модель</label>
+    {% if codex_models %}
+    <select name="model" style="max-width:320px"><option value="">По умолчанию — как выберет Codex</option>{% for m in codex_models %}<option value="{{ m.slug }}" title="{{ m.about }}" {{ 'selected' if settings.chatgpt.model == m.slug }}>{{ m.title }}</option>{% endfor %}{% if settings.chatgpt.model and settings.chatgpt.model not in codex_models | map(attribute='slug') | list %}<option value="{{ settings.chatgpt.model }}" selected>{{ settings.chatgpt.model }}</option>{% endif %}</select>
+    {% else %}
+    <input type="text" name="model" value="{{ settings.chatgpt.model }}" placeholder="по умолчанию — как выберет Codex" style="max-width:320px">
+    {% endif %}
+    <div class="hint">Модель одна на все задачи, а насколько глубоко думать — по задаче, как модели Claude выше: где стоит opus — глубоко, sonnet — обычно, haiku — быстро. Время на один запуск — то же, что у Claude.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('chatgpt') }}</div>
+  </form>
+  <div class="hint">ChatGPT работает по той же инструкции и с теми же данными, что Claude: встречи, переписка, задачи, документы. Писать может только в папку PULSE, интернета у него нет, во внешние системы — только предложениями «Да / Нет». Уведомления в Telegram PULSE отправляет сам — сразу, как ChatGPT закончит.</div>
 </div></section>
 
 {#- сколько PULSE тратит Claude: лимиты подписки (весь аккаунт) и расход самого PULSE по ценам API (opsdash.usage) #}
@@ -656,7 +702,7 @@
 {% set on = connections | rejectattr('status', 'equalto', 'off') | list | length %}
 <section class="card">
   <div class="card-h"><h2>Подключения</h2>
-    <span class="muted small">подключено {{ on }} из {{ connections | length }} · Claude: <span class="{{ 'bad-text' if claude_health.status == 'error' else 'ok-text' }}">{{ claude_health.note }}</span>{% if claude_health.status == 'error' %} · <a href="/settings?tab=claude">настроить Claude</a>{% endif %}</span></div>
+    <span class="muted small">подключено {{ on }} из {{ connections | length }} · {{ claude_health.title or 'Claude' }}: <span class="{{ 'bad-text' if claude_health.status == 'error' else 'ok-text' }}">{{ claude_health.note }}</span>{% if claude_health.status == 'error' %} · <a href="/settings?tab=claude">настроить {{ claude_health.title or 'Claude' }}</a>{% endif %}</span></div>
   <ul class="list conn-list">
     {% for r in connections %}
     <li class="conn-row">

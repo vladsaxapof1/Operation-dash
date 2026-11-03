@@ -20,6 +20,9 @@ from opsdash import brain, config, records, store
 
 MODELS = {"fable": "Fable — самая сильная", "opus": "Opus — подробно", "sonnet": "Sonnet — быстро",
           "haiku": "Haiku — очень быстро"}
+# у ChatGPT модель одна (Настройки → Claude / ChatGPT), а выбор в чате — насколько глубоко думать (codex.effort_for)
+MODELS_CHATGPT = {"fable": "ChatGPT — максимум", "opus": "ChatGPT — подробно", "sonnet": "ChatGPT — быстро",
+                  "haiku": "ChatGPT — очень быстро"}
 # сколько Claude думает перед ответом (--effort); «авто» — как решит сам Claude Code
 EFFORTS = {"": "Рассуждение: авто", "low": "Рассуждение: лёгкое", "medium": "Рассуждение: обычное",
            "high": "Рассуждение: глубокое", "xhigh": "Рассуждение: очень глубокое", "max": "Рассуждение: максимум"}
@@ -278,8 +281,15 @@ def title_for(text: str, context: list[dict]) -> str:
     return (first[:70].rsplit(" ", 1)[0] + "…") if len(first) > 70 else (first or "Новый чат")
 
 
+def model_labels(settings: dict | None = None) -> dict:
+    """Варианты выбора модели в «Спросить» — у того, кто сейчас работает (Claude или ChatGPT)."""
+    return MODELS_CHATGPT if brain.engine(settings) == "chatgpt" else MODELS
+
+
 def step_label(tool: str, params: dict) -> str:
     """Что Claude делает — по-человечески: «Читает расшифровку «КПЭ…»», «Ищет в переписке: склад»."""
+    if tool == "Wait":  # очередь между Claude и ChatGPT (brain.turn)
+        return params.get("label") or "Ждёт очереди"
     if tool == "Bash":
         cmd = (params.get("command") or "").strip()
         m = re.match(r"(?:\./)?ops\s+(\S+)(?:\s+(\S+))?(.*)", cmd)

@@ -27,7 +27,7 @@ TABS = [
     ("office", "Офис"),
     ("autonomy", "Автономия"),
     ("schedule", "Расписание"),
-    ("claude", "Claude"),
+    ("claude", "Claude / ChatGPT"),
     ("archive", "Архивные разделы"),
 ]
 TAB_NOTES = {"telegram": "личный аккаунт", "bot": "уведомления"}  # приписка серым — чтобы не путать два Telegram
@@ -59,7 +59,7 @@ def connection_rows(settings: dict) -> tuple[list[dict], dict]:
 
 def settings_menu(settings: dict) -> list[dict]:
     """Подменю Настроек (3.10): пункты и вложенные источники с «есть / нет»; разделитель перед системными."""
-    from opsdash import __version__
+    from opsdash import __version__, brain
 
     subs = []
     for tab, title, keys, _ in CONNECTIONS:
@@ -69,7 +69,7 @@ def settings_menu(settings: dict) -> list[dict]:
     menu = [{"tab": "general", "title": "Основное"},
             {"tab": "connections", "title": "Подключения", "note": f"{on} из {len(subs)}", "subs": subs},
             {"tab": "recordings", "title": "Записи встреч"}, {"tab": "schedule", "title": "Расписание"},
-            {"tab": "autonomy", "title": "Автономия"}, {"tab": "claude", "title": "Claude"}, {"tab": "office", "title": "Офис"}]
+            {"tab": "autonomy", "title": "Автономия"}, {"tab": "claude", "title": "Claude / ChatGPT", "note": brain.name(settings)}, {"tab": "office", "title": "Офис"}]
     if config.section_on("docs", settings):
         menu.append({"tab": "knowledge", "title": "Документы"})
     archived = sum(not config.section_on(n, settings) for n in config.SECTIONS)
@@ -195,8 +195,14 @@ def register(app: FastAPI, render, back) -> None:
             ctx["google_urls"] = len(calendar.google_urls())
             ctx["calendar_names"] = calendar.write_calendar_names(settings)[0]
         elif tab == "claude":
+            from opsdash import codex
+
             ctx["claude_path"] = brain.find_claude(settings)
             ctx["claude_login"] = brain.login_status(ctx["claude_path"], settings) if ctx["claude_path"] else None
+            ctx["engine"], ctx["engines"], ctx["engine_busy"] = brain.engine(settings), brain.ENGINES, brain.busy()
+            ctx["codex_path"] = codex.find(settings)
+            ctx["codex_login"] = codex.login_status(ctx["codex_path"], settings) if ctx["codex_path"] else None
+            ctx["codex_models"] = codex.models()
             from opsdash import usage
 
             ctx["usage"], ctx["limits"] = usage.summary(), usage.limits()
@@ -213,7 +219,7 @@ def register(app: FastAPI, render, back) -> None:
 
     @app.post("/settings/check/{what}")
     async def settings_check(what: str):
-        from opsdash import bot, brain
+        from opsdash import bot, brain, codex
         from opsdash.sources import calendar, kaiten, mail, pachca, telegram, ymessenger
 
         def bot_check():
@@ -222,7 +228,7 @@ def register(app: FastAPI, render, back) -> None:
             return f"бот @{me.get('username')}"
 
         checks = {
-            "claude": brain.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "pachca": pachca.check,
+            "claude": brain.check, "chatgpt": codex.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "pachca": pachca.check,
             "mail": mail.check, "gmail": mail.check_gmail, "google_calendar": calendar.google_check,
             "calendar": calendar.check, "kaiten": kaiten.check, "bot": bot_check,
         }
@@ -777,10 +783,41 @@ def register(app: FastAPI, render, back) -> None:
         from opsdash import brain
 
         try:
-            await run_in_threadpool(brain.run, "Ответь одним словом: ок", model="haiku", job="limits", timeout_min=3)
+            await run_in_threadpool(brain.run, "Ответь одним словом: ок", model="haiku", job="limits", timeout_min=3,
+                                    who="claude")  # лимиты подписки Claude — даже если сейчас работает ChatGPT
         except brain.BrainError as e:
             return back(request, err=str(e), to="/settings?tab=claude#usage")
         return back(request, "Лимиты обновлены", to="/settings?tab=claude#usage")
+
+    @app.post("/settings/ai")
+    def ai_save(request: Request, engine: str = Form("claude")):
+        """Кто работает в PULSE. Запуски, которые уже идут, доработает прежний; новые — у выбранного (brain.turn)."""
+        from opsdash import brain
+
+        if engine not in brain.ENGINES:
+            return back(request, err="Неизвестный выбор", to="/settings?tab=claude")
+        was = brain.busy()
+        config.update_settings("ai", {"engine": engine})
+        note = (f" — {brain.ENGINES[was]} доработает начатое, дальше работает {brain.ENGINES[engine]}"
+                if was and was != engine else "")
+        return back(request, f"Теперь в PULSE работает {brain.ENGINES[engine]}{note}", to="/settings?tab=claude")
+
+    @app.post("/settings/chatgpt")
+    def chatgpt_save(request: Request, path: str = Form(""), model: str = Form("")):
+        config.update_settings("chatgpt", {"path": path.strip().strip('"'), "model": model.strip()})
+        return back(request, "Сохранено", to="/settings?tab=claude#chatgpt")
+
+    @app.post("/settings/chatgpt/login")
+    async def chatgpt_login(request: Request):
+        from opsdash import brain, codex
+
+        try:
+            await run_in_threadpool(codex.open_login)
+        except brain.BrainError as e:
+            return back(request, err=str(e), to="/settings?tab=claude#chatgpt")
+        where = "Терминал" if sys.platform == "darwin" else "окно PowerShell"
+        return back(request, f"Открыла {where}: войдите в ChatGPT в браузере, затем обновите эту страницу",
+                    to="/settings?tab=claude#chatgpt")
 
     @app.post("/settings/claude/login")
     async def claude_login(request: Request):

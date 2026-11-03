@@ -3,6 +3,10 @@
 Claude работает в папке проекта: читает CLAUDE.md и навыки из .claude/skills,
 пользуется командой ./ops и пишет только в data/. Писать во внешние системы
 он может только через очередь подтверждений (./ops propose ...).
+
+Вместо Claude можно выбрать ChatGPT (Настройки → Claude / ChatGPT, opsdash.codex): run и stream запускают
+выбранного. Одновременно работает только один (turn): переключили посреди задания — новый ждёт, пока прежний
+закончит то, что уже начал.
 """
 
 from __future__ import annotations
@@ -15,9 +19,12 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from opsdash import config, store
+
+ENGINES = {"claude": "Claude", "chatgpt": "ChatGPT"}
 
 ALLOWED_TOOLS = [
     "Read", "Glob", "Grep", "Skill",
@@ -29,6 +36,57 @@ DISALLOWED_TOOLS = ["Read(secrets/**)", "Edit(secrets/**)", "Edit(config/**)", "
 
 class BrainError(Exception):
     pass
+
+
+def engine(settings: dict | None = None) -> str:
+    """Кто сейчас работает в PULSE: claude или chatgpt."""
+    chosen = ((settings or config.load_settings()).get("ai") or {}).get("engine")
+    return chosen if chosen in ENGINES else "claude"
+
+
+def name(settings: dict | None = None) -> str:
+    """«Claude» или «ChatGPT» — для подписей в интерфейсе."""
+    return ENGINES[engine(settings)]
+
+
+def session_engine(session_id: str | None) -> str:
+    from opsdash import codex
+
+    return "chatgpt" if (session_id or "").startswith(codex.SESSION_PREFIX) else "claude"
+
+
+_turn = threading.Condition()
+_busy = {"engine": None, "runs": 0}  # кто работает сейчас и сколько его запусков идёт (очереди PULSE — параллельно)
+
+
+@contextmanager
+def turn(who: str, job: str, on_step=None):
+    """Очередь между Claude и ChatGPT: запуски одного могут идти параллельно (как и раньше — разбор, бот, чат),
+    но с другим — никогда. Пока работает прежний, новый ждёт — так бывает только сразу после переключения."""
+    with _turn:
+        other = _busy["engine"]
+        if other not in (None, who):
+            store.log(job, f"{ENGINES[who]} ждёт, пока {ENGINES[other]} закончит начатое")
+            if on_step:
+                on_step("Wait", {"label": f"Ждёт, пока {ENGINES[other]} закончит начатое"})
+        while _busy["engine"] not in (None, who):
+            _turn.wait()
+        _busy["engine"] = who
+        _busy["runs"] += 1
+    try:
+        yield
+    finally:
+        with _turn:
+            _busy["runs"] -= 1
+            if not _busy["runs"]:
+                _busy["engine"] = None
+                _turn.notify_all()
+
+
+def busy() -> str | None:
+    """Кто из двух работает прямо сейчас (None — никто)."""
+    with _turn:
+        return _busy["engine"]
 
 
 def find_claude(settings: dict | None = None) -> str | None:
@@ -236,21 +294,40 @@ def _result(data, returncode: int, stderr: str, out: str, job: str, model: str |
 
 
 def run(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
-        timeout_min: int | None = None) -> dict:
-    """Запуск Claude в фоне; вернуть {"text", "session_id", "raw"}."""
-    return stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, partial=False)
+        timeout_min: int | None = None, who: str | None = None) -> dict:
+    """Запуск Claude (или ChatGPT, если выбран он) в фоне; вернуть {"text", "session_id", "raw"}."""
+    return stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, partial=False, who=who)
 
 
 def stream(prompt: str, *, model: str | None = None, resume: str | None = None, job: str = "brain",
            timeout_min: int | None = None, on_text=None, on_step=None, on_start=None, effort: str | None = None,
-           partial: bool = True) -> dict:
+           partial: bool = True, who: str | None = None) -> dict:
     """Как run, но по ходу работы: on_text(текст) — ответ, который Claude сейчас пишет (каждый новый абзац
     рассуждений начинается заново), on_step(инструмент, параметры) — что он делает (читает файл, ищет),
-    on_start(процесс) — чтобы его можно было остановить. Результат тот же, что у run."""
+    on_start(процесс) — чтобы его можно было остановить. Результат тот же, что у run.
+    model — модель Claude; у ChatGPT она задаёт, насколько глубоко думать (codex.effort_for).
+    who — запустить именно этого (claude / chatgpt), а не выбранного в настройках."""
     from opsdash import office
 
     on_step = office.step_recorder(on_step)  # шаги — и в раздел «Офис», если это фоновое задание
     settings = config.load_settings()
+    who = who if who in ENGINES else engine(settings)
+    if resume and session_engine(resume) != who:  # разговор начинал другой — продолжить его этот не может
+        raise BrainError(f"разговор начат с {ENGINES[session_engine(resume)]}, а сейчас работает {ENGINES[who]}")
+    with turn(who, job, on_step):
+        if who == "chatgpt":
+            from opsdash import codex
+
+            return codex.stream(prompt, settings=settings, model=model, resume=resume, job=job,
+                                timeout_min=timeout_min, on_text=on_text, on_step=on_step, on_start=on_start,
+                                effort=effort)
+        return _stream(prompt, settings=settings, model=model, resume=resume, job=job, timeout_min=timeout_min,
+                       on_text=on_text, on_step=on_step, on_start=on_start, effort=effort, partial=partial)
+
+
+def _stream(prompt: str, *, settings: dict, model: str | None, resume: str | None, job: str,
+            timeout_min: int | None, on_text, on_step, on_start, effort: str | None, partial: bool) -> dict:
+    """Сам запуск Claude Code (stream уже выбрал его и занял очередь)."""
     cmd = _command(settings, _claude(settings), job, model=model, resume=resume, partial=partial, effort=effort)
     cmd, task = _fit_command(cmd, prompt)  # prompt не трогаем: с ним stream повторяют для старого Claude Code
     timeout = 60 * int(timeout_min or settings["claude"].get("timeout_minutes") or 30)
@@ -309,11 +386,11 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
         raise BrainError(f"Claude не уложился в {timeout // 60} мин")
     stderr = "".join(errors)
     if data is None and effort and "--effort" in stderr:  # старый Claude Code не знает --effort — думает как умеет
-        return stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, on_text=on_text,
-                      on_step=on_step, on_start=on_start, partial=partial)
+        return _stream(prompt, settings=settings, model=model, resume=resume, job=job, timeout_min=timeout_min,
+                       on_text=on_text, on_step=on_step, on_start=on_start, effort=None, partial=partial)
     if data is None and partial and "include-partial-messages" in stderr:  # старый Claude Code: без ответа по ходу
-        result = stream(prompt, model=model, resume=resume, job=job, timeout_min=timeout_min, on_step=on_step,
-                        on_start=on_start, effort=effort, partial=False)
+        result = _stream(prompt, settings=settings, model=model, resume=resume, job=job, timeout_min=timeout_min,
+                         on_text=None, on_step=on_step, on_start=on_start, effort=effort, partial=False)
         if on_text:
             on_text(result["text"])
         return result

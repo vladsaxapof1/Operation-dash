@@ -23,6 +23,11 @@ claude:
   model_ask: sonnet
   model_briefs: sonnet
   timeout_minutes: 30
+ai:
+  engine: claude  # кто работает в PULSE: claude или chatgpt (Codex из приложения ChatGPT)
+chatgpt:
+  path: ''
+  model: ''  # пусто — как выберет Codex
 schedule:
   collect_minutes: 15
   triage_minutes: 120

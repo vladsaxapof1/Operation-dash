@@ -60,6 +60,13 @@ DEFAULTS: dict = {
         "chat_effort": "",  # «Спросить Claude»: сколько думать перед ответом (Настройки → Claude), пусто — как решит Claude
         "timeout_minutes": 30,
     },
+    # кто работает в PULSE: claude — Claude Code, chatgpt — Codex из приложения ChatGPT (opsdash.codex).
+    # Одновременно — только один: переключили посреди задания — новый ждёт, пока прежний его закончит (brain.turn)
+    "ai": {"engine": "claude"},
+    "chatgpt": {
+        "path": "",
+        "model": "",  # пусто — модель, которую Codex выбирает сам для аккаунта ChatGPT
+    },
     "schedule": {
         "collect_minutes": 15,
         "triage_minutes": 120,

@@ -1031,10 +1031,13 @@ def cmd_notify(a) -> None:
         digests.save(digests.daily_kind() if a.kind == "digest" else a.kind, text)
         if a.kind == "groups" and not prefs.get("groups_digest"):
             return out("Сохранено в разделе «Дайджесты» (в Telegram сводка групп не отправляется — так в настройках)")
-    oid = bot.notify(text, batch=a.batch, urgent=a.urgent or a.kind == "urgent")
+    sandbox = bool(os.environ.get("OPSDASH_SANDBOX"))  # ChatGPT в песочнице без сети (opsdash.codex)
+    oid = bot.notify(text, batch=a.batch, urgent=a.urgent or a.kind == "urgent", send_now=not sandbox)
     row = store.row("SELECT sent_at, error FROM outbox WHERE id=?", (oid,))
     if row and row["sent_at"]:
         out("Отправлено в Telegram")
+    elif sandbox:
+        out("Поставлено в очередь — PULSE отправит в Telegram сразу, как ты закончишь. Повторно не отправляй")
     else:
         out("Поставлено в очередь (бот не настроен, тихие часы или нет связи) — видно на дашборде")
 

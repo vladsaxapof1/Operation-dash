@@ -158,7 +158,9 @@ def summary(name: str, args: dict, result: str, error: str | None) -> dict | Non
             m = store.row("SELECT c.id, c.title FROM ask_messages m JOIN ask_chats c ON c.id=m.chat_id WHERE m.id=?",
                           (args.get("message_id"),))
             if m:
-                return done("Claude ответил", f"«{m['title']}»", f"/ask/{m['id']}")
+                from opsdash import brain
+
+                return done(f"{brain.name()} ответил", f"«{m['title']}»", f"/ask/{m['id']}")
     elif name == "update":
         return done("PULSE обновлён", result, "/settings?tab=updates")
     return None
