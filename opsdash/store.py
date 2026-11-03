@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS commitments (
     archived_at TEXT,                -- убрана в архив: не видна на доске, в списках и дайджестах
     duplicate_of INTEGER,            -- дубль какой задачи: закрыта при объединении (records.merge_commitments)
     project_id INTEGER,              -- в каком проекте (opsdash.projects); подзадачи получают проект основной
+    no_due_at TEXT,                  -- директор решила оставить без срока («Уточнить срок» на Сводке) — не спрашивать
     created TEXT, updated TEXT, closed_at TEXT
 );
 
@@ -401,6 +402,7 @@ MIGRATIONS = [
     ("commitments", "duplicate_of", "INTEGER"),
     ("commitments", "project_id", "INTEGER"),
     ("kaiten_cards", "blockers", "TEXT"),
+    ("commitments", "no_due_at", "TEXT"),
 ]
 
 

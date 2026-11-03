@@ -228,6 +228,40 @@ def active_count() -> int:
     return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL") or 0
 
 
+def no_due_count() -> int:
+    """Сколько открытых задач без срока — на кнопке «Без срока» в «Задачах»."""
+    return store.scalar(
+        "SELECT COUNT(*) FROM commitments WHERE status='open' AND due IS NULL AND archived_at IS NULL") or 0
+
+
+def due_queue() -> list[dict]:
+    """«Уточнить срок» на Сводке: открытые задачи без срока, про которые директор ещё не решила «пусть без срока».
+    Сначала её задачи, потом что ей должны, потом между коллегами; внутри — последние добавленные сверху."""
+    return _mark(store.rows(
+        "SELECT * FROM commitments WHERE status='open' AND due IS NULL AND no_due_at IS NULL AND archived_at IS NULL "
+        "ORDER BY CASE direction WHEN 'mine' THEN 0 WHEN 'to_me' THEN 1 ELSE 2 END, created DESC, id DESC"))
+
+
+def set_due(cid: int, due: str | None) -> None:
+    """Срок из «Уточнить срок»: дата YYYY-MM-DD или None — оставить без срока, и PULSE больше о задаче не спросит.
+    Директор задачу видела — отметка «новая» снимается."""
+    if due and not _as_date(due):
+        raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
+    now = store.utcnow()
+    store.execute("UPDATE commitments SET due=COALESCE(?, due), no_due_at=?, seen_at=COALESCE(seen_at, ?), updated=? "
+                  "WHERE id=?", (due or None, None if due else now, now, now, cid))
+
+
+def due_choices(today: date | None = None) -> list[tuple[str, date]]:
+    """Быстрые сроки в «Уточнить срок»: завтра, послезавтра, до конца недели (пятница; в выходные — следующая),
+    до конца месяца."""
+    today = today or today_local()
+    next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return [("Завтра", today + timedelta(days=1)), ("Послезавтра", today + timedelta(days=2)),
+            ("До конца недели", today + timedelta(days=(4 - today.weekday()) % 7)),
+            ("До конца месяца", next_month - timedelta(days=1))]
+
+
 def set_in_work(cid: int, on: bool) -> None:
     """«В работе»: директор взялась за задачу — карточка сверху своей колонки и зелёная. Снять — on=False."""
     now = store.utcnow()

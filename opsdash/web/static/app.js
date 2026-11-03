@@ -187,6 +187,10 @@
       el.querySelectorAll(".chip.new").forEach(function (chip) { chip.remove(); });
     });
     fetch("/commitments/" + id + "/seen", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {  // число на «Новые» в «Задачах» — сразу, без перезагрузки
+        document.querySelectorAll("[data-unseen]").forEach(function (b) { b.textContent = res.unseen; b.hidden = !res.unseen; });
+      })
       .catch(function () { /* не получилось — отметка вернётся при следующем открытии страницы */ });
   };
   document.querySelectorAll("[data-new]").forEach(function (el) {
@@ -315,6 +319,75 @@
       document.querySelectorAll(".frow[data-kind]").forEach(function (row) { row.hidden = !!kind && row.dataset.kind !== kind; });
     });
   });
+
+  // «Уточнить срок»: задачи без срока по одной. Быстрая кнопка ставит дату в поле, «Сохранить срок» сохраняет и
+  // показывает следующую; «Оставить без срока» — PULSE больше не спросит; «Не сейчас» — дальше без изменений.
+  // Закрыли окно после изменений — страница обновляется: счётчики, лента и доска
+  var dueDlg = document.querySelector("dialog[data-due]");
+  if (dueDlg) {
+    var dueCards = Array.prototype.slice.call(dueDlg.querySelectorAll("[data-due-card]"));
+    var dueAt = 0, dueDone = { set: 0, skip: 0, later: 0 };
+    var dueShow = function (i) {
+      dueAt = i;
+      dueCards.forEach(function (f, n) { f.hidden = n !== i; });
+      var end = i >= dueCards.length;
+      dueDlg.querySelector("[data-due-step]").textContent = end ? "" : (i + 1) + " из " + dueCards.length;
+      dueDlg.querySelector("[data-due-end]").hidden = !end;
+      if (end) {
+        var parts = [];
+        if (dueDone.set) parts.push("срок поставлен: " + dueDone.set);
+        if (dueDone.skip) parts.push("оставлены без срока: " + dueDone.skip);
+        if (dueDone.later) parts.push("на потом: " + dueDone.later + " — они останутся в разборе");
+        dueDlg.querySelector("[data-due-sum]").textContent = "Готово" + (parts.length ? " · " + parts.join(" · ") : "") + ".";
+        dueDlg.querySelector("[data-due-end] [data-dlg-close]").focus();
+      } else {
+        dueCards[i].querySelector("[data-due-pick]").focus();
+      }
+    };
+    dueCards.forEach(function (form) {
+      var input = form.querySelector("input[name=due]");
+      var save = form.querySelector("[data-due-save]");
+      var err = form.querySelector("[data-due-err]");
+      var mark = function () {  // подсветить выбранное и показать дату на кнопке: «Сохранить срок 06.11»
+        var quick = false;
+        form.querySelectorAll("[data-due-pick]").forEach(function (b) {
+          var on = b.dataset.duePick === input.value;
+          quick = quick || on;
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        input.closest(".due-own").classList.toggle("on", !!input.value && !quick);
+        save.textContent = input.value ? "Сохранить срок " + input.value.slice(8, 10) + "." + input.value.slice(5, 7) : "Сохранить срок";
+      };
+      form.querySelectorAll("[data-due-pick]").forEach(function (b) {
+        b.addEventListener("click", function () { input.value = b.dataset.duePick; mark(); save.focus(); });
+      });
+      input.addEventListener("input", mark);
+      form.querySelector("[data-due-next]").addEventListener("click", function () { dueDone.later++; dueShow(dueAt + 1); });
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var act = e.submitter && e.submitter.value === "skip" ? "skip" : "save";
+        var body = new FormData(form);
+        body.set("act", act);
+        var buttons = form.querySelectorAll("button");
+        buttons.forEach(function (b) { b.disabled = true; });
+        err.hidden = true;
+        fetch(form.action, { method: "POST", body: body, headers: { Accept: "application/json" } })
+          .then(function (r) { return r.json().catch(function () { return { ok: false, err: "" }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error(res.err || "");
+            dueDone[act === "skip" ? "skip" : "set"]++;
+            dueDlg.dataset.changed = "1";
+            dueShow(dueAt + 1);
+          })
+          .catch(function (x) {  // ответ PULSE — его словами; обрыв связи — своими
+            err.textContent = (x.name === "Error" && x.message) || "Не получилось сохранить — попробуйте ещё раз";
+            err.hidden = false;
+          })
+          .finally(function () { buttons.forEach(function (b) { b.disabled = false; }); });
+      });
+    });
+    dueDlg.addEventListener("close", function () { if (dueDlg.dataset.changed) location.reload(); });
+  }
 
   // закрываемые подсказки: «×» прячет и запоминает (cookie на год)
   document.querySelectorAll("[data-dismiss-btn]").forEach(function (b) {

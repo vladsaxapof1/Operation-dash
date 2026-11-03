@@ -9,7 +9,7 @@
     Кнопка раскрывает под строкой черновик ответа или текст напоминания #}
 {% set k = it.kind %}
 <article class="frow{{ ' urgent' if it.urgent }}" data-kind="{{ k }}">
-  <span class="frow-ico" aria-hidden="true">{{ icons.icon({'answer': 'inbox', 'remind': 'journal', 'confirm': 'check'}[k], 18) }}</span>
+  <span class="frow-ico" aria-hidden="true">{{ icons.icon({'answer': 'inbox', 'remind': 'journal', 'confirm': 'check', 'due': 'calendar'}[k], 18) }}</span>
   <div class="frow-b">
   {% if k == 'answer' %}{% set a = it.a %}
     <div class="frow-t">Ответить{% if a.priority == 'high' %} · срочно{% elif a.priority == 'low' %} · не к спеху{% endif %}</div>
@@ -62,6 +62,20 @@
     {% call ui.menu() %}
       <form method="post" action="/tasks/{{ kc.id }}/snooze"><input type="hidden" name="days" value="3"><button class="menu-i">Не напоминать 3 дня</button></form>
       <a class="menu-i" href="{{ kc.url }}" target="_blank" rel="noopener">Открыть в Kaiten ↗</a>
+    {% endcall %}
+  </div>
+  {% elif k == 'due' %}{% set due = it.tasks %}
+    {#- задачи без срока — одной строкой: «Разобрать» открывает их по одной (ui.due_dialog) #}
+    {% set parts = [] %}
+    {% for key, t in [('mine', 'ваших'), ('to_me', 'вам должны'), ('other', 'между коллегами')] %}{% set n = due | selectattr('direction', 'equalto', key) | list | length %}{% if n %}{% set _ = parts.append(t ~ ' — ' ~ n) %}{% endif %}{% endfor %}
+    <div class="frow-t">Уточнить срок · {{ due | length }} {{ plural(due | length, 'задача', 'задачи', 'задач') }} без срока</div>
+    <ul class="frow-titles">{% for c in due[:3] %}<li>{{ c | headline }}</li>{% endfor %}</ul>
+    <p class="frow-x">{{ parts | join(' · ') }}</p>
+  </div>
+  <div class="frow-act">
+    <button type="button" class="btn" data-dlg-open="due-dlg">Разобрать</button>
+    {% call ui.menu() %}
+      <a class="menu-i" href="/commitments?due=none">Все задачи без срока</a>
     {% endcall %}
   </div>
   {% elif it.group %}{% set group = it.group %}{% set mid = it.batch[8:] if it.batch.startswith('meeting:') else '' %}{% set m = meetings.get(mid) %}
@@ -120,14 +134,15 @@
     <div class="feed-h">
       <h2>Нужно от вас</h2>
       <div class="feed-filters" role="group" aria-label="Что показать">
-        <button type="button" class="fchip active" data-feed-filter="">Всё · {{ feed.total }}</button>
-        {% for key, t in [('confirm', 'Подтвердить'), ('answer', 'Ответить'), ('remind', 'Напомнить')] if feed.counts[key] %}<button type="button" class="fchip" data-feed-filter="{{ key }}">{{ t }} · {{ feed.counts[key] }}</button>{% endfor %}
+        <button type="button" class="fchip active" data-feed-filter="">Всё · {{ feed.counts.values() | sum }}</button>
+        {% for key, t in [('confirm', 'Подтвердить'), ('answer', 'Ответить'), ('remind', 'Напомнить'), ('due', 'Уточнить срок')] if feed.counts[key] %}<button type="button" class="fchip" data-feed-filter="{{ key }}">{{ t }} · {{ feed.counts[key] }}</button>{% endfor %}
       </div>
     </div>
     <section class="card feed">
       {% for it in feed['items'] %}{{ feed_row(it) }}{% endfor %}
       <div class="feed-foot">{% if feed['items'] %}Остальные задачи и договорённости не требуют действий сегодня{% else %}От вас сейчас ничего не ждут{% endif %} · <a href="/commitments">Все {{ tasks_count }} на доске →</a></div>
     </section>
+    {% if no_due %}{{ ui.due_dialog(no_due, due_choices, meeting_titles) }}{% endif %}
     {{ ui.task_datalist() }}
     {{ ui.event_datalist() }}
   </div>

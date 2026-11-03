@@ -166,6 +166,12 @@ pre { white-space: pre-wrap; word-break: break-word; }
   background: var(--panel); color: var(--text); font: inherit; font-size: 14px; white-space: nowrap; cursor: pointer; }
 .fchip:hover { border-color: var(--faint); text-decoration: none; }
 .fchip.active { background: var(--text); border-color: var(--text); color: var(--panel); }
+/* переключатели фильтра под заголовком «Задач»: «Новые 15», «Без срока 4» — включённый синий */
+.fchip.sm { height: 30px; padding: 0 12px; gap: 6px; font-size: 13px; }
+.fchip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.fchip .badge { height: 18px; min-width: 18px; padding: 0 6px; font-size: 12px; }
+.fchip.on .badge:not(.acc) { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.tgl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 10px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--muted); }
 .dot.ok { background: var(--ok); } .dot.error, .dot.bad { background: var(--bad); } .dot.pending, .dot.warn { background: var(--warn-fill); }
 .dot.off { background: var(--faint); } .dot.acc { background: var(--accent); }
@@ -423,6 +429,30 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .prop-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .btn.toggle.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .btn .badge { height: 18px; min-width: 18px; margin-left: 2px; font-size: 12px; }
+
+/* «Уточнить срок»: задачи без срока по одной — быстрые сроки плитками, своя дата, «Сохранить срок» */
+.dlg-due { width: min(640px, calc(100vw - 32px)); }
+.dlg-due .dlg-head { align-items: center; }
+.due-step { margin-left: auto; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.due-step + .dlg-x { margin-left: 4px; }
+.due-card { display: grid; gap: 12px; margin: 0; }
+.due-kind { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.due-what { margin: -6px 0 0; font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--text); text-transform: none;
+  letter-spacing: 0; overflow-wrap: anywhere; }
+.due-card .dlg-meta { margin-top: -6px; }
+.due-pick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+@media (max-width: 560px) { .due-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.due-q { display: grid; gap: 2px; align-content: center; min-height: 56px; padding: 8px 12px; border: 1px solid var(--line-strong);
+  border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-align: left;
+  cursor: pointer; }
+.due-q span { font-size: 13px; font-weight: 400; color: var(--muted); }
+.due-q:hover { border-color: var(--faint); background: var(--panel-2); }
+.due-q[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.due-q[aria-pressed="true"] span { color: var(--accent); }
+.due-own { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; color: var(--muted); }
+.due-own input { width: auto; height: 36px; font-size: 14px; }
+.due-own.on input { border-color: var(--accent); background: var(--accent-soft); }
+.due-end p { margin: 0; }
 /* переход по ссылке на задачу — карточка ненадолго подсвечивается */
 .flash { animation: flash 1.8s ease-out 1; }
 @keyframes flash { 0%, 45% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent); } }
@@ -1049,7 +1079,12 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .task.rel-hl { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-card); }
 .task-what { font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .task-meta { margin-top: 3px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.task-wait { display: inline-flex; vertical-align: -2px; }
+.task-wait { display: inline-flex; align-items: center; gap: 3px; vertical-align: bottom; }
+/* новая задача (добавил Claude, вы её ещё не видели) — синяя точка перед названием; исчезает, когда курсор
+   задержался на задаче или открыли её окно (app.js снимает data-new) */
+.task[data-new] > .task-what::before, tr[data-new] > .c-what > .task-open::before, .new-dot {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin: 0 7px 1px 0; border-radius: 50%; background: var(--accent); }
+.fchip .new-dot { margin: 0; }
 .task-more { display: none; }
 .task.open .task-more { display: block; }
 .task-dep { display: flex; gap: 6px; margin-top: 8px; font-size: 13px; color: var(--muted); line-height: 1.4; }

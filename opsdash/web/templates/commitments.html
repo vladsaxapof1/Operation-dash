@@ -5,7 +5,7 @@
 {% block content %}
 {% set keep = '&person=' ~ (person | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&created=' ~ created ~ '&created_from=' ~ created_from
    ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to
-   ~ ('&archived=1' if show_archived else '') ~ ('&project=' ~ project if project else '') %}
+   ~ ('&archived=1' if show_archived else '') ~ ('&project=' ~ project if project else '') ~ ('&new=1' if new else '') %}
 {% set open_cards = (board.mine + board.to_me + board.other) if board else (items or []) | selectattr('status', 'equalto', 'open') | list %}
 {% set n_late = open_cards | selectattr('overdue') | list | length %}
 {#- шапка «Задач» одной строкой (5.2): слева заголовок и сводка с активными фильтрами, справа поиск, фильтр, сортировка,
@@ -18,12 +18,24 @@
       {%- else %}{{ open_cards | length }} {{ plural(open_cards | length, 'активная', 'активных', 'активных') }}{% if n_late %} · {{ n_late }} {{ plural(n_late, 'просрочена', 'просрочены', 'просрочено') }}{% endif %}{% endif %}
       {%- for label, url in filter_chips %} · {{ label }} <a class="unfilter" href="{{ url }}&view={{ view }}" title="Снять фильтр">× снять</a>{% endfor %}
     </p>
+    {#- «Новые» — задачи, которые добавил Claude и вы ещё не видели; «Без срока» — чтобы назначить сроки; второй
+        щелчок снимает фильтр #}
+    {% if view != 'projects' and (new or new_tasks_count or due == 'none' or no_due_count) %}
+    <div class="tgl-row">
+      {% if new or new_tasks_count %}<a class="fchip sm{{ ' on' if new }}" href="{{ toggles.new }}&view={{ view }}" aria-pressed="{{ 'true' if new else 'false' }}"
+         title="{{ 'Показать все задачи' if new else 'Только задачи, которые добавил Claude и вы ещё не видели. Отметка снимается, когда задержите курсор на задаче или откроете её' }}"><i class="new-dot" aria-hidden="true"></i>Новые{% if new_tasks_count %}<span class="badge acc" data-unseen>{{ new_tasks_count }}</span>{% endif %}</a>{% endif %}
+      {% if due == 'none' or no_due_count %}<a class="fchip sm{{ ' on' if due == 'none' }}" href="{{ toggles.no_due }}&view={{ view }}" aria-pressed="{{ 'true' if due == 'none' else 'false' }}"
+         title="{{ 'Показать все задачи' if due == 'none' else 'Только открытые задачи без срока — чтобы назначить сроки' }}">Без срока{% if no_due_count %}<span class="badge">{{ no_due_count }}</span>{% endif %}</a>{% endif %}
+      {% if no_due %}<button type="button" class="linkish small" data-dlg-open="due-dlg" title="Задачи без срока по одной: быстрый срок, своя дата или «оставить без срока»">Разобрать сроки по одной →</button>{% endif %}
+    </div>
+    {% endif %}
   </div>
   <div class="toolbar">
     {% if view != 'projects' %}
     <form method="get" class="toolbar" id="task-filters">
       <input type="hidden" name="view" value="{{ view }}">{% if view == 'gantt' %}<input type="hidden" name="scale" value="{{ scale }}">{% endif %}
       {% if show_done %}<input type="hidden" name="done" value="1">{% endif %}
+      {% if new %}<input type="hidden" name="new" value="1">{% endif %}
       {% if view == 'gantt' %}
       <div class="seg" aria-label="Масштаб">{% for key, title in [('day', 'День'), ('week', 'Неделя'), ('month', 'Месяц')] %}<a href="?view=gantt&scale={{ key }}{{ keep }}" class="{{ 'active' if scale == key }}">{{ title }}</a>{% endfor %}</div>
       <button type="button" class="btn" data-gantt-today>Сегодня</button>
@@ -276,6 +288,7 @@
 {% endif %}
 {#- ?task=<id>: окно задачи открывается само (app.js); если фильтры её прячут — окно отдельно #}
 {% if extra %}{{ ui.task_dialog(extra, meetings) }}{% endif %}
+{% if no_due %}{{ ui.due_dialog(no_due, due_choices, meetings) }}{% endif %}
 {% if focus %}<span hidden data-focus-task="{{ focus }}"></span>{% endif %}
 {{ ui.task_datalist() }}
 {{ ui.event_datalist() }}

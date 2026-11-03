@@ -494,9 +494,10 @@ MONTHS_GEN = ("января", "февраля", "марта", "апреля", "�
               "ноября", "декабря")
 
 
-def needs_from_you(snap: dict | None = None) -> dict:
+def needs_from_you(snap: dict | None = None, *, due: bool = False) -> dict:
     """«Нужно от вас» (5.1): всё, что ждёт директора, одной лентой — подтвердить, ответить, напомнить. Срочное и
-    просроченное сверху, потом подтверждения, ответы, напоминания, карточки Kaiten без движения."""
+    просроченное сверху, потом подтверждения, ответы, напоминания, карточки Kaiten без движения. due — ещё строка
+    «Уточнить срок» (задачи без срока) в самом низу: только в ленте на Сводке, в счётчик меню она не входит."""
     from opsdash.sources import kaiten
 
     settings = config.load_settings()
@@ -520,9 +521,21 @@ def needs_from_you(snap: dict | None = None) -> dict:
             items.append({"kind": "confirm", "p": group[0], "urgent": False, "order": 1})
     for k in stale:
         items.append({"kind": "remind", "kaiten": k, "urgent": False, "order": 5})
+    no_due = records.due_queue() if due else []
+    if no_due:
+        items.append({"kind": "due", "tasks": no_due, "urgent": False, "order": 6})
     items.sort(key=lambda i: i["order"])
-    counts = {"confirm": len(props), "answer": len(attention), "remind": len(reminders) + len(stale)}
-    return {"items": items, "counts": counts, "total": sum(counts.values()), "urgent": any(i["urgent"] for i in items)}
+    counts = {"confirm": len(props), "answer": len(attention), "remind": len(reminders) + len(stale), "due": len(no_due)}
+    return {"items": items, "counts": counts, "total": sum(counts.values()) - counts["due"],
+            "urgent": any(i["urgent"] for i in items)}
+
+
+def due_choices() -> list[dict]:
+    """Быстрые сроки окна «Уточнить срок»: «Завтра · ср, 04.11» — по дате видно, что выберет кнопка."""
+    from opsdash import gantt
+
+    return [{"label": label, "iso": d.isoformat(), "text": f"{gantt.WEEKDAYS[d.weekday()].lower()}, {d:%d.%m}"}
+            for label, d in records.due_choices()]
 
 
 def _next_collect(settings: dict) -> datetime | None:
@@ -546,8 +559,10 @@ def home(request: Request):
 
     settings = config.load_settings()
     snap = overview.snapshot()
-    feed = needs_from_you(snap)
+    feed = needs_from_you(snap, due=True)
+    no_due = next((i["tasks"] for i in feed["items"] if i["kind"] == "due"), [])
     meeting_ids = {i["batch"][8:] for i in feed["items"] if i.get("batch", "").startswith("meeting:")}
+    meeting_ids |= {c["source_ref"] for c in no_due if c["source_type"] == "meeting" and c["source_ref"]}
     meetings = {m["id"]: m for m in store.rows(
         f"SELECT id, title, started_at FROM meetings WHERE id IN ({','.join('?' * len(meeting_ids))})",
         list(meeting_ids))} if meeting_ids else {}
@@ -562,7 +577,8 @@ def home(request: Request):
     start_h, start_m = (int(x) for x in (settings["owner"]["work_hours"].get("start") or "09:00").split(":"))
     work_left = int((now.replace(hour=end_h, minute=end_m, second=0, microsecond=0) - now).total_seconds() // 60)
     before_start = now.hour * 60 + now.minute < start_h * 60 + start_m
-    return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings,
+    return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings, no_due=no_due,
+                  meeting_titles={k: m["title"] for k, m in meetings.items()}, due_choices=due_choices(),
                   describe=proposals.describe, day=day, busy_min=busy_min, left=left, work_left=work_left,
                   before_start=before_start, work_start=f"{start_h:02d}:{start_m:02d}",
                   weekday=WEEKDAYS_FULL[now.weekday()], date_text=f"{now.day} {MONTHS_GEN[now.month - 1]}",
@@ -777,12 +793,18 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
         (f"проект: {proj_title}", ("project",), bool(project)),
         (f"человек: {person}", ("person",), bool(person)),
         (f"создана: {period_titles.get(created, created)}", ("created", "created_from", "created_to"), bool(created)),
-        (f"срок: {period_titles.get(due, due)}", ("due", "due_from", "due_to"), bool(due)),
+        (f"срок: {period_titles.get(due, due)}", ("due", "due_from", "due_to"), bool(due) and due != "none"),
         (records.DIRECTIONS.get(direction, direction), ("direction",), view == "list" and bool(direction)),
         ({"done": "выполненные", "all": "все статусы"}.get(status, status), ("status",), view == "list" and status != "open"),
         ("с архивными", ("archived",), show_archived),
         (f"поиск «{q}»", ("q",), bool(q)),
     ) if on]
+    # «Без срока»: кнопка «Разобрать по одной» — окно «Уточнить срок» с показанными открытыми задачами без срока
+    no_due = [c for c in ([c for key in ("mine", "to_me", "other") for c in board[key]] if board else items or [])
+              if c["status"] == "open" and not c["due"] and not c["archived"]] if due == "none" else []
+    # переключатели «Новые» и «Без срока» под заголовком (вместо «× снять» у этих двух фильтров): второй щелчок снимает
+    toggles = {key: (without(*keys) + ("" if on else add)).replace("?&", "?", 1) for key, keys, on, add in (
+        ("new", ("new",), new == "1", "&new=1"), ("no_due", ("due", "due_from", "due_to"), due == "none", "&due=none"))}
     response = render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
                       direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
                       add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
@@ -797,6 +819,8 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       done_projects=bool(done_projects), show_done=done == "1",
                       group=group if group in LIST_GROUPS else "dir", list_groups=LIST_GROUPS,
                       filter_chips=chips, filter_count=sum(1 for c in chips if not c[0].startswith("поиск")),
+                      no_due_count=records.no_due_count(), no_due=no_due, due_choices=due_choices() if no_due else [],
+                      toggles=toggles,
                       in_projects=store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL "
                                                "AND project_id IS NOT NULL") or 0,
                       done_projects_count=store.scalar("SELECT COUNT(*) FROM projects WHERE status='done'") or 0)
@@ -830,6 +854,26 @@ def commitment_add(request: Request, direction: str = Form(...), title: str = Fo
 def commitment_update(request: Request, cid: int, status: str = Form(None), due: str = Form(None)):
     records.update_commitment(cid, status=status or None, due=due or None)
     return back(request, "Сохранено")
+
+
+@app.post("/commitments/{cid}/due")
+def commitment_due(request: Request, cid: int, due: str = Form(""), act: str = Form("save")):
+    """«Уточнить срок»: срок с быстрой кнопки или из календаря; act=skip — «Оставить без срока», больше не спрашивать.
+    Окно разбора отправляет форму из app.js и ждёт JSON, без скриптов — обычный возврат на страницу."""
+    as_json = "application/json" in request.headers.get("accept", "")
+    err = "" if records.get_commitment(cid) else "Такой задачи нет"
+    if not err and act != "skip" and not due.strip():
+        err = "Выберите срок или «Оставить без срока»"
+    if not err:
+        try:
+            records.set_due(cid, None if act == "skip" else due.strip())
+        except ValueError as e:
+            err = str(e)
+    if as_json:
+        return JSONResponse({"ok": not err, "err": err}, status_code=400 if err else 200)
+    if err:
+        return back(request, err=err)
+    return back(request, "Оставлена без срока" if act == "skip" else f"Срок — {f_date(due.strip())}")
 
 
 @app.post("/commitments/{cid}/state")

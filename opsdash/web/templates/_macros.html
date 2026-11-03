@@ -367,7 +367,7 @@
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}
     {%- if c.archived %} · архив{% endif -%}
-    {%- if open_waits %} <span class="task-wait" title="Ждёт: {% for w in open_waits %}{{ ('«' ~ w.task.headline ~ '» (' ~ w.task.doer ~ ')') if w.task else w.event }}{{ '; ' if not loop.last }}{% endfor %}">{{ icons.icon('hourglass', 13) }}</span>{% endif -%}
+    {%- if open_waits %} · <span class="task-wait" title="Ждёт: {% for w in open_waits %}{{ ('«' ~ w.task.headline ~ '» (' ~ w.task.doer ~ ')') if w.task else w.event }}{{ '; ' if not loop.last }}{% endfor %}">{{ icons.icon('hourglass', 13) }}ждёт</span>{% endif -%}
   </div>
   <div class="task-more">
     {% for w in open_waits[:3] %}<div class="task-dep">{{ icons.icon('hourglass', 14) }}<span>ждёт {% if w.task %}{{ task_ref(w.task) }} — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% if w.until %} · {{ w.until | date }}{% endif %}{% endif %}{% if w.late %}, <span class="bad-text">просрочено</span>{% endif %}</span></div>{% endfor %}
@@ -387,6 +387,50 @@
   </div>
   {{ task_dialog(c, meetings) }}
 </div>
+{% endmacro %}
+
+{% macro due_dialog(tasks, choices, meetings={}) %}
+{#- «Уточнить срок» (Сводка, «Задачи» → «Без срока»): задачи без срока по одной. Быстрая кнопка или своя дата и
+    «Сохранить срок»; «Оставить без срока» — PULSE больше не спросит; «Не сейчас» — к следующей, задача останется
+    в разборе. Сохраняет app.js без перезагрузки, после закрытия окна страница обновляется #}
+<dialog class="dlg dlg-due" id="due-dlg" aria-labelledby="due-title" data-due>
+  <div class="dlg-box" tabindex="-1">
+    <div class="dlg-head">
+      <h2 class="dlg-title" id="due-title">Уточнить срок</h2>
+      <span class="due-step" data-due-step>1 из {{ tasks | length }}</span>
+      <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>
+    </div>
+    {% for c in tasks %}
+    {% set title = c | headline %}
+    <form class="due-card" method="post" action="/commitments/{{ c.id }}/due" data-due-card{% if not loop.first %} hidden{% endif %}>
+      <div class="due-kind">{{ {'mine': 'Ваша задача', 'to_me': 'Вам должны', 'other': 'Между коллегами'}[c.direction] }}</div>
+      <h3 class="due-what">{{ title }}</h3>
+      <div class="dlg-meta">{{ task_people(c) }}
+        {%- if c.source_type == 'meeting' and c.source_ref %} · из <a href="/meetings/{{ c.source_ref }}">{{ ('«' ~ meetings[c.source_ref] ~ '»') if meetings.get(c.source_ref) else 'встречи' }}</a>
+        {%- elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif -%}
+        {%- if c.created %} · появилась {{ c.created | local('%d.%m') }}{% endif -%}
+        {%- if c.no_due_at %} · вы уже оставляли её без срока{% endif %}</div>
+      {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
+      {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}
+      <div class="due-pick" role="group" aria-label="Срок">
+        {% for ch in choices %}<button type="button" class="due-q" data-due-pick="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
+      </div>
+      <label class="due-own">или своя дата <input type="date" name="due" required></label>
+      <p class="bad-text small" data-due-err hidden></p>
+      <div class="dlg-actions">
+        <button class="btn primary" name="act" value="save" data-due-save>Сохранить срок</button>
+        <button class="btn" name="act" value="skip" formnovalidate title="Задача останется без срока, и PULSE больше не спросит о ней">Оставить без срока</button>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" data-due-next title="Решить потом: задача останется в разборе">Не сейчас</button>
+      </div>
+    </form>
+    {% endfor %}
+    <div class="due-end" data-due-end hidden>
+      <p data-due-sum></p>
+      <div class="dlg-actions"><button type="button" class="btn primary" data-dlg-close>Закрыть</button></div>
+    </div>
+  </div>
+</dialog>
 {% endmacro %}
 
 {% macro menu(label='Ещё действия') -%}
