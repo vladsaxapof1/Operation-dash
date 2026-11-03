@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS events (
     organizer TEXT,
     attendees TEXT,                  -- JSON [{email, name, status}]
     url TEXT,
-    synced_at TEXT
+    synced_at TEXT,
+    transp TEXT                      -- TRANSPARENT — «свободен»: время не занято (opsdash.day)
 );
 
 CREATE TABLE IF NOT EXISTS kaiten_cards (
@@ -174,6 +175,8 @@ CREATE TABLE IF NOT EXISTS commitments (
     seen_at TEXT,                    -- когда директор увидела задачу; пусто — «новая» (добавил Claude)
     reminded_at TEXT,                -- когда напомнили исполнителю в Telegram (кнопка «Отправить»)
     in_work_at TEXT,                 -- директор отметила «В работе»: карточка сверху колонки, зелёная
+    estimate_min INTEGER,            -- сколько займёт у директора, мин (opsdash.day); пусто — считаем 30
+    estimate_by TEXT,                -- кто оценил: claude | user (оценку директора Claude не меняет)
     archived_at TEXT,                -- убрана в архив: не видна на доске, в списках и дайджестах
     duplicate_of INTEGER,            -- дубль какой задачи: закрыта при объединении (records.merge_commitments)
     project_id INTEGER,              -- в каком проекте (opsdash.projects); подзадачи получают проект основной
@@ -218,6 +221,16 @@ CREATE TABLE IF NOT EXISTS task_items (       -- пункты внутри за�
 );
 CREATE INDEX IF NOT EXISTS ix_task_items_task ON task_items(task_id);
 CREATE INDEX IF NOT EXISTS ix_task_links_for ON task_links(waits_for);
+CREATE TABLE IF NOT EXISTS day_plan (         -- план дня: какие задачи в какие окна (opsdash.day); в календарь не пишем
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,              -- YYYY-MM-DD, местный день
+    commitment_id INTEGER,
+    start TEXT, "end" TEXT,          -- местное ЧЧ:ММ; у «в план, авто» — пусто
+    status TEXT DEFAULT 'planned',   -- planned | done | moved (срок перенесли) | dropped (сняли срок)
+    source TEXT DEFAULT 'auto',      -- auto — расставил PULSE; user — решение директора, алгоритм его не двигает
+    updated TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_day_plan_date ON day_plan(date, commitment_id);
 
 CREATE TABLE IF NOT EXISTS attention (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -394,6 +407,9 @@ MIGRATIONS = [
     ("commitments", "reminded_at", "TEXT"),
     ("attention", "reopened_at", "TEXT"),
     ("commitments", "in_work_at", "TEXT"),
+    ("commitments", "estimate_min", "INTEGER"),  # «Реальность дня» (opsdash.day)
+    ("commitments", "estimate_by", "TEXT"),
+    ("events", "transp", "TEXT"),
     ("commitments", "archived_at", "TEXT"),
     ("messages", "topic", "TEXT"),
     ("commitments", "event_uid", "TEXT"),   # встреча календаря, посвящённая задаче (opsdash.task_meetings)

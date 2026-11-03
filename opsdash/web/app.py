@@ -29,6 +29,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from opsdash import __version__, briefs, config, digests, overview, proposals, records, store
+from opsdash import day as day_mod
 from opsdash.web import settings_views
 
 HERE = Path(__file__).parent
@@ -218,6 +219,8 @@ templates.env.globals.update(
     proposal_links=proposals.links,  # ссылки у предложений — для макросов (они не видят переменных страницы)
     proposal_action=proposals.action,  # надпись на кнопке подтверждения: «Закрыть задачу», «Напомнить»…
 )
+templates.env.filters.update(dur=day_mod.dur, hm=day_mod.hm, est=day_mod.est_text)  # «Реальность дня»
+templates.env.globals.update(DAY_CHIPS=day_mod.CHIPS, SPLIT_HINT=day_mod.SPLIT_HINT)
 
 
 def render(request: Request, name: str, **ctx) -> HTMLResponse:
@@ -573,8 +576,10 @@ def home(request: Request):
     briefs.for_events(day["events"])
     task_meetings.for_events(day["events"])
     now = snap["now"]
-    timed = [e for e in day["events"] if not e["all_day"]]
-    busy_min = sum(int((e["e_local"] - e["s_local"]).total_seconds() // 60) for e in timed if e.get("e_local"))
+    dp = day_mod.plan(settings=settings, now=now)  # «Реальность дня»: окна, спрос, вердикт и план — без ИИ
+    day_mod.decorate(day, dp)
+    timed = [e for e in day["events"] if not e["all_day"] and not e.get("day_kind")]  # фокус-блок — не встреча
+    busy_min = sum(e - s for s, e in day_mod.union([(m["s"], m["e"]) for m in dp["meetings"]]))
     left = [e for e in timed if (e.get("e_local") or e["s_local"]) > now]
     end_h, end_m = (int(x) for x in (settings["owner"]["work_hours"].get("end") or "20:00").split(":"))
     start_h, start_m = (int(x) for x in (settings["owner"]["work_hours"].get("start") or "09:00").split(":"))
@@ -582,6 +587,7 @@ def home(request: Request):
     before_start = now.hour * 60 + now.minute < start_h * 60 + start_m
     return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings, no_due=no_due,
                   meeting_titles={k: m["title"] for k, m in meetings.items()}, due_choices=due_choices(),
+                  dp=dp, next_label=day_mod.next_label(now.date(), settings), meet_n=len(timed),
                   describe=proposals.describe, day=day, busy_min=busy_min, left=left, work_left=work_left,
                   before_start=before_start, work_start=f"{start_h:02d}:{start_m:02d}",
                   weekday=WEEKDAYS_FULL[now.weekday()], date_text=f"{now.day} {MONTHS_GEN[now.month - 1]}",
@@ -888,6 +894,58 @@ def commitment_due(request: Request, cid: int, due: str = Form(""), act: str = F
     if err:
         return back(request, err=err)
     return back(request, "Оставлена без срока" if act == "skip" else f"Срок — {f_date(due.strip())}")
+
+
+# --- реальность дня (opsdash.day) ---------------------------------------------------------------
+
+@app.post("/commitments/{cid}/estimate")
+def commitment_estimate(request: Request, cid: int, minutes: int = Form(0)):
+    """Оценка в один клик из окна задачи: 15м · 30м · 1ч · 2ч · полдня. Ручную оценку Claude больше не меняет."""
+    try:
+        day_mod.set_estimate(cid, minutes or None, by="user")
+    except ValueError as e:
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"ok": False, "err": str(e)}, status_code=400)
+        return back(request, err=str(e))
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "note": "ваша оценка" if minutes else "не оценена — считаю 30 мин"})
+    return back(request, f"Оценка — {day_mod.est_text(minutes)}" if minutes else "Оценка убрана")
+
+
+def _day_review(after: bool = False) -> str:
+    """Тело окна «Разобрать день» — заново после каждого решения: итог, окна и предложенное время пересчитаны."""
+    settings = config.load_settings()
+    p = day_mod.plan(settings=settings)
+    return str(templates.env.get_template("_day.html").module.review_body(
+        p, due_choices(), day_mod.next_label(p["date"], settings), after))
+
+
+@app.get("/day/review", response_class=HTMLResponse)
+def day_review(after: int = 0):
+    return HTMLResponse(_day_review(bool(after)))
+
+
+@app.post("/day/act")
+def day_act(request: Request, cid: int = Form(...), act: str = Form(...), start: str = Form(""), due: str = Form(""),
+            minutes: int = Form(0)):
+    """Решение из «Разобрать день»: в план (окно или «авто»), на следующий рабочий день, свой срок, снять срок,
+    оценка. Окно ждёт JSON с новым телом; без скриптов — возврат на Сводку."""
+    as_json = "application/json" in request.headers.get("accept", "")
+    try:
+        if act == "estimate":
+            day_mod.set_estimate(cid, minutes or None, by="user")
+            msg = f"Оценка — {day_mod.est_text(minutes)}" if minutes else "Оценка убрана"
+        else:
+            if act == "due" and not due.strip():
+                raise ValueError("Выберите срок")
+            msg = day_mod.decide(cid, act, start=start.strip(), due=due.strip())
+    except ValueError as e:
+        if as_json:
+            return JSONResponse({"ok": False, "err": str(e)}, status_code=400)
+        return back(request, err=str(e))
+    if as_json:
+        return JSONResponse({"ok": True, "msg": msg, "html": _day_review(after=True)})
+    return back(request, msg)
 
 
 @app.post("/commitments/{cid}/state")

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
 {% import "_icons.html" as icons %}
+{% import "_day.html" as dayui %}
 {% block title %}Сводка{% endblock %}
 {% block content %}
 {% macro loop_id(it) -%}{{ it.batch | replace(':', '-') | replace(' ', '-') | replace('|', '-') }}{%- endmacro %}
@@ -151,10 +152,11 @@
     <section class="card today">
       <div class="today-h">
         <h2>Сегодня</h2>
-        <span class="muted">{% if day.events %}{{ day.events | length }} {{ plural(day.events | length, 'встреча', 'встречи', 'встреч') }}{% if busy_min %} · {% if busy_min >= 60 %}{{ busy_min // 60 }} ч {% endif %}{% if busy_min % 60 %}{{ busy_min % 60 }} мин{% endif %}{% endif %}{% else %}встреч нет{% endif %}</span>
+        <span class="muted">{% if meet_n %}{{ meet_n }} {{ plural(meet_n, 'встреча', 'встречи', 'встреч') }}{% if busy_min %} · {% if busy_min >= 60 %}{{ busy_min // 60 }} ч {% endif %}{% if busy_min % 60 %}{{ busy_min % 60 }} мин{% endif %}{% endif %}{% else %}встреч нет{% endif %}</span>
         <span class="grow"></span><a class="small" href="/calendar">неделя →</a>
       </div>
       {% set today = day.days[0] %}
+      {% if settings.calendar.enabled or settings.google_calendar.enabled or day.events %}{{ dayui.verdict(dp) }}{% endif %}
       {% if day.allday %}
       <div class="day-allday">{% for a in day.allday %}<button type="button" class="ev ev-allday{{ ' google' if a.ev.google }}" data-ev="{{ a.ev.n }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>{% endfor %}</div>
       {% endif %}
@@ -163,13 +165,14 @@
         <div class="wk-hours">{% for h in day.hours %}<div class="wk-hour"><span>{{ '%02d:00' % h }}</span></div>{% endfor %}</div>
         <div class="day-col" style="height: {{ day.height }}px">
           {% for g in today.events %}
-          <button type="button" class="ev{{ ' google' if g.ev.google }}{{ ' past' if g.ev.past }}{{ ' now' if g.ev.now }}{{ ' short' if g.short }}" data-ev="{{ g.ev.n }}"
+          <button type="button" class="ev{{ ' google' if g.ev.google }}{{ ' past' if g.ev.past }}{{ ' now' if g.ev.now }}{{ ' short' if g.short }}{{ (' ' ~ g.ev.day_kind) if g.ev.day_kind }}" data-ev="{{ g.ev.n }}"
                   style="top: {{ g.top }}px; height: {{ g.height }}px; left: calc({{ '%.4f' % (g.left * 100) }}% + 4px); width: calc({{ '%.4f' % (g.width * 100) }}% - 6px)"
                   title="{{ g.ev.title or 'Без названия' }} · {{ ui.ev_time(g.ev) }}">
             <span class="ev-t">{{ ui.brief_mark(g.ev) }}{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time"> · {{ ui.ev_time(g.ev) }}</span>{% endif %}</span>
             {% if not g.short %}<span class="ev-time">{{ ui.ev_time(g.ev) }}{% if g.ev.past %} · {{ 'разобрана' if g.ev.recorded else 'прошла' }}{% elif g.ev.now %} · идёт{% endif %}</span>{% endif %}
           </button>
           {% endfor %}
+          {{ dayui.layer(day) }}
           {% if day.now_top is not none %}<div class="day-now" style="top: {{ day.now_top }}px" data-now="{{ day.now_top }}" data-now-min="{{ day.now.hour * 60 + day.now.minute }}"><span data-now-label>{{ day.now.strftime('%H:%M') }}</span></div>{% endif %}
         </div>
       </div>
@@ -178,6 +181,7 @@
       {% endif %}
       {% for e in day.events %}{{ ui.ev_detail(e) }}{{ ui.brief_dialog(e) }}{% endfor %}
       <div class="ev-pop" hidden data-ev-pop></div>
+      {{ dayui.review(dp, due_choices, next_label) }}
     </section>
 
     <section class="away">

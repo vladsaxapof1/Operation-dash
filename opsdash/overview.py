@@ -171,6 +171,12 @@ def day_grid(settings: dict | None = None) -> dict:
     чтобы линия «сейчас» показывала, что уже прошло, а что впереди."""
     now = config.now(settings)
     lo, hi = 9, 19
+    wh = (settings or config.load_settings())["owner"].get("work_hours") or {}
+    try:  # весь рабочий день: на нём окна и план задач («Реальность дня»)
+        lo = min(lo, int(config.hhmm(wh.get("start"), "09:00")[:2]))
+        hi = max(hi, min(24, -(-int(config.hhmm(wh.get("end"), "19:00").replace(":", "")) // 100)))
+    except ValueError:
+        pass
     if 7 <= now.hour < 23:
         lo, hi = min(lo, now.hour), max(hi, now.hour + 1)
     grid = week_grid(now.date(), settings, ndays=1, hour_px=DAY_HOUR_PX, hours=(lo, hi))

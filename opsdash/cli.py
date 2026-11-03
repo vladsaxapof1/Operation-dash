@@ -588,6 +588,8 @@ def _commitment_line(c: dict) -> str:
         line += f" · {c['status']}"
     if c.get("in_work"):
         line += " · в работе"
+    if c.get("estimate_min"):
+        line += f" · ≈{c['estimate_min']} мин" + (" (оценка директора)" if c.get("estimate_by") == "user" else "")
     if c.get("archived_at"):
         line += " · в архиве"
     if c["kaiten_card_id"]:
@@ -647,6 +649,8 @@ def cmd_commitments(a) -> None:
         except ValueError as e:
             fail(str(e))
         out(f"Обещание [{cid}] сохранено" + (f" как часть задачи [{a.parent}]" if a.parent else ""))
+        if a.estimate:
+            _estimate(cid, a.estimate)
         similar = records.similar_open(direction=a.direction, who=a.who, whom=a.whom, title=a.title, what=a.what,
                                        kaiten_card_id=a.card, exclude=cid)
         if similar:
@@ -727,6 +731,96 @@ def cmd_commitments(a) -> None:
         if a.archived:
             records.set_archived(a.id, a.archived == "on")
         out("Сохранено")
+        if a.estimate:
+            _estimate(a.id, a.estimate)
+
+
+def _estimate(cid: int, value: int) -> None:
+    """--estimate: сколько займёт у директора. Из фонового запуска — оценка Claude, оценку директора она не меняет."""
+    from opsdash import day
+
+    try:
+        ok = day.set_estimate(cid, value, by=day.agent_or_user())
+    except ValueError as e:
+        fail(str(e))
+    out(f"Оценка: {day.est_text(value)}" if ok else "Оценку директор поставила сама — не меняю")
+    if value > day.BIG:
+        out(f"Больше полдня — предложи {day.SPLIT_HINT} (./ops commitments items {cid} --add \"…\")")
+
+
+# --- реальность дня ---------------------------------------------------------------------------------
+
+def cmd_day(a) -> None:
+    from datetime import date
+
+    from opsdash import day
+
+    if a.action == "estimates":
+        if a.set:
+            by, done, kept = day.agent_or_user(), 0, 0
+            for part in a.set.replace(";", ",").split(","):
+                cid, _, value = part.strip().partition("=")
+                if not cid:
+                    continue
+                try:
+                    ok = day.set_estimate(int(cid.strip().lstrip("#[").rstrip("]")), int(value), by=by)
+                except ValueError as e:
+                    fail(f"«{part.strip()}»: {e}")
+                done, kept = done + ok, kept + (not ok)
+            out(f"Оценки сохранены: {done}" + (f"; оценки директора не менял: {kept}" if kept else ""))
+            return
+        items = day.unestimated()
+        if a.json:
+            return as_json(items)
+        for c in items:
+            out(f"[{c['id']}] «{records.headline(c)}» → {c['whom'] or '?'}: {short(c['what'], 300)}"
+                + (f" · до {c['due']}" if c["due"] else "") + (" · в работе" if c["in_work_at"] else ""))
+        if not items:
+            out("Все открытые задачи директора оценены.")
+        return
+    try:
+        when = date.fromisoformat(a.date) if a.date else None
+    except ValueError:
+        fail("дата — в виде ГГГГ-ММ-ДД")
+    p = day.plan(when)
+    if a.json:
+        return as_json({k: v for k, v in p.items() if k not in ("meetings", "free_events")})
+    v = p["verdict"]
+    ww = f"рабочее время {day.hm(p['work'][0])}–{day.hm(p['work'][1])}" if p["work"] else "выходной по настройкам"
+    out(f"# День {p['date']:%d.%m} · {ww}" + (f", считаю с {day.hm(p['from'])}" if p["today"] and p["from"] else ""))
+    out(f"Вердикт: {v['line']}")
+    out(f"Строка для дайджеста: {p['digest']}")
+    out(f"\n## Окна ({day.dur(p['capacity'])} для задач)")
+    for w in p["windows"]:
+        out(f"- {day.hm(w['s'])}–{day.hm(w['e'])} ({day.dur(w['len'])})"
+            + (f" · {w['focus']['title']} (фокус-блок)" if w["focus"] else "")
+            + (" · короткое, не считается" if w["short"] else ""))
+    if not p["windows"]:
+        out("- нет")
+    busy = sum(e - s for s, e in day.union([(m["s"], m["e"]) for m in p["meetings"]]))
+    out(f"Занято: встречи {day.dur(busy)} ({len(p['meetings'])}), буферы {day.dur(sum(e - s for s, e in p['buffers']))}"
+        + (f", обед {day.hm(p['lunch'][0])}–{day.hm(p['lunch'][1])}" if p["lunch"] else ""))
+    if p["current"]:
+        w = p["current"]
+        out(f"Сейчас: окно до {day.hm(w['e'])} ({day.dur(w['left'])})"
+            + (f" — подходит «{w['fit']['title']}» (≈{day.dur(w['fit']['est'])})" if w["fit"] else ""))
+    elif p["next"]:
+        out(f"Следующее окно: {day.hm(p['next']['s'])}–{day.hm(p['next']['e'])}")
+    out(f"\n## Нужно сделать ({day.dur(p['need'])}), по приоритету")
+    for i in p["items"]:
+        ref = f"[commitment {i['id']}] «{i['title']}»" if i["id"] else i["title"]
+        est = day.dur(i["est"]) + (" (оценка по умолчанию)" if i["est_default"] else
+                                   " (оценка директора)" if i["est_by"] == "user" else "")
+        out(f"- {ref} — {est} — {i['reason']}" + (f" → {i['slot']}" if i.get("slot") else ""))
+    if not p["items"]:
+        out("- ничего")
+    if p["overflow"]:
+        out("Не влезает сегодня: " + "; ".join(f"«{i['title']}» ({day.dur(i['est'])})" for i in p["overflow"]))
+    for i in p["too_big"]:
+        out(f"Не помещается ни в одно окно: «{i['title']}» ({day.dur(i['est'])}) — самое длинное окно "
+            f"{day.dur(p['longest'])} — {day.SPLIT_HINT}")
+    if p["waiting"]:
+        out("Ждут других, в план не ставлю: " + "; ".join(f"[commitment {c['id']}] «{c['title']}»" for c in p["waiting"]))
 
 
 def _ids(value: str | None) -> list[int]:
@@ -1294,6 +1388,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--force", action="store_true",
                    help="добавить, даже если у этой карточки Kaiten уже есть открытая задача")
     x.add_argument("--project", type=int, help="в проект с этим id (./ops projects list)")
+    x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин: 15, 30, 60, 120, 240 (полдня)")
     x = ms.add_parser("set")
     x.add_argument("id", type=int)
     x.add_argument("--status", choices=["open", "done", "cancelled"])
@@ -1308,6 +1403,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--project", type=int, help="в проект с этим id (0 — убрать из проекта); подзадачи — следом")
     x.add_argument("--in-work", choices=["on", "off"], help="отметка «В работе» (по просьбе директора)")
     x.add_argument("--archived", choices=["on", "off"], help="убрать в архив или вернуть (по просьбе директора)")
+    x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин (оценку директора Claude не меняет)")
     x = ms.add_parser("wait", help="задача ждёт другую задачу или событие: без него её не закончить")
     x.add_argument("id", type=int, help="задача, которая ждёт")
     x.add_argument("--for", dest="waits_for", type=int, help="id задачи, которую она ждёт")
@@ -1390,6 +1486,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--date", help="YYYY-MM-DD, по умолчанию сегодня")
     s.add_argument("--days", type=int, default=1)
     s.set_defaults(fn=cmd_calendar)
+
+    s = sub.add_parser("day", help="реальность дня: окна между встречами, сколько задач, вердикт и план (без ИИ)")
+    s.add_argument("--date", help="YYYY-MM-DD, по умолчанию сегодня")
+    ms = s.add_subparsers(dest="action")
+    x = ms.add_parser("estimates", help="задачи директора без оценки времени; --set — сохранить оценки пачкой")
+    x.add_argument("--set", help="«<id>=<минуты>,<id>=<минуты>»: 12=30,15=60")
+    s.set_defaults(fn=cmd_day, action=None)
 
     s = sub.add_parser("propose", help="предложить действие (выполнится после «да» директора)")
     ps = s.add_subparsers(dest="kind", required=True)

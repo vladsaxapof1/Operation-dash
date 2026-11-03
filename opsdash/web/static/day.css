@@ -1,0 +1,70 @@
+/* «Реальность дня» (opsdash.day): вердикт над сеткой дня, план на сетке, окно «Разобрать день», чипы оценки.
+   Только токены style.css — тёмная тема (dark.css) подхватывается сама */
+
+/* вердикт: точка цвета (зелёный — реально, оранжевый — плотно, красный — перегруз), полоса «нужно / свободно» */
+.dv { display: grid; gap: 6px; padding: 0 14px 10px; }
+.dv-h { display: flex; align-items: center; gap: 8px; }
+.dv-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
+.dv-sub { margin: -4px 0 0; font-size: 13px; line-height: 1.4; }
+.dv-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
+.dv-ok .dv-dot { background: var(--ok); }
+.dv-tight .dv-dot { background: var(--warn); }
+.dv-over .dv-dot { background: var(--bad); }
+.dv-over .dv-title { color: var(--bad-text); }
+.dv-tight .dv-title { color: var(--warn-text); }
+.dv-ok .dv-title { color: var(--ok-text); }
+.dv-bar { position: relative; height: 6px; border-radius: 3px; background: var(--sunken); }
+.dv-need { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--ok); }
+.dv-tight .dv-need { background: var(--warn); }
+.dv-over .dv-need { background: var(--bad); }
+.dv-cap { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); border-radius: 1px; }
+.dv-now, .dv-big { margin: 0; font-size: 13px; line-height: 1.4; }
+.dv-now b { font-weight: 600; color: var(--accent); }
+
+/* на сетке: плановая задача — пунктир цвета акцента; буфер — штриховка; короткое окно — серым */
+.pb { position: absolute; z-index: 1; display: block; overflow: hidden; padding: 2px 8px; border: 1.5px dashed var(--accent);
+  border-radius: 6px; background: color-mix(in srgb, var(--accent-soft) 85%, transparent); color: var(--accent);
+  font-size: 12px; line-height: 1.3; }
+.pb:hover { text-decoration: none; z-index: 2; background: var(--accent-soft); box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.pb.pinned { border-style: solid; }
+.pb-t { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-m { display: block; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb.tiny { padding-top: 0; padding-bottom: 0; }
+.pb.tiny .pb-m { display: none; }
+.pl { position: absolute; left: 4px; right: 4px; z-index: 0; border-radius: 4px; pointer-events: none; }
+.pl-buffer { background: repeating-linear-gradient(135deg, var(--line-strong) 0 1px, transparent 1px 5px); }
+.pl-short { background: var(--sunken); opacity: .7; }
+/* фокус-блок («тайм-аут») — время для задач: светлый, с рамкой акцента; встреча, от которой отказались, — бледная */
+.ev.focus { background: color-mix(in srgb, var(--ok-soft) 70%, var(--panel)); color: var(--ok-text); border-left-color: var(--ok); }
+.ev.free { background: transparent; color: var(--muted); border: 1px dashed var(--line-strong); border-left-width: 3px; }
+
+/* окно «Разобрать день» */
+.dlg-day { width: min(760px, calc(100vw - 32px)); }
+.dlg-day[open] { display: flex; flex-direction: column; overflow: hidden; }
+.dlg-day .dlg-box { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.dlg-day .dlg-head, .dlg-day .dlg-actions { flex: none; }
+.day-body { overflow-y: auto; min-height: 0; display: grid; gap: 10px; align-content: start; }
+.day-total { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; }
+.day-err { margin: 0; }
+.day-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.day-it { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
+.day-it-h { display: flex; align-items: baseline; gap: 10px; }
+.day-it-t { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.day-it-t a { color: var(--text); }
+.day-slot { flex: none; font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.day-slot.warn-text { color: var(--warn-text); }
+.day-it-r { margin-top: -4px; }
+.day-it-a { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.day-plan { display: inline-flex; gap: 4px; }
+.day-plan select { width: auto; height: 30px; padding: 0 6px; font-size: 13px; }
+.day-due { display: grid; gap: 8px; padding: 10px 0 2px; }
+.day-due .due-own { flex-wrap: wrap; }
+
+/* чипы оценки: 15м · 30м · 1ч · 2ч · полдня */
+.est { display: inline-flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.est-c { height: 26px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel);
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.est-c:hover { border-color: var(--faint); color: var(--text); }
+.est-c[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.est-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -4px; }
+.est-l { font-size: 13px; color: var(--muted); }

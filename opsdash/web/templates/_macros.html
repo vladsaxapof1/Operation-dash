@@ -1,4 +1,5 @@
 {% import "_icons.html" as icons %}
+{% import "_day.html" as dayui %}
 {% macro proposal(p, describe) %}
 <li>
   <div class="row">
@@ -468,6 +469,7 @@
         {%- if c.kaiten_card_id %} · Kaiten #{{ c.kaiten_card_id }}{% endif -%}
         {%- if c.archived %} · в архиве{% endif %}
       </div>
+      {{ dayui.estimate_row(c) }}
       {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
       {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}
       {% if c.done_hint %}{% set h = c.done_hint %}
