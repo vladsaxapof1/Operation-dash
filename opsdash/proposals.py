@@ -31,6 +31,28 @@ KINDS = {
     "telegram.remind": "Напомнить коллеге в Telegram",
 }
 
+# надпись на кнопке подтверждения — что произойдёт, а не просто «Да»
+ACTIONS = {
+    "kaiten.create_card": "Создать карточку",
+    "kaiten.comment": "Оставить комментарий",
+    "kaiten.update": "Изменить карточку",
+    "kaiten.block": "Заблокировать",
+    "calendar.create": "Создать встречу",
+    "calendar.cancel": "Отменить встречу",
+    "task.done": "Закрыть задачу",
+    "task.meeting": "Связать со встречей",
+    "task.wait": "Отметить «ждёт»",
+    "task.merge": "Объединить",
+    "project.create": "Создать проект",
+    "attention.done": "Отметить отвеченным",
+    "telegram.remind": "Напомнить",
+}
+
+
+def action(p: dict) -> str:
+    """Надпись на кнопке «выполнить» у предложения: «Закрыть задачу», «Связать со встречей», «Напомнить»."""
+    return ACTIONS.get(p["kind"], "Да")
+
 
 class ProposalError(Exception):
     pass
@@ -644,7 +666,7 @@ def describe(p: dict) -> str:
         lines.append(f"Текст: «{pl.get('text', '')[:600]}»")
         if p.get("reason"):
             lines.append(f"Почему: {p['reason']}")
-        lines.append("«Да» — сообщение уйдёт от вашего имени из вашего Telegram.")
+        lines.append(f"«{action(p)}» — сообщение уйдёт от вашего имени из вашего Telegram.")
         return "\n".join(lines)
     if p["kind"] == "attention.done":
         if p.get("reason"):
@@ -653,7 +675,7 @@ def describe(p: dict) -> str:
             lines.append(f"Ваш ответ: «{pl['quote'][:400]}»")
         if p.get("source_ref"):
             lines.append(f"Источник: {_source_text(p['source_ref'])}")
-        lines.append("«Да» — пункт уйдёт из «Нужен ответ»; «Нет» — останется, пока не закроете сами.")
+        lines.append(f"«{action(p)}» — пункт уйдёт из «Нужен ответ»; «Нет» — останется, пока не закроете сами.")
         return "\n".join(lines)
     if p["kind"] == "task.done":
         if p.get("reason"):
@@ -662,7 +684,7 @@ def describe(p: dict) -> str:
             lines.append(f"«{pl['quote'][:400]}»")
         if p.get("source_ref"):
             lines.append(f"Источник: {_source_text(p['source_ref'])}")
-        lines.append("«Да» — задача закроется в PULSE; карточку в Kaiten, если она есть, это не трогает.")
+        lines.append(f"«{action(p)}» — задача закроется в PULSE; карточку в Kaiten, если она есть, это не трогает.")
         return "\n".join(lines)
     if p["kind"] == "project.create":
         if pl.get("goal"):
@@ -675,14 +697,14 @@ def describe(p: dict) -> str:
             lines.append(f"• {records.headline(c)} — {records.route(c)}" + (" (готово)" if c["status"] == "done" else ""))
         if len(rows) > 12:
             lines.append(f"• и ещё {len(rows) - 12}")
-        lines.append("«Да» — проект появится в «Задачи → Проекты» с прогрессом и цепочкой задач.")
+        lines.append(f"«{action(p)}» — проект появится в «Задачи → Проекты» с прогрессом и цепочкой задач.")
         return "\n".join(lines)
     if p["kind"] == "task.wait":
         if p.get("reason"):
             lines.append(f"Почему так думаю: {p['reason']}")
         if p.get("source_ref"):
             lines.append(f"Источник: {_source_text(p['source_ref'])}")
-        lines.append("«Да» — на карточке появится «ждёт», а когда то, чего ждём, будет готово, PULSE скажет «Можно делать».")
+        lines.append(f"«{action(p)}» — на карточке появится «ждёт», а когда то, чего ждём, будет готово, PULSE скажет «Можно делать».")
         return "\n".join(lines)
     if p["kind"] == "task.merge":
         if p.get("reason"):
@@ -691,13 +713,13 @@ def describe(p: dict) -> str:
             lines.append(f"«{pl['quote'][:400]}»")
         if p.get("source_ref"):
             lines.append(f"Источник: {_source_text(p['source_ref'])}")
-        lines.append("«Да» — первая задача закроется как дубль; её источник, цитата, связи и подзадачи перейдут во вторую. "
+        lines.append(f"«{action(p)}» — первая задача закроется как дубль; её источник, цитата, связи и подзадачи перейдут во вторую. "
                      "Вернуть дубль можно кнопкой «Вернуть» в его окне.")
         return "\n".join(lines)
     if p["kind"] == "task.meeting":
         if p.get("reason"):
             lines.append(f"Почему так думаю: {p['reason']}")
-        lines.append("«Да» — встреча появится на карточке задачи. Задача останется открытой до встречи, "
+        lines.append(f"«{action(p)}» — встреча появится на карточке задачи. Задача останется открытой до встречи, "
                      "а по её итогам Claude предложит закрыть.")
         return "\n".join(lines)
     if p["kind"] == "kaiten.create_card":
@@ -711,7 +733,7 @@ def describe(p: dict) -> str:
     elif p["kind"] == "kaiten.block":
         if pl.get("blocker_card_id") and pl.get("text"):
             lines.append(f"Причина: {pl['text']}")
-        lines.append("«Да» — в карточке Kaiten появится «Заблокировано» со ссылкой; снимают блокировку в самом Kaiten.")
+        lines.append(f"«{action(p)}» — в карточке Kaiten появится «Заблокировано» со ссылкой; снимают блокировку в самом Kaiten.")
     elif p["kind"] == "calendar.create":
         if pl.get("attendees"):
             lines.append("Участники: " + ", ".join(pl["attendees"]))

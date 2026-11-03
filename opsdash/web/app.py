@@ -216,6 +216,7 @@ templates.env.globals.update(
     is_mac=sys.platform == "darwin", is_windows=os.name == "nt",
     is_apple_silicon=sys.platform == "darwin" and platform.machine() == "arm64",
     proposal_links=proposals.links,  # ссылки у предложений — для макросов (они не видят переменных страницы)
+    proposal_action=proposals.action,  # надпись на кнопке подтверждения: «Закрыть задачу», «Напомнить»…
 )
 
 

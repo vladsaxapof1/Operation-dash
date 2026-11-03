@@ -105,6 +105,9 @@ def test_task_done_proposal_waits_for_director():
     assert records.get_commitment(cid)["done_hint"]["id"] == p["id"]
     assert ("Задача", f"/commitments?task={cid}") in proposals.links(p)
     assert "Почему так думаю: Показал готовый отчёт" in proposals.describe(p)
+    # кнопка называет действие, а не «Да» — и пояснение говорит о той же кнопке
+    assert proposals.action(p) == "Закрыть задачу" and "«Закрыть задачу» — задача закроется" in proposals.describe(p)
+    assert set(proposals.ACTIONS) == set(proposals.KINDS), "у каждого типа предложения — своя надпись на кнопке"
 
     done = proposals.approve(p["id"])
     c = records.get_commitment(cid)
@@ -112,6 +115,18 @@ def test_task_done_proposal_waits_for_director():
     assert proposals.result_text(done) == "✅ Задача закрыта"
     with pytest.raises(proposals.ProposalError):
         proposals.propose_task_done(commitment_id=cid, reason="x")  # уже закрыта
+
+
+def test_confirm_buttons_name_the_action(client):
+    cid = records.add_commitment(direction="mine", whom="Тимур", title="Отчёт по продажам", what="Собирать отчёт")
+    p = proposals.propose_task_done(commitment_id=cid, reason="Показал готовый отчёт на встрече")
+    store.execute("INSERT INTO meetings(id, title, status) VALUES('m3', 'Обзор продаж', 'processed')")
+    proposals.propose_task_done(commitment_id=records.add_commitment(direction="to_me", who="Пётр", what="Прислать прогноз"),
+                                reason="Пётр прислал прогноз", source_ref="meeting:m3", batch="meeting:m3")
+    home = client.get("/").text
+    assert f'action="/proposals/{p["id"]}/approve"><button class="btn primary">Закрыть задачу</button>' in home
+    assert ">Да</button>" not in home
+    assert ">Закрыть задачу</button>" in client.get("/meetings/m3").text
 
 
 def test_closing_task_by_hand_settles_proposal(settings_with):

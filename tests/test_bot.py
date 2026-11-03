@@ -81,6 +81,8 @@ def test_notify_with_batch_buttons_and_callback_approve(tg, monkeypatch):
     assert "Ждут вашего «да»" in sent["text"]
     datas = [b["callback_data"] for row in sent["reply_markup"]["inline_keyboard"] for b in row]
     assert f"p:a:{pid}" in datas
+    texts = [b["text"] for row in sent["reply_markup"]["inline_keyboard"] for b in row]
+    assert f"✅ {pid}. Оставить комментарий" in texts, "на кнопке — что произойдёт, а не просто номер"
     assert store.scalar("SELECT COUNT(*) FROM outbox WHERE sent_at IS NOT NULL") == 1
 
     monkeypatch.setattr(proposals, "execute", lambda p: {"card_id": 1})

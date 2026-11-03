@@ -136,7 +136,7 @@
     {% if related %}
     <section class="card side-card">
       <div class="side-h"><h2>Ждут вашего «да» <span class="col-n">{{ pending | length }}</span></h2>
-        {% if pending | length > 1 %}<form method="post" action="/proposals/batch" class="inline"><input type="hidden" name="batch" value="meeting:{{ m.id }}"><input type="hidden" name="top" value="{{ pending | map(attribute='id') | max }}"><button class="btn sm primary">Да — все {{ pending | length }}</button></form>{% endif %}</div>
+        {% if pending | length > 1 %}<form method="post" action="/proposals/batch" class="inline"><input type="hidden" name="batch" value="meeting:{{ m.id }}"><input type="hidden" name="top" value="{{ pending | map(attribute='id') | max }}"><button class="btn sm primary">Подтвердить все {{ pending | length }}</button></form>{% endif %}</div>
       {% for p in pending %}
       {% set links = proposal_links(p) | rejectattr(1, 'equalto', '/meetings/' ~ m.id) | list %}
       <div class="side-row">
@@ -144,10 +144,11 @@
           {% if links %}<a class="side-t" href="{{ links[0][1] }}"{% if links[0][1].startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ p.title }}</a>{% else %}<button type="button" class="linkish side-t" data-reveal="pp-{{ p.id }}">{{ p.title }}</button>{% endif %}
           <div class="side-x">{{ p.reason or '' }}{% for label, url in links[1:] %}{{ ' · ' if p.reason or not loop.first }}<a href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}{% if not links %}{{ ' · ' if p.reason }}<button type="button" class="linkish" data-reveal="pp-{{ p.id }}">предпросмотр</button>{% endif %}</div>
           <div class="side-x side-pre" id="pp-{{ p.id }}" hidden>{% for line in describe(p).split('\n')[1:] %}<div>{{ line }}</div>{% endfor %}</div>
-        </div>
-        <div class="side-acts">
-          <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm primary">Да</button></form>
-          <form class="inline" method="post" action="/proposals/{{ p.id }}/reject"><button class="btn sm">Нет</button></form>
+          {#- кнопки — под текстом: «Связать со встречей» справа сжало бы его в узкой колонке #}
+          <div class="side-acts">
+            <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm primary">{{ proposal_action(p) }}</button></form>
+            <form class="inline" method="post" action="/proposals/{{ p.id }}/reject"><button class="btn sm">Нет</button></form>
+          </div>
         </div>
       </div>
       {% else %}<p class="side-x" style="margin:4px 0 0">Всё подтверждено.</p>{% endfor %}

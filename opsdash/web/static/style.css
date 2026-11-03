@@ -1316,7 +1316,7 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .side-row.done .side-t { color: var(--muted); }
 .side-t { font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
 .side-x { font-size: 13px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
-.side-acts { display: flex; gap: 6px; flex: none; }
+.side-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .side-more > summary { cursor: pointer; color: var(--accent); padding: 10px 0 2px; border-top: 1px solid var(--line); list-style: none; }
 .side-more > summary::-webkit-details-marker { display: none; }
 .side-more[open] > summary { color: var(--muted); }

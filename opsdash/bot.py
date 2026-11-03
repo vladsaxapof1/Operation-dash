@@ -138,7 +138,7 @@ def proposal_buttons(items: list[dict], batch: str | None = None) -> list:
     if len(items) <= 6:
         for p in items:
             rows.append([
-                {"text": f"✅ {p['id']}", "callback_data": f"p:a:{p['id']}"},
+                {"text": f"✅ {p['id']}. {proposals.action(p)}", "callback_data": f"p:a:{p['id']}"},
                 {"text": f"✖ {p['id']}", "callback_data": f"p:r:{p['id']}"},
             ])
     if batch and len(items) > 1:
@@ -492,7 +492,7 @@ def send_approvals(bot: Bot, chat_id: str, one_by_one: bool = False) -> None:
     if one_by_one or len(items) <= 6:
         for p in reversed(items[:20]):
             bot.send(chat_id, e(proposals.describe(p)), [[
-                {"text": "✅ Да", "callback_data": f"p:a:{p['id']}"},
+                {"text": f"✅ {proposals.action(p)}", "callback_data": f"p:a:{p['id']}"},
                 {"text": "✖ Нет", "callback_data": f"p:r:{p['id']}"},
             ]])
         return

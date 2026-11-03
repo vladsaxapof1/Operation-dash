@@ -72,7 +72,7 @@
     <ul class="frow-pane list frow-props" id="pb-{{ loop_id(it) }}" hidden>{% for p in group %}{{ ui.proposal(p, describe) }}{% endfor %}</ul>
   </div>
   <div class="frow-act">
-    <form class="inline" method="post" action="/proposals/batch"><input type="hidden" name="batch" value="{{ it.batch }}"><input type="hidden" name="top" value="{{ group | map(attribute='id') | max }}"><button class="btn primary">Да, все {{ group | length }}</button></form>
+    <form class="inline" method="post" action="/proposals/batch"><input type="hidden" name="batch" value="{{ it.batch }}"><input type="hidden" name="top" value="{{ group | map(attribute='id') | max }}"><button class="btn primary">Подтвердить все {{ group | length }}</button></form>
     {% call ui.menu() %}
       <button type="button" class="menu-i" data-reveal="pb-{{ loop_id(it) }}">Посмотреть по одному</button>
       <form method="post" action="/proposals/batch" data-confirm="Отклонить все {{ group | length }}?"><input type="hidden" name="batch" value="{{ it.batch }}"><input type="hidden" name="top" value="{{ group | map(attribute='id') | max }}"><input type="hidden" name="action" value="reject"><button class="menu-i">Нет, все</button></form>
@@ -87,7 +87,7 @@
     <div class="frow-pane muted small" id="pd-{{ p.id }}" hidden>{% for line in d %}<p>{{ line }}</p>{% endfor %}</div>
   </div>
   <div class="frow-act">
-    <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn primary">{{ 'Объединить' if p.kind == 'task.merge' else 'Закрыть' if p.kind == 'task.done' else 'Да' }}</button></form>
+    <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn primary">{{ proposal_action(p) }}</button></form>
     {% call ui.menu() %}
       <form method="post" action="/proposals/{{ p.id }}/reject"><button class="menu-i">{{ 'Это не дубль' if p.kind == 'task.merge' else 'Нет' }}</button></form>
     {% endcall %}

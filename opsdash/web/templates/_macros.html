@@ -10,7 +10,7 @@
       {% if refs %}<div class="prop-links">{% for label, url in refs %}<a class="btn sm ghost" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}</div>{% endif %}
     </div>
     <div class="actions">
-      <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm primary" title="Выполнить">Да</button></form>
+      <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm primary">{{ proposal_action(p) }}</button></form>
       <form class="inline" method="post" action="/proposals/{{ p.id }}/reject"><button class="btn sm" title="Отклонить">Нет</button></form>
     </div>
   </div>
