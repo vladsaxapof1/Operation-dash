@@ -301,7 +301,9 @@ def step_label(tool: str, params: dict) -> str:
         return {
             ("meetings", "search"): f"Ищет во встречах{q}", ("messages", "search"): f"Ищет в переписке{q}",
             ("docs", "search"): f"Ищет в документах{q}", ("docs", "show"): f"Открывает документ{q}",
-            ("kb", "search"): f"Ищет в базе знаний{q}",
+            ("kb", "search"): f"Ищет в базе знаний{q}", ("agents", "similar"): f"Ищет похожие поручения{q}",
+            ("agents", "context"): "Собирает всё о задаче", ("agents", "show"): "Читает прошлое поручение",
+            ("agents", "brief-save"): "Сохраняет промт",
         }.get((group, action)) or {
             "meetings": "Смотрит встречи", "messages": "Смотрит переписку", "commitments": "Смотрит задачи",
             "kaiten": "Смотрит Kaiten", "docs": "Смотрит документы", "kb": "Смотрит базу знаний",

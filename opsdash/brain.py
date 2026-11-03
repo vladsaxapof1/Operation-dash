@@ -243,7 +243,10 @@ def _command(settings: dict, claude: str, job: str, *, model: str | None, resume
         cmd += ["--effort", effort]
     if resume:
         cmd += ["--resume", resume]
-    for folder in settings["knowledge"].get("folders") or []:
+    folders = list(settings["knowledge"].get("folders") or [])
+    if job == "agent-brief":  # промт для агента: посмотреть файлы проектов из «Офиса» (писать туда нельзя — только data/)
+        folders += settings["office"].get("folders") or []
+    for folder in folders:
         p = config.resolve_path(folder)
         if p.exists():
             cmd += ["--add-dir", str(p)]

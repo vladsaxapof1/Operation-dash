@@ -192,4 +192,48 @@ for job in ("collect:telegram", "collect:mail", "collect:calendar", "collect:kai
     store.execute("INSERT OR REPLACE INTO jobs(name, last_run, last_ok, running) VALUES(?,?,?,0)",
                   (job, store.to_utc_iso(now - timedelta(minutes=7)), store.to_utc_iso(now - timedelta(minutes=7))))
 store.set_state("telegram_me", {"id": 1, "name": "Анна Смирнова", "username": "a_smirnova"})
+
+# --- «Поручить агенту»: папка «Офиса» с проектами и прошлые сессии агентов в индексе ------------------------
+# журналы настоящего Claude Code не трогаем: прошлые сессии — сразу записями индекса (agents._save)
+from opsdash import agents, office  # noqa: E402
+
+WORK = HOME / "Проекты"
+for project, files in {
+    "Отчёты": {"about project.md": "# Отчёты для руководства\nЕжемесячные сводки KPI по отделам. Таблицы — в Excel, "
+                                   "листы «Итог» и «По менеджерам»; суммы без НДС.\n",
+               "KPI продаж — сентябрь.xlsx": "", "Выгрузка CRM — октябрь.csv": "менеджер;выручка\nИванов;1200000\n",
+               "Выгрузка CRM — сентябрь.csv": "менеджер;выручка\nИванов;1100000\n"},
+    "Финмодель": {"Бюджет Q4 — модель.xlsx": "", "README.md": "# Финмодель\nСценарии бюджета и прогнозы.\n"},
+    "Склад": {"График запуска Казань.md": "# График\n"},
+}.items():
+    (WORK / project).mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (WORK / project / name).write_text(text, encoding="utf-8")
+config.update_settings("office", {"folders": [str(WORK)]})
+reports, model = WORK / "Отчёты", WORK / "Финмодель"
+for sid, room, days, title, first, asks, read, written, answer in [
+    ("demo-kpi-sep", "Отчёты", 33, "Сводка KPI продаж за сентябрь",
+     "Собери сводку KPI отдела продаж за сентябрь из выгрузки CRM: выручка, конверсия, средний чек по каждому менеджеру. "
+     "Таблицей в Excel, как в прошлом квартале.",
+     ["Добавь ещё разбивку по менеджерам на отдельном листе", "Считай без НДС", "Посмотри ещё файл с планом — сравни с планом"],
+     [reports / "Выгрузка CRM — сентябрь.csv", DOCS / "План продаж Q4.csv"], [reports / "KPI продаж — сентябрь.xlsx"],
+     "Готово: «KPI продаж — сентябрь.xlsx», листы «Итог» и «По менеджерам», суммы без НДС, сравнение с планом."),
+    ("demo-budget", "Финмодель", 12, "Сценарии бюджета Q4",
+     "Сделай три сценария бюджета Q4: базовый, минус 10% и минус 20%. Исходные цифры — в модели.",
+     ["Сценарий минус 10% — на отдельный слайд"], [model / "Бюджет Q4 — модель.xlsx"], [DOCS / "Бюджет Q4 — сценарии.pptx"],
+     "Три сценария готовы, слайды — в «Бюджет Q4 — сценарии.pptx»."),
+]:
+    s = office._blank()
+    s.update(cwd=str(WORK / room), title=title, prompt=first[:300], first_prompt=first, asks=asks, prompts=1 + len(asks),
+             written=[str(p) for p in written], answer=answer, first=store.to_utc_iso(now - timedelta(days=days, hours=2)),
+             last=store.to_utc_iso(now - timedelta(days=days, hours=1)), skills=["xlsx"])
+    s["touched"].update({str(p): 2 for p in read + written})
+    agents._save(Path(f"{sid}.jsonl"), s, WORK, room, {"status": "completed"}, (0, 0))
+said = "Олег, к сверке плана я соберу сводку KPI продаж за октябрь: выручка, конверсия и средний чек по менеджерам."
+with (records.meeting_dir(planerka) / "transcript.md").open("a", encoding="utf-8") as f:
+    f.write(f"[00:21:40] Спикер 1: {said}\n")
+records.add_commitment(direction="mine", who="Анна Смирнова", whom="Олег Соколов", title="Сводка KPI продаж за октябрь",
+                       what="Собрать сводку KPI отдела продаж за октябрь для сверки плана Q4: выручка, конверсия, "
+                            "средний чек по менеджерам", due=(today + timedelta(days=2)).isoformat(),
+                       source_type="meeting", source_ref=planerka, quote=said)
 print("Демо-стенд готов:", HOME)

@@ -22,6 +22,7 @@ import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator
 from urllib.parse import urlparse
 
 from opsdash import config, store
@@ -46,8 +47,8 @@ DESKS = [
      "link": ("/kb", "База знаний")},
     {"key": "bot", "title": "Дежурный", "what": "Отвечает на вопросы и голосовые в Telegram-боте",
      "jobs": ["ask", "voice"], "run": [], "link": None},
-    {"key": "chat", "title": "Собеседник", "what": "Отвечает в разделе «Спросить Claude»",
-     "jobs": ["chat"], "run": [], "link": ("/ask", "Спросить Claude")},
+    {"key": "chat", "title": "Собеседник", "what": "Отвечает в разделе «Спросить Claude», собирает промты для агентов",
+     "jobs": ["chat", "agent-brief"], "run": [], "link": ("/ask", "Спросить Claude")},
 ]
 TRACKED = {job for desk in DESKS for job in desk["jobs"]}  # сбор не пишем: он раз в 15 минут, хватит таблицы jobs
 COURIER = [  # рабочее место «Курьер»: сборщики без Claude — (задание, раздел настроек, название)
@@ -298,6 +299,10 @@ HEAD = 256 * 1024                  # где искать папку сессии
 SHOWN_STEPS = 40
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 SILENT_TOOLS = ("ToolSearch", "TodoWrite", "update_plan", "wrap_up", "mark_chapter")  # служебные — не шаги
+# для индекса поручений (opsdash.agents): первый промт целиком, следующие реплики человека, последний ответ
+FIRST_PROMPT = 20000
+ASKS, ASK_CHARS = 10, 500
+ANSWER = 2000
 # нужные записи журнала — прежде чем разбирать JSON строки целиком (Claude Code пишет без пробелов, но мало ли)
 _WANTED = re.compile(rb'"type": ?"(?:assistant|user|custom-title)"')
 _CWD = re.compile(rb'"cwd": ?"')
@@ -410,7 +415,8 @@ def desktop_sessions() -> dict[str, dict]:
 
 def _blank() -> dict:
     return {"cwd": "", "entry": "", "title": "", "prompt": "", "first": None, "last": None, "turn": "", "pending": {},
-            "steps": [], "tools": 0, "prompts": 0, "written": [], "touched": Counter(), "model": "", "agents": 0}
+            "steps": [], "tools": 0, "prompts": 0, "written": [], "touched": Counter(), "model": "", "agents": 0,
+            "first_prompt": "", "asks": [], "skills": [], "answer": ""}
 
 
 def _feed(s: dict, raw: bytes, sub: bool) -> None:
@@ -448,6 +454,10 @@ def _feed(s: dict, raw: bytes, sub: bool) -> None:
                 elif text and not text.startswith("<"):  # <command-name>, <system-reminder> — не вопрос человека
                     s["prompts"] += 1
                     s["prompt"] = s["prompt"] or text[:300]
+                    if s["prompts"] == 1:
+                        s["first_prompt"] = text[:FIRST_PROMPT]
+                    elif len(s["asks"]) < ASKS:  # что человек дописал потом — чего не хватило в постановке
+                        s["asks"].append(text[:ASK_CHARS])
                     s["turn"] = "open"
         return
     s["model"] = message.get("model") or s["model"]
@@ -458,6 +468,9 @@ def _feed(s: dict, raw: bytes, sub: bool) -> None:
             s["pending"][b.get("id")] = at
             s["turn"] = "open"
             s["agents"] += name in ("Agent", "Task")
+            skill = str(params.get("skill") or params.get("name") or "") if name == "Skill" else ""
+            if skill and skill not in s["skills"]:
+                s["skills"].append(skill)
             path = params.get("file_path") or params.get("notebook_path") or ""
             if path:
                 s["touched"][path] += 1
@@ -469,6 +482,7 @@ def _feed(s: dict, raw: bytes, sub: bool) -> None:
                 del s["steps"][:-SHOWN_STEPS]
         elif b.get("type") == "text" and (b.get("text") or "").strip():
             s["turn"] = "answered"
+            s["answer"] = b["text"].strip()[:ANSWER]
         elif b.get("type") == "thinking":
             s["turn"] = "open"
 
@@ -585,16 +599,16 @@ def _room(s: dict, root: Path) -> str:
     return rooms.most_common(1)[0][0] if rooms else ""
 
 
-def folder(path: str, settings: dict | None = None) -> dict:
-    """Офис в папке: сессии Claude Code за последние дни по проектам (папкам первого уровня)."""
-    settings = settings or config.load_settings()
-    root = config.resolve_path(path)
-    days = int(settings["office"].get("days") or 7)
-    hide = {unicodedata.normalize("NFC", h.strip()).casefold() for h in settings["office"].get("hide") or [] if h.strip()}
+def hidden(settings: dict) -> set[str]:
+    """Проекты, которые в «Офисе» (и в опыте для поручений агенту) не показываем."""
+    return {unicodedata.normalize("NFC", h.strip()).casefold() for h in settings["office"].get("hide") or [] if h.strip()}
+
+
+def sessions(root: Path, since: float, hide: set[str] = frozenset(), wanted=None) -> Iterator[tuple[Path, dict, str]]:
+    """Сессии Claude Code в папке root (и её проектах), которые менялись после since: (журнал, разбор, проект).
+    Пустые, фоновые запуски самого PULSE и скрытые проекты пропускаем. wanted(журнал) — разбирать ли журнал
+    (индекс поручений не перечитывает неизменившиеся). Общее у «Офиса» и индекса поручений (opsdash.agents)."""
     now = datetime.now(timezone.utc)
-    since = now.timestamp() - days * 86400
-    app = desktop_sessions()
-    sessions = []
     for journal in (claude_dir() / "projects").glob("*/*.jsonl"):
         try:
             if journal.stat().st_mtime < since:
@@ -602,7 +616,7 @@ def folder(path: str, settings: dict | None = None) -> dict:
         except OSError:
             continue
         cwd = _cwd(journal)
-        if not cwd or not _inside(cwd, str(root)):
+        if not cwd or not _inside(cwd, str(root)) or (wanted and not wanted(journal)):
             continue
         s = _session(journal)
         if not s or not (s["prompts"] or s["tools"]) or (store.parse_ts(s["last"]) or now).timestamp() < since:
@@ -612,6 +626,18 @@ def folder(path: str, settings: dict | None = None) -> dict:
         room = _room(s, root)
         if room.casefold() in hide:
             continue
+        yield journal, s, room
+
+
+def folder(path: str, settings: dict | None = None) -> dict:
+    """Офис в папке: сессии Claude Code за последние дни по проектам (папкам первого уровня)."""
+    settings = settings or config.load_settings()
+    root = config.resolve_path(path)
+    days = int(settings["office"].get("days") or 7)
+    now = datetime.now(timezone.utc)
+    app = desktop_sessions()
+    found = []
+    for journal, s, room in sessions(root, now.timestamp() - days * 86400, hidden(settings)):
         agents = _subagents(journal, root, now)
         st = _state(s, now)
         if st != "working" and any(a["state"] == "working" for a in agents):
@@ -621,13 +647,13 @@ def folder(path: str, settings: dict | None = None) -> dict:
         link = f"claude://code/continue?session={mine['id']}" if mine and not mine["archived"] else ""
         if st == "waiting" and mine and (mine["seen"] or mine["status"] in ("completed", "review_ready")):
             st = "rest"  # приложение знает лучше: всё готово или вы уже открывали сессию после ответа
-        sessions.append({"id": journal.stem, "title": title, "room": room, "state": st, "state_title": STATES[st], "link": link,
-                         "needs": mine["needs"] if mine else "",
-                         "first": s["first"], "last": s["last"], "steps": s["steps"][-6:], "tools": s["tools"],
-                         "prompts": s["prompts"], "model": s["model"], "cwd": s["cwd"],
-                         "files": _files_view(s["written"], root), "agents": agents})
+        found.append({"id": journal.stem, "title": title, "room": room, "state": st, "state_title": STATES[st], "link": link,
+                      "needs": mine["needs"] if mine else "",
+                      "first": s["first"], "last": s["last"], "steps": s["steps"][-6:], "tools": s["tools"],
+                      "prompts": s["prompts"], "model": s["model"], "cwd": s["cwd"],
+                      "files": _files_view(s["written"], root), "agents": agents})
     rooms: dict[str, list] = {}
-    for s in sorted(sessions, key=lambda x: x["last"] or "", reverse=True):
+    for s in sorted(found, key=lambda x: x["last"] or "", reverse=True):
         rooms.setdefault(s["room"], []).append(s)
     out = []
     for name, items in rooms.items():
@@ -635,12 +661,12 @@ def folder(path: str, settings: dict | None = None) -> dict:
         passport = next((home / n for n in ("about project.md", "README.md") if (home / n).exists()), None)
         out.append({"name": name or "Общее", "path": str(home), "passport": str(passport) if passport else "",
                     "sessions": items, "working": sum(s["state"] == "working" for s in items)})
-    agents = [a for s in sessions for a in s["agents"]]
+    agents = [a for s in found for a in s["agents"]]
     return {"name": root.name, "path": str(root), "exists": root.exists(), "days": days, "rooms": out,
-            "counts": {"sessions": len(sessions), "working": sum(s["state"] == "working" for s in sessions),
-                       "waiting": sum(s["state"] in ("waiting", "blocked") for s in sessions),
+            "counts": {"sessions": len(found), "working": sum(s["state"] == "working" for s in found),
+                       "waiting": sum(s["state"] in ("waiting", "blocked") for s in found),
                        "agents": len(agents), "agents_working": sum(a["state"] == "working" for a in agents),
-                       "tools": sum(s["tools"] for s in sessions)}}
+                       "tools": sum(s["tools"] for s in found)}}
 
 
 def offices(settings: dict | None = None) -> list[dict]:

@@ -16,10 +16,10 @@ from opsdash import store
 KEEP_HOURS = 24
 LIMIT = 20
 # успешное выполнение этих заданий — не новость: они идут постоянно или директор и так видит результат
-QUIET = {"housekeeping", "docs-index", "ask", "voice", "recordings", "update-check"}
+QUIET = {"housekeeping", "docs-index", "agents-index", "ask", "voice", "recordings", "update-check"}
 # «Сейчас» в углу: что делает Claude или расшифровка; сбор и обслуживание — секунды, о них не пишем
 BUSY = {"triage", "process-meeting", "transcribe", "digest", "weekly", "groups", "briefs", "followup", "anthology",
-        "company-context", "chat", "update", "projects"}
+        "company-context", "chat", "update", "projects", "agent-brief"}
 
 
 def add(kind: str, title: str, text: str = "", link: str | None = None, level: str = "info",
@@ -161,6 +161,13 @@ def summary(name: str, args: dict, result: str, error: str | None) -> dict | Non
                 from opsdash import brain
 
                 return done(f"{brain.name()} ответил", f"«{m['title']}»", f"/ask/{m['id']}")
+    elif name == "agent-brief":
+        b = store.row("SELECT commitment_id FROM task_agents WHERE id=?", (args.get("brief_id"),))
+        if result == "промт готов" and b:
+            from opsdash import records
+
+            c = store.row("SELECT * FROM commitments WHERE id=?", (b["commitment_id"],))
+            return done("Промт для агента готов", f"«{records.headline(c)}»" if c else "", f"/agents?task={b['commitment_id']}")
     elif name == "update":
         return done("PULSE обновлён", result, "/settings?tab=updates")
     return None

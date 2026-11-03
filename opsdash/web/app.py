@@ -29,7 +29,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from opsdash import __version__, briefs, config, digests, overview, proposals, records, store
-from opsdash.web import settings_views
+from opsdash.web import agent_views, settings_views
 
 HERE = Path(__file__).parent
 app = FastAPI(title="PULSE", docs_url=None, redoc_url=None, openapi_url=None)
@@ -2174,6 +2174,7 @@ def help_page(request: Request, slug: str = "", example: str = ""):
 # --- настройки -------------------------------------------------------------------
 
 settings_views.register(app, render, back)
+agent_views.register(app, render, templates, back)
 
 
 @app.exception_handler(Exception)
