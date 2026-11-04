@@ -790,6 +790,8 @@ def cmd_day(a) -> None:
     out(f"# День {p['date']:%d.%m} · {ww}" + (f", считаю с {day.hm(p['from'])}" if p["today"] and p["from"] else ""))
     out(f"Вердикт: {v['line']}")
     out(f"Строка для дайджеста: {p['digest']}")
+    if p["progress"]["total"]:
+        out(f"{p['progress']['line']} (для вечернего дайджеста)")
     out(f"\n## Окна ({day.dur(p['capacity'])} для задач)")
     for w in p["windows"]:
         out(f"- {day.hm(w['s'])}–{day.hm(w['e'])} ({day.dur(w['len'])})"
@@ -820,7 +822,11 @@ def cmd_day(a) -> None:
         out(f"Не помещается ни в одно окно: «{i['title']}» ({day.dur(i['est'])}) — самое длинное окно "
             f"{day.dur(p['longest'])} — {day.SPLIT_HINT}")
     if p["waiting"]:
-        out("Ждут других, в план не ставлю: " + "; ".join(f"[commitment {c['id']}] «{c['title']}»" for c in p["waiting"]))
+        out("Ждут других, в план не ставлю: " + "; ".join(f"[commitment {c['id']}] «{c['title']}» ({c['why']})"
+                                                          for c in p["waiting"]))
+    if p["off"] == "over" and p["today"] and p["carry"]:
+        out("Не закрыто за день (директор переносит кнопкой на Сводке): "
+            + "; ".join(f"[commitment {i['id']}] «{i['title']}»" for i in p["carry"]))
 
 
 def _ids(value: str | None) -> list[int]:

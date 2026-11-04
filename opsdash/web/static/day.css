@@ -31,6 +31,20 @@
 .pb-m { display: block; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pb.tiny { padding-top: 0; padding-bottom: 0; }
 .pb.tiny .pb-m { display: none; }
+.pb[data-drag] { cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
+.pb.dragging { cursor: grabbing; z-index: 4; box-shadow: var(--shadow-pop); background: var(--accent-soft); }
+.pb.dragging .pb-t::before { content: attr(data-at) " · "; }  /* куда встанет — пока тащим */
+.pb.done { border-style: solid; border-color: var(--ok); background: color-mix(in srgb, var(--ok-soft) 80%, transparent);
+  color: var(--ok-text); opacity: .75; }
+.dv-carry { display: grid; gap: 6px; }
+.dv-carry ul { margin: 0; padding-left: 18px; font-size: 13px; }
+.dv-carry li form { margin-left: 4px; }
+.day-progress { margin: -6px 0 0; }
+.day-pass { display: grid; gap: 6px; padding: 10px 0 2px; }
+.day-pass-f { display: flex; flex-wrap: wrap; gap: 6px; }
+.day-pass-f input { width: auto; flex: 1 1 160px; height: 32px; font-size: 13px; }
+.day-pass-f input[type=date] { flex: 0 0 auto; }
+.day-pass p { margin: 0; }
 .pl { position: absolute; left: 4px; right: 4px; z-index: 0; border-radius: 4px; pointer-events: none; }
 .pl-buffer { background: repeating-linear-gradient(135deg, var(--line-strong) 0 1px, transparent 1px 5px); }
 .pl-short { background: var(--sunken); opacity: .7; }

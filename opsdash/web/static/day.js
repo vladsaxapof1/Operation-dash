@@ -73,4 +73,60 @@
   });
 
   if (dlg) dlg.addEventListener("close", function () { if (dlg.dataset.changed) location.reload(); });
+
+  // ссылка «/#day» (уведомление «места нет — что двигаем?») сразу открывает «Разобрать день»
+  var openDay = function () {
+    if (dlg && location.hash === "#day" && !dlg.open) {
+      dlg.showModal();
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  };
+  openDay();
+  window.addEventListener("hashchange", openDay);
+
+  // перетаскивание задачи на сетке дня: блок едет за курсором с шагом 5 минут; отпустили — задача закреплена на этом
+  // времени (решение директора: PULSE её больше не двигает). Щелчок без сдвига — как раньше, открыть задачу
+  var hm = function (m) { return ("0" + Math.floor(m / 60)).slice(-2) + ":" + ("0" + m % 60).slice(-2); };
+  var minuteAt = function (el) {
+    return Number(el.dataset.from) + Math.round(parseFloat(el.style.top) * 60 / Number(el.dataset.px));
+  };
+  var drag = null;
+  document.addEventListener("dragstart", function (e) {  // у ссылки — своё перетаскивание браузера, оно не нужно
+    if (e.target.closest && e.target.closest("[data-drag]")) e.preventDefault();
+  });
+  document.addEventListener("pointerdown", function (e) {
+    var el = e.target.closest("[data-drag]");
+    if (!el || e.button !== 0) return;
+    drag = { el: el, y: e.clientY, top: parseFloat(el.style.top), moved: false };
+  });
+  document.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    var dy = e.clientY - drag.y;
+    if (!drag.moved && Math.abs(dy) < 5) return;
+    drag.moved = true;
+    drag.el.classList.add("dragging");
+    var step = Number(drag.el.dataset.px) / 12;  // 5 минут
+    var col = drag.el.parentNode;
+    var top = Math.round((drag.top + dy) / step) * step;
+    drag.el.style.top = Math.max(0, Math.min(top, col.offsetHeight - drag.el.offsetHeight)) + "px";
+    var meta = drag.el.querySelector(".pb-t");
+    if (meta) meta.dataset.at = hm(minuteAt(drag.el));
+    e.preventDefault();
+  });
+  document.addEventListener("pointerup", function () {
+    if (!drag) return;
+    var d = drag;
+    drag = null;
+    if (!d.moved) return;
+    d.el.addEventListener("click", function (ev) { ev.preventDefault(); }, { once: true });  // это был не щелчок
+    var m = Math.round(minuteAt(d.el) / 5) * 5;
+    var body = new FormData();
+    body.set("cid", d.el.dataset.drag);
+    body.set("act", "move");
+    body.set("start", hm(m));
+    fetch("/day/act", { method: "POST", body: body, headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (res) { if (!res.ok) throw new Error(res.err); location.reload(); })
+      .catch(function () { d.el.style.top = d.top + "px"; d.el.classList.remove("dragging"); });
+  });
 })();

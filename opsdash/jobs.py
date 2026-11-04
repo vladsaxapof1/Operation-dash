@@ -35,9 +35,13 @@ def collect_source(name: str) -> str:
           "google_calendar": calendar.google_collect, "kaiten": kaiten.collect}[name]
     result = fn()
     if name in ("calendar", "google_calendar"):  # появились встречи — не посвящена ли какая-то открытой задаче
-        from opsdash import task_meetings
+        from opsdash import day, task_meetings
 
         task_meetings.suggest()
+        try:  # встреча сдвинулась или добавилась — уведомление, если поменялся вердикт дня
+            day.watch()
+        except Exception as e:  # noqa: BLE001 — сбор календаря не должен падать из-за сигнала
+            store.log("day", f"сигналы дня: {e}", "warning")
     return result
 
 
@@ -380,6 +384,12 @@ def job_housekeeping(**_) -> str:
         pass
     store.execute("DELETE FROM outbox WHERE sent_at IS NOT NULL AND created < ?", (overview.since(24 * 30),))
     office.prune()
+    from opsdash import day
+
+    try:  # «Реальность дня»: новая задача на сегодня при перегрузе, изменился вердикт — уведомление в углу
+        day.watch()
+    except Exception as e:  # noqa: BLE001 — обслуживание не должно падать из-за сигнала
+        store.log("day", f"сигналы дня: {e}", "warning")
     return "готово"
 
 

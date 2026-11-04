@@ -47,6 +47,19 @@
   <p class="dv-now muted">Окон для задач сегодня больше нет</p>
   {% endif %}
   {% for it in p.too_big[:1] %}<p class="dv-big warn-text">«{{ it.title }}» ({{ it.est | dur }}) не помещается: самое длинное окно {{ p.longest | dur }} — {{ SPLIT_HINT }}</p>{% endfor %}
+  {% if p.progress.total %}<p class="dv-now">{{ p.progress.line }}</p>{% endif %}
+  {% if p.today and p.off == 'over' and p.carry %}{{ carry(p) }}{% endif %}
+</div>
+{% endmacro %}
+
+{% macro carry(p) %}
+{#- вечером, когда рабочий день закончился: что из сегодняшнего не закрыто — на следующий рабочий день, всё сразу
+    или по одной #}
+<div class="dv-carry">
+  <ul>{% for it in p.carry[:5] %}<li><a href="/commitments?task={{ it.id }}">{{ it.title }}</a>
+    <form class="inline" method="post" action="/day/act"><input type="hidden" name="cid" value="{{ it.id }}"><button class="linkish small" name="act" value="tomorrow">{{ p.carry_label }}</button></form></li>{% endfor %}
+    {% if p.carry | length > 5 %}<li class="muted">и ещё {{ p.carry | length - 5 }}</li>{% endif %}</ul>
+  <form method="post" action="/day/carry"><button class="btn sm primary">Перенести незакрытое {{ p.carry_label }}</button></form>
 </div>
 {% endmacro %}
 
@@ -55,13 +68,15 @@
 {%- endmacro %}
 
 {% macro layer(day) %}
-{#- на сетке дня: плановые блоки задач (пунктир; клик — окно задачи), буферы — штриховкой, короткие окна — серым #}
+{#- на сетке дня: плановые блоки задач (пунктир; клик — окно задачи, перетащить — поставить на другое время),
+    сделанное из плана — галочкой, буферы — штриховкой, короткие окна — серым #}
 {% for b in day.plan_layer or [] %}
 {% if b.kind == 'plan' %}{% set it = b.item %}
-<a class="pb{{ ' pinned' if b.pinned }}{{ ' tiny' if b.height < 30 }}" {% if it.id %}href="/commitments?task={{ it.id }}"{% else %}href="#" data-feed-jump="answer"{% endif %}
+<a class="pb{{ ' pinned' if b.pinned }}{{ ' done' if b.done }}{{ ' tiny' if b.height < 30 }}" {% if it.id %}href="/commitments?task={{ it.id }}"{% else %}href="#" data-feed-jump="answer"{% endif %}
+   {%- if it.id and not b.done %} data-drag="{{ it.id }}" data-s="{{ b.start }}" data-from="{{ day.plan_from }}" data-px="{{ day.hour_px }}"{% endif %}
    style="top: {{ b.top }}px; height: {{ b.height }}px; left: calc({{ '%.4f' % (b.left * 100) }}% + 4px); width: calc({{ '%.4f' % (b.width * 100) }}% - 8px)"
-   title="{{ it.title }} · {{ b.time }} · ≈{{ it.est | dur }}{{ ' · вы поставили сюда' if b.pinned }}">
-  <span class="pb-t">{{ it.title }}</span><span class="pb-m">{{ b.time }} · ≈{{ it.est | dur }}</span>
+   title="{{ it.title }} · {{ b.time }} · {{ 'сделано' if b.done else '≈' ~ (it.est | dur) }}{{ ' · вы поставили сюда' if b.pinned }}{{ ' · перетащите, чтобы поставить на другое время' if it.id and not b.done }}">
+  <span class="pb-t">{{ '✓ ' if b.done }}{{ it.title }}</span><span class="pb-m">{{ b.time }}{% if not b.done %} · ≈{{ it.est | dur }}{% endif %}</span>
 </a>
 {% else %}
 <div class="pl pl-{{ b.kind }}" style="top: {{ b.top }}px; height: {{ b.height }}px" title="{{ b.title }}" aria-hidden="true"></div>
@@ -79,6 +94,7 @@
       <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>
     </div>
     <div class="day-body" data-day-body>{{ review_body(p, choices, next_label) }}</div>
+    <datalist id="day-people">{% for name in day_people() %}<option value="{{ name }}">{% endfor %}</datalist>
     <div class="dlg-actions">
       <button type="button" class="btn primary" data-dlg-close>Готово</button>
       <span class="muted small">Решения сохраняются сразу. План живёт только в PULSE — в календарь ничего не пишется.</span>
@@ -92,6 +108,8 @@
 <p class="day-total dv-{{ v.level }}" data-day-total><span class="dv-dot" aria-hidden="true"></span>
   {%- if v.level == 'off' %}{{ v.line }}
   {%- else %}{{ 'После ваших решений: задач' if after else 'Задач' }} на {{ p.need | dur }} из {{ p.capacity | dur }} свободных — {{ v.title[0] | lower }}{{ v.title[1:] }}{% endif %}</p>
+{% if p.progress.total %}<p class="muted small day-progress">{{ p.progress.line }}</p>{% endif %}
+{% if p.today and p.off == 'over' and p.carry %}<form method="post" action="/day/carry"><button class="btn sm primary">Перенести незакрытое {{ p.carry_label }} · {{ p.carry | length }}</button></form>{% endif %}
 <p class="day-err bad-text small" data-day-err hidden></p>
 {% set usable = p.windows | rejectattr('short') | list %}
 <ul class="day-list">
@@ -116,6 +134,7 @@
       <form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="btn sm ghost" name="act" value="tomorrow" title="Срок — следующий рабочий день">{{ next_label }}</button></form>
       <button type="button" class="btn sm ghost" data-reveal="day-due-{{ it.id }}">Свой срок</button>
       <form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="btn sm ghost" name="act" value="nodue" title="Задача останется без срока и уйдёт из плана на сегодня">Снять срок</button></form>
+      <button type="button" class="btn sm ghost" data-reveal="day-pass-{{ it.id }}" title="Отдать часть работы коллеге: задача останется вашей и подождёт эту часть">Передать</button>
       {% if it.pin %}<form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="linkish small" name="act" value="unplan" title="PULSE снова расставит задачу сам">отменить решение</button></form>{% endif %}
     </div>
     <form class="day-due" id="day-due-{{ it.id }}" method="post" action="/day/act" data-day-act hidden>
@@ -123,12 +142,22 @@
       <div class="due-pick" role="group" aria-label="Срок">{% for ch in choices %}<button type="button" class="due-q" data-day-due="{{ ch.iso }}">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}</div>
       <label class="due-own">или своя дата <input type="date" name="due" required><button class="btn sm primary">Сохранить срок</button></label>
     </form>
+    <form class="day-pass" id="day-pass-{{ it.id }}" method="post" action="/day/act" data-day-act hidden>
+      <input type="hidden" name="cid" value="{{ it.id }}"><input type="hidden" name="act" value="delegate">
+      <div class="day-pass-f">
+        <input type="text" name="who" list="day-people" required placeholder="Кому — например, Пётр Иванов" aria-label="Кому передать">
+        <input type="text" name="what" value="{{ it.title }}" required aria-label="Что сделать">
+        <input type="date" name="due" value="{{ it.due if it.due and it.due >= p.date.isoformat() else '' }}" aria-label="Срок" title="Срок — необязательно">
+        <button class="btn sm primary">Передать</button>
+      </div>
+      <p class="muted small">Задача останется вашей (на доске — «Я + коллега{{ ' → ' ~ it.whom if it.whom }}») и уйдёт из плана, пока эта часть не готова.</p>
+    </form>
     {% endif %}
   </li>
 {% else %}
   <li class="day-it muted">На этот день задач нет — всё свободное время ваше.</li>
 {% endfor %}
 </ul>
-{% if p.waiting %}<p class="muted small">Ждут других, в план не ставлю: {% for c in p.waiting %}<a href="/commitments?task={{ c.id }}">{{ c.title }}</a>{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+{% if p.waiting %}<p class="muted small">Ждут других, в план не ставлю: {% for c in p.waiting %}<a href="/commitments?task={{ c.id }}">{{ c.title }}</a> ({{ c.why }}){{ '; ' if not loop.last }}{% endfor %}.</p>{% endif %}
 {% for it in p.too_big %}<p class="warn-text small">«{{ it.title }}» ({{ it.est | dur }}) не помещается: самое длинное окно {{ p.longest | dur }} — {{ SPLIT_HINT }}.</p>{% endfor %}
 {% endmacro %}

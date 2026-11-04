@@ -220,7 +220,8 @@ templates.env.globals.update(
     proposal_action=proposals.action,  # надпись на кнопке подтверждения: «Закрыть задачу», «Напомнить»…
 )
 templates.env.filters.update(dur=day_mod.dur, hm=day_mod.hm, est=day_mod.est_text)  # «Реальность дня»
-templates.env.globals.update(DAY_CHIPS=day_mod.CHIPS, SPLIT_HINT=day_mod.SPLIT_HINT)
+templates.env.globals.update(DAY_CHIPS=day_mod.CHIPS, SPLIT_HINT=day_mod.SPLIT_HINT,
+                             day_people=lambda: [p["name"] for p in records.list_people()])  # «Передать» — кому
 
 
 def render(request: Request, name: str, **ctx) -> HTMLResponse:
@@ -927,9 +928,9 @@ def day_review(after: int = 0):
 
 @app.post("/day/act")
 def day_act(request: Request, cid: int = Form(...), act: str = Form(...), start: str = Form(""), due: str = Form(""),
-            minutes: int = Form(0)):
-    """Решение из «Разобрать день»: в план (окно или «авто»), на следующий рабочий день, свой срок, снять срок,
-    оценка. Окно ждёт JSON с новым телом; без скриптов — возврат на Сводку."""
+            minutes: int = Form(0), who: str = Form(""), what: str = Form("")):
+    """Решение из «Разобрать день» и с сетки дня: в план (окно или «авто»), перетащили блок, на следующий рабочий
+    день, свой срок, снять срок, передать коллеге, оценка. Окно ждёт JSON с новым телом; без скриптов — возврат."""
     as_json = "application/json" in request.headers.get("accept", "")
     try:
         if act == "estimate":
@@ -938,7 +939,7 @@ def day_act(request: Request, cid: int = Form(...), act: str = Form(...), start:
         else:
             if act == "due" and not due.strip():
                 raise ValueError("Выберите срок")
-            msg = day_mod.decide(cid, act, start=start.strip(), due=due.strip())
+            msg = day_mod.decide(cid, act, start=start.strip(), due=due.strip(), who=who, what=what)
     except ValueError as e:
         if as_json:
             return JSONResponse({"ok": False, "err": str(e)}, status_code=400)
@@ -946,6 +947,13 @@ def day_act(request: Request, cid: int = Form(...), act: str = Form(...), start:
     if as_json:
         return JSONResponse({"ok": True, "msg": msg, "html": _day_review(after=True)})
     return back(request, msg)
+
+
+@app.post("/day/carry")
+def day_carry(request: Request):
+    """Вечером на Сводке — «Перенести незакрытое на завтра» одной кнопкой."""
+    n = day_mod.carry_over()
+    return back(request, f"Перенесено задач: {n}" if n else "Переносить нечего", to="/")
 
 
 @app.post("/commitments/{cid}/state")

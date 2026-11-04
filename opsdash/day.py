@@ -85,6 +85,7 @@ def work_window(day: date, settings: dict) -> tuple[int, int] | None:
 
 
 WEEKDAYS_TO = ["В понедельник", "Во вторник", "В среду", "В четверг", "В пятницу", "В субботу", "В воскресенье"]
+WEEKDAYS_ON = ["понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье"]
 
 
 def next_label(day: date, settings: dict) -> str:
@@ -263,8 +264,8 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
 def demand(day: date | None = None, settings: dict | None = None, *, rows: list[dict] | None = None) -> dict:
     """Что нужно сделать в этот день, по приоритету. Только задачи директора: срок сегодня или просрочено, всё
     «в работе», срок в ближайшие 2 рабочих дня, если их ждут другие, и то, что директор сама поставила в план;
-    плюс «нужен ответ» × минуты на ответ. Задачи, которые сами чего-то ждут, в план не идут (waiting).
-    rows — решения директора из day_plan на этот день (если уже прочитаны)."""
+    плюс «нужен ответ» × минуты на ответ. Задачи, которые сами чего-то ждут (связь «ждёт» или открытая подзадача —
+    часть работы передана), в план не идут (waiting). rows — решения директора из day_plan на этот день."""
     settings = settings or config.load_settings()
     o = opts(settings)
     day = day or config.now(settings).date()
@@ -280,9 +281,15 @@ def demand(day: date | None = None, settings: dict | None = None, *, rows: list[
             "JOIN commitments t ON t.id=l.task_id WHERE l.waits_for IS NOT NULL AND t.status='open' "
             "AND t.archived_at IS NULL"):
         holders.setdefault(r["for_id"], []).append(r)
-    blocked = {r["task_id"] for r in store.rows(
-        "SELECT DISTINCT l.task_id FROM task_links l LEFT JOIN commitments w ON w.id=l.waits_for "
-        "WHERE (l.waits_for IS NOT NULL AND w.status='open') OR (l.waits_for IS NULL AND l.done_at IS NULL)")}
+    blocked: dict[int, str] = {}  # что задача ждёт — первое, словами
+    for r in store.rows(
+            "SELECT l.task_id, l.event, w.direction, w.who, w.title, w.what FROM task_links l "
+            "LEFT JOIN commitments w ON w.id=l.waits_for "
+            "WHERE (l.waits_for IS NOT NULL AND w.status='open') OR (l.waits_for IS NULL AND l.done_at IS NULL) ORDER BY l.id"):
+        blocked.setdefault(r["task_id"], f"ждёт «{records.headline(r)}»" if r["what"] or r["title"] else f"ждёт: {r['event']}")
+    for r in store.rows("SELECT parent_id, direction, who FROM commitments WHERE parent_id IS NOT NULL AND status='open' "
+                        "AND archived_at IS NULL ORDER BY id"):
+        blocked.setdefault(r["parent_id"], "передано: " + ("ваша часть" if r["direction"] == "mine" else r["who"] or "?"))
     pids = {c["project_id"] for c in tasks if c.get("project_id")}
     projects = {p["id"]: p for p in store.rows(
         f"SELECT id, title, due, status FROM projects WHERE id IN ({','.join('?' * len(pids)) or 'NULL'})", list(pids))}
@@ -295,7 +302,7 @@ def demand(day: date | None = None, settings: dict | None = None, *, rows: list[
         if not want or c["id"] in skipped:
             continue
         if c["id"] in blocked and c["id"] not in forced:
-            waiting.append(c)
+            waiting.append({**c, "why": blocked[c["id"]]})
             continue
         p = projects.get(c.get("project_id"))
         at_risk = bool(p and p["status"] != "done" and p["due"] and p["due"] <= risk_until)
@@ -335,7 +342,7 @@ def demand(day: date | None = None, settings: dict | None = None, *, rows: list[
                       "est_default": False, "est_by": None, "reasons": [f"{replies} × {o['reply']} мин"],
                       "reason": f"{replies} × {o['reply']} мин", "tier": 6, "holders": 0, "pin": None, "in_work": False,
                       "count": replies})
-    return {"items": items, "waiting": [{"id": c["id"], "title": records.headline(c)} for c in waiting]}
+    return {"items": items, "waiting": [{"id": c["id"], "title": records.headline(c), "why": c["why"]} for c in waiting]}
 
 
 # --- вердикт и план -------------------------------------------------------------------------------
@@ -417,15 +424,14 @@ def plan(day: date | None = None, settings: dict | None = None, now: datetime | 
          save: bool = True) -> dict:
     """День целиком: окна, спрос, вердикт, план, «сейчас». Пересчитывается при каждом открытии Сводки и вызове
     ./ops day; расстановка PULSE (source=auto) на сегодня и вперёд сохраняется в day_plan, решения директора
-    не трогаются. Закрытые задачи из плана помечаются «сделано»."""
+    не трогаются. Закрытые задачи из плана помечаются «сделано»; уже начавшиеся блоки остаются историей дня —
+    из неё «План дня: сделано N из M»."""
     settings = settings or config.load_settings()
     now = now if now is not None else config.now(settings)
     day = day or now.date()
     lay = windows(day, settings, now)
     if save:
-        store.execute("UPDATE day_plan SET status='done', updated=? WHERE date=? AND status='planned' "
-                      "AND commitment_id IN (SELECT id FROM commitments WHERE status='done')",
-                      (store.utcnow(), day.isoformat()))
+        _mark_done(day, settings)
     rows = decisions(day)
     dem = demand(day, settings, rows=rows)
     items = dem["items"]
@@ -440,25 +446,60 @@ def plan(day: date | None = None, settings: dict | None = None, now: datetime | 
     placed = place(lay["windows"], items, pins) if not lay["off"] else {"blocks": [], "overflow": [], "too_big": [],
                                                                          "longest": 0}
     if save and day >= now.date():
-        _save(day, placed["blocks"])
+        _save(day, placed["blocks"], hm(lay["from"]) if day == now.date() and lay["from"] is not None else "00:00")
+    today = day == now.date()
     out = {**lay, **placed, "items": items, "waiting": dem["waiting"], "capacity": cap, "need": need,
-           "verdict": verdict(cap, need, settings, off=lay["off"]), "now": now, "today": day == now.date()}
+           "verdict": verdict(cap, need, settings, off=lay["off"]), "now": now, "today": today}
     out["current"], out["next"] = _now_window(out, now)
     out["summary"] = _summary(out)
     out["digest"] = digest_line(out, settings)
+    saved = decisions(day) if save else rows
+    out["progress"] = progress(day, rows=saved)
+    # сделанное из плана — на сетке галочкой на своём (уже прошедшем) месте
+    m = now.hour * 60 + now.minute if today else 24 * 60
+    titles = {r["id"]: records.headline(r) for r in store.rows(
+        f"SELECT id, title, what FROM commitments WHERE id IN ({','.join('?' * len(saved)) or 'NULL'})",
+        [r["commitment_id"] for r in saved])}
+    out["history"] = [{**r, "title": titles.get(r["commitment_id"], "")} for r in saved
+                      if r["status"] == "done" and r["start"] and r["end"] and minutes(r["start"]) < m]
+    # вечером: что из сегодняшнего не закрыто и требует решения — срок сегодня или раньше, или вы ставили в план
+    out["carry"] = [i for i in items if i["kind"] == "task" and ((i["due"] and i["due"] <= day.isoformat()) or i["pin"])]
+    out["carry_label"] = "на завтра" if next_workday(day, settings) == day + timedelta(days=1) else \
+        "на " + WEEKDAYS_ON[next_workday(day, settings).weekday()]
     return out
 
 
-def _save(day: date, blocks: list[dict]) -> None:
-    """Расстановка PULSE на день — в day_plan (старая расстановка PULSE заменяется, решения директора остаются)."""
+def _mark_done(day: date, settings: dict) -> None:
+    """Закрытые задачи из плана дня — «сделано», если закрыты до конца этого дня."""
+    end = store.to_utc_iso(datetime.combine(day + timedelta(days=1), time.min, config.tz(settings)))
+    store.execute("UPDATE day_plan SET status='done', updated=? WHERE date=? AND status='planned' AND commitment_id IN "
+                  "(SELECT id FROM commitments WHERE status='done' AND COALESCE(closed_at, '') < ?)",
+                  (store.utcnow(), day.isoformat(), end))
+
+
+def progress(day: date, *, rows: list[dict] | None = None) -> dict:
+    """«План дня: сделано N из M»: задачи, которые были в плане на этот день (расставил PULSE или поставила
+    директор), и сколько из них закрыто. Перенесённые и снятые решениями директора не считаются."""
+    rows = decisions(day) if rows is None else rows
+    ids = {r["commitment_id"] for r in rows if r["commitment_id"] and r["status"] in ("planned", "done")}
+    done = {r["commitment_id"] for r in rows if r["commitment_id"] and r["status"] == "done"}
+    return {"done": len(done), "total": len(ids),
+            "line": f"План дня: сделано {len(done)} из {len(ids)}" if ids else ""}
+
+
+def _save(day: date, blocks: list[dict], since: str) -> None:
+    """Расстановка PULSE на день — в day_plan: прежняя расстановка с момента since (ЧЧ:ММ) заменяется новой; что уже
+    началось, остаётся историей дня, если задачу не переставили заново. Решения директора не трогаются."""
     now = store.utcnow()
+    auto = [b for b in blocks if b["source"] == "auto" and b["item"].get("id")]
+    ids = [b["item"]["id"] for b in auto]
     with store.db() as conn:
-        conn.execute("DELETE FROM day_plan WHERE date=? AND source='auto' AND status='planned'", (day.isoformat(),))
+        conn.execute("DELETE FROM day_plan WHERE date=? AND source='auto' AND status='planned' AND (start >= ? "
+                     f"OR commitment_id IN ({','.join('?' * len(ids)) or 'NULL'}))", (day.isoformat(), since, *ids))
         conn.executemany(
             'INSERT INTO day_plan(date, commitment_id, start, "end", status, source, updated) '
             "VALUES(?,?,?,?,'planned','auto',?)",
-            [(day.isoformat(), b["item"]["id"], hm(b["s"]), hm(b["e"]), now)
-             for b in blocks if b["source"] == "auto" and b["item"].get("id")])
+            [(day.isoformat(), b["item"]["id"], hm(b["s"]), hm(b["e"]), now) for b in auto])
 
 
 def _now_window(p: dict, now: datetime) -> tuple[dict | None, dict | None]:
@@ -514,8 +555,9 @@ def _esc(s: str) -> str:
 # --- сетка дня на Сводке ----------------------------------------------------------------------------
 
 def decorate(grid: dict, p: dict) -> None:
-    """Слой плана на сетке дня (overview.day_grid): плановые блоки задач, буферы штриховкой, короткие окна серым;
-    фокус-блоки и встречи, от которых отказались, — отметкой на самих событиях."""
+    """Слой плана на сетке дня (overview.day_grid): плановые блоки задач (их можно перетащить — day.js), сделанное
+    из плана — галочкой на прошедшем месте, буферы штриховкой, короткие окна серым; фокус-блоки и встречи,
+    от которых отказались, — отметкой на самих событиях."""
     top = grid["hour_from"] * 60
     px = grid["hour_px"] / 60
     bottom = top + len(grid["hours"]) * 60
@@ -535,10 +577,13 @@ def decorate(grid: dict, p: dict) -> None:
         if w["short"] and (b := box(w["s"], w["e"], kind="short", title=f"окно {w['len']} мин — короткое")):
             layer.append(b)
     narrow = []
-    for blk in p["blocks"]:
+    done = [{"s": minutes(r["start"]), "e": minutes(r["end"]), "source": "done",
+             "item": {"id": r["commitment_id"], "title": r["title"], "est": minutes(r["end"]) - minutes(r["start"])}}
+            for r in p.get("history") or []]
+    for blk in p["blocks"] + done:
         it = blk["item"]
         b = box(blk["s"], blk["e"], kind="plan", item=it, time=f"{hm(blk['s'])}–{hm(blk['e'])}", pinned=blk["source"] == "user",
-                left=0.0, width=1.0)
+                done=blk["source"] == "done", start=blk["s"], left=0.0, width=1.0)
         if not b:
             continue
         layer.append(b)
@@ -549,6 +594,7 @@ def decorate(grid: dict, p: dict) -> None:
     for g in narrow:
         g["left"], g["width"] = 0.0, NARROW
     grid["plan_layer"] = layer
+    grid["plan_from"] = top  # для перетаскивания: минута верхнего края сетки
 
 
 # --- оценки ---------------------------------------------------------------------------------------
@@ -608,29 +654,35 @@ def job_estimates(**_) -> str:
 
 # --- решения директора («Разобрать день») ---------------------------------------------------------
 
-def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due: str = "",
-           settings: dict | None = None) -> str:
-    """Решение по задаче из «Разобрать день»: plan — в план (start «ЧЧ:ММ» или пусто — «авто»), unplan — отменить
-    своё решение, tomorrow — на следующий рабочий день, due — свой срок, nodue — снять срок. Вернуть текст для
-    уведомления."""
+def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due: str = "", who: str = "",
+           what: str = "", settings: dict | None = None) -> str:
+    """Решение по задаче из «Разобрать день» и с сетки дня: plan — в план (start «ЧЧ:ММ» или пусто — «авто»; в
+    занятое директором окно — после её задач), move — блок перетащили на сетке (ровно на start), unplan — отменить
+    своё решение, tomorrow — на следующий рабочий день, due — свой срок, nodue — снять срок, delegate — передать
+    часть коллеге (подзадача: «Я + Пётр → Тимур», who — кому, what — что). Вернуть текст для уведомления."""
     settings = settings or config.load_settings()
     day = day or config.now(settings).date()
-    if not records.get_commitment(cid):
+    c = records.get_commitment(cid)
+    if not c:
         raise ValueError("Такой задачи нет")
     iso, now = day.isoformat(), store.utcnow()
 
-    def mark(status: str, s: str | None = None, e: str | None = None) -> None:
+    def mark(status: str, s: str | None = None, e: str | None = None, on: str = iso) -> None:
         with store.db() as conn:
-            conn.execute("DELETE FROM day_plan WHERE date=? AND commitment_id=? AND status!='done'", (iso, cid))
+            conn.execute("DELETE FROM day_plan WHERE date=? AND commitment_id=? AND status!='done'", (on, cid))
             if status:
                 conn.execute('INSERT INTO day_plan(date, commitment_id, start, "end", status, source, updated) '
-                             "VALUES(?,?,?,?,?,'user',?)", (iso, cid, s, e, status, now))
+                             "VALUES(?,?,?,?,?,'user',?)", (on, cid, s, e, status, now))
 
-    if act == "plan":
-        if start and minutes(start) is None:
+    if act in ("plan", "move"):
+        if (start or act == "move") and minutes(start) is None:
             raise ValueError("Время — в виде ЧЧ:ММ")
-        est = store.scalar("SELECT estimate_min FROM commitments WHERE id=?", (cid,)) or DEFAULT_ESTIMATE
+        est = c.get("estimate_min") or DEFAULT_ESTIMATE
         s = minutes(start) if start else None
+        if act == "move":
+            s = max(0, min(s, 24 * 60 - est))
+            mark("planned", hm(s), hm(s + est))
+            return f"В плане на {hm(s)}"
         if s is not None:  # в выбранном окне — после задач, которые директор уже поставила туда сама
             taken = sorted((minutes(r["start"]), minutes(r["end"])) for r in decisions(day)
                            if r["source"] == "user" and r["status"] == "planned" and r["start"] and r["end"]
@@ -643,6 +695,12 @@ def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due:
     if act == "unplan":  # отменить своё решение: PULSE расставит задачу сам, если она нужна сегодня
         mark("")
         return "Решение отменено — PULSE расставит сам"
+    if act == "tomorrow" and c["due"] and c["due"] > next_workday(day, settings).isoformat():
+        # срок и так позже — переносим только решение «в план»: завтра задача будет в плане сама
+        nxt = next_workday(day, settings).isoformat()
+        mark("moved")
+        mark("planned", on=nxt)
+        return f"В плане на {date.fromisoformat(nxt):%d.%m}"
     if act in ("tomorrow", "due"):
         new = next_workday(day, settings).isoformat() if act == "tomorrow" else due.strip()
         records.set_due(cid, new)
@@ -654,4 +712,64 @@ def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due:
                       "WHERE id=?", (now, now, now, cid))
         mark("dropped")
         return "Срок снят"
+    if act == "delegate":  # задача остаётся на директоре и ждёт свою часть — из плана уходит, пока часть не готова
+        if not who.strip():
+            raise ValueError("Кому передать?")
+        if due.strip() and not records._as_date(due.strip()):
+            raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
+        title = what.strip() or records.headline(c)
+        records.add_commitment(direction="to_me", who=who.strip(), title=title, what=title, due=due.strip() or None,
+                               source_type="manual", parent_id=cid)
+        return f"Передано: {who.strip()} — задача ждёт эту часть"
     raise ValueError("Неизвестное действие")
+
+
+# --- живые сигналы ---------------------------------------------------------------------------------
+
+WATCH = "day_watch"  # что видели в прошлый раз: дата, встречи сегодня, вердикт, задачи на сегодня
+
+
+def watch(settings: dict | None = None, now: datetime | None = None) -> list[str]:
+    """Уведомления в углу экрана (обслуживание раз в 5 минут и после сбора календаря): новая задача от Claude со
+    сроком сегодня, когда день и так перегружен («места нет — что двигаем?»), и изменение календаря — только если
+    поменялся вердикт. Первый проход дня ничего не сообщает — только запоминает. Вернуть заголовки уведомлений."""
+    from opsdash import notices
+
+    settings = settings or config.load_settings()
+    if not (settings["calendar"].get("enabled") or settings["google_calendar"].get("enabled")):
+        return []
+    now = now if now is not None else config.now(settings)
+    p = plan(now.date(), settings, now)
+    events = sorted(f"{m['uid']}@{m['s']}-{m['e']}" for m in p["meetings"] + p["focus"])
+    level, iso = p["verdict"]["level"], now.date().isoformat()
+    today_ids = [i["id"] for i in p["items"] if i["kind"] == "task" and i["due"] == iso]
+    old = store.get_state(WATCH) or {}
+    store.set_state(WATCH, {"date": iso, "events": events, "level": level, "tasks": today_ids,
+                            "at": store.utcnow()})
+    if old.get("date") != iso or level == "off":
+        return []
+    out = []
+    if old.get("events") != events and old.get("level") != level:
+        title = f"Календарь изменился: {p['verdict']['title'].lower()}"
+        notices.add("day", title, p["verdict"]["line"], "/#day", "bad" if level == "over" else "info", merge_hours=1)
+        out.append(title)
+    fresh = set(today_ids) - set(old.get("tasks") or [])
+    if fresh and level == "over":
+        new = store.rows(f"SELECT id, title, what FROM commitments WHERE id IN ({','.join('?' * len(fresh))}) "
+                         "AND source_type != 'manual' AND created >= ?", [*fresh, old.get("at") or ""])
+        for c in new:
+            title = f"Задача «{records.headline(c)}» на сегодня: места нет — что двигаем?"
+            notices.add("day", title, p["verdict"]["line"], "/#day", "bad")
+            out.append(title)
+    return out
+
+
+def carry_over(day: date | None = None, settings: dict | None = None) -> int:
+    """Вечером — «Перенести незакрытое»: всё, что было на сегодня и не закрыто (срок сегодня или раньше, или
+    директор ставила в план), — на следующий рабочий день. Вернуть, сколько задач перенесено."""
+    settings = settings or config.load_settings()
+    day = day or config.now(settings).date()
+    p = plan(day, settings)
+    for it in p["carry"]:
+        decide(it["id"], "tomorrow", day=day, settings=settings)
+    return len(p["carry"])

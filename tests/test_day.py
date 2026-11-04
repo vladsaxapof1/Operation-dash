@@ -208,6 +208,8 @@ def test_decisions_pin_move_and_drop(settings_with):
     rows = {(r["commitment_id"], r["source"], r["status"]) for r in day.decisions(DAY)}
     assert (a, "user", "planned") in rows and (c, "user", "moved") in rows and (later, "user", "planned") in rows
     records.update_commitment(a, status="done")
+    store.execute("UPDATE commitments SET closed_at=? WHERE id=?",  # закрыта в тот же день
+                  (store.to_utc_iso(datetime.combine(DAY, time(15, 0), tz)), a))
     day.plan(DAY, settings, now)
     assert store.scalar("SELECT status FROM day_plan WHERE commitment_id=?", (a,)) == "done"
     day.decide(later, "unplan", day=DAY)  # решение отменено — PULSE снова расставляет сам, задача не на сегодня
@@ -321,3 +323,122 @@ def test_overview_page_review_and_estimate_chips(settings_with, monkeypatch):
     d = config.load_settings()["day"]
     assert d["focus_titles"] == ["тайм-аут", "глубокая работа"] and d["lunch"] == "13:00-13:45"
     assert day.opts()["lunch"] == (780, 825) and day.opts()["after"] == 5
+
+
+# --- этап 2: передать, вечер, сигналы, перетаскивание ------------------------------------------------
+
+def _at(hh, mm=0):
+    return datetime.combine(DAY, time(hh, mm), config.tz())
+
+
+def test_delegate_part_to_colleague():
+    cid = _task("Отчёт по возвратам", DAY.isoformat())
+    with pytest.raises(ValueError, match="Кому"):
+        day.decide(cid, "delegate", day=DAY, what="Выгрузка")
+    assert day.decide(cid, "delegate", day=DAY, who="Пётр Иванов", what="Выгрузка по возвратам",
+                      due="2026-11-05").startswith("Передано: Пётр Иванов")
+    kid = store.row("SELECT * FROM commitments WHERE parent_id=?", (cid,))
+    assert kid["direction"] == "to_me" and kid["who"] == "Пётр Иванов" and kid["due"] == "2026-11-05"
+    assert records.get_commitment(cid)["helpers"] == ["Пётр Иванов"]  # на доске — «Я + Пётр → Тимур»
+    dem = day.demand(DAY)
+    assert cid not in [i["id"] for i in dem["items"]]  # ждёт свою часть — в план не идёт
+    assert dem["waiting"] == [{"id": cid, "title": "Отчёт по возвратам", "why": "передано: Пётр Иванов"}]
+    records.update_commitment(kid["id"], status="done")
+    assert cid in [i["id"] for i in day.demand(DAY)["items"]]  # часть готова — задача снова в плане
+
+
+def test_history_progress_and_no_duplicate_rows(settings_with):
+    settings = settings_with(calendar={"enabled": True})
+    x, y = _task("Икс", DAY.isoformat()), _task("Игрек", DAY.isoformat())
+    p = day.plan(DAY, settings, _at(9))
+    assert [b["item"]["slot"] for b in p["blocks"]] == ["09:00–09:30", "09:30–10:00"]
+    assert p["progress"] == {"done": 0, "total": 2, "line": "План дня: сделано 0 из 2"}
+    records.update_commitment(x, status="done")
+    store.execute("UPDATE commitments SET closed_at=? WHERE id=?", (store.to_utc_iso(_at(9, 20)), x))
+    for hh, mm in ((12, 0), (12, 0), (12, 5)):  # пересчёты не плодят строк: «Игрек» переставлен, «Икс» — история
+        p = day.plan(DAY, settings, _at(hh, mm))
+    assert store.scalar("SELECT COUNT(*) FROM day_plan WHERE commitment_id=?", (y,)) == 1
+    assert p["progress"]["line"] == "План дня: сделано 1 из 2"
+    assert [(h["title"], h["start"]) for h in p["history"]] == [("Икс", "09:00")]
+    grid = {"hour_from": 9, "hour_px": 36, "hours": list(range(9, 20)), "events": [], "days": [{"events": []}]}
+    day.decorate(grid, p)
+    blocks = [b for b in grid["plan_layer"] if b["kind"] == "plan"]
+    assert [(b["item"]["title"], b["done"]) for b in blocks] == [("Игрек", False), ("Икс", True)]
+
+
+def test_evening_carry_over(settings_with, monkeypatch):
+    settings = settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(20, 30))
+    today_, old = _task("Сегодня", DAY.isoformat()), _task("Просрочено", "2026-11-01")
+    later = _task("В план сама", "2026-11-10")
+    day.decide(later, "plan", day=DAY)
+    work = _task("В работе", "2026-11-12")
+    records.set_in_work(work, True)
+    p = day.plan(DAY, settings)
+    assert p["off"] == "over" and [i["id"] for i in p["carry"]] == [later, old, today_]
+    assert p["carry_label"] == "на завтра"
+    assert day.carry_over(DAY, settings) == 3
+    assert records.get_commitment(today_)["due"] == records.get_commitment(old)["due"] == "2026-11-04"
+    assert records.get_commitment(later)["due"] == "2026-11-10"  # срок и так позже — переносится только план
+    tomorrow = {(r["commitment_id"], r["status"]) for r in day.decisions(DAY + timedelta(days=1))}
+    assert tomorrow == {(later, "planned")} and records.get_commitment(work)["due"] == "2026-11-12"
+    assert day.plan(DAY, settings)["carry"] == []
+    friday = date(2026, 11, 6)
+    assert day.plan(friday, settings, datetime.combine(friday, time(21), config.tz()))["carry_label"] == "на понедельник"
+
+
+def test_drag_pins_block_exactly(settings_with):
+    settings = settings_with(calendar={"enabled": True})
+    a, b = _task("А", DAY.isoformat()), _task("Б", DAY.isoformat())
+    day.decide(a, "plan", day=DAY, start="16:00")
+    day.decide(b, "move", day=DAY, start="16:10")  # перетащили — ровно сюда, даже поверх другой задачи
+    p = day.plan(DAY, settings, _at(9))
+    slots = {x["item"]["id"]: (x["item"]["slot"], x["source"]) for x in p["blocks"]}
+    assert slots[a] == ("16:00–16:30", "user") and slots[b] == ("16:10–16:40", "user")
+    with pytest.raises(ValueError):
+        day.decide(b, "move", day=DAY, start="")
+
+
+def test_live_signals_overload_and_calendar(settings_with):
+    from opsdash import notices
+
+    settings = settings_with(calendar={"enabled": True})
+    _busy_day()
+    for i in range(3):
+        _task(f"Задача {i}", DAY.isoformat())
+    assert day.watch(settings, _at(9)) == []  # первый проход дня только запоминает
+    assert day.watch(settings, _at(9, 5)) == []
+    store.execute('INSERT INTO events(uid, title, start, "end", all_day, attendees) VALUES(?,?,?,?,0,?)',
+                  ("big", "Выездная сессия", store.to_utc_iso(_at(9)), store.to_utc_iso(_at(20)),
+                   store.json_col([{"email": "p@example.ru"}])))
+    got = day.watch(settings, _at(9, 10))
+    assert got and got[0].startswith("Календарь изменился: перегруз")
+    records.add_commitment(direction="mine", whom="Тимур", title="Срочная справка", what="Срочная справка",
+                           due=DAY.isoformat(), source_type="meeting")
+    records.add_commitment(direction="mine", whom="Тимур", title="Своя", what="Своя", due=DAY.isoformat())
+    assert day.watch(settings, _at(9, 15)) == ["Задача «Срочная справка» на сегодня: места нет — что двигаем?"]
+    store.execute('INSERT INTO events(uid, title, start, "end", all_day, attendees) VALUES(?,?,?,?,0,?)',
+                  ("more", "Ещё встреча", store.to_utc_iso(_at(10)), store.to_utc_iso(_at(11)), "[]"))
+    assert day.watch(settings, _at(9, 20)) == []  # календарь изменился, вердикт тот же — молчим
+    assert [n["link"] for n in notices.recent()] == ["/#day", "/#day"]
+
+
+def test_overview_evening_carry_and_review_delegate(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings_with(calendar={"enabled": True})
+    records.upsert_person("Пётр Иванов")
+    cid = _task("Сводка решений по KPI", DAY.isoformat())
+    client = TestClient(app, base_url="http://localhost:8765")
+    monkeypatch.setattr(config, "now", lambda s=None: _at(11))
+    page = client.get("/").text
+    assert 'data-drag="%d"' % cid in page and 'id="day-pass-%d"' % cid in page and '<option value="Пётр Иванов">' in page
+    res = client.post("/day/act", data={"cid": cid, "act": "delegate", "who": "Пётр Иванов", "what": "Цифры по KPI"},
+                      headers={"Accept": "application/json"}).json()
+    assert res["ok"] and "передано: Пётр Иванов" in res["html"]
+    other = _task("Ответ юристам", DAY.isoformat())
+    monkeypatch.setattr(config, "now", lambda s=None: _at(20, 30))
+    page = client.get("/").text
+    assert "Перенести незакрытое на завтра" in page and "Ответ юристам" in page
+    client.post("/day/carry")
+    assert records.get_commitment(other)["due"] == "2026-11-04"
