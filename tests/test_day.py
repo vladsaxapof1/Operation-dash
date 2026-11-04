@@ -433,6 +433,8 @@ def test_overview_evening_carry_and_review_delegate(settings_with, monkeypatch):
     monkeypatch.setattr(config, "now", lambda s=None: _at(11))
     page = client.get("/").text
     assert 'data-drag="%d"' % cid in page and 'id="day-pass-%d"' % cid in page and '<option value="Пётр Иванов">' in page
+    assert f'href="/agents?task={cid}" data-agent-open="{cid}"' in page  # «Агенту» — панель «Поручить агенту»
+    assert client.get(f"/agents?task={cid}").status_code == 200  # без скриптов — страница поручения
     res = client.post("/day/act", data={"cid": cid, "act": "delegate", "who": "Пётр Иванов", "what": "Цифры по KPI"},
                       headers={"Accept": "application/json"}).json()
     assert res["ok"] and "передано: Пётр Иванов" in res["html"]

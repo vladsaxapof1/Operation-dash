@@ -135,6 +135,8 @@
       <button type="button" class="btn sm ghost" data-reveal="day-due-{{ it.id }}">Свой срок</button>
       <form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="btn sm ghost" name="act" value="nodue" title="Задача останется без срока и уйдёт из плана на сегодня">Снять срок</button></form>
       <button type="button" class="btn sm ghost" data-reveal="day-pass-{{ it.id }}" title="Отдать часть работы коллеге: задача останется вашей и подождёт эту часть">Передать</button>
+      {#- «Поручить агенту» (opsdash.agents): панель открывается поверх этого окна; без скриптов — страница поручения #}
+      <a class="btn sm ghost" href="/agents?task={{ it.id }}" data-agent-open="{{ it.id }}" title="PULSE соберёт промт для Claude Code или Codex по этой задаче">Агенту</a>
       {% if it.pin %}<form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="linkish small" name="act" value="unplan" title="PULSE снова расставит задачу сам">отменить решение</button></form>{% endif %}
     </div>
     <form class="day-due" id="day-due-{{ it.id }}" method="post" action="/day/act" data-day-act hidden>
