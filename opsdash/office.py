@@ -636,6 +636,9 @@ def folder(path: str, settings: dict | None = None) -> dict:
     days = int(settings["office"].get("days") or 7)
     now = datetime.now(timezone.utc)
     app = desktop_sessions()
+    from opsdash.agents import task_of_sessions
+
+    tasks = task_of_sessions()  # сессии, запущенные из «Поручить агенту»: пометка «по задаче «…»»
     found = []
     for journal, s, room in sessions(root, now.timestamp() - days * 86400, hidden(settings)):
         agents = _subagents(journal, root, now)
@@ -651,7 +654,7 @@ def folder(path: str, settings: dict | None = None) -> dict:
                       "needs": mine["needs"] if mine else "",
                       "first": s["first"], "last": s["last"], "steps": s["steps"][-6:], "tools": s["tools"],
                       "prompts": s["prompts"], "model": s["model"], "cwd": s["cwd"],
-                      "files": _files_view(s["written"], root), "agents": agents})
+                      "files": _files_view(s["written"], root), "agents": agents, "task": tasks.get(journal.stem)})
     rooms: dict[str, list] = {}
     for s in sorted(found, key=lambda x: x["last"] or "", reverse=True):
         rooms.setdefault(s["room"], []).append(s)

@@ -198,4 +198,14 @@
   var page = document.querySelector(".agent-page");
   var live = page && page.querySelector("[data-agent-live]");
   if (live) watch(page, live);
+
+  // открыть панель с любой страницы: кнопка или ссылка с data-agent-open="<id задачи>" (её щелчок ловится выше)
+  // или ?agent=<id задачи> в адресе — например, /commitments?task=18&agent=18 или /?agent=18
+  var asked = new URLSearchParams(location.search).get("agent");
+  if (asked && /^\d+$/.test(asked) && !page) {
+    var dlg = dialog();
+    var box = dlg.querySelector(".dlg-box");
+    dlg.showModal();
+    load(box, asked).then(function () { box.focus(); });
+  }
 })();

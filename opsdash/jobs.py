@@ -63,6 +63,12 @@ def job_agent_brief(brief_id: int, **_) -> str:
     return agents.build(brief_id)
 
 
+def job_agents_watch(**_) -> str:
+    from opsdash import agents
+
+    return agents.check()
+
+
 def job_recordings(**_) -> str:
     settings = config.load_settings()
     created = []
@@ -441,6 +447,7 @@ REGISTRY = {
     "recordings": job_recordings,
     "docs-index": job_docs_index,
     "agents-index": job_agents_index,
+    "agents-watch": job_agents_watch,
     "transcribe": job_transcribe,
     "process-meeting": job_process_meeting,
     "triage": job_triage,
@@ -475,6 +482,7 @@ TITLES = {
     "recordings": "Поиск новых записей",
     "docs-index": "Индекс документов",
     "agents-index": "Опыт агентов: индекс сессий",
+    "agents-watch": "Поручения агентам: сессии и готовность",
     "transcribe": "Расшифровка встречи",
     "process-meeting": "Разбор встречи (Claude)",
     "triage": "Разбор сообщений (Claude)",
@@ -697,6 +705,11 @@ def tick(settings: dict | None = None) -> list[str]:
         go("housekeeping")
     if settings["office"].get("folders") and _due("agents-index", 60):  # опыт агентов — до того, как Claude Code удалит журналы
         go("agents-index")
+    if _due("agents-watch", 1):  # поручение открыли в Claude — найти сессию, следить, не готова ли
+        from opsdash import agents
+
+        if agents.watching():
+            go("agents-watch")
     # раз в сутки (и при первом запуске) — не вышла ли новая версия PULSE; ставит её директор кнопкой
     if settings["updates"].get("auto_check") and settings["updates"].get("repo") and _due("update-check", 24 * 60):
         go("update-check")

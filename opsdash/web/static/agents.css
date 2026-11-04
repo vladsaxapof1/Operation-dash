@@ -30,3 +30,24 @@
 .agent-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .agent-actions [data-agent-said] { flex: 1 1 200px; }
 .btn.agent-hint { border-color: var(--accent); color: var(--accent); }  /* похоже на работу для агента */
+/* этап 2: сессия агента на задаче — блок «Агент» в окне задачи и метка с роботом на карточке (_agent_block.html) */
+.agent-block { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: 14px; }
+.agent-block.working { border-color: var(--accent); }
+.agent-block.waiting, .agent-block.blocked { border-color: var(--warn-text); }
+.agent-block.done { border-color: var(--ok); }
+.agent-ico { color: var(--muted); line-height: 0; margin-top: 2px; }
+.agent-block.working .agent-ico { color: var(--accent); }
+.agent-block.waiting .agent-ico, .agent-block.blocked .agent-ico { color: var(--warn-text); }
+.agent-block.done .agent-ico { color: var(--ok-text); }
+.agent-block-b { flex: 1; min-width: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.agent-block-a { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.agent-made { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.agent-made li { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.agent-made form { margin: 0; }
+.agent-chip { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); white-space: nowrap; }
+.agent-chip .ico { vertical-align: -2px; }
+.agent-chip.working { color: var(--accent); }
+.agent-chip.waiting, .agent-chip.blocked { color: var(--warn-text); }
+.agent-chip.done { color: var(--ok-text); }
+td .agent-chip { margin-left: 6px; font-size: 13px; }

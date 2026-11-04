@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
+{% from "_agent_block.html" import agent_chip %}
 {% import "_icons.html" as icons %}
 {% block title %}Задачи{% endblock %}
 {% block content %}
@@ -271,7 +272,7 @@
 {% macro list_row(c) %}
   {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
   <tr data-task="{{ c.id }}" class="{{ 'dim' if c.status != 'open' or c.archived }}{{ ' archived' if c.archived }}{{ ' inwork' if c.in_work and c.status == 'open' }}"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}>
-    <td class="c-what"><button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>
+    <td class="c-what"><button type="button" class="task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ c | headline }}</button>{{ agent_chip(c) }}
       {%- if c.merge_hint %}<div class="sub2 warn-text">похоже на дубль{% if c.merge_hint.into_task %} «{{ c.merge_hint.into_task.headline }}»{% endif %} · <a href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}">объединить</a></div>
       {%- elif open_waits %}{% set w = open_waits[0] %}<div class="sub2">ждёт {% if w.task %}«{{ w.task.headline | truncate(40, True, '…') }}» — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% endif %}{% if w.late %} <span class="bad-text">(просрочено)</span>{% endif %}{% if open_waits | length > 1 %} и ещё {{ open_waits | length - 1 }}{% endif %}</div>
       {%- elif c.holds and c.status == 'open' %}<div class="sub2">её ждёт «{{ c.holds[0].task.headline | truncate(40, True, '…') }}»</div>

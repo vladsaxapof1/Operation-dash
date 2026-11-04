@@ -261,4 +261,41 @@ records.add_commitment(direction="mine", who="Анна Смирнова", whom="
                        what="Собрать сводку KPI отдела продаж за октябрь для сверки плана Q4: выручка, конверсия, "
                             "средний чек по менеджерам", due=(today + timedelta(days=2)).isoformat(),
                        source_type="meeting", source_ref=planerka, quote=said)
+# поручения, уже открытые в Claude, и их сессии: одна готова (PULSE предложит закрыть задачу), другая ждёт ответа.
+# Журналы — вымышленные, в папке стенда; сессия «нашлась» по строке «PULSE: задача #…» (agents.link)
+JOURNALS = HOME / "claude-journals"
+JOURNALS.mkdir(exist_ok=True)
+
+
+def say(minutes, cwd, **message):
+    kind = "user" if message.get("role") == "user" else "assistant"
+    return json.dumps({"type": kind, "timestamp": store.to_utc_iso(now - timedelta(minutes=minutes)), "cwd": cwd,
+                       "entrypoint": "claude-desktop", "message": message}, ensure_ascii=False)
+
+
+for title, what, room, made, minutes, status, answer in [
+    ("Черновик регламента приёмки возвратов", "Подготовить черновик регламента приёмки возвратов на складе в Казани",
+     "Склад", "Регламент приёмки возвратов — черновик.docx", 200, "completed",
+     "Черновик готов: «Регламент приёмки возвратов — черновик.docx», 6 разделов, сроки — как в действующем регламенте."),
+    ("Анализ воронки B2B за октябрь", "Посчитать конверсию воронки B2B по этапам за октябрь и сравнить с сентябрём",
+     "Отчёты", "Воронка B2B — октябрь.xlsx", 25, "",
+     "Сравнила с сентябрём, файл готов. Считать ли сделки партнёров отдельной строкой?"),
+]:
+    cid = records.add_commitment(direction="mine", who="Анна Смирнова", whom="Олег Соколов", title=title, what=what,
+                                 due=(today + timedelta(days=3)).isoformat(), source_type="manual")
+    bid = store.execute("INSERT INTO task_agents(commitment_id, folder, status) VALUES(?,?, 'running')", (cid, str(WORK / room)))
+    agents.save(bid, f"# Задача: {title}\n\n## Что нужно получить\n{what}.")
+    cwd, file = str(WORK / room), WORK / room / made
+    file.write_text("", encoding="utf-8")
+    journal = JOURNALS / f"demo-agent-{cid}.jsonl"
+    journal.write_text("\n".join([
+        say(minutes, cwd, role="user", content=f"# Задача: {title}\nPULSE: задача #{cid}\n\n{what}."),
+        say(minutes - 2, cwd, content=[{"type": "tool_use", "id": "w1", "name": "Write", "input": {"file_path": str(file)}}]),
+        say(minutes - 3, cwd, role="user", content=[{"type": "tool_result", "tool_use_id": "w1"}]),
+        say(minutes - 4, cwd, content=[{"type": "text", "text": answer}])]) + "\n", encoding="utf-8")
+    st = journal.stat()
+    agents._save(journal, office._session(journal), WORK, room, {"status": status}, (st.st_size, st.st_mtime))
+    store.execute("UPDATE task_agents SET launched_at=?, session_id=?, state='linked' WHERE id=?",
+                  (store.to_utc_iso(now - timedelta(minutes=minutes + 1)), journal.stem, bid))
+print(agents.check())
 print("Демо-стенд готов:", HOME)

@@ -253,9 +253,10 @@ def propose_calendar_cancel(*, uid: str, batch: str | None = None, reason: str |
 
 
 def propose_task_done(*, commitment_id: int, quote: str | None = None, batch: str | None = None,
-                      reason: str | None = None, source_ref: str | None = None) -> dict:
+                      reason: str | None = None, source_ref: str | None = None, label: str | None = None) -> dict:
     """Задача PULSE, судя по встрече или переписке, выполнена — закрыть её после «да» директора.
-    reason — почему так кажется (обязательно), source_ref — где это видно, quote — дословно оттуда."""
+    reason — почему так кажется (обязательно), source_ref — где это видно, quote — дословно оттуда,
+    label — своя подпись («— агент сделал: …», opsdash.agents)."""
     c = store.row("SELECT * FROM commitments WHERE id=?", (int(commitment_id),))
     if not c:
         raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
@@ -268,7 +269,7 @@ def propose_task_done(*, commitment_id: int, quote: str | None = None, batch: st
     if dup:
         return get(dup["id"])
     payload = {"commitment_id": c["id"], "quote": (quote or "").strip()}
-    label = f"Закрыть задачу «{records.headline(c)}» ({records.route(c)}) — похоже, выполнена"
+    label = label or f"Закрыть задачу «{records.headline(c)}» ({records.route(c)}) — похоже, выполнена"
     return _create("task.done", label, payload, autonomy_key="task_done", reason=reason.strip(),
                    source_ref=source_ref, batch=batch)
 
@@ -604,6 +605,9 @@ def execute(p: dict) -> dict:
 def _source_text(source_ref: str | None) -> str:
     """Откуда известно, по-человечески: «встреча «Обзор продаж» 27.10», «Telegram, Операционка, 27.10»."""
     kind, _, ref = (source_ref or "").partition(":")
+    if kind == "agent":  # сессия Claude Code, которой поручили задачу (opsdash.agents)
+        s = store.row("SELECT title FROM agent_sessions WHERE id=?", (ref,))
+        return f"сессия агента «{s['title']}»" if s else "сессия агента"
     if kind == "meeting":
         m = store.row("SELECT title, started_at FROM meetings WHERE id=?", (ref,))
         return f"встреча «{m['title'] or ref}» {store.local(m['started_at'], '%d.%m')}" if m else f"встреча {ref}"
@@ -639,6 +643,10 @@ def links(p: dict) -> list[tuple[str, str]]:
         if start:
             out.append(("Встреча в календаре", f"/calendar?start={store.local(start, '%Y-%m-%d')}"))
     kind, _, ref = (p.get("source_ref") or "").partition(":")
+    if kind == "agent" and ref:
+        desktop = store.scalar("SELECT desktop_id FROM agent_sessions WHERE id=?", (ref,))
+        if desktop:
+            out.append(("Сессия агента", f"claude://code/continue?session={desktop}"))
     if kind == "meeting" and ref:
         out.append(("Встреча", f"/meetings/{ref}?tab=transcript" if p["kind"] == "task.done" else f"/meetings/{ref}"))
     elif kind in ("telegram", "ymessenger", "pachca", "mail") and ref.isdigit():

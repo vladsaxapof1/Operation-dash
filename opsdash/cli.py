@@ -924,6 +924,8 @@ def cmd_agents(a) -> None:
 
     if a.action == "index":
         out(agents.index())
+    elif a.action == "watch":
+        out(agents.check())
     elif a.action == "similar":
         items = agents.similar(a.query, folder=a.folder, limit=a.limit)
         if a.json:
@@ -1525,6 +1527,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("agents", help="поручения агенту: прошлые сессии Claude Code в папках «Офиса» и промты")
     ms = s.add_subparsers(dest="action", required=True)
     ms.add_parser("index", help="дочитать новые сессии в индекс")
+    ms.add_parser("watch", help="найти сессии, запущенные из поручений; готовые — предложить закрыть задачу")
     x = ms.add_parser("similar", help="прошлые сессии, похожие на задачу")
     x.add_argument("query")
     x.add_argument("--folder", help="только сессии в этой папке")

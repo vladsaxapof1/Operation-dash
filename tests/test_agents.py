@@ -344,3 +344,130 @@ def test_cli_similar_show_and_brief_save(work, capsys, tmp_path):
     cli.main(["agents", "brief-save", str(bid), "--file", str(draft)])
     out = capsys.readouterr().out
     assert "Промт сохранён" in out and "Этих файлов нет" in out and agents.get(bid)["status"] == "ready"
+
+
+# --- этап 2: запущенная сессия на задаче ----------------------------------------------------------------
+
+def _launched(root, folder="Отчёты", minutes=10, title="Сводка KPI за октябрь"):
+    """Поручение с готовым промтом, открытое в Claude minutes минут назад."""
+    cid = records.add_commitment(direction="mine", what=f"Собрать: {title}", title=title)
+    bid = store.execute("INSERT INTO task_agents(commitment_id, folder, status) VALUES(?,?, 'running')",
+                        (cid, str(root / folder) if folder else ""))
+    agents.save(bid, "# Задача: Сводка KPI\n\nСобери сводку.")
+    store.execute("UPDATE task_agents SET launched_at=? WHERE id=?", (_ago(minutes=minutes).replace("Z", "+00:00"), bid))
+    return cid, bid
+
+
+def _app(monkeypatch, sessions):
+    monkeypatch.setattr(office, "desktop_sessions", lambda: sessions)
+
+
+@pytest.fixture(autouse=True)
+def fresh_marks():
+    agents._marks.clear()  # метки поручений кэшируются на несколько секунд — между тестами база другая
+
+
+def test_link_finds_session_by_service_line_or_brief_file(work, monkeypatch):
+    journals, root = work
+    _app(monkeypatch, {})
+    cid, bid = _launched(root)
+    other, _ = _launched(root, minutes=60, title="Сценарии бюджета")
+    cwd = str(root / "Отчёты")
+    path = agents.brief_path(agents.get(bid))
+    _write(journals / "old.jsonl", [_say(_ago(minutes=30), cwd, f"PULSE: задача #{cid}\nСтарое")])  # до «Открыть»
+    _write(journals / "alien.jsonl", [_say(_ago(minutes=5), cwd, f"PULSE: задача #{cid}0\nЧужая задача")])
+    _write(journals / "ours.jsonl", [_say(_ago(minutes=8), cwd, f"# Задача: Сводка KPI\nPULSE: задача #{cid}\nСобери"),
+                                     _tool(_ago(minutes=7), cwd, "t1", "Write", file_path=str(root / "Отчёты" / "KPI.xlsx"))])
+    # промт ушёл файлом, служебную строку стёрли — находим по имени брифа
+    _write(journals / "file.jsonl", [_say(_ago(minutes=40), cwd, f"Полный бриф — в файле {agents.brief_path(agents.for_task(other))}")])
+    assert agents.link() == 2
+    assert agents.for_task(cid)["session_id"] == "ours" and agents.for_task(other)["session_id"] == "file"
+    assert agents.show("ours")["title"] == "Сводка KPI"  # сессия сразу и в опыте агентов, название — без «# Задача:»
+    assert path.name in str(agents.brief_path(agents.get(bid)))
+    assert agents.link() == 0  # уже нашли — не перепривязываем
+    marked = {x["id"]: (x["task"] or {}).get("id") for x in office.snapshot("f0")["rooms"][0]["sessions"]}
+    assert marked == {"ours": cid, "file": other, "alien": None, "old": None}  # пометка «по задаче «…»» в «Офисе»
+
+
+def test_state_block_chip_and_done_proposal(work, monkeypatch, client):
+    from opsdash import proposals
+
+    journals, root = work
+    cid, bid = _launched(root)
+    cwd = str(root / "Отчёты")
+    made = root / "Отчёты" / "KPI продаж — октябрь.xlsx"
+    made.write_text("x")
+    _write(journals / "s1.jsonl", [_say(_ago(minutes=8), cwd, f"PULSE: задача #{cid}\nСобери"),
+                                   _tool(_ago(minutes=7), cwd, "t1", "Write", file_path=str(made))])
+    app = {"s1": {"id": "local_s1", "archived": False, "status": "", "needs": "", "seen": False}}
+    _app(monkeypatch, app)
+    assert agents.check() == "нашла сессий: 1, предложила закрыть: 0"
+    st = agents.of(cid)["st"]
+    assert st["state"] == "blocked" and st["title"] == "ждёт разрешения?"  # инструмент давно без ответа
+    assert st["link"] == "claude://code/continue?session=local_s1"
+    assert [f["name"] for f in st["files"]] == ["KPI продаж — октябрь.xlsx"]
+
+    # ответил и ждёт; приложение говорит, что нужно от вас
+    _write(journals / "s1.jsonl", [_line("user", _ago(minutes=2), cwd, message={"content": [{"type": "tool_result", "tool_use_id": "t1"}]}),
+                                   _answer(_ago(minutes=1), cwd, "Сделала таблицу. Добавить лист по регионам?")])
+    app["s1"].update(status="blocked", needs="ответить, нужен ли лист по регионам")
+    agents._marks.clear()
+    st = agents.of(cid)["st"]
+    assert st["state"] == "waiting" and st["title"] == "ждёт вашего ответа" and st["needs"].startswith("ответить")
+    page = client.get(f"/commitments?task={cid}").text
+    assert "Агент — ждёт вашего ответа" in page and "KPI продаж — октябрь.xlsx" in page and "local_s1" in page
+    assert 'class="agent-chip waiting"' in page  # метка с роботом на карточке доски
+    assert 'class="agent-chip waiting"' in client.get("/commitments?view=list").text
+
+    # приложение: готово — предложение закрыть задачу с файлами, один раз
+    app["s1"].update(status="completed", needs="")
+    assert agents.check() == "нашла сессий: 0, предложила закрыть: 1"
+    p = proposals.list_proposals()[0]
+    assert p["kind"] == "task.done" and p["title"] == "Закрыть задачу «Сводка KPI за октябрь» — агент сделал: KPI продаж — октябрь.xlsx"
+    assert p["source_ref"] == "agent:s1" and ("Сессия агента", "claude://code/continue?session=local_s1") in proposals.links(p)
+    assert agents.check().endswith("предложила закрыть: 0") and not agents.watching()
+    agents._marks.clear()
+    assert 'class="agent-chip done"' in client.get("/commitments").text
+    proposals.approve(p["id"])
+    assert records.get_commitment(cid)["status"] == "done"
+
+
+def test_launched_block_waits_for_session_and_watch_is_scheduled(work, monkeypatch, client):
+    journals, root = work
+    _app(monkeypatch, {})
+    cid, _ = _launched(root, minutes=1)
+    page = client.get(f"/commitments?task={cid}").text
+    assert "Промт открыт в Claude" in page and f"PULSE: задача #{cid}" in page and "agent-chip" not in page
+    submitted = []
+    monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: submitted.append(name) or True)
+    jobs.tick()
+    assert "agents-watch" in submitted
+    store.execute("UPDATE commitments SET status='done' WHERE id=?", (cid,))  # задачу закрыли — следить не за чем
+    submitted.clear()
+    store.execute("DELETE FROM jobs WHERE name='agents-watch'")
+    jobs.tick()
+    assert "agents-watch" not in submitted
+
+
+def test_default_folder_setting(work, client, settings_with):
+    journals, root = work
+    cid = records.add_commitment(direction="mine", what="Совсем новая работа", title="Новая работа")
+    c = records.get_commitment(cid)
+    assert agents.default_folder(c, []) == str(root)  # без похожих и без проекта — первая папка «Офиса»
+    page = client.get("/settings?tab=office").text
+    assert "Папка по умолчанию для поручений агенту" in page and f'value="{root / "Финмодель"}"' in page
+    client.post("/settings/office", data={"folders": str(root), "agent_folder": str(root / "Финмодель")})
+    assert agents.default_folder(c, []) == str(root / "Финмодель")
+    client.post("/settings/office", data={"folders": str(root), "agent_folder": "/etc"})  # не из «Офиса» — не сохраняем
+    assert config.load_settings()["office"]["agent_folder"] == ""
+
+
+def test_own_session_is_not_similar_to_its_task(work, monkeypatch):
+    journals, root = work
+    _app(monkeypatch, {})
+    cid, _ = _launched(root, title="Сводка KPI продаж за октябрь")
+    _write(journals / "own.jsonl", [_say(_ago(minutes=5), str(root / "Отчёты"), f"PULSE: задача #{cid}\nСводка KPI продаж за октябрь")])
+    agents.link()
+    text = agents.task_text(records.get_commitment(cid))
+    assert [s["id"] for s in agents.similar(text)] == ["own"]
+    assert agents.similar(text, task=cid) == []
