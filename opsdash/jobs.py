@@ -412,6 +412,13 @@ def job_update(**_) -> str:
     return result
 
 
+def job_estimates(**_) -> str:
+    """Разовая доразметка оценок времени у старых задач директора (opsdash.day)."""
+    from opsdash import day
+
+    return day.job_estimates()
+
+
 REGISTRY = {
     "collect:telegram": lambda **kw: collect_source("telegram"),
     "collect:ymessenger": lambda **kw: collect_source("ymessenger"),
@@ -443,6 +450,7 @@ REGISTRY = {
     "housekeeping": job_housekeeping,
     "update-check": job_update_check,
     "update": job_update,
+    "estimates": job_estimates,
 }
 
 TITLES = {
@@ -476,6 +484,7 @@ TITLES = {
     "housekeeping": "Обслуживание",
     "update-check": "Проверка обновлений PULSE",
     "update": "Обновление PULSE",
+    "estimates": "Оценки времени у задач (Claude)",
 }
 
 
@@ -713,6 +722,14 @@ def tick(settings: dict | None = None) -> list[str]:
     if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
             and _daily("projects", sch["projects_weekly"], settings)):
         go("projects", "heavy")
+    # «Реальность дня»: один раз оценить время у открытых задач директора, появившихся до оценок (opsdash.day)
+    from opsdash import day
+
+    if not store.get_state(day.BACKFILL) and in_work_hours(settings) and _due("estimates", 6 * 60):
+        if day.unestimated(limit=1):
+            go("estimates", "heavy")
+        else:
+            store.set_state(day.BACKFILL, config.now(settings).date().isoformat())
     return started
 
 

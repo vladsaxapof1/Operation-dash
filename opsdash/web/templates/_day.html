@@ -1,0 +1,134 @@
+{#- «Реальность дня» (opsdash.day): вердикт над сеткой дня, плановые блоки на сетке, окно «Разобрать день», чипы оценки.
+    Действия отправляет static/day.js без перезагрузки; без скриптов — обычные формы #}
+{% import "_icons.html" as icons %}
+
+{% macro est_chips(value, action, cid=None, review=False) -%}
+{#- оценка в один клик: 15м · 30м · 1ч · 2ч · полдня. В «Разобрать день» — через /day/act, итог пересчитывается сразу #}
+<form class="est" method="post" action="{{ action }}" {{ 'data-day-act' if review else 'data-est' }} aria-label="Сколько займёт">
+  {%- if review %}<input type="hidden" name="cid" value="{{ cid }}"><input type="hidden" name="act" value="estimate">{% endif -%}
+  {%- for m, t in DAY_CHIPS %}<button class="est-c" name="minutes" value="{{ m }}" aria-pressed="{{ 'true' if value == m else 'false' }}" title="{{ m | est }}">{{ t }}</button>{% endfor -%}
+</form>
+{%- endmacro %}
+
+{% macro est_note(c) -%}
+{{ ('ваша оценка' if c.estimate_by == 'user' else 'оценил Claude') if c.estimate_min else 'не оценена — считаю 30 мин' }}
+{%- endmacro %}
+
+{% macro estimate_row(c) %}
+{#- в окне задачи: сколько займёт у директора. Только у её открытых задач — чужая работа в её день не входит #}
+{% if c.direction == 'mine' and c.status == 'open' %}
+<div class="est-row"><span class="est-l">Займёт у вас</span>{{ est_chips(c.estimate_min, '/commitments/' ~ c.id ~ '/estimate') }}<span class="muted small" data-est-note>{{ est_note(c) }}</span></div>
+{% endif %}
+{% endmacro %}
+
+{% macro verdict(p) %}
+{#- над сеткой дня: вердикт, полоса «свободно / нужно», «Сейчас», что не помещается, кнопка «Разобрать день» #}
+{% set v = p.verdict %}
+{% set top = [p.capacity, p.need] | max %}
+<div class="dv dv-{{ v.level }}">
+  <div class="dv-h">
+    <span class="dv-dot" aria-hidden="true"></span>
+    <b class="dv-title">{{ v.title }}</b>
+    <button type="button" class="btn sm{{ ' primary' if v.level in ('tight', 'over') }}" data-dlg-open="day-dlg">Разобрать день</button>
+  </div>
+  <p class="dv-sub muted">{% if v.level == 'off' %}{{ v.note[0] | upper }}{{ v.note[1:] }}
+    {%- else %}{% if p.capacity %}Свободно {{ p.capacity | dur }}{% if p.summary %} ({{ p.summary }}){% endif %}{% else %}Свободных окон нет{% endif %}, задач на {{ p.need | dur }}{% endif %}</p>
+  {% if top and v.level != 'off' %}
+  <div class="dv-bar" title="Свободно {{ p.capacity | dur }}, нужно {{ p.need | dur }}" aria-hidden="true">
+    <span class="dv-need" style="width: {{ '%.1f' % (p.need * 100 / top) }}%"></span>
+    {% if p.capacity and p.need > p.capacity %}<span class="dv-cap" style="left: {{ '%.1f' % (p.capacity * 100 / top) }}%"></span>{% endif %}
+  </div>
+  {% endif %}
+  {% if p.current %}{% set w = p.current %}
+  <p class="dv-now"><b>Сейчас</b> окно до {{ w.e | hm }} ({{ w.left | dur }}){% if w.fit %} — подходит {{ task_link(w.fit) }} (≈{{ w.fit.est | dur }}){% endif %}</p>
+  {% elif p.next %}{% set w = p.next %}
+  <p class="dv-now">Следующее окно {{ w.s | hm }}–{{ w.e | hm }}{% if w.fit %} — {{ task_link(w.fit) }} (≈{{ w.fit.est | dur }}){% endif %}</p>
+  {% elif p.today and not p.verdict.level == 'off' %}
+  <p class="dv-now muted">Окон для задач сегодня больше нет</p>
+  {% endif %}
+  {% for it in p.too_big[:1] %}<p class="dv-big warn-text">«{{ it.title }}» ({{ it.est | dur }}) не помещается: самое длинное окно {{ p.longest | dur }} — {{ SPLIT_HINT }}</p>{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro task_link(it) -%}
+{% if it.id %}«<a href="/commitments?task={{ it.id }}">{{ it.title }}</a>»{% else %}{{ it.title | lower }}{% endif %}
+{%- endmacro %}
+
+{% macro layer(day) %}
+{#- на сетке дня: плановые блоки задач (пунктир; клик — окно задачи), буферы — штриховкой, короткие окна — серым #}
+{% for b in day.plan_layer or [] %}
+{% if b.kind == 'plan' %}{% set it = b.item %}
+<a class="pb{{ ' pinned' if b.pinned }}{{ ' tiny' if b.height < 30 }}" {% if it.id %}href="/commitments?task={{ it.id }}"{% else %}href="#" data-feed-jump="answer"{% endif %}
+   style="top: {{ b.top }}px; height: {{ b.height }}px; left: calc({{ '%.4f' % (b.left * 100) }}% + 4px); width: calc({{ '%.4f' % (b.width * 100) }}% - 8px)"
+   title="{{ it.title }} · {{ b.time }} · ≈{{ it.est | dur }}{{ ' · вы поставили сюда' if b.pinned }}">
+  <span class="pb-t">{{ it.title }}</span><span class="pb-m">{{ b.time }} · ≈{{ it.est | dur }}</span>
+</a>
+{% else %}
+<div class="pl pl-{{ b.kind }}" style="top: {{ b.top }}px; height: {{ b.height }}px" title="{{ b.title }}" aria-hidden="true"></div>
+{% endif %}
+{% endfor %}
+{% endmacro %}
+
+{% macro review(p, choices, next_label) %}
+{#- «Разобрать день»: спрос по приоритету — оценка, причина, предложенное окно; «В план», «Завтра», «Свой срок»,
+    «Снять срок». Каждое решение сохраняется сразу, итог сверху пересчитывается; «Готово» закрывает и обновляет Сводку #}
+<dialog class="dlg dlg-day" id="day-dlg" aria-labelledby="day-title" data-day-dlg>
+  <div class="dlg-box" tabindex="-1">
+    <div class="dlg-head">
+      <h2 class="dlg-title" id="day-title">Разобрать день</h2>
+      <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>
+    </div>
+    <div class="day-body" data-day-body>{{ review_body(p, choices, next_label) }}</div>
+    <div class="dlg-actions">
+      <button type="button" class="btn primary" data-dlg-close>Готово</button>
+      <span class="muted small">Решения сохраняются сразу. План живёт только в PULSE — в календарь ничего не пишется.</span>
+    </div>
+  </div>
+</dialog>
+{% endmacro %}
+
+{% macro review_body(p, choices, next_label, after=False) %}
+{% set v = p.verdict %}
+<p class="day-total dv-{{ v.level }}" data-day-total><span class="dv-dot" aria-hidden="true"></span>
+  {%- if v.level == 'off' %}{{ v.line }}
+  {%- else %}{{ 'После ваших решений: задач' if after else 'Задач' }} на {{ p.need | dur }} из {{ p.capacity | dur }} свободных — {{ v.title[0] | lower }}{{ v.title[1:] }}{% endif %}</p>
+<p class="day-err bad-text small" data-day-err hidden></p>
+{% set usable = p.windows | rejectattr('short') | list %}
+<ul class="day-list">
+{% for it in p['items'] %}
+  <li class="day-it">
+    <div class="day-it-h">
+      <span class="day-it-t">{% if it.id %}<a href="/commitments?task={{ it.id }}">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %}</span>
+      <span class="day-slot{{ ' warn-text' if not it.slot }}">{% if it.slot %}{{ it.slot }}{% if it.pin %} · ваше{% endif %}{% elif it in p.too_big %}не помещается в окна{% elif v.level != 'off' %}не влезает сегодня{% endif %}</span>
+    </div>
+    <div class="day-it-r muted small">{{ it.reason }}</div>
+    {% if it.id %}
+    <div class="day-it-a">
+      {{ est_chips(None if it.est_default else it.est, '/day/act', it.id, True) }}
+      <form class="inline day-plan" method="post" action="/day/act" data-day-act>
+        <input type="hidden" name="cid" value="{{ it.id }}">
+        <select name="start" aria-label="Окно для задачи">
+          <option value="">авто</option>
+          {% for w in usable %}<option value="{{ w.s | hm }}">{{ w.s | hm }}–{{ w.e | hm }}{% if w.focus %} · {{ w.focus.title }}{% endif %}</option>{% endfor %}
+        </select>
+        <button class="btn sm" name="act" value="plan" title="Поставить в план на сегодня: в выбранное окно или куда поместится">В план</button>
+      </form>
+      <form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="btn sm ghost" name="act" value="tomorrow" title="Срок — следующий рабочий день">{{ next_label }}</button></form>
+      <button type="button" class="btn sm ghost" data-reveal="day-due-{{ it.id }}">Свой срок</button>
+      <form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="btn sm ghost" name="act" value="nodue" title="Задача останется без срока и уйдёт из плана на сегодня">Снять срок</button></form>
+      {% if it.pin %}<form class="inline" method="post" action="/day/act" data-day-act><input type="hidden" name="cid" value="{{ it.id }}"><button class="linkish small" name="act" value="unplan" title="PULSE снова расставит задачу сам">отменить решение</button></form>{% endif %}
+    </div>
+    <form class="day-due" id="day-due-{{ it.id }}" method="post" action="/day/act" data-day-act hidden>
+      <input type="hidden" name="cid" value="{{ it.id }}"><input type="hidden" name="act" value="due">
+      <div class="due-pick" role="group" aria-label="Срок">{% for ch in choices %}<button type="button" class="due-q" data-day-due="{{ ch.iso }}">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}</div>
+      <label class="due-own">или своя дата <input type="date" name="due" required><button class="btn sm primary">Сохранить срок</button></label>
+    </form>
+    {% endif %}
+  </li>
+{% else %}
+  <li class="day-it muted">На этот день задач нет — всё свободное время ваше.</li>
+{% endfor %}
+</ul>
+{% if p.waiting %}<p class="muted small">Ждут других, в план не ставлю: {% for c in p.waiting %}<a href="/commitments?task={{ c.id }}">{{ c.title }}</a>{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+{% for it in p.too_big %}<p class="warn-text small">«{{ it.title }}» ({{ it.est | dur }}) не помещается: самое длинное окно {{ p.longest | dur }} — {{ SPLIT_HINT }}.</p>{% endfor %}
+{% endmacro %}

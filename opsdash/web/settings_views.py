@@ -27,6 +27,7 @@ TABS = [
     ("office", "Офис"),
     ("autonomy", "Автономия"),
     ("schedule", "Расписание"),
+    ("day", "День"),
     ("claude", "Claude / ChatGPT"),
     ("archive", "Архивные разделы"),
 ]
@@ -69,6 +70,7 @@ def settings_menu(settings: dict) -> list[dict]:
     menu = [{"tab": "general", "title": "Основное"},
             {"tab": "connections", "title": "Подключения", "note": f"{on} из {len(subs)}", "subs": subs},
             {"tab": "recordings", "title": "Записи встреч"}, {"tab": "schedule", "title": "Расписание"},
+            {"tab": "day", "title": "День"},
             {"tab": "autonomy", "title": "Автономия"}, {"tab": "claude", "title": "Claude / ChatGPT", "note": brain.name(settings)}, {"tab": "office", "title": "Офис"}]
     if config.section_on("docs", settings):
         menu.append({"tab": "knowledge", "title": "Документы"})
@@ -258,6 +260,26 @@ def register(app: FastAPI, render, back) -> None:
         })
         config.update_settings("web", {"port": int(port)})
         return back(request, "Сохранено")
+
+    @app.post("/settings/day")
+    def save_day(request: Request, focus_titles: str = Form(""), buffer_after_min: int = Form(10),
+                 buffer_before_min: int = Form(10), min_window_min: int = Form(25), lunch_on: str = Form(None),
+                 lunch_start: str = Form("13:00"), lunch_end: str = Form("14:00"), reply_min: int = Form(5)):
+        """«Реальность дня»: фокус-блоки, буферы, минимальное окно, обед, минуты на ответ (opsdash.day)."""
+        values = {"buffer_after_min": buffer_after_min, "buffer_before_min": buffer_before_min,
+                  "min_window_min": min_window_min, "reply_min": reply_min}
+        if any(not 0 <= v <= 120 for v in values.values()):
+            return back(request, err="Минуты — от 0 до 120", to="/settings?tab=day")
+        lunch = ""
+        if checkbox(lunch_on):
+            if not lunch_start or not lunch_end or lunch_end <= lunch_start:
+                return back(request, err="Обед: конец должен быть позже начала", to="/settings?tab=day")
+            lunch = f"{lunch_start}-{lunch_end}"
+        titles = [t.strip() for t in focus_titles.replace("\n", ",").split(",") if t.strip()]
+        settings = config.load_settings()
+        settings["day"] = {**settings["day"], **values, "lunch": lunch, "focus_titles": titles}
+        config.save_settings(settings)  # целиком: список фокус-блоков заменяется, а не дополняется
+        return back(request, "Сохранено", to="/settings?tab=day")
 
     @app.post("/settings/sections/{name}")
     def save_section(request: Request, name: str, on: str = Form("")):

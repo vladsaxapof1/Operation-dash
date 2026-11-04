@@ -1,0 +1,323 @@
+"""«Реальность дня»: окна между встречами (склейка, буферы, фокус-блоки, короткие окна), «сейчас», полночь и весь
+день, часовой пояс, спрос по приоритету, жадная расстановка, решения директора, оценки, ./ops day и Сводка."""
+
+import time as clock
+from datetime import date, datetime, time, timedelta
+
+import pytest
+from fastapi.testclient import TestClient
+
+from opsdash import config, day, records, store
+
+DAY = date(2026, 11, 3)  # вторник
+
+
+def ev(uid, title, start, end, people=(), *, on=DAY, end_on=None, **kw):
+    """Событие календаря как в базе: время местное (часы:минуты), участники — адреса."""
+    tz = config.tz()
+    s = datetime.combine(on, time.fromisoformat(start), tz)
+    f = datetime.combine(end_on or on, time.fromisoformat(end), tz)
+    return {"uid": uid, "title": title, "start": store.to_utc_iso(s), "end": store.to_utc_iso(f), "all_day": 0,
+            "calendar": "Рабочий", "attendees": [{"email": p, "name": p, "status": ""} for p in people], **kw}
+
+
+def spans(items):
+    return [(day.hm(s), day.hm(e)) for s, e in items]
+
+
+def wins(lay, short=None):
+    return [(day.hm(w["s"]), day.hm(w["e"])) for w in lay["windows"] if short is None or w["short"] == short]
+
+
+def test_merge_buffers_and_short_windows():
+    settings = config.load_settings()
+    events = [
+        ev("a", "Планёрка", "10:00", "11:00", ["petr@example.ru"]),
+        ev("b", "Созвон с маркетингом", "10:30", "11:30", ["ira@example.ru"]),  # пересекается — склеиваются
+        ev("c", "1:1 с Олегом", "11:35", "12:00", ["oleg@example.ru"]),  # буфер после «b» — только 5 минут до неё
+        ev("d", "Итоги дня", "15:00", "15:30"),  # без участников — без буфера «на хвосты»
+        ev("e", "Созвон с подрядчиком", "15:50", "16:30", ["podr@example.ru"]),  # окно 15:30–15:50 короткое
+        ev("f", "Вечерний созвон", "19:30", "20:00", ["petr@example.ru"]),  # буфер после — за концом рабочего дня
+    ]
+    lay = day.layout(DAY, events, settings)
+    assert spans(lay["busy"]) == [("10:00", "11:30"), ("11:35", "12:00"), ("15:00", "15:30"), ("15:50", "16:30"),
+                                  ("19:30", "20:00")]
+    assert spans(lay["buffers"]) == [("11:30", "11:35"), ("12:00", "12:10"), ("16:30", "16:40")]
+    assert wins(lay) == [("09:00", "10:00"), ("12:10", "15:00"), ("15:30", "15:50"), ("16:40", "19:30")]
+    assert wins(lay, short=True) == [("15:30", "15:50")]  # 20 минут меньше 25 — видно, но не считается
+    assert day.capacity(lay) == 60 + 170 + 170
+
+
+def test_brief_buffer_stays_inside_work_hours_and_gaps():
+    settings = config.load_settings()
+    events = [ev("a", "Статус", "09:00", "09:30", ["d@example.ru"]),  # бриф готов, но 08:50 — до рабочего дня
+              ev("b", "Звонок", "11:00", "11:55", ["p@example.ru"]),
+              ev("c", "Бюджет Q4", "12:00", "13:00", ["o@example.ru"])]  # бриф готов: буфер только 11:55–12:00
+    lay = day.layout(DAY, events, settings, briefs={"a", "c"})
+    assert spans(lay["buffers"]) == [("09:30", "09:40"), ("11:55", "12:00"), ("13:00", "13:10")]
+    assert wins(lay) == [("09:40", "11:00"), ("13:10", "20:00")]
+
+
+def test_focus_block_is_a_window_and_gets_tasks_first(settings_with):
+    settings = settings_with(calendar={"login": "anna@example.ru"})
+    events = [ev("t", "Тайм-аут", "11:00", "12:00", ["anna@example.ru"]),  # только сама — фокус-блок
+              ev("f", "Фокус: стратегия", "16:00", "17:00", ["petr@example.ru"]),  # с участником — обычная встреча
+              ev("m", "Планёрка", "12:00", "13:00", ["petr@example.ru"])]
+    lay = day.layout(DAY, events, settings)
+    assert [f["uid"] for f in lay["focus"]] == ["t"] and [m["uid"] for m in lay["meetings"]] == ["f", "m"]
+    assert wins(lay) == [("09:00", "12:00"), ("13:10", "16:00"), ("17:10", "20:00")]
+    assert lay["windows"][0]["focus"]["title"] == "Тайм-аут"
+    items = [{"id": i, "title": f"Задача {i}", "est": est} for i, est in enumerate([30, 30, 30], 1)]
+    placed = day.place(lay["windows"], items)
+    # сначала сам «Тайм-аут», когда он заполнен — остальное в том же окне
+    assert [(b["item"]["id"], day.hm(b["s"])) for b in placed["blocks"]] == [(3, "09:00"), (1, "11:00"), (2, "11:30")]
+
+
+def test_now_in_the_middle_of_the_day():
+    settings = config.load_settings()
+    tz = config.tz()
+    events = [ev("m", "Планёрка", "12:00", "13:00", ["p@example.ru"]), ev("n", "1:1", "15:00", "15:30", ["o@example.ru"])]
+    lay = day.layout(DAY, events, settings, now=datetime.combine(DAY, time(12, 30), tz))
+    assert lay["from"] == 12 * 60 + 30 and wins(lay) == [("13:10", "15:00"), ("15:40", "20:00")]
+    p = {**lay, "today": True, "off": None, "blocks": [], "items": [{"id": 1, "title": "Сводка", "est": 30}]}
+    cur, nxt = day._now_window(p, datetime.combine(DAY, time(12, 30), tz))
+    assert cur is None and day.hm(nxt["s"]) == "13:10" and nxt["fit"]["title"] == "Сводка"
+    lay = day.layout(DAY, events, settings, now=datetime.combine(DAY, time(14, 20), tz))
+    p = {**lay, "today": True, "off": None, "blocks": [], "items": []}
+    cur, nxt = day._now_window(p, datetime.combine(DAY, time(14, 20), tz))
+    assert day.hm(cur["e"]) == "15:00" and cur["left"] == 40 and nxt is None
+    late = day.layout(DAY, events, settings, now=datetime.combine(DAY, time(20, 30), tz))
+    assert late["off"] == "over" and late["windows"] == []
+    assert day.verdict(0, 90, settings, off="over")["line"] == "Рабочий день закончился · не сделано задач на 1 ч 30 мин"
+
+
+def test_overnight_and_all_day_events():
+    settings = config.load_settings()
+    events = [
+        ev("night", "Перелёт", "23:00", "09:30", ["p@example.ru"], on=DAY - timedelta(days=1), end_on=DAY),
+        ev("late", "Созвон с Владивостоком", "19:30", "00:30", ["v@example.ru"], end_on=DAY + timedelta(days=1)),
+        ev("all", "Конференция", "00:00", "00:00", end_on=DAY + timedelta(days=1), all_day=1),
+        ev("long", "Выездная сессия", "09:00", "10:00", ["p@example.ru"], on=DAY - timedelta(days=1)),
+    ]
+    events[-1]["end"] = store.to_utc_iso(datetime.combine(DAY + timedelta(days=1), time(10), config.tz()))  # двое суток
+    lay = day.layout(DAY, events, settings)
+    assert spans(lay["busy"]) == [("00:00", "09:30"), ("19:30", "24:00")]
+    assert wins(lay) == [("09:40", "19:30")]
+
+
+def test_owner_timezone(settings_with):
+    settings = settings_with(owner={"timezone": "Asia/Yekaterinburg"})
+    e = {"uid": "x", "title": "Планёрка", "start": "2026-11-03T05:00:00+00:00", "end": "2026-11-03T06:00:00+00:00",
+         "all_day": 0, "attendees": [{"email": "p@example.ru"}]}  # 10:00–11:00 по Екатеринбургу
+    lay = day.layout(DAY, [e], settings)
+    assert wins(lay) == [("09:00", "10:00"), ("11:10", "20:00")]
+    store.execute('INSERT INTO events(uid, title, start, "end", all_day, attendees) VALUES(?,?,?,?,0,?)',
+                  ("x", e["title"], e["start"], e["end"], store.json_col(e["attendees"])))
+    assert wins(day.windows(DAY, settings, now=datetime(2026, 11, 3, 8, 0, tzinfo=config.tz(settings)))) == \
+        [("09:00", "10:00"), ("11:10", "20:00")]
+
+
+def test_declined_transparent_and_lunch(settings_with):
+    settings = settings_with(calendar={"login": "anna@example.ru"}, day={"lunch": "13:00-14:00"})
+    events = [
+        ev("d", "Ревью", "10:00", "11:00", ["petr@example.ru"]),
+        ev("g", "Синк", "15:00", "16:00", ["petr@example.ru", "anna@gmail.example"], calendar="Google: anna@gmail.example"),
+        ev("t", "Вебинар", "17:00", "18:00", ["x@example.ru"], transp="TRANSPARENT"),
+    ]
+    events[0]["attendees"].append({"email": "Anna@Example.ru", "status": "DECLINED"})
+    events[1]["attendees"][1]["status"] = "DECLINED"  # отказ в Google: адрес — название календаря
+    lay = day.layout(DAY, events, settings)
+    assert [e["uid"] for e in lay["free_events"]] == ["d", "g", "t"] and lay["meetings"] == []
+    assert wins(lay) == [("09:00", "13:00"), ("14:00", "20:00")]
+
+
+def test_verdict_levels():
+    assert day.verdict(130, 100)["level"] == "ok"
+    v = day.verdict(130, 270)
+    assert v["level"] == "over" and v["title"] == "Перегруз 2 ч 20 мин"
+    assert v["line"] == "Свободно 2 ч 10 мин, задач на 4 ч 30 мин — перегруз 2 ч 20 мин"
+    assert day.verdict(100, 105)["title"] == "Плотно"
+    assert day.verdict(0, 30)["line"] == "Свободных окон нет, задач на 30 мин — перегруз 30 мин"
+    assert day.verdict(0, 0, off="weekend")["title"] == "Выходной"
+
+
+def test_greedy_placement_overflow_and_too_big():
+    wins_ = [{"s": 540, "e": 600, "len": 60, "short": False, "focus": None},
+             {"s": 700, "e": 730, "len": 30, "short": False, "focus": None},
+             {"s": 760, "e": 780, "len": 20, "short": True, "focus": None},  # короткое — не используется
+             {"s": 800, "e": 1000, "len": 200, "short": False, "focus": None}]
+    items = [{"id": i, "title": str(i), "est": est} for i, est in enumerate([120, 60, 30, 240, 90, 15], 1)]
+    res = day.place(wins_, items)
+    assert [(b["item"]["id"], b["item"]["slot"]) for b in res["blocks"]] == [
+        (2, "09:00–10:00"), (3, "11:40–12:10"), (1, "13:20–15:20"), (6, "15:20–15:35")]
+    assert [i["id"] for i in res["overflow"]] == [5] and [i["id"] for i in res["too_big"]] == [4]
+    assert res["longest"] == 200
+
+
+def _task(title, due=None, **kw):
+    return records.add_commitment(direction=kw.pop("direction", "mine"), whom="Тимур", title=title, what=title,
+                                  due=due, **kw)
+
+
+def test_demand_priorities_and_reasons():
+    iso = lambda n: (DAY + timedelta(days=n)).isoformat()  # noqa: E731
+    later = _task("Позже", iso(5))
+    work = _task("В работе", iso(10))
+    records.set_in_work(work, True)
+    held = _task("Её ждут", iso(2))  # среда и четверг — ближайшие 2 рабочих дня
+    for who in ("Пётр", "Мария"):
+        waiter = _task(f"Ждёт {who}", direction="to_me", who=who)
+        records.add_wait(waiter, waits_for=held)
+    today = _task("Сегодня", iso(0))
+    overdue = _task("Просрочено", iso(-2))
+    blocked = _task("Ждёт других", iso(0))
+    records.add_wait(blocked, waits_for=_task("Чужая", direction="to_me", who="Олег"))
+    _task("Не моя", iso(0), direction="to_me", who="Олег")
+    for _ in range(2):
+        records.add_attention(summary="Ответить")
+    day.set_estimate(today, 60)
+    dem = day.demand(DAY)
+    items = dem["items"]
+    assert [i["id"] for i in items] == [overdue, today, held, work, None]
+    assert [i["reason"] for i in items] == [
+        "просрочено 2 дня", "срок сегодня", "ждут Пётр, Мария · срок 05.11", "в работе · срок 13.11", "2 × 5 мин"]
+    assert items[0]["est"] == 30 and items[0]["est_default"] and items[1]["est"] == 60 and items[-1]["est"] == 10
+    assert [c["id"] for c in dem["waiting"]] == [blocked] and later not in [i["id"] for i in items]
+
+
+def test_decisions_pin_move_and_drop(settings_with):
+    settings = settings_with(calendar={"enabled": True})
+    tz = config.tz()
+    now = datetime.combine(DAY, time(9, 0), tz)
+    a, b, c, d = (_task(t, DAY.isoformat()) for t in ("А", "Б", "В", "Г"))
+    later = _task("На следующей неделе", (DAY + timedelta(days=7)).isoformat())
+    day.decide(a, "plan", day=DAY, start="14:00")
+    day.decide(b, "plan", day=DAY, start="14:00")  # то же окно — встаёт после первой
+    day.decide(later, "plan", day=DAY)  # «авто»: в план сегодня, хотя срок не сегодня
+    assert "срок — " in day.decide(c, "tomorrow", day=DAY).lower()
+    day.decide(d, "nodue", day=DAY)
+    p = day.plan(DAY, settings, now)
+    slots = {b_["item"]["id"]: b_["item"]["slot"] for b_ in p["blocks"]}
+    assert slots[a] == "14:00–14:30" and slots[b] == "14:30–15:00" and slots[later] == "09:00–09:30"
+    assert c not in slots and d not in slots
+    assert records.get_commitment(c)["due"] == "2026-11-04"
+    assert records.get_commitment(d)["due"] is None and records.get_commitment(d)["no_due_at"]
+    assert [i["id"] for i in p["items"][:3]] == [a, b, later]  # решения директора — первыми
+    assert p["items"][2]["reason"] == "вы поставили в план · срок 10.11"
+    # расстановка PULSE сохранена, решения директора — отдельно; закрытая задача из плана — «сделано»
+    rows = {(r["commitment_id"], r["source"], r["status"]) for r in day.decisions(DAY)}
+    assert (a, "user", "planned") in rows and (c, "user", "moved") in rows and (later, "user", "planned") in rows
+    records.update_commitment(a, status="done")
+    day.plan(DAY, settings, now)
+    assert store.scalar("SELECT status FROM day_plan WHERE commitment_id=?", (a,)) == "done"
+    day.decide(later, "unplan", day=DAY)  # решение отменено — PULSE снова расставляет сам, задача не на сегодня
+    assert later not in [i["id"] for i in day.plan(DAY, settings, now)["items"]]
+
+
+def test_estimates_user_wins_over_claude(monkeypatch, capsys):
+    from opsdash import cli
+
+    cid = _task("Сводка решений")
+    assert day.set_estimate(cid, 60, by="claude")
+    assert day.set_estimate(cid, 30, by="user")
+    assert not day.set_estimate(cid, 120, by="claude")  # ручную оценку Claude не перезаписывает
+    assert store.row("SELECT estimate_min, estimate_by FROM commitments WHERE id=?", (cid,)) == \
+        {"estimate_min": 30, "estimate_by": "user"}
+    with pytest.raises(ValueError):
+        day.set_estimate(cid, -5)
+    monkeypatch.setenv("OPSDASH_AGENT", "1")
+    cli.main(["commitments", "add", "--direction", "mine", "--title", "Стратегия склада", "--what", "Стратегия склада",
+              "--estimate", "300"])
+    out = capsys.readouterr().out
+    assert "Оценка: 5 ч" in out and "разбить" in out
+    new = store.row("SELECT id, estimate_min, estimate_by FROM commitments WHERE title='Стратегия склада'")
+    assert new["estimate_min"] == 300 and new["estimate_by"] == "claude"
+    plain = _task("Без оценки")
+    cli.main(["day", "estimates"])
+    assert f"[{plain}]" in capsys.readouterr().out
+    cli.main(["day", "estimates", "--set", f"{plain}=15, {cid}=240"])
+    assert "Оценки сохранены: 1; оценки директора не менял: 1" in capsys.readouterr().out
+    cli.main(["commitments", "set", str(cid), "--estimate", "60"])
+    assert "Оценку директор поставила сама" in capsys.readouterr().out
+    assert day.unestimated() == []
+
+
+def test_backfill_job_runs_once(monkeypatch, settings_with):
+    from opsdash import brain, jobs
+
+    settings_with(schedule={"digest_morning": "", "digest_evening": "", "stale_check": ""})
+    cid = _task("Старая задача")
+    submitted = []
+    monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: submitted.append(name) or True)
+    monkeypatch.setattr(jobs, "in_work_hours", lambda settings, at=None: True)
+    jobs.tick()
+    assert "estimates" in submitted
+    monkeypatch.setattr(brain, "run", lambda prompt, **kw: day.set_estimate(cid, 30, by="claude"))
+    assert jobs.REGISTRY["estimates"]() == "оценено задач: 1 из 1"
+    submitted.clear()
+    _task("Ещё одна")
+    store.execute("DELETE FROM jobs")
+    jobs.tick()
+    assert "estimates" not in submitted  # разовая: дальше оценки ставят навыки при создании задачи
+
+
+def _busy_day():
+    """8 встреч и «Тайм-аут», как в спецификации."""
+    plan = [("09:30", "10:00"), ("10:30", "11:00"), ("12:00", "13:00"), ("12:30", "13:00"), ("13:30", "14:00"),
+            ("15:00", "16:00"), ("16:30", "17:15"), ("18:30", "19:00")]
+    events = [ev(f"m{i}", f"Встреча {i}", s, e, ["p@example.ru"]) for i, (s, e) in enumerate(plan)]
+    events.append(ev("focus", "Тайм-аут", "11:00", "12:00"))
+    for e in events:
+        store.execute('INSERT INTO events(uid, title, start, "end", all_day, attendees) VALUES(?,?,?,?,0,?)',
+                      (e["uid"], e["title"], e["start"], e["end"], store.json_col(e["attendees"])))
+
+
+def test_cli_day_and_speed(settings_with, capsys, monkeypatch):
+    from opsdash import cli
+
+    settings = settings_with(calendar={"enabled": True})
+    _busy_day()
+    for i in range(20):
+        _task(f"Задача {i}", (DAY - timedelta(days=i % 3)).isoformat())
+    now = datetime.combine(DAY, time(8, 0), config.tz())
+    monkeypatch.setattr(config, "now", lambda s=None: now)
+    day.plan(DAY, settings, now)
+    started = clock.perf_counter()
+    p = day.plan(DAY, settings, now)
+    assert clock.perf_counter() - started < 0.2  # без ИИ и быстро
+    assert p["capacity"] == 30 + 50 + 40 + 65 + 60 and p["summary"] == "тайм-аут 11:10 + 4 окна"
+    assert p["verdict"]["level"] == "over" and "Главное: «" in p["digest"]
+    cli.main(["day", "--date", DAY.isoformat()])
+    out = capsys.readouterr().out
+    assert "Вердикт: " in out and "Тайм-аут (фокус-блок)" in out and "Не влезает сегодня" in out
+
+
+def test_overview_page_review_and_estimate_chips(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: datetime.combine(DAY, time(10, 0), config.tz(s)))
+    _busy_day()
+    cid = _task("Сводка решений по KPI", records.today_local().isoformat())
+    client = TestClient(app, base_url="http://localhost:8765")
+    page = client.get("/").text
+    assert "Разобрать день" in page and 'id="day-dlg"' in page and "Сводка решений по KPI" in page
+    res = client.post("/day/act", data={"cid": cid, "act": "estimate", "minutes": 120},
+                      headers={"Accept": "application/json"}).json()
+    assert res["ok"] and "После ваших решений" in res["html"]
+    assert store.scalar("SELECT estimate_by FROM commitments WHERE id=?", (cid,)) == "user"
+    res = client.post("/day/act", data={"cid": cid, "act": "tomorrow"}, headers={"Accept": "application/json"}).json()
+    assert res["ok"] and records.get_commitment(cid)["due"] > records.today_local().isoformat()
+    bad = client.post("/day/act", data={"cid": cid, "act": "due"}, headers={"Accept": "application/json"})
+    assert bad.status_code == 400 and bad.json()["err"] == "Выберите срок"
+    res = client.post(f"/commitments/{cid}/estimate", data={"minutes": 15}, headers={"Accept": "application/json"}).json()
+    assert res == {"ok": True, "note": "ваша оценка"}
+    board = client.get(f"/commitments?task={cid}").text
+    assert "Займёт у вас" in board and 'value="15" aria-pressed="true"' in board
+    assert "Фокус-блоки" in client.get("/settings?tab=day").text
+    client.post("/settings/day", data={"focus_titles": "тайм-аут, глубокая работа", "buffer_after_min": 5,
+                                       "buffer_before_min": 0, "min_window_min": 30, "reply_min": 3,
+                                       "lunch_on": "on", "lunch_start": "13:00", "lunch_end": "13:45"})
+    d = config.load_settings()["day"]
+    assert d["focus_titles"] == ["тайм-аут", "глубокая работа"] and d["lunch"] == "13:00-13:45"
+    assert day.opts()["lunch"] == (780, 825) and day.opts()["after"] == 5

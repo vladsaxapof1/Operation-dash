@@ -43,14 +43,17 @@ def at(day_offset: int, hh: int, mm: int = 0) -> datetime:
 
 
 # --- календарь: день с прошедшими и будущими встречами, неделя вперёд ---------------------
+# сегодня — 8 встреч (две идут одновременно) и «Тайм-аут»: время, которое Анна ставит себе на задачи
 store.execute("DELETE FROM events WHERE uid LIKE 'demo-ev-%'")
 events = [
     (0, 9, 30, 30, "Утренний статус операционки", ["d_orlov", "m_kuz"]),
-    (0, 11, 0, 60, "Планёрка операционного блока", ["p_ivanov", "m_kuz", "sokolov_o", "d_orlov"]),
-    (0, 11, 30, 30, "Созвон с маркетингом", ["irina_l"]),
-    (0, 13, 0, 30, "1:1 с Петром Ивановым", ["p_ivanov"]),
+    (0, 10, 30, 30, "Созвон по договору с перевозчиком", ["d_orlov"]),
+    (0, 11, 0, 60, "Тайм-аут", []),
+    (0, 12, 0, 60, "Планёрка операционного блока", ["p_ivanov", "m_kuz", "sokolov_o", "d_orlov"]),
+    (0, 12, 30, 30, "Созвон с маркетингом", ["irina_l"]),
+    (0, 13, 30, 30, "1:1 с Петром Ивановым", ["p_ivanov"]),
     (0, 15, 0, 60, "Бюджет Q4: сценарии", ["sokolov_o"]),
-    (0, 17, 0, 45, "Созвон с подрядчиком по складу", ["d_orlov", "podryad"]),
+    (0, 16, 30, 45, "Созвон с подрядчиком по складу", ["d_orlov", "podryad"]),
     (0, 18, 30, 30, "Итоги дня", []),
     (1, 10, 0, 60, "Сверка плана Q4: продажи и финансы", ["p_ivanov", "sokolov_o"]),
     (1, 14, 0, 45, "Собеседование: менеджер в Казань", ["m_kuz"]),
@@ -83,6 +86,28 @@ for direction, who, whom, what, due, src in extra:
 for what in ("Согласовать график отпусков склада", "Подписать договор с новым перевозчиком"):
     cid = records.add_commitment(direction="mine", who="Анна Смирнова", whom="Дмитрий Орлов", what=what, source_type="manual")
     records.update_commitment(cid, status="done")
+
+# --- «Реальность дня»: дел на сегодня больше, чем окон между встречами -------------------------------
+from opsdash import briefs, day  # noqa: E402
+
+for title, whom, due, est, by, in_work in [
+    ("Сводка решений по KPI для собственника", "Собственник", 0, 60, "claude", False),
+    ("Регламент запуска склада: финальная редакция", "Дмитрий Орлов", -2, 60, "claude", True),
+    ("Ответить юристам по договору перевозчика", "Дмитрий Орлов", 0, 30, "user", False),
+    ("Стратегия склада на 2027 год", "Собственник", 10, 120, "claude", True),
+]:
+    cid = records.add_commitment(direction="mine", who="Анна Смирнова", whom=whom, title=title, what=title,
+                                 due=(today + timedelta(days=due)).isoformat(), source_type="meeting", source_ref=planerka)
+    day.set_estimate(cid, est, by=by)
+    if in_work:
+        records.set_in_work(cid, True)
+for c in records.list_commitments(status="open", direction="mine"):
+    if not c["estimate_min"]:
+        day.set_estimate(c["id"], 30 if "ок" in c["what"] or "Посмотреть" in c["what"] else 60, by="claude")
+budget = store.row("SELECT uid FROM events WHERE title='Бюджет Q4: сценарии' AND start >= ? ORDER BY start",
+                   (store.to_utc_iso(at(0, 0)),))
+briefs.save(budget["uid"], "## Бюджет Q4: сценарии\n\n- Три сценария, базовый — выручка 182 млн.\n"
+            "- Олег ждёт решения по урезанию на 10%.", topic="Выбрать сценарий бюджета Q4")
 
 # --- база знаний ---------------------------------------------------------------------------------
 for kind, title, details, days_ago, project in [

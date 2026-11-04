@@ -555,6 +555,31 @@
   </form>
 </div></section>
 
+{% elif tab == 'day' %}
+{#- «Реальность дня» (opsdash.day): как PULSE считает время на задачи между встречами. Рабочие часы — в «Основном» #}
+{% set d = settings.day %}{% set lunch = (d.lunch or '13:00-14:00').split('-') %}
+<section class="card"><div class="card-h"><h2>День</h2></div><div class="card-b">
+  <p class="muted">Сколько времени на задачи реально есть между встречами. Рабочие часы — в <a href="/settings?tab=general">«Основном»</a>: сейчас {{ settings.owner.work_hours.start | hhmm }}–{{ settings.owner.work_hours.end | hhmm }}.</p>
+  <form method="post" action="/settings/day">
+    <label>Фокус-блоки — время, которое вы ставите себе сами для работы</label>
+    <input type="text" name="focus_titles" value="{{ d.focus_titles | join(', ') }}" placeholder="тайм-аут, фокус">
+    <div class="hint">Слова из названия события через запятую. Такое событие без других участников — не занятость, а лучшее окно: задачи PULSE ставит туда в первую очередь.</div>
+    <div class="form-row">
+      <div><label>После встречи с участниками, мин</label><input type="number" name="buffer_after_min" value="{{ d.buffer_after_min }}" min="0" max="120">
+        <div class="hint">На хвосты: записать договорённости, ответить.</div></div>
+      <div><label>Перед встречей с готовым брифом, мин</label><input type="number" name="buffer_before_min" value="{{ d.buffer_before_min }}" min="0" max="120">
+        <div class="hint">Прочитать бриф.</div></div>
+      <div><label>Окно короче, мин — не рабочее</label><input type="number" name="min_window_min" value="{{ d.min_window_min }}" min="0" max="120">
+        <div class="hint">Видно на сетке серым, в свободное время не входит.</div></div>
+      <div><label>Минут на каждый «нужен ответ»</label><input type="number" name="reply_min" value="{{ d.reply_min }}" min="0" max="120"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="lunch_on" {{ 'checked' if d.lunch }}> Обед — не время для задач</label>
+    <div class="time-range"><input type="time" lang="ru" name="lunch_start" value="{{ lunch[0] | hhmm }}" aria-label="Обед с"><span>—</span><input type="time" lang="ru" name="lunch_end" value="{{ (lunch[1] if lunch | length > 1 else '14:00') | hhmm }}" aria-label="Обед до"></div>
+    <div class="hint">План дня живёт только в PULSE: в Яндекс и Google Календарь ничего не пишется.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
 {% elif tab == 'claude' %}
 {#- кто работает в PULSE: Claude Code или ChatGPT (Codex) — одновременно только один (brain.turn) #}
 {% set claude_ready = claude_path and not (claude_login and not claude_login.loggedIn) %}

@@ -92,6 +92,7 @@ def parse_component(comp, cal_name: str, tzinfo) -> dict | None:
         "attendees": store.json_col(attendees),
         "url": str(comp.get("url") or ""),
         "synced_at": store.utcnow(),
+        "transp": str(comp.get("transp") or "").upper(),  # TRANSPARENT — «свободен»: время не занято
     }
 
 

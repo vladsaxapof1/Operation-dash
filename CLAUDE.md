@@ -22,6 +22,7 @@
 | Справочник людей | база | `./ops people list / find` |
 | Задачи Kaiten (зеркало) | база | `./ops kaiten cards`, `./ops kaiten card <id>` |
 | Календарь | база | `./ops calendar --days 7` |
+| Реальность дня: окна между встречами, задачи на сегодня, вердикт, план | база | `./ops day [--date YYYY-MM-DD]` |
 | Брифы к встречам | база (тексты — `data/briefs/`) | `./ops briefs pending / context <uid> / show <uid>` |
 | Итоги недели, сводка групп | база, раздел «Дайджесты» | `./ops week`, `./ops messages groups` |
 | Загрузка людей | база | раздел «Люди» |
