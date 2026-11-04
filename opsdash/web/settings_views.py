@@ -720,8 +720,12 @@ def register(app: FastAPI, render, back) -> None:
     # --- офис ---
 
     @app.post("/settings/office")
-    def office_save(request: Request, folders: str = Form(""), hide: str = Form(""), days: int = Form(7)):
+    def office_save(request: Request, folders: str = Form(""), hide: str = Form(""), days: int = Form(7),
+                    agent_folder: str = Form("")):
+        from opsdash import agents
+
         config.update_settings("office", {"folders": lines(folders), "hide": lines(hide), "days": max(1, min(days, 60))})
+        config.update_settings("office", {"agent_folder": agent_folder if agents.allowed_folder(agent_folder) else ""})
         missing = [f for f in lines(folders) if not config.resolve_path(f).exists()]
         if missing:
             return back(request, err="Сохранено, но этих папок нет: " + "; ".join(missing))

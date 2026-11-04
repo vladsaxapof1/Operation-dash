@@ -281,4 +281,4 @@ def test_office_settings_saved(client):
     from opsdash import config
 
     s = config.load_settings()["office"]
-    assert s == {"folders": ["/нет/такой"], "hide": ["Личное"], "days": 60}
+    assert s == {"folders": ["/нет/такой"], "hide": ["Личное"], "days": 60, "agent_folder": ""}

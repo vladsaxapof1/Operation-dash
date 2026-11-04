@@ -489,6 +489,12 @@
     <div class="hint">Например, личную работу — если показываете офис коллегам или на демо.</div>
     <label>Показывать сессии за … дней</label>
     <input type="number" name="days" value="{{ settings.office.days }}" min="1" max="60" style="max-width:120px">
+    <label>Папка по умолчанию для поручений агенту</label>
+    <select name="agent_folder" style="max-width:420px">
+      <option value="">Первая из папок выше</option>
+      {% for f in agent_folders(settings) %}<option value="{{ f.path }}" {{ 'selected' if settings.office.agent_folder == f.path }}>{{ f.label }}</option>{% endfor %}
+    </select>
+    <div class="hint">«Поручить агенту» в окне задачи сначала предложит папку, где вы делали похожие задачи, потом — проект с названием проекта задачи, и только потом — эту.</div>
     <div class="form-actions"><button class="btn primary">Сохранить</button></div>
   </form>
 </div></section>

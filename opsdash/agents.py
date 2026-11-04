@@ -110,7 +110,8 @@ def index(settings: dict | None = None) -> str:
 def _save(journal: Path, s: dict, root: Path, room: str, mine: dict | None, stat: tuple) -> None:
     written = [p for p in s["written"] if _useful(p)][-FILES_KEEP:]
     read = [p for p, _ in s["touched"].most_common() if p not in s["written"] and _useful(p)][:FILES_KEEP]
-    title = s["title"] or (s["prompt"].splitlines()[0][:90] if s["prompt"] else "Без названия")
+    first = re.sub(r"^#+\s*(Задача:\s*)?", "", s["prompt"].splitlines()[0]) if s["prompt"] else ""  # «# Задача: …» — из брифа
+    title = s["title"] or first[:90] or "Без названия"
     row = {"id": journal.stem, "engine": "claude", "journal": str(journal), "desktop_id": (mine or {}).get("id"),
            "folder": str(root), "room": room, "cwd": s["cwd"], "title": title, "first_prompt": s["first_prompt"],
            "prompts": store.json_col(s["asks"]), "files_read": store.json_col(read),
@@ -158,9 +159,11 @@ def _decorate(r: dict) -> dict:
     return r
 
 
-def similar(text: str, *, folder: str | None = None, limit: int = 5, settings: dict | None = None) -> list[dict]:
+def similar(text: str, *, folder: str | None = None, limit: int = 5, settings: dict | None = None,
+            task: int | None = None) -> list[dict]:
     """Прошлые сессии, похожие на задачу: полнотекстом по названию, промтам, файлам и проекту; общих слов с названием
-    и промтами — не меньше двух (у короткого запроса — одно). folder — только сессии в этой папке."""
+    и промтами — не меньше двух (у короткого запроса — одно). folder — только сессии в этой папке; task — без сессий,
+    запущенных по самой этой задаче."""
     from opsdash import docs
 
     query = docs.fts_query(text, "OR")
@@ -172,9 +175,11 @@ def similar(text: str, *, folder: str | None = None, limit: int = 5, settings: d
     rows = store.rows("SELECT s.*, bm25(agent_sessions_fts, 0, 6.0, 2.0, 1.5, 2.0) AS rank FROM agent_sessions_fts f "
                       "JOIN agent_sessions s ON s.id = f.id WHERE agent_sessions_fts MATCH ? ORDER BY rank LIMIT 80",
                       (query,))
+    own = {r["session_id"] for r in store.rows("SELECT session_id FROM task_agents WHERE commitment_id=? "
+                                               "AND session_id IS NOT NULL", (task,))} if task else set()
     out = []
     for r in rows:
-        if (r["room"] or "").casefold() in hide:
+        if (r["room"] or "").casefold() in hide or r["id"] in own:
             continue
         if folder and not (office._inside(_home(r), folder) or (r["cwd"] and office._inside(r["cwd"], folder))):
             continue
@@ -229,8 +234,8 @@ def allowed_folder(path: str, settings: dict | None = None) -> bool:
 
 
 def default_folder(c: dict, sims: list[dict], settings: dict | None = None) -> str:
-    """Папка по умолчанию: где делали похожие задачи, иначе — проект с названием проекта задачи, иначе первая
-    из Настройки → Офис."""
+    """Папка по умолчанию: где делали похожие задачи, иначе — проект с названием проекта задачи, иначе «Папка
+    по умолчанию для поручений» из Настройки → Офис, иначе первая папка оттуда же."""
     settings = settings or config.load_settings()
     for s in sims:
         if s["home"] and allowed_folder(s["home"], settings):
@@ -242,6 +247,9 @@ def default_folder(c: dict, sims: list[dict], settings: dict | None = None) -> s
             name = unicodedata.normalize("NFC", Path(f["path"]).name).casefold()
             if not f["label"].endswith("вся папка") and (name in title or title in name):
                 return f["path"]
+    chosen = settings["office"].get("agent_folder") or ""
+    if chosen and allowed_folder(chosen, settings):
+        return chosen
     return choices[0]["path"] if choices else ""
 
 
@@ -415,7 +423,7 @@ def context(bid: int, settings: dict | None = None) -> str:
     passport = _passport(b["folder"])
     if passport:
         out += ["Паспорт проекта —", passport]
-    sims = similar(task_text(c), limit=5, settings=settings)
+    sims = similar(task_text(c), limit=5, settings=settings, task=c["id"])
     out += ["", "Похожие прошлые сессии (подробно — ./ops agents show <id>):"]
     out += [f"- {s['id']} · {s['when']} · «{s['title']}» · {s['home']} · реплик человека: {s['n_prompts']}"
             + (f" · создали: {', '.join(f['name'] for f in s['made'][:4])}" if s["made"] else "")
@@ -554,7 +562,7 @@ def build(bid: int) -> str:
         index()
     except Exception as e:  # noqa: BLE001 — без свежего индекса промт всё равно соберётся
         store.log("agent-brief", f"индекс сессий не обновлён: {e}", "warning")
-    sims = similar(task_text(b["task"]), limit=3)
+    sims = similar(task_text(b["task"]), limit=3, task=b["commitment_id"])
     store.execute("UPDATE task_agents SET similar=? WHERE id=?", (store.json_col([s["id"] for s in sims]), bid))
     prompt = (f"Собери промт для агента по задаче [{b['commitment_id']}] строго по навыку agent-brief "
               f"(.claude/skills/agent-brief/SKILL.md). Всё о задаче и прошлых поручениях: ./ops agents context {bid}. "
@@ -692,4 +700,155 @@ def launch(bid: int, text: str | None = None) -> dict:
     url, whole = claude_link(b)
     open_url(url)
     store.execute("UPDATE task_agents SET launched_at=? WHERE id=?", (store.utcnow(), bid))
+    _marks.clear()
     return {"whole": whole, "url": url}
+
+
+# --- запущенные поручения: сессия агента на задаче -----------------------------------------------
+
+WATCH_DAYS = 14         # столько дней после «Открыть в Claude» ищем сессию и следим, не готова ли она
+LATE_START = 120        # сессию могли начать чуть раньше отметки «открыли» (часы, задержка записи) — секунд
+STATES = {"working": ("работает", "работает"), "waiting": ("ждёт вашего ответа", "ждёт"),
+          "blocked": ("ждёт разрешения?", "ждёт"), "done": ("готово", "готово"), "rest": ("не активна", "агент")}
+FINISHED = ("completed", "review_ready")  # итог хода по оценке приложения Claude: готово или на проверку
+_marks: dict = {}       # задача → поручение и его сессия: на странице много карточек — считаем раз в несколько секунд
+MARKS_TTL = 5
+
+
+def _service(cid: int) -> re.Pattern:
+    return re.compile(rf"PULSE: задача #{int(cid)}(?!\d)")
+
+
+def _started(b: dict, s: dict) -> bool:
+    """Сессия — по этому поручению: в первой реплике служебная строка или путь к файлу брифа, начата после
+    «Открыть в Claude»."""
+    first, launched = store.parse_ts(s["first"]), store.parse_ts(b["launched_at"])
+    if not first or not launched or first < launched - timedelta(seconds=LATE_START):
+        return False
+    text = s["first_prompt"] or ""
+    return bool(_service(b["commitment_id"]).search(text)) or bool(b["brief_path"] and Path(b["brief_path"]).name in text)
+
+
+def watching() -> list[dict]:
+    """Поручения, которые открыли в Claude за последние дни и которые ещё не закончены."""
+    since = (datetime.now(timezone.utc) - timedelta(days=WATCH_DAYS)).replace(microsecond=0).isoformat()
+    return store.rows("SELECT a.* FROM task_agents a JOIN commitments c ON c.id = a.commitment_id WHERE "
+                      "a.launched_at >= ? AND c.status = 'open' AND COALESCE(a.state, '') != 'proposed'", (since,))
+
+
+def link(settings: dict | None = None) -> int:
+    """Найти сессии, запущенные из поручений: по служебной строке «PULSE: задача #…» в первой реплике (или пути
+    к брифу). Ищем в папке поручения, без папки — во всех папках «Офиса»; берём самую свежую. Сколько нашли."""
+    settings = settings or config.load_settings()
+    roots = [config.resolve_path(f) for f in settings["office"].get("folders") or []]
+    app = office.desktop_sessions()
+    found = 0
+    for b in watching():
+        launched = store.parse_ts(b["launched_at"])
+        since = launched.timestamp() - LATE_START
+        best = None
+        for root in [Path(b["folder"])] if b["folder"] else roots:
+            for journal, s, room in office.sessions(root, since):  # скрытый проект — не помеха: папку выбрала директор
+                if _started(b, s) and (not best or (s["first"] or "") > (best[1]["first"] or "")):
+                    best = (journal, s, room, root)
+        if not best or best[0].stem == b["session_id"]:
+            continue
+        journal, s, room, root = best
+        try:
+            st = journal.stat()
+            _save(journal, s, root, room, app.get(journal.stem), (st.st_size, st.st_mtime))  # опыт — сразу в индекс
+        except OSError:
+            continue
+        mine = app.get(journal.stem) or {}
+        store.execute("UPDATE task_agents SET session_id=?, desktop_id=?, state='linked', result_files='[]' WHERE id=?",
+                      (journal.stem, mine.get("id"), b["id"]))
+        found += 1
+    _marks.clear()
+    return found
+
+
+def session_state(b: dict, app: dict | None = None) -> dict | None:
+    """Сессия поручения сейчас: работает, ждёт вашего ответа, готово; что нужно от вас, ссылка, созданные файлы.
+    Состояние — как в «Офисе» (по журналу), итог — по оценке приложения Claude."""
+    if not b.get("session_id"):
+        return None
+    r = store.row("SELECT * FROM agent_sessions WHERE id=?", (b["session_id"],)) or {}
+    journal = Path(r["journal"]) if r.get("journal") else None
+    s = office._session(journal) if journal and journal.exists() else None
+    app = office.desktop_sessions() if app is None else app
+    mine = app.get(b["session_id"]) or {}
+    status = mine.get("status") or (r.get("status") or "")  # приложение забыло сессию — его последняя оценка из индекса
+    now = datetime.now(timezone.utc)
+    st = office._state(s, now) if s else "rest"
+    if st == "waiting" and (mine.get("seen") or status in FINISHED):
+        st = "rest"
+    if status in FINISHED and st != "working":
+        st = "done"
+    written = s["written"] if s else store.loads(r.get("files_written"), [])
+    files = [{"path": p, "name": Path(p).name} for p in reversed(written) if _useful(p) and Path(p).is_file()][:10]
+    desktop = mine.get("id") or b.get("desktop_id") or r.get("desktop_id") or ""
+    title, short = STATES[st]
+    return {"state": st, "title": title, "short": short, "status": status,
+            "needs": (mine.get("needs") or "") if st != "done" else "", "files": files,
+            "session_title": r.get("title") or (s["title"] if s else "") or "Сессия агента",
+            "last": (s or {}).get("last") or r.get("last"),
+            "link": f"claude://code/continue?session={desktop}" if office._DESKTOP_ID.match(desktop or "") and
+            not mine.get("archived") else ""}
+
+
+def check(settings: dict | None = None) -> str:
+    """Задание «agents-watch»: найти запущенные сессии, запомнить их файлы; готова — предложить закрыть задачу."""
+    from opsdash import proposals
+
+    found = link(settings)
+    proposed = 0
+    app = office.desktop_sessions()
+    for b in watching():
+        st = session_state(b, app)
+        if not st:
+            continue
+        store.execute("UPDATE task_agents SET result_files=? WHERE id=?",
+                      (store.json_col([f["path"] for f in st["files"]]), b["id"]))
+        if st["state"] != "done":
+            continue
+        c = store.row("SELECT * FROM commitments WHERE id=?", (b["commitment_id"],))
+        names = ", ".join(f["name"] for f in st["files"][:4])
+        made = f"агент сделал: {names}" if names else "сессия агента закончила работу"
+        try:
+            proposals.propose_task_done(
+                commitment_id=c["id"], source_ref=f"agent:{b['session_id']}",
+                label=f"Закрыть задачу «{records.headline(c)}» — {made}",
+                reason=f"Сессия «{st['session_title']}» по этой задаче готова"
+                       + (" (приложение Claude: на проверку)" if st["status"] == "review_ready" else "")
+                       + (f". Создала: {', '.join(f['name'] for f in st['files'])}" if st["files"] else ""))
+        except proposals.ProposalError as e:
+            store.log("agents-watch", f"не предложила закрыть задачу [{c['id']}]: {e}", "warning")
+            continue
+        store.execute("UPDATE task_agents SET state='proposed' WHERE id=?", (b["id"],))
+        proposed += 1
+    _marks.clear()
+    return f"нашла сессий: {found}, предложила закрыть: {proposed}"
+
+
+def marks() -> dict[int, dict]:
+    """Задача → поручение (промт готов или открыт в Claude) и состояние его сессии — для окна задачи и метки
+    на карточке. Считаем раз в несколько секунд: карточек на странице много, а приложение Claude читаем один раз."""
+    if _marks.get("at", 0) > time.time() - MARKS_TTL:
+        return _marks["data"]
+    rows = store.rows("SELECT * FROM task_agents WHERE id IN (SELECT MAX(id) FROM task_agents GROUP BY commitment_id) "
+                      "AND (prompt IS NOT NULL OR launched_at IS NOT NULL)")
+    app = office.desktop_sessions() if any(r["session_id"] for r in rows) else {}
+    data = {r["commitment_id"]: {"brief": r, "st": session_state(r, app)} for r in rows}
+    _marks.update(at=time.time(), data=data)
+    return data
+
+
+def of(cid: int) -> dict | None:
+    return marks().get(cid)
+
+
+def task_of_sessions() -> dict[str, dict]:
+    """Сессия агента → её задача: пометка «по задаче «…»» в «Офисе»."""
+    rows = store.rows("SELECT a.session_id, c.* FROM task_agents a JOIN commitments c ON c.id = a.commitment_id "
+                      "WHERE a.session_id IS NOT NULL")
+    return {r["session_id"]: {"id": r["id"], "headline": records.headline(r)} for r in rows}

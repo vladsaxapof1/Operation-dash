@@ -1,5 +1,6 @@
 {% import "_icons.html" as icons %}
 {% import "_day.html" as dayui %}
+{% from "_agent_block.html" import agent_block, agent_chip %}
 {% macro proposal(p, describe) %}
 <li>
   <div class="row">
@@ -368,6 +369,7 @@
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}
     {%- if c.archived %} · архив{% endif -%}
+    {%- set agent = agent_chip(c) | trim %}{% if agent %} · {{ agent }}{% endif -%}
     {%- if open_waits %} · <span class="task-wait" title="Ждёт: {% for w in open_waits %}{{ ('«' ~ w.task.headline ~ '» (' ~ w.task.doer ~ ')') if w.task else w.event }}{{ '; ' if not loop.last }}{% endfor %}">{{ icons.icon('hourglass', 13) }}ждёт</span>{% endif -%}
   </div>
   <div class="task-more">
@@ -565,6 +567,7 @@
         {% endif %}
       </div>
       {{ task_items(c) }}
+      {{ agent_block(c) }}
       <div class="dlg-actions">
         {% if c.status == 'open' %}
         <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn primary">{{ icons.icon('check', 16) }} Готово</button></form>

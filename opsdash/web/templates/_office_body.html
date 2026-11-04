@@ -120,6 +120,7 @@
         <span class="st {{ {'working': 'acc', 'waiting': 'warn', 'blocked': 'warn', 'done': 'ok', 'error': 'bad'}.get(s.state, '') }}"><span class="dot {{ {'working': 'acc', 'waiting': 'warn', 'blocked': 'warn', 'done': 'ok', 'error': 'bad'}.get(s.state, 'off') }}"></span>{{ s.state_title }}</span>
         <span class="muted small nowrap">· {{ s.last | ago }}</span>
         {% if s.link %}<a class="btn sm office-claude{{ ' primary' if s.state in ('waiting', 'blocked') }}" href="{{ s.link }}" title="Открыть эту сессию в приложении Claude">Открыть в Claude</a>{% endif %}</div>
+      {% if s.task %}<div class="small">По задаче <a href="/commitments?task={{ s.task.id }}">«{{ s.task.headline }}»</a></div>{% endif %}
       {% if s.needs %}<div class="small warn-text">Нужно от вас: {{ s.needs }}</div>{% endif %}
       {{ steps(s.steps, 5 if s.state == 'working' else 2) }}
       {% if s.agents %}

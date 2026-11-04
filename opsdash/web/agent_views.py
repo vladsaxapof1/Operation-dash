@@ -14,7 +14,9 @@ from opsdash import agents, brain, config, records
 
 
 def register(app: FastAPI, render, templates, back) -> None:
-    templates.env.globals.update(agent_hint=agents.agentish)  # «можно поручить агенту» — в окне задачи (_macros.html)
+    # «можно поручить агенту», поручение задачи и его сессия — в окне задачи и на карточке (_macros.html,
+    # _agent_block.html), куда поручать — в Настройки → Офис
+    templates.env.globals.update(agent_hint=agents.agentish, agent_of=agents.of, agent_folders=agents.folders)
 
     def context(cid: int) -> dict | None:
         c = records.get_commitment(cid)
@@ -22,7 +24,7 @@ def register(app: FastAPI, render, templates, back) -> None:
             return None
         settings = config.load_settings()
         b = agents.for_task(cid)
-        sims = (b or {}).get("similar") or agents.similar(agents.task_text(c), limit=3, settings=settings)
+        sims = (b or {}).get("similar") or agents.similar(agents.task_text(c), limit=3, settings=settings, task=cid)
         choices = agents.folders(settings)
         folder = b["folder"] if b and b["folder"] is not None else agents.default_folder(c, sims, settings)
         if folder and not any(f["path"] == folder for f in choices):

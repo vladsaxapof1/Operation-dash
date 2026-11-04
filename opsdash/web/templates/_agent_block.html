@@ -1,0 +1,40 @@
+{#- «Поручить агенту», этап 2 (opsdash.agents): блок «Агент» в окне задачи и метка с роботом на карточке.
+    agent_of(id) — поручение задачи и состояние его сессии (agents.marks): работает, ждёт вашего ответа, готово #}
+{% import "_icons.html" as icons %}
+
+{% macro agent_chip(c) -%}
+{%- set ag = agent_of(c.id) -%}
+{%- if ag and ag.st -%}
+<span class="agent-chip {{ ag.st.state }}" title="Агент по задаче: {{ ag.st.title }}{{ ' — ' ~ ag.st.needs if ag.st.needs }}">{{ icons.icon('robot', 13) }}{{ ag.st.short }}</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro agent_block(c) %}
+{%- set ag = agent_of(c.id) -%}
+{%- if ag %}{% set b = ag.brief %}{% set st = ag.st %}
+<div class="agent-block{{ ' ' ~ st.state if st }}">
+  <span class="agent-ico">{{ icons.icon('robot', 18) }}</span>
+  <div class="agent-block-b">
+    {% if st %}
+    <div><b>Агент — {{ st.title }}</b>{% if st.needs %}: {{ st.needs }}{% endif %} <span class="muted small">· «{{ st.session_title }}»{% if st.last %} · {{ st.last | ago }}{% endif %}</span></div>
+    {% if st.files %}
+    <ul class="agent-made">
+      {% for f in st.files %}<li><span title="{{ f.path }}">{{ f.name }}</span>
+        <form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ f.path }}"><button class="linkish">Открыть</button></form>
+        <form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ f.path }}"><input type="hidden" name="reveal" value="1"><button class="linkish">{{ 'Показать в Finder' if is_mac else 'Показать в папке' }}</button></form></li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% elif b.launched_at %}
+    <div><b>Промт открыт в Claude</b> <span class="muted small">· {{ b.launched_at | local }}</span></div>
+    <div class="small muted">Отправите его — сессия появится здесь в течение минуты: PULSE найдёт её по строке «PULSE: задача #{{ c.id }}».</div>
+    {% else %}
+    <div><b>Промт для агента готов</b> <span class="muted small">· ещё не открывали в Claude</span></div>
+    {% endif %}
+    <div class="agent-block-a">
+      {% if st and st.link %}<a class="btn sm{{ ' primary' if st.state in ('waiting', 'blocked') }}" href="{{ st.link }}" title="Открыть эту сессию в приложении Claude">Открыть в Claude</a>{% endif %}
+      <a class="btn sm ghost" href="/agents?task={{ c.id }}" data-agent-open="{{ c.id }}">Поручение</a>
+    </div>
+  </div>
+</div>
+{%- endif %}
+{% endmacro %}
