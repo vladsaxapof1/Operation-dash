@@ -1,11 +1,14 @@
-{#- «Поручить агенту», этап 2 (opsdash.agents): блок «Агент» в окне задачи и метка с роботом на карточке.
-    agent_of(id) — поручение задачи и состояние его сессии (agents.marks): работает, ждёт вашего ответа, готово #}
+{#- «Поручить агенту» (opsdash.agents): блок «Агент» в окне задачи и метка с роботом на карточке.
+    agent_of(id) — поручение задачи и состояние его сессии (agents.marks): работает, ждёт вашего ответа, готово.
+    c.agent_hint — Claude при разборе встречи или переписки отметил, что работу можно поручить агенту #}
 {% import "_icons.html" as icons %}
 
 {% macro agent_chip(c) -%}
 {%- set ag = agent_of(c.id) -%}
 {%- if ag and ag.st -%}
 <span class="agent-chip {{ ag.st.state }}" title="Агент по задаче: {{ ag.st.title }}{{ ' — ' ~ ag.st.needs if ag.st.needs }}">{{ icons.icon('robot', 13) }}{{ ag.st.short }}</span>
+{%- elif c.agent_hint and c.status == 'open' and not ag -%}
+<span class="agent-chip hint" title="Можно поручить агенту: {{ c.agent_hint }}">{{ icons.icon('robot', 13) }}агенту?</span>
 {%- endif -%}
 {%- endmacro %}
 
@@ -31,9 +34,17 @@
     <div><b>Промт для агента готов</b> <span class="muted small">· ещё не открывали в Claude</span></div>
     {% endif %}
     <div class="agent-block-a">
-      {% if st and st.link %}<a class="btn sm{{ ' primary' if st.state in ('waiting', 'blocked') }}" href="{{ st.link }}" title="Открыть эту сессию в приложении Claude">Открыть в Claude</a>{% endif %}
+      {% if st and st.link %}<a class="btn sm{{ ' primary' if st.state in ('waiting', 'blocked') }}" href="{{ st.link }}" title="Открыть эту сессию в приложении {{ 'ChatGPT' if st.engine == 'codex' else 'Claude' }}">{{ 'Открыть в Codex' if st.engine == 'codex' else 'Открыть в Claude' }}</a>{% endif %}
       <a class="btn sm ghost" href="/agents?task={{ c.id }}" data-agent-open="{{ c.id }}">Поручение</a>
     </div>
+  </div>
+</div>
+{%- elif c.agent_hint and c.status == 'open' %}
+<div class="agent-block hint">
+  <span class="agent-ico">{{ icons.icon('robot', 18) }}</span>
+  <div class="agent-block-b">
+    <div><b>Можно поручить агенту:</b> {{ c.agent_hint }}</div>
+    <div class="agent-block-a"><a class="btn sm" href="/agents?task={{ c.id }}" data-agent-open="{{ c.id }}">Собрать промт</a></div>
   </div>
 </div>
 {%- endif %}

@@ -458,6 +458,7 @@ MIGRATIONS = [
     ("commitments", "due_hint", "TEXT"),
     ("commitments", "due_hint_why", "TEXT"),
     ("events", "transp", "TEXT"),
+    ("commitments", "agent_hint", "TEXT"),  # «можно поручить агенту»: что агент может сделать (opsdash.agents)
     ("commitments", "archived_at", "TEXT"),
     ("messages", "topic", "TEXT"),
     ("commitments", "event_uid", "TEXT"),   # встреча календаря, посвящённая задаче (opsdash.task_meetings)

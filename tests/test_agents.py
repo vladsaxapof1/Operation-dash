@@ -471,3 +471,145 @@ def test_own_session_is_not_similar_to_its_task(work, monkeypatch):
     text = agents.task_text(records.get_commitment(cid))
     assert [s["id"] for s in agents.similar(text)] == ["own"]
     assert agents.similar(text, task=cid) == []
+
+
+# --- этап 3: Codex, обучение на прошлых поручениях, пометка «агенту» -------------------------------------
+
+U1, U2, U3 = (f"0a0a0a0a-0000-4000-8000-00000000000{i}" for i in (1, 2, 3))  # вымышленные номера тредов Codex
+
+
+def _cx(kind, at, payload):
+    return {"timestamp": at, "type": kind, "payload": payload}
+
+
+def _cuser(at, text):
+    return _cx("response_item", at, {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]})
+
+
+def _canswer(at, text):
+    return _cx("response_item", at, {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
+
+
+def _cpatch(at, path):  # как в журнале приложения ChatGPT: apply_patch внутри кода инструмента exec, \n — экранами
+    return _cx("response_item", at, {"type": "custom_tool_call", "name": "exec",
+                                     "input": f'text(await tools.apply_patch("*** Begin Patch\\n*** Add File: {path}\\n+x\\n*** End Patch"))'})
+
+
+def _codex(home, uuid, cwd, lines, *, source="vscode", thread_source="user", name=None):
+    meta = _cx("session_meta", lines[0]["timestamp"], {"id": uuid, "cwd": cwd, "originator": "codex_work_desktop",
+                                                       "source": source, "thread_source": thread_source})
+    _write(home / "sessions" / "2026" / "11" / "04" / f"rollout-2026-11-04T10-00-00-{uuid}.jsonl", [meta, *lines])
+    if name:
+        _write(home / "session_index.jsonl", [{"id": uuid, "thread_name": name, "updated_at": lines[-1]["timestamp"]}])
+
+
+@pytest.fixture
+def codex_home(tmp_path, monkeypatch):
+    home = tmp_path / "codex"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    return home
+
+
+def test_codex_sessions_indexed_with_claude_ones(work, codex_home, monkeypatch):
+    journals, root = work
+    _app(monkeypatch, {})
+    _kpi_session(journals, root)
+    cwd = str(root / "Отчёты")
+    _codex(codex_home, U1, cwd, [
+        _cuser(_ago(days=2, minutes=30), "<environment_context>cwd</environment_context>"),
+        _cuser(_ago(days=2, minutes=29), "Собери сводку KPI продаж за август по менеджерам"),
+        _cpatch(_ago(days=2, minutes=20), "KPI август.md"),
+        _canswer(_ago(days=2, minutes=19), "Готово: «KPI август.md»."),
+        _cuser(_ago(days=2, minutes=10), "Добавь конверсию по этапам"),
+        _cx("event_msg", _ago(days=2, minutes=5), {"type": "task_complete"})], name="Сводка KPI за август")
+    _codex(codex_home, U2, cwd, [_cuser(_ago(days=1), "Проверь действие")], source={"subagent": {"other": "guardian"}},
+           thread_source="guardian_review")  # проверка-«guardian» — не человек
+    _codex(codex_home, U3, str(config.APP_DIR), [_cuser(_ago(days=1), "Разбери сообщения")], source="exec")
+    assert agents.index() == "сессий в индексе: 2, обновлено: 2"
+    s = agents.show(f"codex-{U1}")
+    assert s["engine"] == "codex" and s["title"] == "Сводка KPI за август" and s["room"] == "Отчёты"
+    assert s["first_prompt"] == "Собери сводку KPI продаж за август по менеджерам" and s["prompts"] == ["Добавь конверсию по этапам"]
+    assert s["files_written"] == [str(root / "Отчёты" / "KPI август.md")] and s["summary"] == "Готово: «KPI август.md»."
+    assert s["link"] == f"codex://threads/{U1}"
+    assert {x["engine"] for x in agents.similar("сводка KPI продаж по менеджерам")} == {"claude", "codex"}
+    assert agents.index().endswith("обновлено: 0")  # не изменились — не перечитываем
+    text = agents.context(store.execute("INSERT INTO task_agents(commitment_id, status) VALUES(?, 'new')",
+                                        (_meeting_task(root),)))
+    assert f"- codex-{U1} · Codex · " in text and "Пришлось уточнять: «Добавь конверсию по этапам»" in text
+
+
+def test_open_in_codex_link_or_terminal(work, codex_home, monkeypatch, tmp_path):
+    from opsdash import codex
+
+    journals, root = work
+    b = _brief("# Задача: Сводка KPI\n\nСобери сводку.", folder=str(root / "Отчёты"))
+    url, whole = agents.codex_link(b)
+    q = parse_qs(urlparse(url).query)
+    assert url.startswith("codex://threads/new?") and whole and q["prompt"] == [b["prompt"]] and q["path"] == [str(root / "Отчёты")]
+    long = _brief("# Задача: Большая\n\n" + "Очень подробно. " * 1000)
+    q = parse_qs(urlparse(agents.codex_link(long)[0]).query)
+    assert str(agents.brief_path(long)) in q["prompt"][0] and len(q["prompt"][0]) < 600
+
+    opened, ran = [], []
+    monkeypatch.setattr(agents, "open_url", opened.append)
+    monkeypatch.setattr(agents, "chatgpt_app", lambda: True)
+    res = agents.launch(b["id"], engine="codex")
+    assert res["where"] == "chatgpt" and opened[0].startswith("codex://threads/new?prompt=")
+    assert agents.get(b["id"])["engine"] == "codex" and agents.get(b["id"])["launched_at"]
+
+    # приложения ChatGPT нет — Терминал с Codex CLI в папке, промт — в буфер обмена (сам не отправляется)
+    monkeypatch.setattr(agents, "chatgpt_app", lambda: False)
+    monkeypatch.setattr(agents.sys, "platform", "darwin")
+    monkeypatch.setattr(codex, "find", lambda settings=None: "/opt/codex/bin/codex")
+    monkeypatch.setattr(agents.subprocess, "run", lambda cmd, **kw: ran.append((cmd, kw.get("input"))))
+    res = agents.launch(b["id"], engine="codex")
+    assert res["where"] == "terminal" and res["whole"]
+    assert ran[0] == (["pbcopy"], b["prompt"].encode("utf-8")) and ran[1][0][0] == "open"
+    script = Path(ran[1][0][1]).read_text(encoding="utf-8")
+    assert f"cd '{root / 'Отчёты'}'" in script and "exec /opt/codex/bin/codex" in script and "Собери" not in script
+    monkeypatch.setattr(codex, "find", lambda settings=None: None)
+    with pytest.raises(ValueError):
+        agents.launch(b["id"], engine="codex")
+
+
+def test_codex_session_found_for_brief_and_becomes_example(work, codex_home, monkeypatch, client):
+    journals, root = work
+    _app(monkeypatch, {})
+    cid, bid = _launched(root, title="Сводка KPI за октябрь")
+    store.execute("UPDATE task_agents SET engine='codex' WHERE id=?", (bid,))
+    _codex(codex_home, U1, str(root / "Отчёты"), [
+        _cuser(_ago(minutes=8), f"# Задача: Сводка KPI за октябрь\nPULSE: задача #{cid}\nСобери"),
+        _cpatch(_ago(minutes=6), "KPI октябрь.md"),
+        _canswer(_ago(minutes=5), "Сделал «KPI октябрь.md»."),
+        _cx("event_msg", _ago(minutes=5), {"type": "task_complete"})], name="Сводка KPI за октябрь")
+    (root / "Отчёты" / "KPI октябрь.md").write_text("x")
+    assert agents.link() == 1
+    st = agents.of(cid)["st"]
+    assert agents.for_task(cid)["session_id"] == f"codex-{U1}" and st["engine"] == "codex"
+    assert st["state"] == "waiting" and st["link"] == f"codex://threads/{U1}" and [f["name"] for f in st["files"]] == ["KPI октябрь.md"]
+    assert "Открыть в Codex" in client.get(f"/commitments?task={cid}").text
+
+    # задачу закрыли, агенту хватило одной реплики — промт становится образцом для навыка
+    assert agents.examples() == []
+    store.execute("UPDATE commitments SET status='done' WHERE id=?", (cid,))
+    good = agents.examples(text="сводка KPI")
+    assert [g["task"] for g in good] == [cid] and good[0]["replies"] == 0 and good[0]["made"] == ["KPI октябрь.md"]
+    other = _meeting_task(root)
+    text = agents.context(store.execute("INSERT INTO task_agents(commitment_id, status) VALUES(?, 'new')", (other,)))
+    assert "Удачные промты прошлых поручений" in text and str(agents.brief_path(agents.for_task(cid))) in text
+
+
+def test_agent_hint_from_meeting_or_chat_review(work, client, capsys):
+    cli.main(["commitments", "add", "--direction", "mine", "--who", "Анна", "--whom", "Олег Соколов", "--title",
+              "Сравнение тарифов перевозчиков", "--what", "Сравнить тарифы трёх перевозчиков по Казани",
+              "--agent", "собрать таблицу тарифов из писем и прайсов"])
+    cid = store.scalar("SELECT MAX(id) FROM commitments")
+    assert "Пометка «Можно поручить агенту»" in capsys.readouterr().out
+    c = records.get_commitment(cid)
+    assert c["agent_hint"] == "собрать таблицу тарифов из писем и прайсов" and agents.agentish(c)
+    page = client.get(f"/commitments?task={cid}").text
+    assert "Можно поручить агенту:</b> собрать таблицу тарифов" in page and 'class="agent-chip hint"' in page
+    cli.main(["commitments", "list"])
+    assert "можно поручить агенту: собрать таблицу тарифов" in capsys.readouterr().out
+    cli.main(["commitments", "set", str(cid), "--agent", ""])
+    assert records.get_commitment(cid)["agent_hint"] is None

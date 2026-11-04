@@ -70,10 +70,11 @@
   <div class="agent-k">Похожие поручения</div>
   <ul class="agent-sims">
     {% for s in sims %}
-    <li><div><b>{{ s.title }}</b> <span class="muted small">· {{ s.when }}{% if s.room %} · {{ s.room }}{% endif %} · {{ s.n_prompts }} {{ plural(s.n_prompts, 'реплика', 'реплики', 'реплик') }}{% if s.outcome %} · {{ s.outcome }}{% endif %}</span></div>
+    {% set codex = s.engine == 'codex' %}
+    <li><div><b>{{ s.title }}</b> <span class="muted small">· {{ 'Codex' if codex else 'Claude' }} · {{ s.when }}{% if s.room %} · {{ s.room }}{% endif %} · {{ s.n_prompts }} {{ plural(s.n_prompts, 'реплика', 'реплики', 'реплик') }}{% if s.outcome %} · {{ s.outcome }}{% endif %}</span></div>
       {% if s.made %}<div class="small">Получилось: {% for f in s.made[:4] %}{{ f.name }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
-      {% if s.prompts %}<div class="small muted" title="{{ s.prompts | join(' · ') }}">Пришлось уточнять: {{ s.prompts[0] | truncate(140) }}</div>{% endif %}
-      {% if s.link %}<a class="small" href="{{ s.link }}" title="Открыть эту сессию в приложении Claude">Открыть в Claude</a>{% endif %}</li>
+      {% if s.prompts %}<div class="small muted">Пришлось уточнять{% if s.prompts | length > 1 %} ({{ s.prompts | length }}){% endif %}: {% for a in s.prompts[:3] %}«{{ a | truncate(110) }}»{{ '; ' if not loop.last }}{% endfor %}</div>{% endif %}
+      {% if s.link %}<a class="small" href="{{ s.link }}" title="Открыть эту сессию в приложении {{ 'ChatGPT' if codex else 'Claude' }}">{{ 'Открыть в Codex' if codex else 'Открыть в Claude' }}</a>{% endif %}</li>
     {% endfor %}
   </ul>
   {% endif %}
@@ -88,8 +89,8 @@
   </form>
   <div class="dlg-actions agent-actions">
     <button type="button" class="btn" data-agent-copy>Копировать промт</button>
-    <button class="btn primary" form="agent-prompt-{{ b.id }}" data-agent-launch title="Новая сессия в приложении Claude: промт — в поле ввода, папка — «{{ folder or 'без папки' }}». Отправляете вы"{% if engine == 'codex' %} hidden{% endif %}>Открыть в Claude</button>
-    <span class="muted small" data-agent-codex{% if engine != 'codex' %} hidden{% endif %}>«Открыть в Codex» — в следующей версии: скопируйте промт в Codex</span>
+    <button class="btn primary" form="agent-prompt-{{ b.id }}" data-agent-launch="claude" title="Новая сессия в приложении Claude: промт — в поле ввода, папка — «{{ folder or 'без папки' }}». Отправляете вы"{% if engine == 'codex' %} hidden{% endif %}>Открыть в Claude</button>
+    <button class="btn primary" form="agent-prompt-{{ b.id }}" data-agent-launch="codex" data-agent-codex title="{{ 'Новый тред Codex в приложении ChatGPT: промт — в поле ввода, папка — проект треда' if chatgpt else 'Терминал с Codex CLI в папке поручения: промт — в буфере обмена' }}. Отправляете вы"{% if engine != 'codex' %} hidden{% endif %}>Открыть в Codex</button>
     <button class="btn ghost" form="agent-prompt-{{ b.id }}" formaction="/agents/{{ b.id }}/save" data-agent-save-btn>Сохранить</button>
     <span class="small muted" data-agent-said role="status"></span>
   </div>

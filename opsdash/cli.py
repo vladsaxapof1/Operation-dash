@@ -590,6 +590,8 @@ def _commitment_line(c: dict) -> str:
         line += " · в работе"
     if c.get("estimate_min"):
         line += f" · ≈{c['estimate_min']} мин" + (" (оценка директора)" if c.get("estimate_by") == "user" else "")
+    if c.get("agent_hint"):
+        line += f" · можно поручить агенту: {c['agent_hint']}"
     if c.get("archived_at"):
         line += " · в архиве"
     if c["kaiten_card_id"]:
@@ -653,6 +655,8 @@ def cmd_commitments(a) -> None:
             _estimate(cid, a.estimate)
         if a.direction == "mine" and a.due:
             _due_check(cid)
+        if a.agent:
+            _agent_hint(cid, a.agent)
         similar = records.similar_open(direction=a.direction, who=a.who, whom=a.whom, title=a.title, what=a.what,
                                        kaiten_card_id=a.card, exclude=cid)
         if similar:
@@ -735,6 +739,16 @@ def cmd_commitments(a) -> None:
         out("Сохранено")
         if a.estimate:
             _estimate(a.id, a.estimate)
+        if a.agent is not None:
+            _agent_hint(a.id, a.agent)
+
+
+def _agent_hint(cid: int, why: str) -> None:
+    """--agent: работу можно поручить агенту (Claude Code, Codex) — пометка на задаче, без запусков."""
+    from opsdash import agents
+
+    agents.mark_hint(cid, why)
+    out("Пометка «Можно поручить агенту»: " + why.strip() if why.strip() else "Пометка «Можно поручить агенту» снята")
 
 
 def _due_check(cid: int) -> None:
@@ -971,6 +985,13 @@ def cmd_agents(a) -> None:
         out(agents.index())
     elif a.action == "watch":
         out(agents.check())
+    elif a.action == "examples":
+        items = agents.examples(limit=a.limit, text=a.query or "")
+        for g in items:
+            out(f"{g['brief']} — «{g['headline']}» · {agents.ENGINES.get(g['engine'], 'Claude')} · уточнений: {g['replies']}"
+                + (f" · сделал: {', '.join(g['made'][:3])}" if g["made"] else ""))
+        if not items:
+            out("Удачных поручений пока нет: образцом становится промт, после которого агенту хватило 1–2 реплик.")
     elif a.action == "similar":
         items = agents.similar(a.query, folder=a.folder, limit=a.limit)
         if a.json:
@@ -1512,6 +1533,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="добавить, даже если у этой карточки Kaiten уже есть открытая задача")
     x.add_argument("--project", type=int, help="в проект с этим id (./ops projects list)")
     x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин: 15, 30, 60, 120, 240 (полдня)")
+    x.add_argument("--agent", help="можно поручить агенту: что он сделает («собрать сводку из выгрузки CRM»)")
     x = ms.add_parser("set")
     x.add_argument("id", type=int)
     x.add_argument("--status", choices=["open", "done", "cancelled"])
@@ -1527,6 +1549,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--in-work", choices=["on", "off"], help="отметка «В работе» (по просьбе директора)")
     x.add_argument("--archived", choices=["on", "off"], help="убрать в архив или вернуть (по просьбе директора)")
     x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин (оценку директора Claude не меняет)")
+    x.add_argument("--agent", help="можно поручить агенту: что он сделает; \"\" — снять пометку")
     x = ms.add_parser("wait", help="задача ждёт другую задачу или событие: без него её не закончить")
     x.add_argument("id", type=int, help="задача, которая ждёт")
     x.add_argument("--for", dest="waits_for", type=int, help="id задачи, которую она ждёт")
@@ -1573,6 +1596,9 @@ def build_parser() -> argparse.ArgumentParser:
     ms = s.add_subparsers(dest="action", required=True)
     ms.add_parser("index", help="дочитать новые сессии в индекс")
     ms.add_parser("watch", help="найти сессии, запущенные из поручений; готовые — предложить закрыть задачу")
+    x = ms.add_parser("examples", help="удачные промты прошлых поручений — образцы (агенту хватило 1–2 реплик)")
+    x.add_argument("query", nargs="?", help="о чём задача — похожие первыми")
+    x.add_argument("--limit", type=int, default=3)
     x = ms.add_parser("similar", help="прошлые сессии, похожие на задачу")
     x.add_argument("query")
     x.add_argument("--folder", help="только сессии в этой папке")
