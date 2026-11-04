@@ -454,6 +454,7 @@ MIGRATIONS = [
     ("commitments", "estimate_min", "INTEGER"),  # «Реальность дня» (opsdash.day)
     ("commitments", "estimate_by", "TEXT"),
     ("events", "transp", "TEXT"),
+    ("commitments", "agent_hint", "TEXT"),  # «можно поручить агенту»: что агент может сделать (opsdash.agents)
     ("commitments", "archived_at", "TEXT"),
     ("messages", "topic", "TEXT"),
     ("commitments", "event_uid", "TEXT"),   # встреча календаря, посвящённая задаче (opsdash.task_meetings)

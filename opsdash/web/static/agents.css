@@ -51,3 +51,6 @@
 .agent-chip.waiting, .agent-chip.blocked { color: var(--warn-text); }
 .agent-chip.done { color: var(--ok-text); }
 td .agent-chip { margin-left: 6px; font-size: 13px; }
+/* этап 3: Claude отметил при разборе, что работу можно поручить агенту */
+.agent-block.hint { border-style: dashed; border-color: var(--accent); }
+.agent-block.hint .agent-ico, .agent-chip.hint { color: var(--accent); }

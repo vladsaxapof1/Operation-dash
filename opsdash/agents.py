@@ -3,8 +3,8 @@
 Промт собирается из двух контекстов. Задача — откуда она (встреча с цитатой и временем, сообщение), срок, проект,
 связи «ждёт», решения из базы знаний, документы. И опыт агентов — как похожие задачи уже делали в папках «Офиса»:
 первый промт, что человек дописал потом (этого не хватило в постановке), какие файлы читали и создали, чем кончилось.
-Опыт — в индексе agent_sessions: журналы Claude Code PULSE только читает (разбор общий с «Офисом», office.sessions),
-а запись остаётся и после того, как Claude Code удалит старый журнал.
+Опыт — в индексе agent_sessions: журналы Claude Code (разбор общий с «Офисом», office.sessions) и Codex
+(~/.codex/sessions, codex_session) PULSE только читает, а запись остаётся и после того, как журнал удалят.
 
 Промт пишет Claude по навыку agent-brief — заданием «agent-brief» в очереди чата, шаги видны по ходу, как в «Спросить
 Claude». Директор правит его, снимает лишние файлы и открывает новую сессию в приложении Claude ссылкой
@@ -13,8 +13,10 @@ claude://code/new: промт встаёт в поле ввода, отправ�
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -77,16 +79,17 @@ def index(settings: dict | None = None) -> str:
     tried: set[str] = set()
 
     def wanted(journal: Path) -> bool:
-        if journal.stem in stats:  # папки офисов вложены друг в друга — сессию уже взяли
+        sid = _sid(journal)
+        if sid in stats:  # папки офисов вложены друг в друга — сессию уже взяли
             return False
         try:
             st = journal.stat()
         except OSError:
             return False
-        stats[journal.stem] = (st.st_size, st.st_mtime)
-        if known.get(journal.stem) == stats[journal.stem] or skipped["files"].get(journal.stem) == list(stats[journal.stem]):
+        stats[sid] = (st.st_size, st.st_mtime)
+        if known.get(sid) == stats[sid] or skipped["files"].get(sid) == list(stats[sid]):
             return False
-        tried.add(journal.stem)
+        tried.add(sid)
         return True
 
     updated, saved = 0, set()
@@ -95,6 +98,10 @@ def index(settings: dict | None = None) -> str:
             _save(journal, s, root, room, app.get(journal.stem), stats[journal.stem])
             saved.add(journal.stem)
             updated += 1
+    for journal, s, room, root in codex_sessions(roots, since, hide, wanted):
+        _save(journal, s, root, room, None, stats[_sid(journal)], engine="codex")
+        saved.add(_sid(journal))
+        updated += 1
     skipped["files"] = {k: v for k, v in skipped["files"].items() if k in stats and k not in saved}
     skipped["files"].update({k: list(stats[k]) for k in tried - saved})
     store.set_state("agents_skipped", skipped)
@@ -107,12 +114,12 @@ def index(settings: dict | None = None) -> str:
     return f"сессий в индексе: {total}, обновлено: {updated}"
 
 
-def _save(journal: Path, s: dict, root: Path, room: str, mine: dict | None, stat: tuple) -> None:
+def _save(journal: Path, s: dict, root: Path, room: str, mine: dict | None, stat: tuple, engine: str = "claude") -> None:
     written = [p for p in s["written"] if _useful(p)][-FILES_KEEP:]
     read = [p for p, _ in s["touched"].most_common() if p not in s["written"] and _useful(p)][:FILES_KEEP]
     first = re.sub(r"^#+\s*(Задача:\s*)?", "", s["prompt"].splitlines()[0]) if s["prompt"] else ""  # «# Задача: …» — из брифа
     title = s["title"] or first[:90] or "Без названия"
-    row = {"id": journal.stem, "engine": "claude", "journal": str(journal), "desktop_id": (mine or {}).get("id"),
+    row = {"id": _sid(journal), "engine": engine, "journal": str(journal), "desktop_id": (mine or {}).get("id"),
            "folder": str(root), "room": room, "cwd": s["cwd"], "title": title, "first_prompt": s["first_prompt"],
            "prompts": store.json_col(s["asks"]), "files_read": store.json_col(read),
            "files_written": store.json_col(written), "skills": store.json_col(s["skills"]), "agents": s["agents"],
@@ -126,6 +133,130 @@ def _save(journal: Path, s: dict, root: Path, room: str, mine: dict | None, stat
         conn.execute("DELETE FROM agent_sessions_fts WHERE id=?", (row["id"],))
         conn.execute("INSERT INTO agent_sessions_fts(id, title, prompts, files, room) VALUES(?,?,?,?,?)",
                      (row["id"], title, f"{s['first_prompt']}\n" + "\n".join(s["asks"]), files, room))
+
+
+# --- сессии Codex: приложение ChatGPT (вкладка «Работа») и Codex CLI --------------------------------
+
+_UUID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$")
+_PATCHED = re.compile(r"\*\*\* (?:Add|Update) File: ([^\n\r\\\"'`]+)")  # apply_patch: какие файлы агент создал и правил
+_VIEWED = re.compile(r"view_image\(\{\s*path:\s*[\"']([^\"']+)")
+
+
+def codex_home() -> Path:
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+
+
+def _sid(journal: Path) -> str:
+    """Номер сессии в индексе: у Claude Code — имя журнала, у Codex — «codex-<номер треда>»."""
+    m = _UUID.search(journal.name) if journal.name.startswith("rollout-") else None
+    return f"codex-{m.group(1)}" if m else journal.stem
+
+
+def codex_titles() -> dict[str, str]:
+    """Названия тредов Codex (session_index.jsonl): номер треда → название."""
+    out = {}
+    try:
+        lines = (codex_home() / "session_index.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("id") and d.get("thread_name"):
+            out[str(d["id"])] = str(d["thread_name"])
+    return out
+
+
+def codex_session(journal: Path, titles: dict | None = None) -> dict | None:
+    """Журнал Codex (rollout-*.jsonl) → разбор в том же виде, что у Claude Code (office._blank). Только сессии,
+    которые начал человек: проверки-«guardian» и прочие субагенты — мимо. Формат официально не описан —
+    что не разобрали, пропускаем молча."""
+    s, meta = office._blank(), None
+    try:
+        f = journal.open(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    with f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            kind = d.get("type") if isinstance(d, dict) else None
+            p = d.get("payload") if kind and isinstance(d.get("payload"), dict) else {}
+            at = d.get("timestamp") or s["last"]
+            if kind == "session_meta":
+                meta = p
+                s["cwd"] = str(p.get("cwd") or "")
+                s["entry"] = "codex-exec" if p.get("source") == "exec" else "codex"  # exec — запуск без человека
+            elif kind == "event_msg":
+                event = p.get("type")
+                if event == "task_started":
+                    s["turn"], s["pending"] = "open", {"turn": at}
+                elif event == "task_complete":
+                    s["turn"], s["pending"] = "answered", {}
+                elif event == "turn_aborted":
+                    s["turn"], s["pending"] = "stopped", {}
+            elif kind == "response_item":
+                s["first"], s["last"] = s["first"] or at, at
+                if s["pending"]:  # ход идёт — «работает», пока есть движение (у Codex нет отдельного «ждёт разрешения»)
+                    s["pending"] = {"turn": at}
+                item = p.get("type")
+                if item == "message" and p.get("role") == "user":
+                    for c in p.get("content") or []:
+                        text = str((c or {}).get("text") or "").strip()
+                        if text and not text.startswith("<"):  # <environment_context>, <external_context> — не человек
+                            s["prompts"] += 1
+                            s["prompt"] = s["prompt"] or text[:300]
+                            if s["prompts"] == 1:
+                                s["first_prompt"] = text[:office.FIRST_PROMPT]
+                            elif len(s["asks"]) < office.ASKS:
+                                s["asks"].append(text[:office.ASK_CHARS])
+                elif item == "message" and p.get("role") == "assistant":
+                    text = "\n".join(str((c or {}).get("text") or "") for c in p.get("content") or []
+                                     if (c or {}).get("type") == "output_text").strip()
+                    if text:
+                        s["answer"] = text[:office.ANSWER]
+                elif item in ("function_call", "custom_tool_call", "local_shell_call"):
+                    s["tools"] += 1
+                    code = str(p.get("input") or p.get("arguments") or "")
+                    for m in _PATCHED.finditer(code):
+                        path = os.path.join(s["cwd"], m.group(1).strip()) if s["cwd"] else m.group(1).strip()
+                        s["touched"][path] += 1
+                        if path not in s["written"]:
+                            s["written"].append(path)
+                    for m in _VIEWED.finditer(code):
+                        s["touched"][m.group(1)] += 1
+    if not meta or meta.get("thread_source") != "user" or not isinstance(meta.get("source"), str):
+        return None
+    s["title"] = (titles if titles is not None else codex_titles()).get(str(meta.get("id") or ""), "")
+    return s
+
+
+def codex_sessions(roots: list[Path], since: float, hide: set[str] = frozenset(), wanted=None):
+    """Сессии Codex в папках «Офиса», менявшиеся после since: (журнал, разбор, проект, папка офиса). Фоновые
+    запуски самого PULSE (codex exec в папке программы) — мимо, как и у Claude Code."""
+    titles = None
+    for journal in (codex_home() / "sessions").glob("**/rollout-*.jsonl"):
+        try:
+            if journal.stat().st_mtime < since:
+                continue
+        except OSError:
+            continue
+        if wanted and not wanted(journal):
+            continue
+        titles = codex_titles() if titles is None else titles
+        s = codex_session(journal, titles)
+        if not s or not s["prompts"] or (s["entry"] == "codex-exec" and office._inside(s["cwd"] or "/", str(config.APP_DIR))):
+            continue
+        root = next((r for r in roots if s["cwd"] and office._inside(s["cwd"], str(r))), None)
+        if not root:
+            continue
+        room = office._room(s, root)
+        if room.casefold() not in hide:
+            yield journal, s, room, root
 
 
 def prune() -> None:
@@ -152,11 +283,19 @@ def _decorate(r: dict) -> dict:
     started, last = store.parse_ts(r.get("started")), store.parse_ts(r.get("last"))
     r["duration"] = office._duration((last - started).total_seconds()) if started and last else ""
     r["home"] = _home(r)
-    r["link"] = f"claude://code/continue?session={r['desktop_id']}" \
-        if r.get("desktop_id") and office._DESKTOP_ID.match(r["desktop_id"]) else ""
+    r["link"] = _session_link(r)
     r["made"] = [{"path": p, "name": Path(p).name} for p in r["files_written"] if Path(p).exists()]
     r["outcome"] = {"completed": "готово", "review_ready": "на проверку", "blocked": "ждала действия"}.get(r.get("status") or "", "")
     return r
+
+
+def _session_link(r: dict) -> str:
+    """Открыть сессию там, где она шла: Claude — claude://code/continue, Codex — codex://threads/<тред>."""
+    if r.get("engine") == "codex" and str(r.get("id") or "").startswith("codex-"):
+        return f"codex://threads/{r['id'].removeprefix('codex-')}"
+    if r.get("desktop_id") and office._DESKTOP_ID.match(r["desktop_id"]):
+        return f"claude://code/continue?session={r['desktop_id']}"
+    return ""
 
 
 def similar(text: str, *, folder: str | None = None, limit: int = 5, settings: dict | None = None,
@@ -261,7 +400,16 @@ def task_text(c: dict) -> str:
 
 
 def agentish(c: dict) -> bool:
-    return bool(AGENTISH.search(f"{c.get('title') or ''} {c.get('what') or ''}"))
+    """Похоже на работу для агента: пометил Claude при разборе встречи или переписки — или по словам задачи."""
+    return bool(c.get("agent_hint")) or bool(AGENTISH.search(f"{c.get('title') or ''} {c.get('what') or ''}"))
+
+
+def mark_hint(cid: int, why: str) -> None:
+    """«Можно поручить агенту» на задаче (./ops commitments add|set --agent): что агент может сделать. Без запусков."""
+    if not store.row("SELECT 1 FROM commitments WHERE id=?", (cid,)):
+        raise ValueError(f"нет задачи [{cid}]")
+    store.execute("UPDATE commitments SET agent_hint=? WHERE id=?", ((why or "").strip()[:300] or None, cid))
+    _marks.clear()
 
 
 def _quote_time(meeting_id: str, c: dict) -> str:
@@ -425,9 +573,21 @@ def context(bid: int, settings: dict | None = None) -> str:
         out += ["Паспорт проекта —", passport]
     sims = similar(task_text(c), limit=5, settings=settings, task=c["id"])
     out += ["", "Похожие прошлые сессии (подробно — ./ops agents show <id>):"]
-    out += [f"- {s['id']} · {s['when']} · «{s['title']}» · {s['home']} · реплик человека: {s['n_prompts']}"
-            + (f" · создали: {', '.join(f['name'] for f in s['made'][:4])}" if s["made"] else "")
-            + (f" · итог: {s['outcome']}" if s["outcome"] else "") for s in sims] or ["- не нашлось"]
+    for s in sims:
+        out.append(f"- {s['id']} · {ENGINES.get(s['engine'], 'Claude')} · {s['when']} · «{s['title']}» · {s['home']}"
+                   f" · реплик человека: {s['n_prompts']}"
+                   + (f" · создали: {', '.join(f['name'] for f in s['made'][:4])}" if s["made"] else "")
+                   + (f" · итог: {s['outcome']}" if s["outcome"] else ""))
+        if s["prompts"]:  # что человек дописал после первого промта — этого в постановке не хватило
+            out.append("  Пришлось уточнять: " + "; ".join(f"«{' '.join(a.split())[:200]}»" for a in s["prompts"][:3]))
+    if not sims:
+        out.append("- не нашлось")
+    good = examples(limit=2, text=task_text(c), exclude=c["id"])
+    if good:
+        out += ["", "Удачные промты прошлых поручений — образцы (после них агенту хватило 1–2 реплик; прочитай самый "
+                    "похожий целиком — так подробно и в таком порядке и пиши):"]
+        out += [f"- {g['brief']} — «{g['headline']}» · {ENGINES.get(g['engine'], 'Claude')} · уточнений: {g['replies']}"
+                + (f" · сделал: {', '.join(g['made'][:3])}" if g["made"] else "") for g in good]
     listing = _listing(b["folder"])
     if listing:
         out += ["", "Свежие файлы в папке, где будет работать агент:"] + listing
@@ -690,18 +850,90 @@ def open_url(url: str) -> None:
         subprocess.run(["xdg-open", url], check=False, timeout=30)
 
 
-def launch(bid: int, text: str | None = None) -> dict:
-    """«Открыть в Claude»: сохранить правку, открыть новую сессию с промтом в поле ввода. Отправляет — человек."""
+CHATGPT_APPS = [Path("/Applications/ChatGPT.app"), Path.home() / "Applications" / "ChatGPT.app"]
+
+
+def codex_link(b: dict) -> tuple[str, bool]:
+    """Ссылка «новый тред Codex в приложении ChatGPT»: промт — в поле ввода (сам не отправляется; проверено на Mac,
+    ChatGPT 26.1027), папка — проект треда (приложение добавит её в список проектов). Длинный промт — коротким
+    поручением с путём к файлу брифа, как у Claude. Второе значение — ушёл ли промт целиком."""
+    def url(q: str) -> str:
+        return "codex://threads/new?" + urlencode([("prompt", q)] + [("path", b["folder"])] * bool(b.get("folder")),
+                                                  quote_via=quote)
+
+    prompt = b.get("prompt") or ""
+    if prompt and len(prompt) <= LINK_PROMPT:
+        return url(prompt), True
+    return url(short_prompt(b)), False
+
+
+def chatgpt_app() -> bool:
+    """Есть приложение ChatGPT с Codex — оно понимает codex://threads/new. Не на Mac — не проверено, только Терминал."""
+    return sys.platform == "darwin" and any(p.exists() for p in CHATGPT_APPS)
+
+
+def open_codex_terminal(b: dict) -> bool:
+    """Приложения ChatGPT нет — окно Терминала (Windows — PowerShell) с Codex CLI в папке поручения. Промт — в буфер
+    обмена: Codex CLI с промтом в команде отправил бы его сам, а отправляет человек. Второе — ушёл ли промт целиком."""
+    from opsdash import codex
+
+    exe = codex.find()
+    if not exe:
+        raise ValueError("не нашла ни приложение ChatGPT, ни Codex CLI — скопируйте промт")
+    prompt = b.get("prompt") or ""
+    whole = len(prompt) <= LINK_PROMPT
+    text = prompt if whole else short_prompt(b)
+    folder = b.get("folder") or str(Path.home())
+    script = config.DATA_DIR / "agent-briefs" / "codex-open"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        clip = script.with_suffix(".txt")
+        clip.write_text(text, encoding="utf-8")
+        ps = script.with_suffix(".ps1")
+        quoted = lambda x: "'" + str(x).replace("'", "''") + "'"  # noqa: E731
+        ps.write_text(f"Set-Location -LiteralPath {quoted(folder)}\n"
+                      f"Get-Content -Raw -Encoding UTF8 -LiteralPath {quoted(clip)} | Set-Clipboard\n"
+                      'Write-Host "Промт PULSE — в буфере обмена: вставьте (Ctrl+V) и нажмите Enter."\n'
+                      f"& {quoted(exe)}\n", encoding="utf-8-sig")  # Windows PowerShell читает UTF-8 только с BOM
+        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps)],
+                         creationflags=0x00000010)  # CREATE_NEW_CONSOLE
+        return whole
+    if sys.platform != "darwin":
+        raise ValueError(f"выполните в терминале: cd {shlex.quote(folder)} && {shlex.quote(exe)} — и вставьте промт")
+    subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True, timeout=10)
+    command = script.with_suffix(".command")  # .command открывается в Терминале без лишних разрешений
+    command.write_text("#!/bin/bash\n"
+                       f"cd {shlex.quote(folder)} || exit 1\n"
+                       'echo "Промт PULSE — в буфере обмена: вставьте (⌘V) и нажмите Enter."\n'
+                       f"exec {shlex.quote(exe)}\n", encoding="utf-8")
+    command.chmod(0o700)
+    subprocess.run(["open", str(command)], check=True, timeout=30)
+    return whole
+
+
+def launch(bid: int, text: str | None = None, engine: str = "claude") -> dict:
+    """«Открыть в Claude» / «Открыть в Codex»: сохранить правку, открыть новую сессию с промтом в поле ввода
+    (Codex без приложения ChatGPT — Терминал, промт в буфере обмена). Отправляет — человек."""
     if text is not None:
         save(bid, text)
     b = get(bid)
     if not b or not b["prompt"]:
         raise ValueError("промта ещё нет — соберите его")
-    url, whole = claude_link(b)
-    open_url(url)
-    store.execute("UPDATE task_agents SET launched_at=? WHERE id=?", (store.utcnow(), bid))
+    if engine == "codex":
+        if chatgpt_app():
+            url, whole = codex_link(b)
+            open_url(url)
+            where = "chatgpt"
+        else:
+            url, whole, where = "", open_codex_terminal(b), "terminal"
+    else:
+        url, whole = claude_link(b)
+        open_url(url)
+        where = "claude"
+    store.execute("UPDATE task_agents SET launched_at=?, engine=? WHERE id=?",
+                  (store.utcnow(), "codex" if engine == "codex" else "claude", bid))
     _marks.clear()
-    return {"whole": whole, "url": url}
+    return {"whole": whole, "url": url, "where": where}
 
 
 # --- запущенные поручения: сессия агента на задаче -----------------------------------------------
@@ -747,21 +979,24 @@ def link(settings: dict | None = None) -> int:
         launched = store.parse_ts(b["launched_at"])
         since = launched.timestamp() - LATE_START
         best = None
-        for root in [Path(b["folder"])] if b["folder"] else roots:
-            for journal, s, room in office.sessions(root, since):  # скрытый проект — не помеха: папку выбрала директор
-                if _started(b, s) and (not best or (s["first"] or "") > (best[1]["first"] or "")):
-                    best = (journal, s, room, root)
-        if not best or best[0].stem == b["session_id"]:
+        where = [Path(b["folder"])] if b["folder"] else roots
+        found_in = [(journal, s, room, root, "claude") for root in where  # скрытый проект — не помеха: папку выбрала директор
+                    for journal, s, room in office.sessions(root, since)]
+        found_in += [(journal, s, room, root, "codex") for journal, s, room, root in codex_sessions(where, since)]
+        for item in found_in:
+            if _started(b, item[1]) and (not best or (item[1]["first"] or "") > (best[1]["first"] or "")):
+                best = item
+        if not best or _sid(best[0]) == b["session_id"]:
             continue
-        journal, s, room, root = best
+        journal, s, room, root, engine = best
         try:
             st = journal.stat()
-            _save(journal, s, root, room, app.get(journal.stem), (st.st_size, st.st_mtime))  # опыт — сразу в индекс
+            _save(journal, s, root, room, app.get(journal.stem), (st.st_size, st.st_mtime), engine)  # опыт — сразу в индекс
         except OSError:
             continue
         mine = app.get(journal.stem) or {}
         store.execute("UPDATE task_agents SET session_id=?, desktop_id=?, state='linked', result_files='[]' WHERE id=?",
-                      (journal.stem, mine.get("id"), b["id"]))
+                      (_sid(journal), mine.get("id"), b["id"]))
         found += 1
     _marks.clear()
     return found
@@ -774,8 +1009,9 @@ def session_state(b: dict, app: dict | None = None) -> dict | None:
         return None
     r = store.row("SELECT * FROM agent_sessions WHERE id=?", (b["session_id"],)) or {}
     journal = Path(r["journal"]) if r.get("journal") else None
-    s = office._session(journal) if journal and journal.exists() else None
-    app = office.desktop_sessions() if app is None else app
+    codex = r.get("engine") == "codex"
+    s = (codex_session(journal) if codex else office._session(journal)) if journal and journal.exists() else None
+    app = {} if codex else office.desktop_sessions() if app is None else app
     mine = app.get(b["session_id"]) or {}
     status = mine.get("status") or (r.get("status") or "")  # приложение забыло сессию — его последняя оценка из индекса
     now = datetime.now(timezone.utc)
@@ -792,8 +1028,9 @@ def session_state(b: dict, app: dict | None = None) -> dict | None:
             "needs": (mine.get("needs") or "") if st != "done" else "", "files": files,
             "session_title": r.get("title") or (s["title"] if s else "") or "Сессия агента",
             "last": (s or {}).get("last") or r.get("last"),
-            "link": f"claude://code/continue?session={desktop}" if office._DESKTOP_ID.match(desktop or "") and
-            not mine.get("archived") else ""}
+            "engine": "codex" if codex else "claude",
+            "link": _session_link(r) if codex else f"claude://code/continue?session={desktop}"
+            if office._DESKTOP_ID.match(desktop or "") and not mine.get("archived") else ""}
 
 
 def check(settings: dict | None = None) -> str:
@@ -845,6 +1082,28 @@ def marks() -> dict[int, dict]:
 
 def of(cid: int) -> dict | None:
     return marks().get(cid)
+
+
+def examples(limit: int = 3, text: str = "", exclude: int | None = None) -> list[dict]:
+    """Пары «бриф → результат», которые удались: после промта агенту хватило 1–2 реплик человека, а работа сделана —
+    приложение отметило сессию готовой или задачу закрыли. Образцы для навыка agent-brief; похожие на text — первыми."""
+    rows = store.rows(
+        "SELECT a.commitment_id, a.brief_path, s.n_prompts, s.engine, s.files_written, s.last, c.title, c.what "
+        "FROM task_agents a JOIN agent_sessions s ON s.id = a.session_id JOIN commitments c ON c.id = a.commitment_id "
+        "WHERE a.brief_path IS NOT NULL AND s.n_prompts BETWEEN 1 AND 2 "
+        "AND (s.status IN ('completed', 'review_ready') OR c.status = 'done')")
+    want = records._stems(text)
+    out = []
+    for r in rows:
+        brief = config.DATA_DIR / r["brief_path"]
+        if r["commitment_id"] == exclude or not brief.is_file():
+            continue
+        out.append({"task": r["commitment_id"], "headline": records.headline(r), "brief": str(brief), "engine": r["engine"],
+                    "replies": r["n_prompts"] - 1, "last": r["last"] or "",
+                    "made": [Path(p).name for p in store.loads(r["files_written"], []) if Path(p).is_file()],
+                    "common": len(want & records._stems(f"{r['title'] or ''} {r['what'] or ''}"))})
+    out.sort(key=lambda g: (g["common"], g["last"]), reverse=True)
+    return out[:limit]
 
 
 def task_of_sessions() -> dict[str, dict]:

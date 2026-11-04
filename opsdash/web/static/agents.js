@@ -102,8 +102,7 @@
     if (!e.target.matches("[data-agent-panel] input[name=engine]")) return;
     var panel = e.target.closest("[data-agent-panel]");
     var codex = e.target.value === "codex";
-    panel.querySelectorAll("[data-agent-launch]").forEach(function (b) { b.hidden = codex; });
-    panel.querySelectorAll("[data-agent-codex]").forEach(function (b) { b.hidden = !codex; });
+    panel.querySelectorAll("[data-agent-launch]").forEach(function (b) { b.hidden = (b.dataset.agentLaunch === "codex") !== codex; });
   });
 
   function said(panel, text, bad) {
@@ -165,7 +164,7 @@
     save(panel);
   });
 
-  // «Копировать промт» и «Открыть в Claude»: сначала сохраняем правку — в Claude уходит то, что на экране
+  // «Копировать промт», «Открыть в Claude» и «Открыть в Codex»: сначала сохраняем правку — агенту уходит то, что на экране
   document.addEventListener("click", function (e) {
     var copy = e.target.closest("[data-agent-copy]");
     var launch = e.target.closest("[data-agent-launch]");
@@ -183,10 +182,11 @@
     }
     if (store) { save(panel); return; }
     launch.disabled = true;
-    said(panel, "Открываю Claude…");
+    said(panel, launch.dataset.agentLaunch === "codex" ? "Открываю Codex…" : "Открываю Claude…");
     var form = panel.querySelector("[data-agent-prompt]");
     var body = new FormData();
     body.append("prompt", area.value);
+    body.append("engine", launch.dataset.agentLaunch || "claude");
     fetch(form.action, { method: "POST", body: body, headers: HEADERS })
       .then(function (r) { return r.json(); })
       .then(function (res) { said(panel, res.ok ? res.said : res.error, !res.ok); })

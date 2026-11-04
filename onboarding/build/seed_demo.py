@@ -298,4 +298,20 @@ for title, what, room, made, minutes, status, answer in [
     store.execute("UPDATE task_agents SET launched_at=?, session_id=?, state='linked' WHERE id=?",
                   (store.to_utc_iso(now - timedelta(minutes=minutes + 1)), journal.stem, bid))
 print(agents.check())
+
+# прошлая сессия Codex в опыте агентов и задача, которую Claude при разборе пометил «можно поручить агенту»
+forecast = model / "Прогноз выручки — сценарии.xlsx"
+forecast.write_text("", encoding="utf-8")
+s = office._blank()
+s.update(cwd=str(model), title="Прогноз выручки Q4 по сценариям", prompt="Посчитай прогноз выручки Q4 по трём сценариям",
+         first_prompt="Посчитай прогноз выручки Q4 по трём сценариям из финмодели: базовый, минус 10%, минус 20%. Таблицей.",
+         asks=["Сделай ещё вариант без новых клиентов"], prompts=2, written=[str(forecast)],
+         answer="Готово: «Прогноз выручки — сценарии.xlsx», четыре сценария.",
+         first=store.to_utc_iso(now - timedelta(days=9, hours=2)), last=store.to_utc_iso(now - timedelta(days=9, hours=1)))
+agents._save(Path("rollout-2026-10-26T10-00-00-0a0a0a0a-1b1b-2c2c-3d3d-4e4e4e4e4e4e.jsonl"), s, WORK, "Финмодель", None,
+             (0, 0), engine="codex")
+cid = records.add_commitment(direction="mine", who="Анна Смирнова", whom="Олег Соколов", title="Прогноз выручки на ноябрь",
+                             what="Прогноз выручки на ноябрь по трём сценариям для сверки плана Q4",
+                             due=(today + timedelta(days=4)).isoformat(), source_type="meeting", source_ref=planerka)
+agents.mark_hint(cid, "посчитать прогноз по сценариям из финмодели — так уже делали для Q4")
 print("Демо-стенд готов:", HOME)

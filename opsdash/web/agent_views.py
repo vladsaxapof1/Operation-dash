@@ -31,7 +31,7 @@ def register(app: FastAPI, render, templates, back) -> None:
             choices.insert(0, {"path": folder, "label": folder, "root": ""})
         engine = b["engine"] if b else ("codex" if brain.engine(settings) == "chatgpt" else "claude")
         return {"c": c, "b": b, "sims": sims, "folders": choices, "folder": folder, "engine": engine,
-                "builder": brain.name(settings), "hint": agents.agentish(c),
+                "builder": brain.name(settings), "hint": agents.agentish(c), "chatgpt": agents.chatgpt_app(),
                 "long": bool(b and b["prompt"] and len(b["prompt"]) > agents.LINK_PROMPT), "limit": agents.LINK_PROMPT}
 
     def panel(request: Request, cid: int, msg: str = "", err: str = "") -> HTMLResponse:
@@ -79,19 +79,24 @@ def register(app: FastAPI, render, templates, back) -> None:
         return answer(request, b["commitment_id"], "Промт сохранён")
 
     @app.post("/agents/{bid}/open")
-    def agent_open(request: Request, bid: int, prompt: str = Form("")):
+    def agent_open(request: Request, bid: int, prompt: str = Form(""), engine: str = Form("claude")):
         b = agents.get(bid)
         if not b:
             return JSONResponse({"ok": False, "error": "Поручения нет"}, status_code=404)
         try:
-            res = agents.launch(bid, prompt if prompt.strip() else None)
+            res = agents.launch(bid, prompt if prompt.strip() else None, engine)
         except (ValueError, OSError) as e:
             err = f"Не открылось: {e}"
             return JSONResponse({"ok": False, "error": err}) if request.headers.get("x-agent-panel") \
                 else answer(request, b["commitment_id"], err=err)
-        said = ("Открыла новую сессию в Claude: промт — в поле ввода. Проверьте и отправьте сами." if res["whole"] else
-                "Открыла новую сессию в Claude: промт длинный — в поле ввода короткое поручение со ссылкой на файл "
-                "брифа. Проверьте и отправьте сами.")
+        where = {"claude": "новую сессию в Claude", "chatgpt": "новый тред Codex в приложении ChatGPT"}.get(res["where"])
+        if where:
+            said = (f"Открыла {where}: промт — в поле ввода. Проверьте и отправьте сами." if res["whole"] else
+                    f"Открыла {where}: промт длинный — в поле ввода короткое поручение со ссылкой на файл брифа. "
+                    "Проверьте и отправьте сами.")
+        else:
+            said = ("Открыла Терминал с Codex в папке поручения: промт — в буфере обмена, вставьте его и нажмите Enter."
+                    + ("" if res["whole"] else " Промт длинный — в буфере короткое поручение со ссылкой на файл брифа."))
         if request.headers.get("x-agent-panel"):
             return JSONResponse({"ok": True, "said": said})
         return answer(request, b["commitment_id"], said)
