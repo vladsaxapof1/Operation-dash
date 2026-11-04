@@ -219,7 +219,8 @@ templates.env.globals.update(
     proposal_links=proposals.links,  # ссылки у предложений — для макросов (они не видят переменных страницы)
     proposal_action=proposals.action,  # надпись на кнопке подтверждения: «Закрыть задачу», «Напомнить»…
 )
-templates.env.filters.update(dur=day_mod.dur, hm=day_mod.hm, est=day_mod.est_text)  # «Реальность дня»
+templates.env.filters.update(dur=day_mod.dur, hm=day_mod.hm, est=day_mod.est_text,  # «Реальность дня»
+                             day_text=day_mod.day_text)
 templates.env.globals.update(DAY_CHIPS=day_mod.CHIPS, SPLIT_HINT=day_mod.SPLIT_HINT,
                              day_people=lambda: [p["name"] for p in records.list_people()])  # «Передать» — кому
 
@@ -579,6 +580,7 @@ def home(request: Request):
     now = snap["now"]
     dp = day_mod.plan(settings=settings, now=now)  # «Реальность дня»: окна, спрос, вердикт и план — без ИИ
     day_mod.decorate(day, dp)
+    dp["week"] = day_mod.week(settings=settings, now=now)  # «На неделю: …» — в понедельник и когда впереди перегруз
     timed = [e for e in day["events"] if not e["all_day"] and not e.get("day_kind")]  # фокус-блок — не встреча
     busy_min = sum(e - s for s, e in day_mod.union([(m["s"], m["e"]) for m in dp["meetings"]]))
     left = [e for e in timed if (e.get("e_local") or e["s_local"]) > now]

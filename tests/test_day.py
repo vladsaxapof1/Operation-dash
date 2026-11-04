@@ -444,3 +444,118 @@ def test_overview_evening_carry_and_review_delegate(settings_with, monkeypatch):
     assert "Перенести незакрытое на завтра" in page and "Ответ юристам" in page
     client.post("/day/carry")
     assert records.get_commitment(other)["due"] == "2026-11-04"
+
+
+# --- этап 3: неделя, срок в момент обещания, приток и отток --------------------------------------------
+
+def _meeting(uid, on, start="09:00", end="19:30"):
+    """Встреча с участником на весь рабочий день — окон в этот день не остаётся."""
+    tz = config.tz()
+    store.execute('INSERT INTO events(uid, title, start, "end", all_day, attendees) VALUES(?,?,?,?,0,?)',
+                  (uid, "Выездная сессия", store.to_utc_iso(datetime.combine(on, time.fromisoformat(start), tz)),
+                   store.to_utc_iso(datetime.combine(on, time.fromisoformat(end), tz)),
+                   store.json_col([{"email": "p@example.ru"}])))
+
+
+def test_week_overload_from_thursday():
+    settings = config.load_settings()
+    _busy_day()  # вторник: окон 4 ч 05 мин
+    wed, thu, fri = (DAY + timedelta(days=n) for n in (1, 2, 3))
+    for i, d in enumerate((wed, thu, fri)):
+        _meeting(f"full{i}", d)
+    for n in range(3):
+        day.set_estimate(_task(f"Вторник {n}", DAY.isoformat()), 30)
+    day.set_estimate(_task("Среда", wed.isoformat()), 60)
+    day.set_estimate(_task("Четверг", thu.isoformat()), 120)
+    w = day.week(DAY, settings, _at(8))
+    assert [(x["date"], x["capacity"], x["need"], x["level"]) for x in w["days"]] == [
+        (DAY, 245, 90, "ok"), (wed, 0, 60, "ok"), (thu, 0, 120, "over"), (fri, 0, 0, "over")]
+    assert w["line"] == "На неделю: окон 4 ч, задач 4 ч 30 мин — перегруз с четверга"
+    assert day.week(DAY, settings, _at(8, 0) + timedelta(days=1))["days"][0]["date"] == wed  # с сегодняшнего дня
+
+
+def test_week_only_today_overloaded_is_not_week_overload():
+    settings = config.load_settings()
+    _busy_day()
+    day.set_estimate(_task("Большая просроченная", "2026-11-01"), 240)
+    w = day.week(DAY, settings, _at(8))
+    assert w["days"][0]["level"] == "tight" and all(x["level"] == "ok" for x in w["days"][1:])
+    assert w["line"].endswith("— реально (сегодня — плотно)")
+    nxt = day.week(DAY + timedelta(days=7), settings, _at(8))  # следующая неделя: первый день — понедельник
+    assert nxt["days"][0]["date"] == date(2026, 11, 9) and nxt["line"].startswith("На неделю: окон 55 ч")
+
+
+def test_capacity_until_and_due_hint(capsys, monkeypatch):
+    from opsdash import cli
+
+    settings = config.load_settings()
+    _busy_day()  # сегодня окон 4 ч 05 мин; завтра календарь пуст
+    day.set_estimate(_task("Уже на сегодня", DAY.isoformat()), 240)
+    res = day.capacity_until(DAY, 60, settings=settings, now=_at(8))
+    assert not res["ok"] and res["capacity"] == 245 and res["need"] == 240 and res["realistic"] == DAY + timedelta(days=1)
+    assert day.capacity_until(DAY + timedelta(days=1), 60, settings=settings, now=_at(8))["ok"]
+    cid = _task("Справка для собственника", DAY.isoformat(), source_type="meeting")
+    day.set_estimate(cid, 60, by="claude")
+    assert day.check_due(cid, settings, _at(8))["realistic"] == date(2026, 11, 4)
+    c = store.row("SELECT due_hint, due_hint_why FROM commitments WHERE id=?", (cid,))
+    assert c["due_hint"] == "2026-11-04" and c["due_hint_why"].startswith("до 03.11 окон для задач 4 ч 5 мин")
+    assert [x["id"] for x in records.due_queue() if x["due_hint"]] == [cid]  # «Уточнить срок» предложит дату
+    records.set_due(cid, None)  # «Оставить 03.11» — срок прежний, больше не спрашиваем
+    c = records.get_commitment(cid)
+    assert c["due"] == DAY.isoformat() and not c["due_hint"] and not c["no_due_at"] and cid not in [
+        x["id"] for x in records.due_queue()]
+    # Claude записывает задачу со сроком — проверка сразу, текст для пометки в разборе встречи
+    monkeypatch.setattr(config, "now", lambda s=None: _at(8))
+    cli.main(["commitments", "add", "--direction", "mine", "--title", "Ещё справка", "--what", "Ещё справка",
+              "--due", DAY.isoformat(), "--estimate", "60"])
+    out = capsys.readouterr().out
+    assert "Срок под угрозой с самого начала" in out and "срок под угрозой с самого начала — реальнее" in out
+    cli.main(["day", "capacity", "--until", DAY.isoformat(), "--estimate", "15"])
+    assert capsys.readouterr().out.startswith("Не успеваете: до 03.11")
+    cli.main(["day", "week"])
+    assert capsys.readouterr().out.startswith("На неделю:")
+
+
+def test_due_dialog_offers_realistic_date(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(10))
+    _busy_day()
+    day.set_estimate(_task("Уже на сегодня", DAY.isoformat()), 240)
+    cid = _task("Справка для собственника", DAY.isoformat(), source_type="meeting")
+    day.check_due(cid)
+    page = TestClient(app, base_url="http://localhost:8765").get("/").text
+    assert "срок под угрозой — 1" in page and 'data-due-pick="2026-11-04"' in page and "Реальнее<span>ср, 04.11</span>" in page
+    assert "Оставить 03.11" in page
+
+
+def test_week_line_on_monday_overview(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings_with(calendar={"enabled": True})
+    monday = date(2026, 11, 2)
+    monkeypatch.setattr(config, "now", lambda s=None: datetime.combine(monday, time(9), config.tz(s)))
+    _task("Отчёт", monday.isoformat())
+    page = TestClient(app, base_url="http://localhost:8765").get("/").text
+    assert "На неделю: окон 55 ч, задач 30 мин — реально" in page
+    monkeypatch.setattr(config, "now", lambda s=None: _at(9))  # вторник и неделя реальна — строки нет
+    assert "На неделю:" not in TestClient(app, base_url="http://localhost:8765").get("/").text
+
+
+def test_flow_in_weekly_stats():
+    from opsdash import digests
+
+    tz = config.tz()
+    a, b = _task("Из встречи", source_type="meeting"), _task("Из встречи 2", source_type="meeting")
+    c = _task("Вручную")
+    records.update_commitment(a, status="done")
+    for cid in (a, b, c):
+        store.execute("UPDATE commitments SET created=? WHERE id=?", (store.to_utc_iso(_at(10)), cid))
+    store.execute("UPDATE commitments SET closed_at=? WHERE id=?", (store.to_utc_iso(_at(15)), a))
+    store.execute("INSERT INTO meetings(id, title, started_at, status) VALUES('m1', 'Планёрка', ?, 'processed')",
+                  (store.to_utc_iso(datetime.combine(DAY, time(11), tz)),))
+    f = day.flow(date(2026, 11, 2), date(2026, 11, 8))
+    assert (f["added"], f["closed"], f["from_meetings"], f["meetings"]) == (3, 1, 2, 1)
+    assert f["line"] == "Ваши задачи: добавилось 3, закрыто 1 (долг вырос на 2); 1 разобранная встреча — каждая в среднем даёт вам 2 задачи"
+    assert "Приток и отток: Ваши задачи:" in digests.week_stats(DAY)

@@ -48,6 +48,9 @@
   {% endif %}
   {% for it in p.too_big[:1] %}<p class="dv-big warn-text">«{{ it.title }}» ({{ it.est | dur }}) не помещается: самое длинное окно {{ p.longest | dur }} — {{ SPLIT_HINT }}</p>{% endfor %}
   {% if p.progress.total %}<p class="dv-now">{{ p.progress.line }}</p>{% endif %}
+  {% set w = p.week %}{% if w and w.line and (p.now.weekday() == 0 or w.level == 'over') %}
+  <p class="dv-week dv-{{ w.level }}" title="{% for x in w.days %}{{ x.date | day_text }}: окон {{ x.capacity | dur }}, задач {{ x.need | dur }}{{ '; ' if not loop.last }}{% endfor %}"><span class="dv-dot" aria-hidden="true"></span>{{ w.line }}</p>
+  {% endif %}
   {% if p.today and p.off == 'over' and p.carry %}{{ carry(p) }}{% endif %}
 </div>
 {% endmacro %}

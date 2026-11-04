@@ -415,14 +415,17 @@
         {%- if c.no_due_at %} · вы уже оставляли её без срока{% endif %}</div>
       {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
       {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}
+      {% if c.due_hint %}<p class="warn-text small">Срок {{ c.due | date }} под угрозой с самого начала: {{ c.due_hint_why }}. Реальнее — {{ c.due_hint | day_text }}.</p>{% endif %}
       <div class="due-pick" role="group" aria-label="Срок">
-        {% for ch in choices %}<button type="button" class="due-q" data-due-pick="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
+        {% if c.due_hint %}<button type="button" class="due-q" data-due-pick="{{ c.due_hint }}" aria-pressed="false">Реальнее<span>{{ c.due_hint | day_text }}</span></button>{% endif %}
+        {% for ch in (choices | rejectattr('iso', 'equalto', c.due_hint) | list)[:3 if c.due_hint else 4] %}<button type="button" class="due-q" data-due-pick="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
       </div>
       <label class="due-own">или своя дата <input type="date" name="due" required></label>
       <p class="bad-text small" data-due-err hidden></p>
       <div class="dlg-actions">
         <button class="btn primary" name="act" value="save" data-due-save>Сохранить срок</button>
-        <button class="btn" name="act" value="skip" formnovalidate title="Задача останется без срока, и PULSE больше не спросит о ней">Оставить без срока</button>
+        {% if c.due_hint %}<button class="btn" name="act" value="skip" formnovalidate title="Срок останется прежним, и PULSE больше не спросит о нём">Оставить {{ c.due | date }}</button>
+        {% else %}<button class="btn" name="act" value="skip" formnovalidate title="Задача останется без срока, и PULSE больше не спросит о ней">Оставить без срока</button>{% endif %}
         <span class="grow"></span>
         <button type="button" class="btn ghost" data-due-next title="Решить потом: задача останется в разборе">Не сейчас</button>
       </div>

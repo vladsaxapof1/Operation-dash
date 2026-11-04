@@ -177,6 +177,8 @@ CREATE TABLE IF NOT EXISTS commitments (
     in_work_at TEXT,                 -- директор отметила «В работе»: карточка сверху колонки, зелёная
     estimate_min INTEGER,            -- сколько займёт у директора, мин (opsdash.day); пусто — считаем 30
     estimate_by TEXT,                -- кто оценил: claude | user (оценку директора Claude не меняет)
+    due_hint TEXT,                   -- срок под угрозой с самого начала: реальнее эта дата (opsdash.day.check_due)
+    due_hint_why TEXT,               -- почему: сколько окон до срока и сколько задач
     archived_at TEXT,                -- убрана в архив: не видна на доске, в списках и дайджестах
     duplicate_of INTEGER,            -- дубль какой задачи: закрыта при объединении (records.merge_commitments)
     project_id INTEGER,              -- в каком проекте (opsdash.projects); подзадачи получают проект основной
@@ -453,6 +455,8 @@ MIGRATIONS = [
     ("commitments", "in_work_at", "TEXT"),
     ("commitments", "estimate_min", "INTEGER"),  # «Реальность дня» (opsdash.day)
     ("commitments", "estimate_by", "TEXT"),
+    ("commitments", "due_hint", "TEXT"),
+    ("commitments", "due_hint_why", "TEXT"),
     ("events", "transp", "TEXT"),
     ("commitments", "archived_at", "TEXT"),
     ("messages", "topic", "TEXT"),

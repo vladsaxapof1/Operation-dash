@@ -261,6 +261,21 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     return one if k % 10 == 1 else few if 2 <= k % 10 <= 4 else many
 
 
+def _blocked() -> dict[int, str]:
+    """Задачи, которые сами чего-то ждут: связь «ждёт» (не готово) или открытая подзадача — часть работы передана.
+    id → что ждёт, словами («ждёт «…»», «передано: Пётр»)."""
+    blocked: dict[int, str] = {}
+    for r in store.rows(
+            "SELECT l.task_id, l.event, w.direction, w.who, w.title, w.what FROM task_links l "
+            "LEFT JOIN commitments w ON w.id=l.waits_for "
+            "WHERE (l.waits_for IS NOT NULL AND w.status='open') OR (l.waits_for IS NULL AND l.done_at IS NULL) ORDER BY l.id"):
+        blocked.setdefault(r["task_id"], f"ждёт «{records.headline(r)}»" if r["what"] or r["title"] else f"ждёт: {r['event']}")
+    for r in store.rows("SELECT parent_id, direction, who FROM commitments WHERE parent_id IS NOT NULL AND status='open' "
+                        "AND archived_at IS NULL ORDER BY id"):
+        blocked.setdefault(r["parent_id"], "передано: " + ("ваша часть" if r["direction"] == "mine" else r["who"] or "?"))
+    return blocked
+
+
 def demand(day: date | None = None, settings: dict | None = None, *, rows: list[dict] | None = None) -> dict:
     """Что нужно сделать в этот день, по приоритету. Только задачи директора: срок сегодня или просрочено, всё
     «в работе», срок в ближайшие 2 рабочих дня, если их ждут другие, и то, что директор сама поставила в план;
@@ -281,15 +296,7 @@ def demand(day: date | None = None, settings: dict | None = None, *, rows: list[
             "JOIN commitments t ON t.id=l.task_id WHERE l.waits_for IS NOT NULL AND t.status='open' "
             "AND t.archived_at IS NULL"):
         holders.setdefault(r["for_id"], []).append(r)
-    blocked: dict[int, str] = {}  # что задача ждёт — первое, словами
-    for r in store.rows(
-            "SELECT l.task_id, l.event, w.direction, w.who, w.title, w.what FROM task_links l "
-            "LEFT JOIN commitments w ON w.id=l.waits_for "
-            "WHERE (l.waits_for IS NOT NULL AND w.status='open') OR (l.waits_for IS NULL AND l.done_at IS NULL) ORDER BY l.id"):
-        blocked.setdefault(r["task_id"], f"ждёт «{records.headline(r)}»" if r["what"] or r["title"] else f"ждёт: {r['event']}")
-    for r in store.rows("SELECT parent_id, direction, who FROM commitments WHERE parent_id IS NOT NULL AND status='open' "
-                        "AND archived_at IS NULL ORDER BY id"):
-        blocked.setdefault(r["parent_id"], "передано: " + ("ваша часть" if r["direction"] == "mine" else r["who"] or "?"))
+    blocked = _blocked()
     pids = {c["project_id"] for c in tasks if c.get("project_id")}
     projects = {p["id"]: p for p in store.rows(
         f"SELECT id, title, due, status FROM projects WHERE id IN ({','.join('?' * len(pids)) or 'NULL'})", list(pids))}
@@ -722,6 +729,172 @@ def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due:
                                source_type="manual", parent_id=cid)
         return f"Передано: {who.strip()} — задача ждёт эту часть"
     raise ValueError("Неизвестное действие")
+
+
+# --- неделя и срок в момент обещания ----------------------------------------------------------------
+
+WEEKDAYS_FROM = ["понедельника", "вторника", "среды", "четверга", "пятницы", "субботы", "воскресенья"]
+
+
+def _calendar(first: date, last: date, settings: dict) -> tuple[list[dict], set[str]]:
+    """События с first по last (включительно) одним запросом и uid встреч с готовым брифом."""
+    tz = config.tz(settings)
+    begin = datetime.combine(first, time.min, tz)
+    events = store.rows('SELECT * FROM events WHERE start < ? AND "end" > ? ORDER BY start',
+                        (store.to_utc_iso(datetime.combine(last + timedelta(days=1), time.min, tz)), store.to_utc_iso(begin)))
+    uids = [e["uid"] for e in events]
+    ready = {r["uid"] for r in store.rows(
+        f"SELECT uid FROM briefs WHERE status='ready' AND uid IN ({','.join('?' * len(uids)) or 'NULL'})", uids)}
+    return events, ready
+
+
+def _by_due(today: date, *, exclude: int | None = None) -> dict[date, list[dict]]:
+    """Задачи директора по дню, к которому их надо сделать: срок (просроченные — сегодня), «в работе» без срока —
+    сегодня. Задачи, которые сами чего-то ждут, не считаются: их всё равно не закончить."""
+    blocked = _blocked()
+    out: dict[date, list[dict]] = {}
+    for c in store.rows("SELECT * FROM commitments WHERE direction='mine' AND status='open' AND archived_at IS NULL"):
+        if c["id"] in blocked or c["id"] == exclude:
+            continue
+        d = records._as_date(c["due"]) if c["due"] else (today if c["in_work_at"] else None)
+        if d:
+            out.setdefault(max(d, today), []).append(
+                {"id": c["id"], "title": records.headline(c), "est": c.get("estimate_min") or DEFAULT_ESTIMATE})
+    return out
+
+
+WEEKDAYS_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+
+
+def day_text(value: str | date | None) -> str:
+    """«чт, 09.11» — как у быстрых сроков в «Уточнить срок»."""
+    d = records._as_date(value) if isinstance(value, str) else value
+    return f"{WEEKDAYS_SHORT[d.weekday()]}, {d:%d.%m}" if d else ""
+
+
+def _hours(m: int) -> str:
+    """Для недели — с точностью до получаса: «9 ч», «13 ч 30 мин»."""
+    return dur(round(m / 30) * 30)
+
+
+def week(day: date | None = None, settings: dict | None = None, now: datetime | None = None) -> dict:
+    """Неделя (рабочие дни недели, в которую входит day; текущая — от сегодня): окна и задачи по дням, нарастающим
+    итогом — задачу со сроком в четверг можно делать с понедельника. «На неделю: окон 9 ч, задач 14 ч — перегруз
+    с четверга»: с какого дня задач больше, чем окон до него."""
+    settings = settings or config.load_settings()
+    o = opts(settings)
+    now = now if now is not None else config.now(settings)
+    today = now.date()
+    day = day or today
+    monday = day - timedelta(days=day.weekday())
+    days = [d for d in (monday + timedelta(days=i) for i in range(7)) if d >= today and work_window(d, settings)]
+    out = {"monday": monday, "days": [], "capacity": 0, "need": 0, "level": "ok", "from": None, "line": ""}
+    if not days:
+        return out
+    events, ready = _calendar(days[0], days[-1], settings)
+    first = demand(days[0], settings)["items"]  # первый день — как в плане дня: просроченное, «в работе», ответы
+    counted = {i["id"] for i in first if i["id"]}
+    later = _by_due(days[0])
+    cap_sum = need_sum = 0
+    for d in days:
+        cap = capacity(layout(d, events, settings, now=now, briefs=ready))
+        items = first if d == days[0] else [t for t in later.get(d, []) if t["id"] not in counted]
+        counted |= {i["id"] for i in items if i.get("id")}
+        need = sum(i["est"] for i in items)
+        cap_sum, need_sum = cap_sum + cap, need_sum + need
+        pct = need_sum * 100 / cap_sum if cap_sum else (math.inf if need_sum else 0)
+        level = "over" if pct > o["over"] else "tight" if pct > o["tight"] else "ok"
+        out["days"].append({"date": d, "capacity": cap, "need": need, "items": items, "level": level,
+                            "cum_capacity": cap_sum, "cum_need": need_sum})
+    out["capacity"], out["need"] = cap_sum, need_sum
+    # перегружен только первый день (в нём всё просроченное и «в работе»), а дальше по неделе всё помещается —
+    # это забота «Разобрать день» того дня, а не недели
+    head, rest = out["days"][0], out["days"][1:]
+    only_first = bool(rest) and head["level"] != "ok" and all(x["level"] == "ok" for x in rest)
+    for level in ("over", "tight"):
+        hit = next((x for x in (rest if only_first else out["days"]) if x["level"] == level), None)
+        if hit:
+            out["level"], out["from"] = level, hit["date"]
+            break
+    word = {"over": "перегруз", "tight": "плотно"}.get(out["level"])
+    when = ("уже сегодня" if out["from"] == today else f"с {WEEKDAYS_FROM[out['from'].weekday()]}") if word else ""
+    first = "сегодня" if head["date"] == today else WEEKDAYS_TO[head["date"].weekday()].lower()
+    out["line"] = (f"На неделю: окон {_hours(cap_sum)}, задач {_hours(need_sum)} — "
+                   + (f"{word} {when}" if word else "реально")
+                   + (f" ({first} — {'перегруз' if head['level'] == 'over' else 'плотно'})" if only_first else ""))
+    return out
+
+
+def capacity_until(until: date, est: int = DEFAULT_ESTIMATE, *, exclude: int | None = None,
+                   settings: dict | None = None, now: datetime | None = None) -> dict:
+    """Хватит ли окон до конца дня until ещё на задачу длиной est: окна с сегодняшнего момента против задач директора
+    с этим сроком и раньше (exclude — саму задачу, если она уже записана). Не хватает — первый день, к которому
+    успеть реально (realistic). Ищем не дальше 60 дней."""
+    settings = settings or config.load_settings()
+    now = now if now is not None else config.now(settings)
+    today = now.date()
+    until = max(until, today)
+    horizon = until + timedelta(days=60)
+    events, ready = _calendar(today, horizon, settings)
+    need_by = _by_due(today, exclude=exclude)
+    replies = (store.scalar("SELECT COUNT(*) FROM attention WHERE status='open'") or 0) * opts(settings)["reply"]
+    cap_sum, need_sum, res = 0, replies, {}
+    d = today
+    while d <= horizon:
+        cap_sum += capacity(layout(d, events, settings, now=now, briefs=ready))
+        need_sum += sum(t["est"] for t in need_by.get(d, []))
+        fits = cap_sum >= need_sum + est
+        if d == until:
+            res = {"until": until, "capacity": cap_sum, "need": need_sum, "est": est, "ok": fits, "realistic": None}
+        if d >= until and fits and work_window(d, settings):
+            res["realistic"] = d
+            break
+        d += timedelta(days=1)
+    res["why"] = (f"до {until:%d.%m} окон для задач {dur(res['capacity'])}, а ваших задач с этим сроком и раньше "
+                  f"уже {dur(res['need'])}" + (f" — ещё {dur(est)} не помещается" if not res["ok"] else ""))
+    return res
+
+
+def check_due(cid: int, settings: dict | None = None, now: datetime | None = None) -> dict | None:
+    """Проверка срока в момент обещания: новая задача директора со сроком — хватит ли окон до него. Не хватает —
+    у задачи запоминается реальный срок (due_hint): «Уточнить срок» предложит его директору. None — проверять нечего."""
+    c = store.row("SELECT * FROM commitments WHERE id=?", (cid,))
+    if not c or c["direction"] != "mine" or c["status"] != "open" or not records._as_date(c["due"]):
+        return None
+    res = capacity_until(date.fromisoformat(c["due"]), c.get("estimate_min") or DEFAULT_ESTIMATE, exclude=cid,
+                         settings=settings, now=now)
+    hint = None if res["ok"] or not res["realistic"] else res["realistic"].isoformat()
+    store.execute("UPDATE commitments SET due_hint=?, due_hint_why=? WHERE id=?", (hint, res["why"] if hint else None, cid))
+    return res
+
+
+def flow(first: date, last: date, settings: dict | None = None) -> dict:
+    """Приток и отток задач директора за дни first..last: сколько добавилось и закрылось, сколько дала одна разобранная
+    встреча. Дубли, закрытые объединением, не считаются."""
+    settings = settings or config.load_settings()
+    tz = config.tz(settings)
+    s = store.to_utc_iso(datetime.combine(first, time.min, tz))
+    e = store.to_utc_iso(datetime.combine(last + timedelta(days=1), time.min, tz))
+    mine = "direction='mine' AND duplicate_of IS NULL"
+    added = store.scalar(f"SELECT COUNT(*) FROM commitments WHERE {mine} AND created >= ? AND created < ?", (s, e)) or 0
+    closed = store.scalar(f"SELECT COUNT(*) FROM commitments WHERE {mine} AND status='done' AND closed_at >= ? "
+                          "AND closed_at < ?", (s, e)) or 0
+    from_meetings = store.scalar(f"SELECT COUNT(*) FROM commitments WHERE {mine} AND source_type='meeting' "
+                                 "AND created >= ? AND created < ?", (s, e)) or 0
+    meetings = store.scalar("SELECT COUNT(*) FROM meetings WHERE status='processed' AND started_at >= ? "
+                            "AND started_at < ?", (s, e)) or 0
+    per = from_meetings / meetings if meetings else None
+    line = f"Ваши задачи: добавилось {added}, закрыто {closed}"
+    if added != closed:
+        line += f" ({'долг вырос' if added > closed else 'долг уменьшился'} на {abs(added - closed)})"
+    if per is not None:
+        whole = abs(per - round(per)) < 0.05
+        num = str(round(per)) if whole else f"{per:.1f}".replace(".", ",")
+        tasks = _plural(round(per), "задача", "задачи", "задач") if whole else "задачи"
+        line += (f"; {meetings} {_plural(meetings, 'разобранная встреча', 'разобранные встречи', 'разобранных встреч')} "
+                 f"— каждая в среднем даёт вам {num} {tasks}")
+    return {"added": added, "closed": closed, "from_meetings": from_meetings, "meetings": meetings, "per_meeting": per,
+            "line": line}
 
 
 # --- живые сигналы ---------------------------------------------------------------------------------

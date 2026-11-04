@@ -651,6 +651,8 @@ def cmd_commitments(a) -> None:
         out(f"Обещание [{cid}] сохранено" + (f" как часть задачи [{a.parent}]" if a.parent else ""))
         if a.estimate:
             _estimate(cid, a.estimate)
+        if a.direction == "mine" and a.due:
+            _due_check(cid)
         similar = records.similar_open(direction=a.direction, who=a.who, whom=a.whom, title=a.title, what=a.what,
                                        kaiten_card_id=a.card, exclude=cid)
         if similar:
@@ -735,6 +737,18 @@ def cmd_commitments(a) -> None:
             _estimate(a.id, a.estimate)
 
 
+def _due_check(cid: int) -> None:
+    """Срок в момент обещания: хватит ли директору окон до срока новой задачи (opsdash.day.check_due)."""
+    from opsdash import day
+
+    res = day.check_due(cid)
+    if res and not res["ok"]:
+        out(f"Срок под угрозой с самого начала: {res['why']}."
+            + (f" Реальнее {res['realistic']:%d.%m} — директору это предложит «Уточнить срок»; в разборе встречи "
+               f"пометь у задачи: «срок под угрозой с самого начала — реальнее {res['realistic']:%d.%m}»"
+               if res["realistic"] else ""))
+
+
 def _estimate(cid: int, value: int) -> None:
     """--estimate: сколько займёт у директора. Из фонового запуска — оценка Claude, оценку директора она не меняет."""
     from opsdash import day
@@ -779,9 +793,38 @@ def cmd_day(a) -> None:
             out("Все открытые задачи директора оценены.")
         return
     try:
-        when = date.fromisoformat(a.date) if a.date else None
+        when = date.fromisoformat(getattr(a, "week_date", None) or a.date) if (getattr(a, "week_date", None) or a.date) \
+            else None
+        until = date.fromisoformat(a.until) if a.action == "capacity" else None
     except ValueError:
         fail("дата — в виде ГГГГ-ММ-ДД")
+    if a.action == "week":
+        w = day.week(when)
+        if a.json:
+            return as_json(w)
+        out(w["line"] or "На этой неделе рабочих дней больше нет")
+        for x in w["days"]:
+            out(f"- {day.day_text(x['date'])}: окон {day.dur(x['capacity'])}, задач {day.dur(x['need'])}"
+                f" (с начала недели: окон {day.dur(x['cum_capacity'])}, задач {day.dur(x['cum_need'])})"
+                + {"over": " — перегруз", "tight": " — плотно"}.get(x["level"], "")
+                + (": " + "; ".join(f"«{i['title']}»" for i in x["items"] if i.get("id"))[:400] if x["items"] else ""))
+        return
+    if a.action == "capacity":
+        task = store.row("SELECT due, estimate_min FROM commitments WHERE id=?", (a.task,)) if a.task else None
+        if a.task and not task:
+            fail(f"нет задачи [{a.task}]")
+        if task and task["due"] == until.isoformat() and not a.estimate:
+            res = day.check_due(a.task)  # срок самой задачи — «реальнее …» запомнится для «Уточнить срок»
+        else:
+            res = None
+        res = res or day.capacity_until(until, a.estimate or (task or {}).get("estimate_min") or day.DEFAULT_ESTIMATE,
+                                        exclude=a.task)
+        if a.json:
+            return as_json(res)
+        out(("Успеваете: " if res["ok"] else "Не успеваете: ") + res["why"] + "."
+            + ("" if res["ok"] else f" Реальнее {res['realistic']:%d.%m}." if res["realistic"]
+               else " В ближайшие два месяца окон не хватает."))
+        return
     p = day.plan(when)
     if a.json:
         return as_json({k: v for k, v in p.items() if k not in ("meetings", "free_events")})
@@ -790,6 +833,8 @@ def cmd_day(a) -> None:
     out(f"# День {p['date']:%d.%m} · {ww}" + (f", считаю с {day.hm(p['from'])}" if p["today"] and p["from"] else ""))
     out(f"Вердикт: {v['line']}")
     out(f"Строка для дайджеста: {p['digest']}")
+    if p["today"] and (w := day.week())["line"]:
+        out(f"{w['line']} (неделя по дням — ./ops day week)")
     if p["progress"]["total"]:
         out(f"{p['progress']['line']} (для вечернего дайджеста)")
     out(f"\n## Окна ({day.dur(p['capacity'])} для задач)")
@@ -1590,6 +1635,12 @@ def build_parser() -> argparse.ArgumentParser:
     ms = s.add_subparsers(dest="action")
     x = ms.add_parser("estimates", help="задачи директора без оценки времени; --set — сохранить оценки пачкой")
     x.add_argument("--set", help="«<id>=<минуты>,<id>=<минуты>»: 12=30,15=60")
+    x = ms.add_parser("week", help="неделя: окна и задачи по дням — «На неделю: окон 9 ч, задач 14 ч — перегруз с четверга»")
+    x.add_argument("--date", dest="week_date", help="любой день нужной недели, YYYY-MM-DD; по умолчанию — эта")
+    x = ms.add_parser("capacity", help="успевает ли директор к сроку: окна до него против задач с этим сроком и раньше")
+    x.add_argument("--until", required=True, help="срок, YYYY-MM-DD")
+    x.add_argument("--estimate", type=int, help="сколько займёт новая задача, мин (по умолчанию 30)")
+    x.add_argument("--task", type=int, help="задача, которую проверяем (уже записана): её оценка, саму её не считаем")
     s.set_defaults(fn=cmd_day, action=None)
 
     s = sub.add_parser("propose", help="предложить действие (выполнится после «да» директора)")

@@ -108,6 +108,12 @@ budget = store.row("SELECT uid FROM events WHERE title='Бюджет Q4: сце�
                    (store.to_utc_iso(at(0, 0)),))
 briefs.save(budget["uid"], "## Бюджет Q4: сценарии\n\n- Три сценария, базовый — выручка 182 млн.\n"
             "- Олег ждёт решения по урезанию на 10%.", topic="Выбрать сценарий бюджета Q4")
+# срок, под угрозой с самого начала: Claude записал задачу на сегодня, а окон уже нет — «Уточнить срок» предложит реальную дату
+risky = records.add_commitment(direction="mine", who="Анна Смирнова", whom="Собственник", title="Справка по перевозчику",
+                               what="Справка по новому перевозчику для собственника: условия, цены, риски",
+                               due=today.isoformat(), source_type="meeting", source_ref=planerka)
+day.set_estimate(risky, 60, by="claude")
+day.check_due(risky)
 
 # --- база знаний ---------------------------------------------------------------------------------
 for kind, title, details, days_ago, project in [

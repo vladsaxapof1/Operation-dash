@@ -235,22 +235,25 @@ def no_due_count() -> int:
 
 
 def due_queue() -> list[dict]:
-    """«Уточнить срок» на Сводке: открытые задачи без срока, про которые директор ещё не решила «пусть без срока».
+    """«Уточнить срок» на Сводке: открытые задачи без срока, про которые директор ещё не решила «пусть без срока»,
+    и её задачи, чей срок под угрозой с самого начала (due_hint — реальнее эта дата, opsdash.day.check_due).
     Только её задачи и что ей должны (сроки договорённостей между коллегами она не разбирает): сначала её,
     внутри — последние добавленные сверху."""
     return _mark(store.rows(
-        "SELECT * FROM commitments WHERE status='open' AND due IS NULL AND no_due_at IS NULL AND archived_at IS NULL "
-        "AND direction IN ('mine', 'to_me') ORDER BY direction='to_me', created DESC, id DESC"))
+        "SELECT * FROM commitments WHERE status='open' AND archived_at IS NULL AND direction IN ('mine', 'to_me') "
+        "AND ((due IS NULL AND no_due_at IS NULL) OR due_hint > due) ORDER BY direction='to_me', created DESC, id DESC"))
 
 
 def set_due(cid: int, due: str | None) -> None:
-    """Срок из «Уточнить срок»: дата YYYY-MM-DD или None — оставить без срока, и PULSE больше о задаче не спросит.
-    Директор задачу видела — отметка «новая» снимается."""
+    """Срок из «Уточнить срок»: дата YYYY-MM-DD или None — оставить как есть: задача без срока так и останется, и PULSE
+    больше о ней не спросит; у задачи со сроком под угрозой остаётся её срок. Директор задачу видела — отметка «новая»
+    снимается, подсказка «реальнее …» — тоже."""
     if due and not _as_date(due):
         raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
     now = store.utcnow()
-    store.execute("UPDATE commitments SET due=COALESCE(?, due), no_due_at=?, seen_at=COALESCE(seen_at, ?), updated=? "
-                  "WHERE id=?", (due or None, None if due else now, now, now, cid))
+    store.execute("UPDATE commitments SET no_due_at=CASE WHEN ? IS NULL AND due IS NULL THEN ? END, due=COALESCE(?, due), "
+                  "due_hint=NULL, due_hint_why=NULL, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
+                  (due or None, now, due or None, now, now, cid))
 
 
 def due_choices(today: date | None = None) -> list[tuple[str, date]]:

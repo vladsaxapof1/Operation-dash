@@ -82,3 +82,8 @@
 .est-c[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .est-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -4px; }
 .est-l { font-size: 13px; color: var(--muted); }
+.dv-week { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; line-height: 1.4; }
+.dv-week .dv-dot { width: 8px; height: 8px; }
+.dv-week.dv-ok .dv-dot { background: var(--ok); }  /* цвет недели, а не дня, внутри которого строка */
+.dv-week.dv-tight .dv-dot { background: var(--warn); }
+.dv-week.dv-over .dv-dot { background: var(--bad); }

@@ -84,6 +84,9 @@ def week_stats(day: date | None = None, settings: dict | None = None) -> str:
     overdue = records.list_commitments(status="open", overdue=True)
     out.append(f"Просрочено сейчас: {len(overdue)}")
     out += [f"  - [{c['id']}] {records.route(c)}: {records.headline(c)} · срок {c['due']}" for c in overdue]
+    from opsdash import day
+
+    out.append(f"Приток и отток: {day.flow(monday, end.date(), settings)['line']}")  # «Реальность дня»
 
     load = records.workload()
     out.append("\n## Загрузка (открытые задачи · карточки Kaiten)")
@@ -109,6 +112,8 @@ def week_stats(day: date | None = None, settings: dict | None = None) -> str:
     out.append(f"\n## Следующая неделя: встреч {len(upcoming)}, {sum(_minutes(e) for e in upcoming) / 60:.1f} ч"
                .replace(".", ","))
     out += [f"- срок на неделе: {records.route(c)}: {records.headline(c)} · {c['due']}" for c in due_next]
+    if (ahead := day.week(monday + timedelta(days=7), settings))["line"]:
+        out.append(f"- {ahead['line'].replace('На неделю', 'На следующую неделю')} (по календарю и срокам сейчас)")
     return "\n".join(out)
 
 
