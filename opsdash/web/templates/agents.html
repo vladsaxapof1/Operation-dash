@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{#- «Поручить агенту» отдельной страницей: сюда ведёт уведомление «Промт для агента готов» и кнопка без скриптов #}
+{% block title %}Поручить агенту{% endblock %}
+{% block content %}
+<div class="card agent-page">{% include "_agent_panel.html" %}</div>
+{% endblock %}

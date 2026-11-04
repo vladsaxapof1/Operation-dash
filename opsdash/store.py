@@ -316,6 +316,50 @@ CREATE TABLE IF NOT EXISTS agent_runs (       -- запуски фоновых �
     title TEXT, text TEXT, link TEXT -- итог по-человечески и куда ведёт — как в уведомлении в углу
 );
 
+CREATE TABLE IF NOT EXISTS agent_sessions (   -- опыт агентов: сессии Claude Code в папках «Офиса» (opsdash.agents)
+    id TEXT PRIMARY KEY,             -- номер журнала Claude Code (имя файла .jsonl)
+    engine TEXT DEFAULT 'claude',    -- claude | codex
+    journal TEXT,                    -- путь к журналу; журнал Claude Code удаляет через месяц — запись остаётся
+    desktop_id TEXT,                 -- local_… — сессия приложения Claude: открыть её ссылкой
+    folder TEXT, room TEXT, cwd TEXT,  -- папка офиса, проект (папка первого уровня), где шла сессия
+    title TEXT,
+    first_prompt TEXT,               -- первый промт целиком
+    prompts TEXT DEFAULT '[]',       -- JSON: что человек дописал потом (первые реплики) — чего не хватило в постановке
+    files_read TEXT DEFAULT '[]',    -- JSON: прочитанные файлы, самые нужные первыми
+    files_written TEXT DEFAULT '[]', -- JSON: созданные и изменённые
+    skills TEXT DEFAULT '[]',        -- JSON: навыки
+    agents INTEGER DEFAULT 0,        -- сколько раз поручала субагентам
+    n_prompts INTEGER DEFAULT 0,     -- реплик человека
+    started TEXT, last TEXT,
+    status TEXT,                     -- итог по оценке приложения: completed | review_ready | blocked | …
+    summary TEXT,                    -- последний ответ агента
+    size INTEGER, mtime REAL,        -- журнал на момент разбора: не изменился — не перечитываем
+    indexed_at TEXT
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS agent_sessions_fts USING fts5(
+    id UNINDEXED, title, prompts, files, room, tokenize='unicode61 remove_diacritics 2', prefix='3 4'
+);
+
+CREATE TABLE IF NOT EXISTS task_agents (      -- «Поручить агенту»: промт для агента по задаче (opsdash.agents)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    commitment_id INTEGER NOT NULL,
+    engine TEXT DEFAULT 'claude',    -- кому поручаем: claude | codex
+    folder TEXT,                     -- где работать: папка или проект из «Офиса»
+    status TEXT DEFAULT 'new',       -- new | running (собирается) | ready | failed
+    prompt TEXT,                     -- промт с правками директора
+    brief_path TEXT,                 -- полный текст — data/agent-briefs/…md
+    files TEXT DEFAULT '[]',         -- JSON: [{path, why}] — из раздела «Файлы»; галочка = строка есть в промте
+    similar TEXT DEFAULT '[]',       -- JSON: номера похожих сессий
+    fix TEXT,                        -- «что поправить» к пересборке
+    steps TEXT DEFAULT '[]',         -- что делал Claude, пока собирал
+    error TEXT,
+    created TEXT, updated TEXT,
+    launched_at TEXT,                -- когда нажали «Открыть в Claude»
+    session_id TEXT, desktop_id TEXT, state TEXT, result_files TEXT DEFAULT '[]'  -- запущенная сессия (следующий этап)
+);
+CREATE INDEX IF NOT EXISTS ix_task_agents_task ON task_agents(commitment_id);
+
 CREATE TABLE IF NOT EXISTS notices (          -- уведомления в углу экрана: что PULSE сделал (opsdash.notices)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT,                       -- задание, после которого появилось: triage, process-meeting, …

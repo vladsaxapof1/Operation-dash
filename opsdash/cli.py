@@ -906,6 +906,76 @@ def cmd_projects(a) -> None:
         out("Сохранено")
 
 
+# --- поручения агенту -------------------------------------------------------------
+
+def _session_line(s: dict) -> str:
+    line = f"{s['id']} · {s['when']} · «{s['title']}» · {s['home'] or '?'} · реплик человека: {s['n_prompts']}"
+    if s["duration"]:
+        line += f" · шла {s['duration']}"
+    if s["made"]:
+        line += " · создала: " + ", ".join(f["name"] for f in s["made"][:5])
+    if s["outcome"]:
+        line += f" · итог: {s['outcome']}"
+    return line
+
+
+def cmd_agents(a) -> None:
+    from opsdash import agents
+
+    if a.action == "index":
+        out(agents.index())
+    elif a.action == "similar":
+        items = agents.similar(a.query, folder=a.folder, limit=a.limit)
+        if a.json:
+            return as_json(items)
+        for s in items:
+            out(_session_line(s))
+            out(f"   первый промт: {short(' '.join(s['first_prompt'].split()), 300)}")
+        if not items:
+            st = agents.stats()
+            out("Похожих сессий нет." + ("" if st["sessions"] else " Индекс пуст — ./ops agents index "
+                                         "(папки — Настройки → Офис)."))
+    elif a.action == "show":
+        s = agents.show(a.id)
+        if not s:
+            fail(f"нет сессии {a.id} в индексе (./ops agents similar \"<слова>\")")
+        if a.json:
+            return as_json(s)
+        out(_session_line(s))
+        out(f"Папка: {s['cwd'] or s['folder']}" + (f" · навыки: {', '.join(s['skills'])}" if s["skills"] else "")
+            + (f" · субагентов: {s['agents']}" if s["agents"] else "") + (f" · открыть: {s['link']}" if s["link"] else ""))
+        out(f"\n## Первый промт\n{short(s['first_prompt'], a.max_chars)}")
+        if s["prompts"]:
+            out("\n## Что человек дописал потом (этого не хватило в первом промте)")
+            for i, text in enumerate(s["prompts"], 2):
+                out(f"{i}. {' '.join(text.split())}")
+        for title, files in (("Прочитала", s["files_read"]), ("Создала и изменила", s["files_written"])):
+            if files:
+                out(f"\n## {title}")
+                out("\n".join(f"- {p}" + ("" if Path(p).exists() else " (файла уже нет)") for p in files[:20]))
+        if s["summary"]:
+            out(f"\n## Последний ответ агента\n{short(s['summary'], 1500)}")
+    elif a.action == "context":
+        try:
+            out(agents.context(a.id))
+        except ValueError as e:
+            fail(str(e))
+    elif a.action == "brief-save":
+        path = Path(a.file)
+        if not path.is_absolute():  # Claude пишет от папки программы; данные обычно там же
+            path = next((base / path for base in (config.ROOT, config.APP_DIR) if (base / path).exists()), config.ROOT / path)
+        try:
+            b = agents.save(a.id, path.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as e:
+            fail(str(e))
+        out(f"Промт сохранён: {agents.brief_path(b)} ({len(b['prompt'])} символов, файлов: {len(b['files'])})")
+        missing = [f["path"] for f in b["files"] if not f["exists"]]
+        if missing:
+            out("Этих файлов нет — исправь путь или убери строку и сохрани ещё раз: " + "; ".join(missing))
+        if not b["files"]:
+            out("В разделе «## Файлы» не нашлось строк «- <абсолютный путь> — зачем».")
+
+
 # --- нужен ответ ----------------------------------------------------------------
 
 def cmd_attention(a) -> None:
@@ -1451,6 +1521,25 @@ def build_parser() -> argparse.ArgumentParser:
         x.add_argument("--card", type=int, help="карточка проекта в Kaiten")
         x.add_argument("--tasks", help="добавить задачи: id через запятую")
     s.set_defaults(fn=cmd_projects)
+
+    s = sub.add_parser("agents", help="поручения агенту: прошлые сессии Claude Code в папках «Офиса» и промты")
+    ms = s.add_subparsers(dest="action", required=True)
+    ms.add_parser("index", help="дочитать новые сессии в индекс")
+    x = ms.add_parser("similar", help="прошлые сессии, похожие на задачу")
+    x.add_argument("query")
+    x.add_argument("--folder", help="только сессии в этой папке")
+    x.add_argument("--limit", type=int, default=5)
+    x.add_argument("--json", action="store_true")
+    x = ms.add_parser("show", help="сессия: первый промт, что дописывали потом, файлы, итог")
+    x.add_argument("id")
+    x.add_argument("--max-chars", type=int, default=6000, help="первый промт — не длиннее")
+    x.add_argument("--json", action="store_true")
+    x = ms.add_parser("context", help="всё для промта по поручению: задача, источник, похожие сессии, файлы")
+    x.add_argument("id", type=int, help="номер поручения")
+    x = ms.add_parser("brief-save", help="сохранить готовый промт из файла (Markdown)")
+    x.add_argument("id", type=int, help="номер поручения")
+    x.add_argument("--file", required=True)
+    s.set_defaults(fn=cmd_agents)
 
     s = sub.add_parser("attention", help="где ждут ответа директора")
     ms = s.add_subparsers(dest="action", required=True)

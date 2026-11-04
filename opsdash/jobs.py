@@ -5,7 +5,7 @@
 - heavy — плановые запуски Claude (разбор встреч и сообщений, дайджесты, брифы);
 - transcribe — расшифровка встреч: часовая запись или расшифровка на паузе не задерживают дайджесты;
 - interactive — вопросы директора из Telegram (не ждут часовую расшифровку);
-- chat — ответы в разделе «Спросить Claude»: подробный разбор на полчаса не задерживает бота.
+- chat — ответы в разделе «Спросить Claude» и промты для агентов: подробный разбор на полчаса не задерживает бота.
 """
 
 from __future__ import annotations
@@ -49,6 +49,18 @@ def job_docs_index(**_) -> str:
     from opsdash import docs
 
     return docs.index()
+
+
+def job_agents_index(**_) -> str:
+    from opsdash import agents
+
+    return agents.index()
+
+
+def job_agent_brief(brief_id: int, **_) -> str:
+    from opsdash import agents
+
+    return agents.build(brief_id)
 
 
 def job_recordings(**_) -> str:
@@ -428,6 +440,7 @@ REGISTRY = {
     "collect:kaiten": lambda **kw: collect_source("kaiten"),
     "recordings": job_recordings,
     "docs-index": job_docs_index,
+    "agents-index": job_agents_index,
     "transcribe": job_transcribe,
     "process-meeting": job_process_meeting,
     "triage": job_triage,
@@ -443,6 +456,7 @@ REGISTRY = {
     "ask": job_ask,
     "voice": job_voice,
     "chat": job_chat,
+    "agent-brief": job_agent_brief,
     "housekeeping": job_housekeeping,
     "update-check": job_update_check,
     "update": job_update,
@@ -460,6 +474,7 @@ TITLES = {
     "collect:kaiten": "Сбор: Kaiten",
     "recordings": "Поиск новых записей",
     "docs-index": "Индекс документов",
+    "agents-index": "Опыт агентов: индекс сессий",
     "transcribe": "Расшифровка встречи",
     "process-meeting": "Разбор встречи (Claude)",
     "triage": "Разбор сообщений (Claude)",
@@ -475,6 +490,7 @@ TITLES = {
     "ask": "Вопрос из Telegram (Claude)",
     "voice": "Голосовое из Telegram",
     "chat": "Спросить Claude",
+    "agent-brief": "Промт для агента (Claude)",
     "housekeeping": "Обслуживание",
     "update-check": "Проверка обновлений PULSE",
     "update": "Обновление PULSE",
@@ -679,6 +695,8 @@ def tick(settings: dict | None = None) -> list[str]:
         go("docs-index")
     if _due("housekeeping", 5):
         go("housekeeping")
+    if settings["office"].get("folders") and _due("agents-index", 60):  # опыт агентов — до того, как Claude Code удалит журналы
+        go("agents-index")
     # раз в сутки (и при первом запуске) — не вышла ли новая версия PULSE; ставит её директор кнопкой
     if settings["updates"].get("auto_check") and settings["updates"].get("repo") and _due("update-check", 24 * 60):
         go("update-check")
@@ -733,6 +751,9 @@ def start_workers(stop: threading.Event) -> list[threading.Thread]:
     office.interrupted()
     store.execute("UPDATE ask_messages SET status='failed', error='Прервано перезапуском PULSE — спросите ещё раз' "
                   "WHERE status='running'")
+    from opsdash import agents
+
+    agents.interrupted()
     for m in store.rows("SELECT id, status FROM meetings WHERE status IN ('transcribing','processing')"):
         records.update_meeting(m["id"], status="new" if m["status"] == "transcribing" else "transcribed")
         if m["status"] == "processing":

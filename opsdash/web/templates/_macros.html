@@ -573,6 +573,7 @@
         <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn">Вернуть в работу</button></form>
         {% endif %}
         <a class="btn" href="/ask?task={{ c.id }}" title="Спросить Claude об этой задаче: что по ней было на встречах, в переписке, в Kaiten">{{ icons.icon('ask', 16) }} Спросить Claude</a>
+        <a class="btn{{ ' agent-hint' if c.status == 'open' and agent_hint(c) }}" href="/agents?task={{ c.id }}" data-agent-open="{{ c.id }}" title="{{ 'Можно поручить агенту. ' if c.status == 'open' and agent_hint(c) }}PULSE соберёт подробный промт для Claude Code или Codex: задача, источник, файлы и как похожее уже делали">{{ icons.icon('office', 16) }} Поручить агенту</a>
         <span class="grow"></span>
         {% call menu() %}
           <button type="button" class="menu-i" data-dlg-edit>Изменить</button>

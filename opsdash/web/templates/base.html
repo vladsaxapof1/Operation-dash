@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="/static/icon.png">
   <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/day.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/agents.css?v={{ static_v }}">
   {% if theme != 'light' %}<link rel="stylesheet" href="/static/dark.css?v={{ static_v }}"{% if theme != 'dark' %} media="(prefers-color-scheme: dark)"{% endif %}>{% endif %}
 </head>
 <body class="{{ 'nav-collapsed' if nav_collapsed }} page-{{ nav or 'other' }}">
@@ -96,5 +97,6 @@
 {% if design_intro %}{% include "_design_intro.html" %}{% endif %}
 <script src="/static/app.js?v={{ static_v }}"></script>
 <script src="/static/day.js?v={{ static_v }}"></script>
+<script src="/static/agents.js?v={{ static_v }}"></script>
 </body>
 </html>
