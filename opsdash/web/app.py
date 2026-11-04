@@ -1399,8 +1399,19 @@ def calendar_page(request: Request, start: str = "", view: str = "week", task: i
     elif view == "week":  # неделя — с понедельника, как в Google Календаре
         first -= timedelta(days=first.weekday())
     span = 42 if view == "month" else 7
-    grid = overview.week_grid(first, settings, hours=(9, 20)) if view == "week" else None
+    wh = settings["owner"].get("work_hours") or {}  # весь рабочий день: на нём задачи
+    hours = (min(9, day_mod.minutes(wh.get("start"), 540) // 60), max(20, -(-day_mod.minutes(wh.get("end"), 1200) // 60)))
+    grid = overview.week_grid(first, settings, hours=hours) if view == "week" else None
     days = overview.calendar_days(first, span, settings) if view != "week" else None
+    # задачи по свободным окнам дней («Реальность дня»); «Задачи» у видов — показать или скрыть, выбор запоминается
+    show_tasks = (request.query_params.get("tasks") or request.cookies.get("cal_tasks") or "1") == "1"
+    if show_tasks:
+        pr = day_mod.plan_range(first, span, settings, now)
+        if grid:
+            day_mod.calendar_layer(grid, pr)
+        else:
+            for d in days:
+                d["plan"] = pr.get(d["date"])
     shown = grid["events"] if grid else [e for d in days for e in d["events"]]
     briefs.for_events(shown)
     task_meetings.for_events(shown)
@@ -1437,7 +1448,8 @@ def calendar_page(request: Request, start: str = "", view: str = "week", task: i
             e["s_local"] = store.parse_ts(e["start"]).astimezone(tz)
             e["past"] = store.parse_ts(e["end"]) <= now
     count = len({e["uid"] for e in shown if view != "month" or e["s_local"].month == month_first.month})
-    return render(request, "calendar.html", nav="calendar", view=view, grid=grid, days=days, first=first,
+    page = render(request, "calendar.html", nav="calendar", view=view, grid=grid, days=days, first=first,
+                  show_tasks=show_tasks,
                   last=last, today=now.date(), is_current=first <= now.date() <= last, title=title, count=count,
                   week_no=first.isocalendar()[1], month=month_first.month,
                   prev=prev, next=nxt, can_refresh=bool(sources), connected=bool(sources),
@@ -1447,6 +1459,9 @@ def calendar_page(request: Request, start: str = "", view: str = "week", task: i
                   write_calendars=calendar.write_calendar_names(settings), for_task=for_task,
                   hide_cal_banner=request.cookies.get("hide_cal_banner") == "1",
                   google_calendars=(store.get_state("google_calendar_names") or []) if settings["google_calendar"].get("enabled") else [])
+    if request.query_params.get("tasks") in ("0", "1"):  # «Задачи» нажали — запомнить выбор
+        page.set_cookie("cal_tasks", request.query_params["tasks"], max_age=365 * 86400, samesite="lax")
+    return page
 
 
 @app.post("/briefs/build")

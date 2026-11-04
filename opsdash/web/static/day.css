@@ -21,21 +21,26 @@
 .dv-now, .dv-big { margin: 0; font-size: 13px; line-height: 1.4; }
 .dv-now b { font-weight: 600; color: var(--accent); }
 
-/* на сетке: плановая задача — пунктир цвета акцента; буфер — штриховка; короткое окно — серым */
-.pb { position: absolute; z-index: 1; display: block; overflow: hidden; padding: 2px 8px; border: 1.5px dashed var(--accent);
-  border-radius: 6px; background: color-mix(in srgb, var(--accent-soft) 85%, transparent); color: var(--accent);
+/* на сетке Сводки и Календаря — одна легенда: задача «в работе» — светло-зелёная с зелёным пунктиром, остальные
+   запланированные — серые с пунктиром; закреплённая директором — сплошной рамкой; буфер — штриховка; короткое окно — серым */
+.pb { position: absolute; z-index: 1; display: block; overflow: hidden; padding: 2px 8px; border: 1.5px dashed var(--faint);
+  border-radius: 6px; background: color-mix(in srgb, var(--panel-2) 88%, transparent); color: var(--text);
   font-size: 12px; line-height: 1.3; }
-.pb:hover { text-decoration: none; z-index: 2; background: var(--accent-soft); box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.pb:hover { text-decoration: none; z-index: 2; background: var(--panel-2); box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.pb .pb-m { color: var(--muted); }
+.pb.work { border-color: var(--ok); background: color-mix(in srgb, var(--ok-soft) 90%, transparent); color: var(--ok-text); }
+.pb.work:hover { background: var(--ok-soft); }
+.pb.work .pb-m { color: inherit; }
 .pb.pinned { border-style: solid; }
+.pb.late { border-color: var(--warn); }  /* встанет уже после своего срока */
 .pb-t { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pb-m { display: block; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pb.tiny { padding-top: 0; padding-bottom: 0; }
 .pb.tiny .pb-m { display: none; }
 .pb[data-drag] { cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
-.pb.dragging { cursor: grabbing; z-index: 4; box-shadow: var(--shadow-pop); background: var(--accent-soft); }
+.pb.dragging { cursor: grabbing; z-index: 4; box-shadow: var(--shadow-pop); }
 .pb.dragging .pb-t::before { content: attr(data-at) " · "; }  /* куда встанет — пока тащим */
-.pb.done { border-style: solid; border-color: var(--ok); background: color-mix(in srgb, var(--ok-soft) 80%, transparent);
-  color: var(--ok-text); opacity: .75; }
+.pb.done { border-style: solid; opacity: .6; }
 .dv-carry { display: grid; gap: 6px; }
 .dv-carry ul { margin: 0; padding-left: 18px; font-size: 13px; }
 .dv-carry li form { margin-left: 4px; }
@@ -49,7 +54,7 @@
 .pl-buffer { background: repeating-linear-gradient(135deg, var(--line-strong) 0 1px, transparent 1px 5px); }
 .pl-short { background: var(--sunken); opacity: .7; }
 /* фокус-блок («тайм-аут») — время для задач: светлый, с рамкой акцента; встреча, от которой отказались, — бледная */
-.ev.focus { background: color-mix(in srgb, var(--ok-soft) 70%, var(--panel)); color: var(--ok-text); border-left-color: var(--ok); }
+.ev.focus { background: var(--panel-2); color: var(--text); border-left-style: dashed; }  /* зелёный — у задач «в работе» */
 .ev.free { background: transparent; color: var(--muted); border: 1px dashed var(--line-strong); border-left-width: 3px; }
 
 /* окно «Разобрать день» */
@@ -87,3 +92,23 @@
 .dv-week.dv-ok .dv-dot { background: var(--ok); }  /* цвет недели, а не дня, внутри которого строка */
 .dv-week.dv-tight .dv-dot { background: var(--warn); }
 .dv-week.dv-over .dv-dot { background: var(--bad); }
+
+/* Календарь: задачи по дням (вид «Неделя» — блоки на сетке, «Месяц» — строка у дня, «Список» — под встречами) */
+.wk-col .pb { padding: 2px 6px; }
+.ev-late { position: static; display: block; margin: 0 2px; padding: 1px 6px; overflow: hidden; border: 1.5px dashed var(--warn);
+  border-radius: 6px; background: var(--warn-soft); color: var(--warn-text); font-size: 12px; white-space: nowrap;
+  text-overflow: ellipsis; }
+.ev-late:hover { text-decoration: none; }
+.mtasks { display: flex; align-items: center; gap: 5px; padding: 1px 6px; border: 1px dashed var(--faint); border-radius: 4px;
+  font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.mtasks:hover { text-decoration: none; color: var(--text); }
+.mtasks.late { border-color: var(--warn); color: var(--warn-text); }
+.tdot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.tdot.work { background: var(--ok); }
+.cal-task { color: var(--text); }
+.cal-task.work { color: var(--ok-text); }
+.cal-tasks-t { font-variant-numeric: tabular-nums; }
+.cal-legend { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.cal-legend i { display: inline-block; width: 18px; height: 10px; margin-right: 4px; vertical-align: -1px; border-radius: 3px;
+  border: 1.5px dashed var(--faint); background: var(--panel-2); }
+.cal-legend i.work { border-color: var(--ok); background: var(--ok-soft); }

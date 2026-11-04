@@ -559,7 +559,45 @@ def _esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-# --- сетка дня на Сводке ----------------------------------------------------------------------------
+# --- сетка дня на Сводке и в Календаре ----------------------------------------------------------------
+# Одна легенда везде: задача «в работе» — светло-зелёная с зелёным пунктиром, остальные запланированные — серые
+# с пунктиром; закреплённая директором — сплошной рамкой; сделанная из плана — галочкой на прошедшем месте.
+
+def _box(s: int, e: int, top: int, px: float, bottom: int, **kw) -> dict | None:
+    """Блок на часовой сетке: минуты от полуночи → top/height в пикселях, обрезанный видимыми часами."""
+    s, e = max(s, top), min(e, bottom)
+    if e <= s:
+        return None
+    return {"top": round((s - top) * px), "height": max(round((e - s) * px) - 2, 4), "len": e - s, **kw}
+
+
+def _task_blocks(blocks: list[dict], col_events: list[dict], top: int, px: float, bottom: int) -> list[dict]:
+    """Блоки задач одного дня на сетке. Событие, которое задача перекрывает (фокус-блок, встреча, от которой
+    отказались), — узкой полосой слева, задача — справа."""
+    layer, narrow = [], []
+    for blk in blocks:
+        it = blk["item"]
+        b = _box(blk["s"], blk["e"], top, px, bottom, kind="plan", item=it, time=f"{hm(blk['s'])}–{hm(blk['e'])}",
+                 pinned=blk.get("source") == "user", done=blk.get("source") == "done", start=blk["s"],
+                 work=bool(it.get("in_work")) and blk.get("source") != "done", late=bool(blk.get("late")),
+                 left=0.0, width=1.0)
+        if not b:
+            continue
+        layer.append(b)
+        for g in col_events:
+            if g["s"] < blk["e"] and g["e"] > blk["s"]:
+                narrow.append(g)
+                b["left"], b["width"] = NARROW, 1 - NARROW
+    for g in narrow:
+        g["left"], g["width"] = 0.0, NARROW
+    return layer
+
+
+def _done_blocks(p: dict) -> list[dict]:
+    return [{"s": minutes(r["start"]), "e": minutes(r["end"]), "source": "done",
+             "item": {"id": r["commitment_id"], "title": r["title"], "est": minutes(r["end"]) - minutes(r["start"])}}
+            for r in p.get("history") or []]
+
 
 def decorate(grid: dict, p: dict) -> None:
     """Слой плана на сетке дня (overview.day_grid): плановые блоки задач (их можно перетащить — day.js), сделанное
@@ -571,37 +609,112 @@ def decorate(grid: dict, p: dict) -> None:
     kinds = {f["uid"]: "focus" for f in p["focus"]} | {f["uid"]: "free" for f in p["free_events"]}
     for e in grid["events"]:
         e["day_kind"] = kinds.get(e["uid"])
-    def box(s: int, e: int, **kw) -> dict | None:
-        s, e = max(s, top), min(e, bottom)
-        if e <= s:
-            return None
-        return {"top": round((s - top) * px), "height": max(round((e - s) * px) - 2, 4), "len": e - s, **kw}
     layer = []
     for s, e in p["buffers"]:
-        if b := box(s, e, kind="buffer", title="буфер"):
+        if b := _box(s, e, top, px, bottom, kind="buffer", title="буфер"):
             layer.append(b)
     for w in p["windows"]:
-        if w["short"] and (b := box(w["s"], w["e"], kind="short", title=f"окно {w['len']} мин — короткое")):
+        if w["short"] and (b := _box(w["s"], w["e"], top, px, bottom, kind="short",
+                                     title=f"окно {w['len']} мин — короткое")):
             layer.append(b)
-    narrow = []
-    done = [{"s": minutes(r["start"]), "e": minutes(r["end"]), "source": "done",
-             "item": {"id": r["commitment_id"], "title": r["title"], "est": minutes(r["end"]) - minutes(r["start"])}}
-            for r in p.get("history") or []]
-    for blk in p["blocks"] + done:
-        it = blk["item"]
-        b = box(blk["s"], blk["e"], kind="plan", item=it, time=f"{hm(blk['s'])}–{hm(blk['e'])}", pinned=blk["source"] == "user",
-                done=blk["source"] == "done", start=blk["s"], left=0.0, width=1.0)
-        if not b:
-            continue
-        layer.append(b)
-        for g in grid["days"][0]["events"]:
-            if g["s"] < blk["e"] and g["e"] > blk["s"]:
-                narrow.append(g)
-                b["left"], b["width"] = NARROW, 1 - NARROW
-    for g in narrow:
-        g["left"], g["width"] = 0.0, NARROW
+    layer += _task_blocks(p["blocks"] + _done_blocks(p), grid["days"][0]["events"], top, px, bottom)
     grid["plan_layer"] = layer
     grid["plan_from"] = top  # для перетаскивания: минута верхнего края сетки
+
+
+# --- расписание задач на несколько дней (Календарь) ---------------------------------------------------
+
+def plan_range(start: date, days: int, settings: dict | None = None, now: datetime | None = None) -> dict:
+    """Задачи директора по свободным окнам дней start … start+days-1 — тот же детерминированный алгоритм, без ИИ.
+    Сегодня — ровно план Сводки (те же day_plan и решения директора). Дальше по рабочим дням: что не поместилось
+    сегодня, затем «в работе» и задачи со сроком — «в работе» первыми, остальные по сроку, каждая не позже своего
+    срока; задачи без срока и не «в работе» по будущим дням не раскладываются. Не успела к сроку — плашка «не влезает
+    до срока» в день срока, а сама задача встаёт в первое окно после него. Прошедшие дни — пустые.
+    Вернуть {день: {"blocks", "late", "count", "minutes", "work"}}; хранится только план на сегодня."""
+    settings = settings or config.load_settings()
+    now = now if now is not None else config.now(settings)
+    today = now.date()
+    end = start + timedelta(days=days - 1)
+    out = {start + timedelta(days=i): {"blocks": [], "late": []} for i in range(days)}
+    if end >= today:
+        p = plan(today, settings, now)
+        if today in out:
+            out[today]["blocks"] = p["blocks"] + _done_blocks(p)
+        taken = {b["item"]["id"] for b in p["blocks"] if b["item"].get("id")} | {r["commitment_id"] for r in p["history"]}
+        late: dict[int, dict] = {}  # задачи, не успевшие к сроку: id → плашка (в день срока)
+        queue = []
+        blocked = _blocked()
+        for c in store.rows("SELECT * FROM commitments WHERE direction='mine' AND status='open' AND archived_at IS NULL "
+                            "AND (due IS NOT NULL OR in_work_at IS NOT NULL)"):
+            if c["id"] in taken or c["id"] in blocked:
+                continue
+            due = records._as_date(c["due"])
+            item = {"id": c["id"], "title": records.headline(c), "est": c.get("estimate_min") or DEFAULT_ESTIMATE,
+                    "in_work": bool(c["in_work_at"]), "due": due}
+            if due and due <= today:  # срок сегодня или прошёл, а в сегодняшний план не попала
+                late[c["id"]] = {"item": item, "day": today, "why": "не влезает до срока"}
+            queue.append(item)
+        queue.sort(key=lambda i: (not i["in_work"], i["due"] or date.max, i["id"]))
+        if end > today:
+            events, ready = _calendar(today + timedelta(days=1), end, settings)
+            longest = 0
+            d = today + timedelta(days=1)
+            while d <= end and queue:
+                if work_window(d, settings):
+                    for it in queue:  # срок вчера и раньше, а задача так и не встала — плашка в день срока
+                        if it["due"] and it["due"] < d and it["id"] not in late:
+                            late[it["id"]] = {"item": it, "day": it["due"], "why": "не влезает до срока"}
+                    lay = layout(d, events, settings, briefs=ready)
+                    usable = [w for w in lay["windows"] if not w["short"]]
+                    longest = max([longest] + [w["len"] for w in usable])
+                    free = {id(w): [(w["s"], w["e"])] for w in usable}
+                    order = sorted(usable, key=lambda w: (w["focus"] is None, w["s"]))
+                    forced = {r["commitment_id"] for r in decisions(d) if r["source"] == "user" and r["status"] == "planned"}
+                    placed = []
+                    for it in sorted(queue, key=lambda i: i["id"] not in forced):
+                        for w in order:
+                            if (s := _fit(w, free[id(w)], it["est"])) is not None:
+                                free[id(w)] = subtract(free[id(w)], [(s, s + it["est"])])
+                                if d in out:
+                                    out[d]["blocks"].append({"item": it, "s": s, "e": s + it["est"], "source": "auto",
+                                                             "late": it["id"] in late})
+                                placed.append(it["id"])
+                                break
+                    queue = [it for it in queue if it["id"] not in placed]
+                d += timedelta(days=1)
+            for it in queue:  # срок в этом диапазоне, а окон до него так и не нашлось
+                if it["due"] and it["due"] <= end and it["id"] not in late:
+                    late[it["id"]] = {"item": it, "day": it["due"],
+                                      "why": "длиннее любого окна" if it["est"] > longest else "не влезает до срока"}
+        for x in late.values():
+            if x["day"] in out and x["day"] >= today:
+                out[x["day"]]["late"].append(x)
+    for d, v in out.items():
+        if d < today:
+            v["blocks"], v["late"] = [], []
+        v["blocks"].sort(key=lambda b: b["s"])
+        tasks = [b for b in v["blocks"] if b["item"].get("id") and b.get("source") != "done"]
+        v["count"], v["minutes"] = len(tasks), sum(b["e"] - b["s"] for b in tasks)
+        v["work"] = any(b["item"].get("in_work") for b in tasks)
+    return out
+
+
+def calendar_layer(grid: dict, pr: dict) -> None:
+    """Задачи на недельной сетке Календаря (overview.week_grid): блоки в колонках дней и плашки «не влезает до срока»
+    в строке «весь день» под встречами на весь день."""
+    top = grid["hour_from"] * 60
+    px = grid["hour_px"] / 60
+    bottom = top + len(grid["hours"]) * 60
+    late = []
+    for col, d in enumerate(grid["days"]):
+        v = pr.get(d["date"]) or {"blocks": [], "late": []}
+        d["tasks"] = _task_blocks(v["blocks"], d["events"], top, px, bottom)
+        late += [{**x, "col": col} for x in v["late"]]
+    rows: dict[int, int] = {}
+    for x in late:
+        x["row"] = grid["allday_rows"] + rows.get(x["col"], 0)
+        rows[x["col"]] = rows.get(x["col"], 0) + 1
+    grid["late"], grid["late_rows"] = late, max(rows.values(), default=0)
 
 
 # --- оценки ---------------------------------------------------------------------------------------

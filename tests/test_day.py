@@ -1,6 +1,7 @@
 """«Реальность дня»: окна между встречами (склейка, буферы, фокус-блоки, короткие окна), «сейчас», полночь и весь
 день, часовой пояс, спрос по приоритету, жадная расстановка, решения директора, оценки, ./ops day и Сводка."""
 
+import re
 import time as clock
 from datetime import date, datetime, time, timedelta
 
@@ -559,3 +560,72 @@ def test_flow_in_weekly_stats():
     assert (f["added"], f["closed"], f["from_meetings"], f["meetings"]) == (3, 1, 2, 1)
     assert f["line"] == "Ваши задачи: добавилось 3, закрыто 1 (долг вырос на 2); 1 разобранная встреча — каждая в среднем даёт вам 2 задачи"
     assert "Приток и отток: Ваши задачи:" in digests.week_stats(DAY)
+
+
+# --- задачи по дням в Календаре: plan_range ------------------------------------------------------------
+
+def _slots(v):
+    return [(b["item"]["title"], day.hm(b["s"]), bool(b.get("late"))) for b in v["blocks"]]
+
+
+def test_plan_range_deadlines_work_first_and_late(settings_with):
+    settings = settings_with(calendar={"enabled": True})
+    wed, thu, fri = (DAY + timedelta(days=n) for n in (1, 2, 3))
+    _meeting("tue", DAY, "09:00", "19:30")  # сегодня окон нет
+    _meeting("wed", wed, "10:00", "20:00")  # в среду — только 09:00–10:00
+    day.set_estimate(_task("К среде, большая", wed.isoformat()), 120)  # к сроку не влезает
+    day.set_estimate(_task("К четвергу", thu.isoformat()), 60)
+    work = _task("В работе без срока")
+    records.set_in_work(work, True)
+    day.set_estimate(work, 60)
+    _task("Без срока — по дням не раскладываем")
+    day.set_estimate(_task("Сегодняшняя", DAY.isoformat()), 30)
+    pr = day.plan_range(DAY - timedelta(days=1), 5, settings, _at(8))
+    assert pr[DAY - timedelta(days=1)] == {"blocks": [], "late": [], "count": 0, "minutes": 0, "work": False}  # прошлое
+    assert [x["item"]["title"] for x in pr[DAY]["late"]] == ["Сегодняшняя"]  # сегодня окон нет — к сроку не успела
+    assert _slots(pr[wed]) == [("В работе без срока", "09:00", False)]  # «в работе» — первой
+    assert [x["item"]["title"] for x in pr[wed]["late"]] == ["К среде, большая"]  # плашка в день срока
+    assert _slots(pr[thu]) == [("Сегодняшняя", "09:00", True), ("К среде, большая", "09:30", True),
+                               ("К четвергу", "11:30", False)]  # опоздавшие — с первого окна после срока
+    assert pr[thu]["count"] == 3 and pr[thu]["minutes"] == 210 and not pr[thu]["work"] and pr[wed]["work"]
+    assert pr[fri]["blocks"] == []
+
+
+def test_plan_range_today_matches_overview(settings_with):
+    settings = settings_with(calendar={"enabled": True})
+    _busy_day()
+    a = _task("Срочное", DAY.isoformat())
+    day.set_estimate(a, 60)
+    records.set_in_work(_task("Долгая", "2026-11-20"), True)
+    day.decide(a, "plan", day=DAY, start="17:30")
+    p = day.plan(DAY, settings, _at(9))
+    pr = day.plan_range(DAY, 7, settings, _at(9))
+    assert [(b["item"]["id"], b["s"], b["source"]) for b in pr[DAY]["blocks"]] == \
+        [(b["item"]["id"], b["s"], b["source"]) for b in p["blocks"]]
+    assert all(b["item"]["id"] not in {x["item"]["id"] for x in pr[DAY + timedelta(days=1)]["blocks"]} for b in p["blocks"])
+
+
+def test_calendar_views_show_tasks_and_toggle(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(8))
+    work = _task("Регламент склада", "2026-11-05")
+    records.set_in_work(work, True)
+    plain = _task("Сводка по KPI", "2026-11-04")
+    client = TestClient(app, base_url="http://localhost:8765")
+    page = client.get("/calendar?view=week").text
+    blocks = {int(i): c for c, i in re.findall(r'class="(pb[^"]*)" href="/commitments\?task=(\d+)"', page)}
+    assert "work" in blocks[work].split() and "work" not in blocks[plain].split()
+    assert "в работе</span><span><i></i>запланировано" in page
+    month = client.get("/calendar?view=month").text
+    cells = re.findall(r'<a class="mtasks[^"]*" href="\?start=([\d-]+)&view=week"[^>]*>(.*?)</a>', month, re.S)
+    assert cells == [("2026-11-03", '<span class="tdot work" aria-hidden="true"></span>задачи: 1 · 30 мин'),
+                     ("2026-11-04", '<span class="tdot" aria-hidden="true"></span>задачи: 1 · 30 мин')]
+    assert f'href="/commitments?task={plain}">Сводка по KPI</a>' in client.get("/calendar?view=list").text
+    off = client.get("/calendar?view=week&tasks=0")
+    assert 'class="pb' not in off.text and off.cookies.get("cal_tasks") == "0"
+    assert 'class="pb' not in client.get("/calendar?view=week").text  # выбор запомнен
+    assert 'class="pb work' in client.get("/calendar?view=week&tasks=1").text
+    home = client.get("/").text  # на Сводке — та же легенда
+    assert re.search(rf'class="pb work[^"]*" href="/commitments\?task={work}"', home)

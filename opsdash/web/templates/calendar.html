@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import ev_time, ev_detail, brief_mark, brief_dialog %}
+{% import "_day.html" as dayui %}
 {% block title %}Календарь{% endblock %}
 
 {% block content %}
@@ -8,6 +9,7 @@
 <div class="cal-top">
   <h1 class="cal-title">{{ title }}</h1>
   <span class="muted">{% if view == 'week' %}неделя {{ week_no }} · {% endif %}{{ count }} {{ plural(count, 'встреча', 'встречи', 'встреч') }}</span>
+  {% if show_tasks %}<span class="cal-legend" aria-label="Задачи на календаре"><span><i class="work"></i>в работе</span><span><i></i>запланировано</span></span>{% endif %}
   <span class="cal-nav">
     <a class="btn icon" href="?start={{ prev }}&view={{ view }}" title="{{ 'Месяц' if view == 'month' else 'Неделя' }} назад" aria-label="Назад">‹</a>
     <a class="btn" href="/calendar?view={{ view }}">Сегодня</a>
@@ -16,6 +18,9 @@
   <div class="grow"></div>
   {% if updated %}<span class="muted small">обновлён {{ updated | ago }}</span>{% endif %}
   {% if can_refresh %}<form class="inline" method="post" action="/calendar/refresh" data-busy="Обновляю…"><button class="btn ghost" title="Обновить Яндекс и Google Календарь сейчас">↻ Обновить</button></form>{% endif %}
+  {#- «Задачи»: ваши задачи по свободным окнам дней («Реальность дня»); выбор запоминается #}
+  <a class="fchip sm{{ ' on' if show_tasks }}" href="?start={{ first }}&view={{ view }}&tasks={{ 0 if show_tasks else 1 }}" aria-pressed="{{ 'true' if show_tasks else 'false' }}"
+     title="{{ 'Скрыть задачи' if show_tasks else 'Показать ваши задачи по свободным окнам дней' }}">Задачи</a>
   <nav class="seg" aria-label="Вид">
     <a href="?start={{ first }}&view=week" class="{{ 'active' if view == 'week' }}">Неделя</a><a href="?start={{ first }}&view=month" class="{{ 'active' if view == 'month' }}">Месяц</a><a href="?start={{ first }}&view=list" class="{{ 'active' if view == 'list' }}">Список</a>
   </nav>
@@ -64,12 +69,16 @@
       <div class="wk-gutter"></div>
       {% for d in grid.days %}<div class="wk-day-h{{ ' today' if d.today }}"><div class="wk-dow">{{ d.weekday }}{{ ' · сегодня' if d.today }}</div><div class="wk-num">{{ d.date.day }}</div></div>{% endfor %}
     </div>
-    {% if grid.allday %}
+    {% if grid.allday or grid.late %}
     <div class="wk-allday">
-      <div class="wk-gutter wk-allday-label" style="grid-row: 1 / span {{ grid.allday_rows }}">весь день</div>
+      <div class="wk-gutter wk-allday-label" style="grid-row: 1 / span {{ grid.allday_rows + (grid.late_rows or 0) }}">весь день</div>
       {% for a in grid.allday %}
       <button type="button" class="ev ev-allday{{ ' google' if a.ev.google }}{{ ' past' if a.ev.past }}" data-ev="{{ a.ev.n }}"
               style="grid-column: {{ a.col + 2 }} / span {{ a.span }}; grid-row: {{ a.row + 1 }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>
+      {% endfor %}
+      {% for x in grid.late or [] %}{#- срок в этот день, а окон до него не хватило — «срок под угрозой» #}
+      <a class="ev-late" href="/commitments?task={{ x.item.id }}" style="grid-column: {{ x.col + 2 }}; grid-row: {{ x.row + 1 }}"
+         title="«{{ x.item.title }}» (≈{{ x.item.est | dur }}) — {{ x.why }}">«{{ x.item.title }}» — {{ x.why }}</a>
       {% endfor %}
     </div>
     {% endif %}
@@ -86,6 +95,7 @@
           {% if not g.short %}<span class="ev-time">{{ ev_time(g.ev) }}{% if g.ev.past and g.ev.rec_status == 'processed' %} · разобрана ✓{% elif g.ev.past and g.ev.recorded %} · есть запись{% endif %}</span>{% endif %}
         </button>
         {% endfor %}
+        {% for b in d.tasks or [] %}{{ dayui.task_block(b, gap=2) }}{% endfor %}
         {% if d.today and grid.now_top is not none %}<div class="wk-now" style="top: {{ grid.now_top }}px" data-now="{{ grid.now_top }}"><span>{{ grid.now.strftime('%H:%M') if grid.now else '' }}</span></div>{% endif %}
       </div>
       {% endfor %}
@@ -103,6 +113,9 @@
     {% for d in days %}
     <div class="mcell{{ ' today' if d.today }}{{ ' other' if d.date.month != month }}">
       <a class="mcell-n" href="?start={{ d.date }}&view=week">{{ d.date.day }}</a>
+      {% set t = d.plan %}{% if t and (t.count or t.late) %}
+      <a class="mtasks{{ ' late' if t.late }}" href="?start={{ d.date }}&view=week" title="{% for b in t.blocks if b.item.id %}{{ b.s | hm }} {{ b.item.title }}{{ ' (в работе)' if b.item.in_work }}{{ '; ' if not loop.last }}{% endfor %}{% for x in t.late %}; «{{ x.item.title }}» — {{ x.why }}{% endfor %}"><span class="tdot{{ ' work' if t.work }}" aria-hidden="true"></span>задачи: {{ t.count }}{% if t.minutes %} · {{ t.minutes | dur }}{% endif %}{% if t.late %} · не влезает {{ t.late | length }}{% endif %}</a>
+      {% endif %}
       {% for e in d.events[:3] %}<button type="button" class="mev{{ ' past' if e.past }}{{ ' google' if e.uid.startswith('google:') }}" data-ev="{{ e.n }}" title="{{ e.title }} · {{ ev_time(e) }}">{% if not e.all_day %}<span>{{ e.start | local('%H:%M') }}</span> {% endif %}{{ e.title or 'Без названия' }}</button>{% endfor %}
       {% if d.events | length > 3 %}<a class="mev-more" href="?start={{ d.date }}&view=list">ещё {{ d.events | length - 3 }}</a>{% endif %}
     </div>
@@ -132,6 +145,18 @@
     {% if e.recorded %}<a class="btn sm" href="/meetings/{{ e.recorded }}">{{ 'Открыть разбор' if e.rec_status == 'processed' else 'Открыть встречу' }}</a>{% endif %}
     </div></li>
     {% else %}<li class="empty small">Встреч нет</li>{% endfor %}
+    {% for b in (d.plan or {}).blocks or [] if b.item.id %}
+    <li><div class="row"><div class="grow">
+      <span class="nowrap cal-li-t">{{ b.s | hm }}–{{ b.e | hm }}</span>
+      <span class="tdot{{ ' work' if b.item.in_work }}" aria-hidden="true"></span>
+      <a class="cal-task{{ ' work' if b.item.in_work }}" href="/commitments?task={{ b.item.id }}">{{ b.item.title }}</a>
+      <span class="muted small">· задача, ≈{{ b.item.est | dur }}{{ ' · в работе' if b.item.in_work }}{{ ' · сделано' if b.source == 'done' }}{{ ' · после срока' if b.late }}</span>
+    </div></div></li>
+    {% endfor %}
+    {% for x in (d.plan or {}).late or [] %}
+    <li><div class="row"><div class="grow warn-text"><span class="nowrap cal-li-t">срок</span>
+      <a class="warn-text" href="/commitments?task={{ x.item.id }}">«{{ x.item.title }}»</a> — {{ x.why }}</div></div></li>
+    {% endfor %}
   {% endfor %}
   </ul>
 </section>

@@ -70,17 +70,24 @@
 {% if it.id %}«<a href="/commitments?task={{ it.id }}">{{ it.title }}</a>»{% else %}{{ it.title | lower }}{% endif %}
 {%- endmacro %}
 
+{% macro task_block(b, drag=None, gap=4) %}
+{#- плановая задача на часовой сетке — одна легенда на Сводке и в Календаре: «в работе» — зелёная, остальные —
+    серые, обе пунктиром; закреплённая директором — сплошной рамкой; сделанная — галочкой. Клик — окно задачи.
+    drag — сетка Сводки (минута верхнего края и высота часа): блок можно перетащить на другое время #}
+{% set it = b.item %}
+<a class="pb{{ ' work' if b.work }}{{ ' pinned' if b.pinned }}{{ ' done' if b.done }}{{ ' late' if b.late }}{{ ' tiny' if b.height < 30 }}" {% if it.id %}href="/commitments?task={{ it.id }}"{% else %}href="#" data-feed-jump="answer"{% endif %}
+   {%- if drag and it.id and not b.done %} data-drag="{{ it.id }}" data-s="{{ b.start }}" data-from="{{ drag.plan_from }}" data-px="{{ drag.hour_px }}"{% endif %}
+   style="top: {{ b.top }}px; height: {{ b.height }}px; left: calc({{ '%.4f' % (b.left * 100) }}% + {{ gap }}px); width: calc({{ '%.4f' % (b.width * 100) }}% - {{ gap * 2 }}px)"
+   title="{{ it.title }} · {{ b.time }} · {{ 'сделано' if b.done else '≈' ~ (it.est | dur) }}{{ ' · в работе' if b.work }}{{ ' · после срока' if b.late }}{{ ' · вы поставили сюда' if b.pinned }}{{ ' · перетащите, чтобы поставить на другое время' if drag and it.id and not b.done }}">
+  <span class="pb-t">{{ '✓ ' if b.done }}{{ it.title }}</span><span class="pb-m">{{ b.time }}{% if not b.done %} · ≈{{ it.est | dur }}{% endif %}</span>
+</a>
+{% endmacro %}
+
 {% macro layer(day) %}
 {#- на сетке дня: плановые блоки задач (пунктир; клик — окно задачи, перетащить — поставить на другое время),
     сделанное из плана — галочкой, буферы — штриховкой, короткие окна — серым #}
 {% for b in day.plan_layer or [] %}
-{% if b.kind == 'plan' %}{% set it = b.item %}
-<a class="pb{{ ' pinned' if b.pinned }}{{ ' done' if b.done }}{{ ' tiny' if b.height < 30 }}" {% if it.id %}href="/commitments?task={{ it.id }}"{% else %}href="#" data-feed-jump="answer"{% endif %}
-   {%- if it.id and not b.done %} data-drag="{{ it.id }}" data-s="{{ b.start }}" data-from="{{ day.plan_from }}" data-px="{{ day.hour_px }}"{% endif %}
-   style="top: {{ b.top }}px; height: {{ b.height }}px; left: calc({{ '%.4f' % (b.left * 100) }}% + 4px); width: calc({{ '%.4f' % (b.width * 100) }}% - 8px)"
-   title="{{ it.title }} · {{ b.time }} · {{ 'сделано' if b.done else '≈' ~ (it.est | dur) }}{{ ' · вы поставили сюда' if b.pinned }}{{ ' · перетащите, чтобы поставить на другое время' if it.id and not b.done }}">
-  <span class="pb-t">{{ '✓ ' if b.done }}{{ it.title }}</span><span class="pb-m">{{ b.time }}{% if not b.done %} · ≈{{ it.est | dur }}{% endif %}</span>
-</a>
+{% if b.kind == 'plan' %}{{ task_block(b, day) }}
 {% else %}
 <div class="pl pl-{{ b.kind }}" style="top: {{ b.top }}px; height: {{ b.height }}px" title="{{ b.title }}" aria-hidden="true"></div>
 {% endif %}
