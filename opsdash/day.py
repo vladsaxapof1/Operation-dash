@@ -830,6 +830,9 @@ def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due:
     if act == "nodue":
         store.execute("UPDATE commitments SET due=NULL, no_due_at=?, seen_at=COALESCE(seen_at, ?), updated=? "
                       "WHERE id=?", (now, now, now, cid))
+        from opsdash import worklog
+
+        worklog.event(cid, "Срок снят")
         mark("dropped")
         return "Срок снят"
     if act == "delegate":  # задача остаётся на директоре и ждёт свою часть — из плана уходит, пока часть не готова

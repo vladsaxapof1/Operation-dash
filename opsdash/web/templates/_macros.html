@@ -310,6 +310,7 @@
     {% if c.source_type == 'meeting' and c.source_ref %} · <a href="/meetings/{{ c.source_ref }}">встреча</a>{% elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif %}
     {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
   </div>
+  {% if c.now %}<div class="cm-now" title="Последнее по задаче — {{ c.now.day }}, {{ c.now.src }}">{{ icons.icon('inbox', 13) }}<span>{{ c.now.text }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</span></div>{% endif %}
   <div class="actions cm-actions">
     {% if c.archived_at %}
     {{ archive_button(c, small=True) }}
@@ -368,11 +369,13 @@
     {%- if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif -%}
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}
+    {%- if c.now and c.now.waiting %} · <span class="warn-text" title="{{ c.now.text }}">{{ c.now.waiting_short }}</span>{% endif -%}
     {%- if c.archived %} · архив{% endif -%}
     {%- set agent = agent_chip(c) | trim %}{% if agent %} · {{ agent }}{% endif -%}
     {%- if open_waits %} · <span class="task-wait" title="Ждёт: {% for w in open_waits %}{{ ('«' ~ w.task.headline ~ '» (' ~ w.task.doer ~ ')') if w.task else w.event }}{{ '; ' if not loop.last }}{% endfor %}">{{ icons.icon('hourglass', 13) }}ждёт</span>{% endif -%}
   </div>
   <div class="task-more">
+    {% if c.now %}<div class="task-dep task-now">{{ icons.icon('inbox', 14) }}<span>{{ c.now.text | truncate(160) }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %} <span class="muted">· {{ c.now.day }}</span></span></div>{% endif %}
     {% for w in open_waits[:3] %}<div class="task-dep">{{ icons.icon('hourglass', 14) }}<span>ждёт {% if w.task %}{{ task_ref(w.task) }} — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% if w.until %} · {{ w.until | date }}{% endif %}{% endif %}{% if w.late %}, <span class="bad-text">просрочено</span>{% endif %}</span></div>{% endfor %}
     {% if c.status == 'open' and c.waits and not open_waits %}<div class="task-dep ok-text">{{ icons.icon('check', 14) }}<span>дождалась — можно делать</span></div>{% endif %}
     {% for h in holds[:3] %}<div class="task-dep"><span class="dep-ico">→</span><span>её ждёт {{ task_ref(h.task) }} — {{ 'вы' if h.task.direction == 'mine' else h.task.doer }}</span></div>{% endfor %}
@@ -446,6 +449,64 @@
 </details>
 {%- endmacro %}
 
+{% macro task_now(c) -%}
+{#- «Сейчас» под заголовком окна задачи: последняя запись хода (комментарий директора или что произошло — из переписки,
+    со встречи). Вопрос без ответа — «ответа нет N дней». Обновляется само: Claude дописывает ход при разборе -#}
+<div class="dlg-now-slot" data-now-slot>{% if c.now %}<div class="dlg-now{{ ' wait' if c.now.waiting }}" title="Последнее по задаче; весь ход — в колонке «Ход задачи»">
+  <span class="now-l">Сейчас</span>
+  <span class="now-t">{{ c.now.text }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</span>
+  <span class="now-m">{{ c.now.day }} · {{ c.now.src }}</span>
+</div>{% endif %}</div>
+{%- endmacro %}
+
+{% macro log_entry(c, e) -%}
+{#- запись хода задачи. Событие PULSE — одной серой строкой; «появилась» — откуда задача; остальное — откуда (чат,
+    встреча, вы), когда, ссылка на сообщение, текст и цитата -#}
+<li class="log-i k-{{ e.kind }}{{ ' waiting' if e.waiting }}"{% if e.id %} data-log-id="{{ e.id }}"{% endif %}>
+  {%- if e.kind == 'event' %}
+  <div class="log-ev"><span class="log-when">{{ e.when }}</span> {{ e.text }}{% if e.link %} <a href="{{ e.link }}" target="_blank" rel="noopener" title="{{ e.link_label }}">↗</a>{% endif %}
+    <form class="inline log-x" method="post" action="/commitments/{{ c.id }}/log/{{ e.id }}/remove" data-log-remove><button class="linkish muted" title="Убрать запись" aria-label="Убрать запись">✕</button></form></div>
+  {%- else %}
+  <div class="log-meta">
+    <span class="log-src">{% if e.kind == 'origin' %}{{ 'появилась' if e.source_type and e.source_type != 'manual' else 'добавлена вручную' }}{% if e.source_type and e.source_type != 'manual' %} · {{ e.src }}{% endif %}{% else %}{{ e.src }}{% endif %}</span>
+    <span class="log-when">{{ e.when }}</span>
+    {%- if e.link %} <a class="log-link" href="{{ e.link }}"{% if e.link.startswith('http') %} target="_blank" rel="noopener"{% endif %} title="{{ e.link_label }}">↗</a>{% endif %}
+    {%- if e.author == 'claude' %} <span class="log-by" title="Записал {{ assistant() }}, разбирая переписку и встречи">· {{ assistant() }}</span>{% endif %}
+    {%- if e.id %}<form class="inline log-x" method="post" action="/commitments/{{ c.id }}/log/{{ e.id }}/remove" data-log-remove><button class="linkish muted" title="Убрать запись" aria-label="Убрать запись">✕</button></form>{% endif %}
+  </div>
+  {%- if e.kind != 'origin' %}
+  <div class="log-text">{{ e.text }}{% if e.waiting %} <span class="log-wait">{{ e.waiting }}</span>{% elif e.kind == 'ask' %} <span class="log-asked">вопрос</span>{% endif %}</div>
+  {%- if e.quote %}<div class="log-quote">«{{ e.quote }}»</div>{% endif %}
+  {%- endif %}
+  {%- endif %}
+</li>
+{%- endmacro %}
+
+{% macro task_log(c) %}
+{#- ход задачи — колонка справа в окне задачи (на узком экране — внизу): от появления до последнего апдейта. Claude
+    дописывает его сам, разбирая переписку и встречи; PULSE — события (срок, «в работе», «ждёт», Kaiten); директор —
+    комментарии полем внизу. «Собрать с Claude» — поискать по задаче во всех источниках и дописать пропущенное #}
+<aside class="dlg-log" aria-label="Ход задачи">
+  <div class="log-head">
+    <span class="dlg-sec">Ход задачи</span>
+    {% if c.status == 'open' and not c.duplicate %}<form class="inline" method="post" action="/commitments/{{ c.id }}/log/collect"><button class="linkish log-collect" title="{{ assistant() }} поищет по задаче в переписке, встречах и Kaiten и допишет в ход, что было: вопросы, ответы, договорённости">{{ icons.icon('ask', 14) }} Собрать с {{ assistant() }}</button></form>{% endif %}
+  </div>
+  <ol class="log-list" data-log-list>
+    {% for e in c.log or [] %}{{ log_entry(c, e) }}{% endfor %}
+  </ol>
+  {% if not c.log_count %}<p class="log-empty muted small" data-log-empty>Здесь будет видно, как движется задача: {{ assistant() }} допишет вопросы, ответы и договорённости из переписки и встреч, PULSE — переносы сроков и статусы. Свой комментарий — ниже.</p>{% endif %}
+  <form class="log-form" method="post" action="/commitments/{{ c.id }}/log" data-log-form>
+    <textarea name="text" rows="2" required placeholder="Что изменилось, комментарий…" aria-label="Запись в ход задачи"></textarea>
+    <div class="log-form-row">
+      <label class="log-ask" title="Вы спросили или попросили — пока не появится новая запись, у задачи будет «ответа нет N дней»"><input type="checkbox" name="ask" value="1"> жду ответа</label>
+      <span class="grow"></span>
+      <button class="btn sm primary" title="Записать (⌘ или Ctrl + Enter)">Записать</button>
+    </div>
+    <p class="bad-text small" data-log-err hidden></p>
+  </form>
+</aside>
+{% endmacro %}
+
 {% macro task_dialog(c, meetings={}) %}
 {#- окно задачи (5.4): заголовок и статус, одна строка меты, суть, связи с иконками («ждёт», «её ждёт», встреча, части
     задачи), внизу «Готово», «В работе», «Спросить Claude» и «…». Открывается «открыть» на карточке, кликом по строке
@@ -466,6 +527,7 @@
         </form>
         <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>
       </div>
+      <div class="dlg-main">
       <div class="dlg-meta">
         {{ task_people(c) }} · {{ due_text(c, both=True) or 'без срока' }}
         {%- if c.source_type == 'meeting' and c.source_ref %} · из <a href="/meetings/{{ c.source_ref }}">{{ ('«' ~ meetings[c.source_ref] ~ '»') if meetings.get(c.source_ref) else 'встречи' }}</a>
@@ -474,6 +536,7 @@
         {%- if c.kaiten_card_id %} · Kaiten #{{ c.kaiten_card_id }}{% endif -%}
         {%- if c.archived %} · в архиве{% endif %}
       </div>
+      {{ task_now(c) }}
       {{ dayui.estimate_row(c) }}
       {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
       {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}
@@ -600,6 +663,8 @@
         {%- if c.closed_at and c.status != 'open' %} · {{ 'выполнена' if c.status == 'done' else 'отменена' }} {{ c.closed_at | local('%d.%m') }}{% endif %}
         {%- if c.note %} · {{ c.note }}{% endif %}
       </div>
+      </div>
+      {{ task_log(c) }}
     </div>
     <form class="dlg-edit" method="post" action="/commitments/{{ c.id }}/edit" hidden>
       <h2 class="dlg-title">Изменить задачу</h2>

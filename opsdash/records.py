@@ -8,7 +8,7 @@ import math
 import re
 from datetime import date, datetime, time, timedelta, timezone
 
-from opsdash import config, store
+from opsdash import config, store, worklog
 
 DIRECTIONS = {"mine": "мои задачи", "to_me": "мне должны", "other": "между коллегами"}
 
@@ -251,9 +251,20 @@ def set_due(cid: int, due: str | None) -> None:
     if due and not _as_date(due):
         raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
     now = store.utcnow()
+    was = store.scalar("SELECT due FROM commitments WHERE id=?", (cid,))
     store.execute("UPDATE commitments SET no_due_at=CASE WHEN ? IS NULL AND due IS NULL THEN ? END, due=COALESCE(?, due), "
                   "due_hint=NULL, due_hint_why=NULL, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
                   (due or None, now, due or None, now, now, cid))
+    if due and due != was:
+        worklog.event(cid, due_change(was, due))
+
+
+def due_change(was: str | None, new: str | None) -> str:
+    """Событие хода задачи: «Срок: 11.11 → 18.11», «Срок — 18.11», «Срок снят»."""
+    f = lambda d: f"{_as_date(d):%d.%m}" if _as_date(d) else d  # noqa: E731
+    if not new:
+        return "Срок снят"
+    return f"Срок: {f(was)} → {f(new)}" if was else f"Срок — {f(new)}"
 
 
 def due_choices(today: date | None = None) -> list[tuple[str, date]]:
@@ -269,16 +280,22 @@ def due_choices(today: date | None = None) -> list[tuple[str, date]]:
 def set_in_work(cid: int, on: bool) -> None:
     """«В работе»: директор взялась за задачу — карточка сверху своей колонки и зелёная. Снять — on=False."""
     now = store.utcnow()
+    was = store.scalar("SELECT in_work_at FROM commitments WHERE id=?", (cid,))
     store.execute("UPDATE commitments SET in_work_at=?, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
                   (now if on else None, now, now, cid))
+    if on and not was:
+        worklog.event(cid, "Взяли в работу")
 
 
 def set_archived(cid: int, on: bool) -> None:
     """Убрать задачу в архив (или вернуть): статус не меняется, задача только пропадает с доски, из списков,
     напоминаний и дайджестов. Архив — в списке задач, фильтр «Архив»."""
     now = store.utcnow()
+    was = store.scalar("SELECT archived_at FROM commitments WHERE id=?", (cid,))
     store.execute("UPDATE commitments SET archived_at=?, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
                   (now if on else None, now, now, cid))
+    if bool(was) != on:
+        worklog.event(cid, "Убрана в архив" if on else "Возвращена из архива")
     if on:  # задача больше не в работе; предложения Claude по ней («закрыть», «напомнить») не ждут ответа
         store.execute("UPDATE commitments SET in_work_at=NULL WHERE id=?", (cid,))
         store.execute(
@@ -319,12 +336,28 @@ def update_commitment(cid: int, **fields) -> None:
         sets.append("duplicate_of=NULL")  # вернули дубль — снова самостоятельная задача
     sets.append("updated=?")
     params.append(store.utcnow())
-    was = store.scalar("SELECT status FROM commitments WHERE id=?", (cid,))
+    old = store.row("SELECT status, due, kaiten_card_id FROM commitments WHERE id=?", (cid,)) or {}
+    was = old.get("status")
     store.execute(f"UPDATE commitments SET {', '.join(sets)} WHERE id=?", [*params, cid])
+    _log_changes(cid, old, fields)
     if fields.get("status") in ("done", "cancelled"):
         _settle_done_proposals(cid, fields["status"])
         if was == "open":
             _notify_unblocked(cid)
+
+
+def _log_changes(cid: int, old: dict, fields: dict) -> None:
+    """События хода задачи после update_commitment: статус, срок, карточка Kaiten."""
+    status = fields.get("status")
+    if status and status != old.get("status"):
+        note = (fields.get("note") or "").strip()
+        text = {"done": "Выполнена", "cancelled": "Отменена"}.get(status, "Возвращена в работу")
+        worklog.event(cid, f"{text}. {note}" if note and status != "open" else text)
+    if fields.get("due") and fields["due"] != old.get("due"):
+        worklog.event(cid, due_change(old.get("due"), fields["due"]))
+    card = fields.get("kaiten_card_id")
+    if card and card != old.get("kaiten_card_id"):
+        worklog.event(cid, f"Карточка Kaiten #{card}", source=f"kaiten:{card}")
 
 
 # --- «ждёт» и дубли ---------------------------------------------------------------------
@@ -388,11 +421,21 @@ def add_wait(task_id: int, *, waits_for: int | None = None, event: str | None = 
         store.execute("UPDATE task_links SET until=COALESCE(?, until), note=COALESCE(?, note), done_at=NULL WHERE id=?",
                       (until or None, note or None, old["id"]))
         return old["id"]
-    return store.execute(
+    lid = store.execute(
         "INSERT INTO task_links(task_id, waits_for, event, until, note, source_ref, added_by, created) "
         "VALUES(?,?,?,?,?,?,?,?)",
         (task_id, waits_for or None, None if waits_for else event, None if waits_for else (until or None),
          (note or "").strip() or None, source_ref, by if by in ("claude", "kaiten") else "director", store.utcnow()))
+    if waits_for:
+        other = store.row("SELECT * FROM commitments WHERE id=?", (waits_for,)) or {}
+        text = f"Ждёт «{headline(other)}» ({doer(other)})"
+    else:
+        day = _as_date(until)
+        text = f"Ждёт: {event}" + (f" — к {day:%d.%m}" if day else "")
+    if (note or "").strip():
+        text += f". {note.strip()}"
+    worklog.event(task_id, ("Kaiten: " + text[0].lower() + text[1:]) if by == "kaiten" else text)
+    return lid
 
 
 def find_waits(task_id: int, *, waits_for: int | None = None, event: str | None = None) -> list[dict]:
@@ -414,6 +457,8 @@ def set_event_done(link_id: int, done: bool = True) -> None:
     if not link:
         raise ValueError("Нет такого события у задачи")
     store.execute("UPDATE task_links SET done_at=? WHERE id=?", (store.utcnow() if done else None, link_id))
+    if done != bool(link["done_at"]):
+        worklog.event(link["task_id"], f"Случилось: {link['event']}" if done else f"Снова ждёт: {link['event']}")
     if done and not link["done_at"]:
         _notify_unblocked(None, task_id=link["task_id"], event=link["event"])
 
@@ -491,6 +536,7 @@ def _notify_unblocked(closed_id: int | None, *, task_id: int | None = None, even
         if t and not _open_waits(tid):
             notices.add("tasks", f"Можно делать: «{headline(t)}»", why.replace("Я:", "Вы:", 1),
                         link=f"/commitments?task={tid}")
+            worklog.event(tid, "Можно делать — " + why.replace("Я:", "Вы:", 1))
 
 
 def unblocked(days: int = 2) -> list[dict]:
@@ -587,6 +633,9 @@ def merge_commitments(drop_id: int, keep_id: int, *, note: str | None = None) ->
             store.execute("UPDATE task_items SET task_id=?, sort=sort+1000 WHERE id=?", (keep_id, r["id"]))
     store.execute("UPDATE commitments SET status='cancelled', duplicate_of=?, closed_at=COALESCE(closed_at, ?), "
                   "in_work_at=NULL, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?", (keep_id, now, now, now, drop_id))
+    # ход дубля — в ход остающейся задачи: что было по нему в переписке и на встречах, не теряется
+    worklog.move(drop_id, keep_id)
+    worklog.event(keep_id, f"Объединена с дублем «{headline(drop)}»" + (f" ({source})" if source else ""))
     # предложения Claude по дублю больше не ждут ответа; предложение объединить эту пару — выполнено
     store.execute(
         "UPDATE proposals SET status='rejected', decided_at=?, result=? WHERE status='pending' "
@@ -659,8 +708,12 @@ def find_items(task_id: int, text: str) -> list[dict]:
 
 
 def set_item_done(item_id: int, done: bool = True, note: str | None = None) -> None:
+    item = store.row("SELECT * FROM task_items WHERE id=?", (item_id,))
     store.execute("UPDATE task_items SET done_at=?, note=? WHERE id=?",
                   (store.utcnow() if done else None, (note or "").strip() or None if done else None, item_id))
+    if item and done != bool(item["done_at"]):
+        text = f"Пункт готов: {item['text']}" if done else f"Пункт снова не готов: {item['text']}"
+        worklog.event(item["task_id"], text + (f" — {note.strip()}" if done and (note or "").strip() else ""))
 
 
 def remove_item(item_id: int) -> None:
@@ -742,12 +795,20 @@ def edit_commitment(cid: int, *, title: str, what: str, direction: str, who: str
     now = store.utcnow()
     if project_id and project_id != -1:
         _check_project(project_id)
+    was = store.row("SELECT due, who, whom, direction FROM commitments WHERE id=?", (cid,)) or {}
     store.execute("UPDATE commitments SET title=?, what=?, direction=?, who=?, whom=?, due=?, parent_id=?, "
                   "seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
                   (title or None, what, direction, (who or "").strip() or None, (whom or "").strip() or None,
                    due or None, parent_id or None, now, now, cid))
     if project_id != -1:
         set_project(cid, project_id or None)
+    if (due or None) != was.get("due"):
+        worklog.event(cid, due_change(was.get("due"), due))
+    if was and direction == was.get("direction"):  # передали другому: у моих — кому, у остальных — кто делает
+        key, label = ("whom", "Кому") if direction == "mine" else ("who", "Исполнитель")
+        name, old_name = ((whom if key == "whom" else who) or "").strip(), was.get(key) or ""
+        if name != old_name:
+            worklog.event(cid, f"{label}: " + (f"{old_name} → {name}" if old_name and name else name or "не указан"))
 
 
 def headline(c: dict) -> str:
@@ -814,6 +875,7 @@ def add_links(items: list[dict]) -> list[dict]:
             c["link"], c["link_title"] = found
             c["link_label"] = ("Telegram" if "t.me/" in found[0] or "telegram.org" in found[0]
                                else "Пачка" if "pachca.com" in found[0] else "Почта")
+    worklog.add_links(items)  # ход задачи: у записей из переписки — ссылка на сообщение
     return with_reminders(items, people)
 
 
@@ -952,6 +1014,8 @@ def set_reminders(cid: int, act: str, until: str | date | None = None) -> None:
         return
     note = {"reminded": "уже напомнили сами", "pause": "попросили пока не напоминать",
             "off": "попросили больше не напоминать"}[act]
+    worklog.event(cid, {"reminded": "Напомнили исполнителю сами", "off": "Больше не напоминать по этому сроку"}.get(
+        act) or f"Не напоминать до {_as_date(until.isoformat() if isinstance(until, date) else until):%d.%m}")
     store.execute("UPDATE proposals SET status='rejected', decided_at=?, result=? WHERE kind='telegram.remind' "
                   "AND status='pending' AND json_extract(payload, '$.commitment_id')=?",
                   (now, store.json_col({"note": note}), cid))
@@ -1125,6 +1189,7 @@ def _relations(items: list[dict]) -> None:
     from opsdash import task_meetings
 
     task_meetings.decorate(items)
+    worklog.decorate(items)
 
 
 def _waits(items: list[dict]) -> None:

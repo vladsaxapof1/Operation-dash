@@ -277,6 +277,7 @@
       {%- elif open_waits %}{% set w = open_waits[0] %}<div class="sub2">ждёт {% if w.task %}«{{ w.task.headline | truncate(40, True, '…') }}» — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% endif %}{% if w.late %} <span class="bad-text">(просрочено)</span>{% endif %}{% if open_waits | length > 1 %} и ещё {{ open_waits | length - 1 }}{% endif %}</div>
       {%- elif c.holds and c.status == 'open' %}<div class="sub2">её ждёт «{{ c.holds[0].task.headline | truncate(40, True, '…') }}»</div>
       {%- elif c.items_total %}<div class="sub2">{{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}</div>{% endif %}
+      {%- if c.now %}<div class="sub2 sub-now" title="Последнее по задаче — {{ c.now.day }}, {{ c.now.src }}: {{ c.now.text }}">{{ c.now.day }} · {{ c.now.text | truncate(90, True, '…') }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</div>{% endif %}
       {{ ui.task_dialog(c, meetings) }}</td>
     <td>{{ c.route }}</td>
     <td class="nowrap">{% if c.due %}{% if c.overdue %}<span class="bad-text">{{ c.due | date }} · просрочено</span>{% elif c.status == 'open' and c.due_days is not none and c.due_days <= 1 %}<span class="warn-text">{{ c.due | date }} · {{ 'сегодня' if c.due_days == 0 else 'завтра' }}</span>{% else %}{{ c.due | date }}{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>

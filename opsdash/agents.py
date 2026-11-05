@@ -485,6 +485,10 @@ def _task_lines(c: dict) -> list[str]:
         card = store.row("SELECT title, column_title, responsible_name FROM kaiten_cards WHERE id=?", (c["kaiten_card_id"],))
         out.append(f"Карточка Kaiten #{c['kaiten_card_id']}" + (f" «{card['title']}» ({card['column_title']}, "
                                                                 f"{card['responsible_name'] or 'без исполнителя'})" if card else ""))
+    if c.get("log_count"):  # ход задачи: что уже сделали, спросили, о чём договорились — агент не начнёт с нуля
+        from opsdash import worklog
+
+        out += worklog.lines(c)[-13:]
     return out
 
 

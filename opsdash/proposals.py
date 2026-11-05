@@ -561,6 +561,9 @@ def execute(p: dict) -> dict:
 
         telegram.send(pl["target"], pl["text"])
         records.mark_reminded(pl["commitment_id"])
+        from opsdash import worklog
+
+        worklog.event(pl["commitment_id"], f"Напомнили{' ' + pl['to'] if pl.get('to') else ''} в Telegram: «{pl['text']}»")
         return {"commitment_id": pl["commitment_id"], "to": pl.get("to")}
     if kind == "attention.done":
         a = store.row("SELECT status FROM attention WHERE id=?", (pl["attention_id"],))

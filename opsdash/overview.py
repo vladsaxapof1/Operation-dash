@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 from datetime import date, datetime, time, timedelta, timezone
 
-from opsdash import config, projects, proposals, records, store
+from opsdash import config, projects, proposals, records, store, worklog
 from opsdash.sources import kaiten
 
 SOURCE_TITLES = {
@@ -349,7 +349,8 @@ def overview_markdown(settings: dict | None = None) -> str:
                 f"{' · пункты ' + str(c['items_done']) + '/' + str(c['items_total']) if c.get('checklist') else ''}"
                 f"{' · срок под угрозой: ' + c['wait_risk'] if c.get('wait_risk') else ''}"
                 f"{_remind_note(c)}"
-                f"{' · предложено закрыть' if c.get('done_hint') else ''}" for c in s[key]] or ["- нет"]
+                f"{' · предложено закрыть' if c.get('done_hint') else ''}"
+                f"{' · ' + worklog.now_text(c, 160) if c.get('now') else ''}" for c in s[key]] or ["- нет"]
     out.append("\n## Проекты")
     for p in s["projects"]:
         line = (f"- [project {p['id']}] {p['title']} — {p['done']} из {p['total']} ({p['percent']}%)"

@@ -225,6 +225,20 @@ CREATE TABLE IF NOT EXISTS task_items (       -- пункты внутри за�
 );
 CREATE INDEX IF NOT EXISTS ix_task_items_task ON task_items(task_id);
 CREATE INDEX IF NOT EXISTS ix_task_links_for ON task_links(waits_for);
+CREATE TABLE IF NOT EXISTS task_log (         -- ход задачи: комментарии, апдейты из переписки и встреч, события (worklog)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    at TEXT NOT NULL,                -- когда это случилось (UTC): время сообщения, встречи, записи
+    kind TEXT DEFAULT 'update',      -- note — комментарий директора | update — что произошло | ask — спросили, ждём
+                                     -- ответа | event — событие PULSE (срок, статус, «ждёт», Kaiten)
+    text TEXT NOT NULL,
+    source_type TEXT,                -- telegram | ymessenger | pachca | mail | meeting | kaiten | manual
+    source_ref TEXT,
+    quote TEXT,
+    author TEXT,                     -- director | claude | pulse
+    created TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_task_log_task ON task_log(task_id, at);
 CREATE TABLE IF NOT EXISTS day_plan (         -- план дня: какие задачи в какие окна (opsdash.day); в календарь не пишем
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT NOT NULL,              -- YYYY-MM-DD, местный день

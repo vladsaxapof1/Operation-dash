@@ -198,6 +198,11 @@ def _context_prompt(items: list[dict]) -> str:
                 line += f" · источник {t['source_type']}:{t['source_ref'] or ''}"
             if t.get("meeting"):
                 line += f" · встреча по задаче «{t['meeting']['title']}» {store.local(t['meeting']['start'])}"
+            if t.get("now"):
+                from opsdash import worklog
+
+                line += f" · {worklog.now_text(t)}"
+            line += f" — весь ход задачи: ./ops commitments show {t['id']}"
             lines.append(line)
         elif c["type"] == "doc":
             d = store.row("SELECT rel FROM docs WHERE path=?", (c["path"],))

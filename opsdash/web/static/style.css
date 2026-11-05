@@ -1157,6 +1157,66 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 #add-dlg input, #add-dlg select, #add-dlg textarea { max-width: none; }
 #add-dlg .dlg-head { margin-bottom: 4px; }
 
+/* ход задачи (opsdash.worklog): «Сейчас» под заголовком и лента справа — от появления до последнего апдейта.
+   На широком экране окно задачи — в две колонки, лента со своей прокруткой и полем комментария внизу;
+   на узком — лента под задачей */
+.dlg-main { display: grid; gap: 14px; min-width: 0; align-content: start; }
+.dlg-now-slot:empty { display: none; }
+.dlg-now { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 10px; padding: 9px 12px; border-radius: 10px;
+  background: var(--accent-soft); font-size: 14px; line-height: 1.45; }
+.dlg-now.wait { background: var(--warn-soft); }
+.now-l { padding-top: 2px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+.dlg-now.wait .now-l { color: var(--warn-text); }
+.now-t { overflow-wrap: anywhere; }
+.now-m { grid-column: 2; font-size: 12px; color: var(--muted); }
+.dlg-log { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.log-head { display: flex; align-items: baseline; gap: 10px; }
+.log-head form { margin-left: auto; }
+.log-collect { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.log-list { margin: 0 0 0 5px; padding: 2px 0 2px 16px; list-style: none; display: grid; gap: 12px; align-content: start;
+  border-left: 2px solid var(--line); overflow-y: auto; overscroll-behavior: contain; }
+.log-i { position: relative; font-size: 14px; line-height: 1.45; min-width: 0; }
+.log-i::before { content: ""; position: absolute; left: -23px; top: 5px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--panel); border: 2px solid var(--faint); }
+.log-i.k-update::before { border-color: var(--accent); }
+.log-i.k-note::before { border-color: var(--accent); background: var(--accent); }
+.log-i.k-ask::before { border-color: var(--warn); }
+.log-i.k-ask.waiting::before { background: var(--warn); }
+.log-i.k-event::before { left: -21px; top: 8px; width: 6px; height: 6px; border: 0; background: var(--line-strong); }
+.log-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: 12px; color: var(--muted); }
+.log-src { font-weight: 600; overflow-wrap: anywhere; }
+.log-i.k-origin .log-src { font-weight: 400; }
+.log-when { white-space: nowrap; }
+.log-x { margin-left: auto; visibility: hidden; }
+.log-x .linkish { font-size: 12px; }
+.log-i:hover .log-x, .log-x:focus-within { visibility: visible; }
+.log-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-quote { margin-top: 2px; font-size: 13px; font-style: italic; color: var(--muted); overflow-wrap: anywhere; }
+.log-wait { display: inline-block; padding: 0 7px; border-radius: 999px; background: var(--warn-soft); color: var(--warn-text);
+  font-size: 12px; white-space: nowrap; }
+.log-asked { font-size: 12px; color: var(--muted); }
+.log-ev { display: flex; align-items: baseline; gap: 6px; font-size: 13px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; }
+.log-ev .log-when { font-size: 12px; }
+.log-empty { margin: 0; }
+.log-form { display: grid; gap: 6px; margin: 0; }
+.log-form textarea { width: 100%; max-width: none; min-height: 60px; font-size: 14px; resize: vertical; }
+.log-form-row { display: flex; align-items: center; gap: 8px; }
+.log-ask { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.log-ask input { width: auto; margin: 0; }
+.task-now { color: var(--text); }
+.task-now .ico { color: var(--muted); }
+.cm-now { display: flex; gap: 6px; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.cm-now .ico { flex: none; margin-top: 2px; }
+.tlist .sub-now { overflow-wrap: anywhere; }
+@media (min-width: 1100px) {
+  .dlg-task:has(.dlg-view:not([hidden])) { width: min(1120px, calc(100vw - 48px)); }
+  .dlg-task .dlg-view { grid-template-columns: minmax(0, 1fr) 340px; column-gap: 28px; align-items: start; }
+  .dlg-task .dlg-head { grid-column: 1 / -1; }
+  .dlg-log { position: sticky; top: 0; max-height: calc(100vh - 160px); padding: 0 0 0 24px; border-top: 0;
+    border-left: 1px solid var(--line); }
+  .dlg-log .log-list { flex: 0 1 auto; min-height: 0; }
+}
+
 @media (max-width: 1000px) { .board { grid-template-columns: repeat(3, minmax(250px, 1fr)); overflow-x: auto; padding-bottom: 6px; } }
 @media (max-width: 760px) {
   .toolbar { width: 100%; }

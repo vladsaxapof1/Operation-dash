@@ -13,7 +13,7 @@ import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 
-from opsdash import config, overview, records, store
+from opsdash import config, overview, records, store, worklog
 
 
 def fingerprint(e: dict) -> str:
@@ -227,10 +227,13 @@ def context(uid: str, settings: dict | None = None) -> str:
     from opsdash import task_meetings
 
     linked = task_meetings.tasks_for(uid)
+    worklog.decorate(linked)  # «сейчас: …» у задач встречи — последнее из их хода
     if linked:  # ради этих задач встречу и собирают — с них и начинается бриф
         out.append("\nВстреча посвящена задачам:")
         out += [f"- [{c['id']}] {records.route(c)}: {records.headline(c)}{' · до ' + c['due'] if c['due'] else ''}"
-                f"{' — ' + c['what'] if c['what'] != records.headline(c) else ''}" for c in linked]
+                f"{' — ' + c['what'] if c['what'] != records.headline(c) else ''}"
+                f"{' · ' + worklog.now_text(c) if c.get('now') else ''}" for c in linked]
+        out.append("Ход этих задач целиком — ./ops commitments show <id>.")
 
     keys = list(dict.fromkeys(w for n in names if "@" not in n for w in re.findall(r"[А-Яа-яЁё]{3,}", n)))
     name_stems = records._stems(" ".join(keys) + " " + owner)
@@ -262,7 +265,8 @@ def context(uid: str, settings: dict | None = None) -> str:
         tasks.pop(c["id"], None)
     out.append("\nОткрытые задачи с участниками:")
     out += [f"- [{c['id']}] {records.route(c)}: {records.headline(c)}{' · до ' + c['due'] if c['due'] else ''}"
-            f"{' (ПРОСРОЧЕНО)' if c['overdue'] else ''}" for c in sorted(tasks.values(), key=lambda c: c["due"] or "9")]
+            f"{' (ПРОСРОЧЕНО)' if c['overdue'] else ''}{' · ' + worklog.now_text(c, 160) if c.get('now') else ''}"
+            for c in sorted(tasks.values(), key=lambda c: c["due"] or "9")]
     if not tasks:
         out.append("- не нашлось (проверь ./ops commitments list --person \"<имя>\")")
 

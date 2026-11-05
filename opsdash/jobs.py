@@ -16,7 +16,7 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 
-from opsdash import bot, brain, config, notices, office, overview, recordings, records, store
+from opsdash import bot, brain, config, notices, office, overview, recordings, records, store, worklog
 
 _queues: dict[str, queue.Queue] = {}
 _pending: set[str] = set()
@@ -61,6 +61,22 @@ def job_agent_brief(brief_id: int, **_) -> str:
     from opsdash import agents
 
     return agents.build(brief_id)
+
+
+def job_task_log(task_id: int, **_) -> str:
+    """«Собрать с Claude» в окне задачи: что по ней было в переписке, на встречах и в Kaiten — в ход задачи."""
+    c = store.row("SELECT * FROM commitments WHERE id=?", (task_id,))
+    if not c:
+        return "задачи уже нет"
+    settings = config.load_settings()
+    count = lambda: store.scalar("SELECT COUNT(*) FROM task_log WHERE task_id=? AND kind!='event'", (task_id,)) or 0  # noqa: E731
+    before = count()
+    prompt = (f"Собери ход задачи [{task_id}] «{records.headline(c)}» строго по навыку task-log "
+              "(.claude/skills/task-log/SKILL.md). Это фоновый запуск по кнопке «Собрать с Claude»: директор увидит "
+              "результат в окне задачи, писать ей через ./ops notify не нужно.")
+    brain.run(prompt, model=settings["claude"]["model_triage"], job="task-log", timeout_min=15)
+    added = count() - before
+    return f"записей в ходе: +{added}" if added > 0 else "нового по задаче не нашлось"
 
 
 def job_agents_watch(**_) -> str:
@@ -127,6 +143,7 @@ def job_process_meeting(meeting_id: str, **_) -> str:
         "Действуй строго по навыку process-meeting (.claude/skills/process-meeting/SKILL.md). "
         "Это фоновый запуск: директор не видит этот чат, связь с ней — только через ./ops notify."
     )
+    log_from = worklog.last_id()
     try:
         brain.run(prompt, model=settings["claude"]["model_meetings"], job="process-meeting")
     except Exception as e:
@@ -141,6 +158,8 @@ def job_process_meeting(meeting_id: str, **_) -> str:
         else:
             records.update_meeting(meeting_id, status="failed", error="Claude не создал summary.md")
             raise RuntimeError("Claude не создал summary.md")
+    m = records.get_meeting(meeting_id) or {}
+    worklog.announce(log_from, "process-meeting", f"— встреча «{m.get('title') or meeting_id}»")
     return "готово"
 
 
@@ -177,10 +196,13 @@ def job_triage(force: bool = False, **_) -> str:
         "Это фоновый запуск: директор не видит этот чат, связь с ней — только через ./ops notify."
     )
     before = _triage_counts()
+    log_from = worklog.last_id()
     brain.run(prompt, model=settings["claude"]["model_triage"], job="triage")
+    worklog.announce(log_from, "triage")  # «Обновил ход задачи …» в углу экрана
     left = store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0
     after = _triage_counts()
     found = [f"{title}: +{after[k] - before[k]}" for k, title in (("attention", "нужен ответ"), ("commitments", "задач"),
+                                                                  ("log", "ход задач"),
                                                                   ("proposals", "на подтверждение")) if after[k] > before[k]]
     return f"разобрано {pending - left} из {pending}" + "".join(f" · {f}" for f in found)
 
@@ -189,6 +211,7 @@ def _triage_counts() -> dict:
     """Сколько всего пунктов «Нужен ответ», задач и предложений — чтобы сказать, что принёс разбор."""
     return {"attention": store.scalar("SELECT COUNT(*) FROM attention") or 0,
             "commitments": store.scalar("SELECT COUNT(*) FROM commitments") or 0,
+            "log": store.scalar("SELECT COUNT(*) FROM task_log WHERE kind != 'event' AND author = 'claude'") or 0,
             "proposals": store.scalar("SELECT COUNT(*) FROM proposals") or 0}
 
 
@@ -464,6 +487,7 @@ REGISTRY = {
     "voice": job_voice,
     "chat": job_chat,
     "agent-brief": job_agent_brief,
+    "task-log": job_task_log,
     "housekeeping": job_housekeeping,
     "update-check": job_update_check,
     "update": job_update,
@@ -499,6 +523,7 @@ TITLES = {
     "voice": "Голосовое из Telegram",
     "chat": "Спросить Claude",
     "agent-brief": "Промт для агента (Claude)",
+    "task-log": "Ход задачи (Claude)",
     "housekeeping": "Обслуживание",
     "update-check": "Проверка обновлений PULSE",
     "update": "Обновление PULSE",

@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from opsdash import __version__, briefs, config, digests, overview, proposals, records, store
+from opsdash import __version__, briefs, config, digests, overview, proposals, records, store, worklog
 from opsdash import day as day_mod
 from opsdash.web import agent_views, settings_views
 
@@ -221,6 +221,9 @@ templates.env.globals.update(
 )
 templates.env.filters.update(dur=day_mod.dur, hm=day_mod.hm, est=day_mod.est_text,  # «Реальность дня»
                              day_text=day_mod.day_text)
+from opsdash import brain as _brain  # noqa: E402
+
+templates.env.globals.update(assistant=_brain.name)  # «Claude» или «ChatGPT» — для макросов (ход задачи)
 templates.env.globals.update(DAY_CHIPS=day_mod.CHIPS, SPLIT_HINT=day_mod.SPLIT_HINT,
                              day_people=lambda: [p["name"] for p in records.list_people()])  # «Передать» — кому
 
@@ -1016,6 +1019,59 @@ def _back_task(request: Request, cid: int, msg: str = "", err: str = "") -> Redi
     ref = urlparse(request.headers.get("referer") or "/commitments")
     query = "&".join(p for p in ref.query.split("&") if p and not p.startswith(("task=", "msg=", "err=")))
     return back(request, msg, err, to=f"{ref.path or '/commitments'}?{query + '&' if query else ''}task={cid}")
+
+
+# --- ход задачи (opsdash.worklog) --------------------------------------------------------------------
+
+def _log_reply(cid: int) -> JSONResponse:
+    """Ответ окну задачи без перезагрузки: лента хода и строка «Сейчас» — готовым HTML (у прежнего вопроса
+    «ответа нет» после новой записи снимается — поэтому ленту целиком)."""
+    c = records.get_commitment(cid)
+    worklog.add_links([c])
+    ui = templates.env.get_template("_macros.html").module
+    return JSONResponse({"ok": True, "list": "".join(str(ui.log_entry(c, e)) for e in c["log"]),
+                         "now": str(ui.task_now(c)), "count": c["log_count"]})
+
+
+@app.post("/commitments/{cid}/log")
+def commitment_log_add(request: Request, cid: int, text: str = Form(""), ask: str = Form("")):
+    """Комментарий директора в ход задачи; «жду ответа» — вопрос: пока нет новой записи, у задачи «ответа нет N дней».
+    Окно задачи отправляет форму из app.js и ждёт JSON; без скриптов — возврат с открытым окном."""
+    as_json = "application/json" in request.headers.get("accept", "")
+    try:
+        worklog.add(cid, text, kind="ask" if ask else "note", source="manual", by="director")
+    except ValueError as e:
+        if as_json:
+            return JSONResponse({"ok": False, "err": str(e)}, status_code=400)
+        return _back_task(request, cid, err=str(e))
+    records.mark_seen(cid)
+    if as_json:
+        return _log_reply(cid)
+    return _back_task(request, cid, "Записано в ход задачи")
+
+
+@app.post("/commitments/{cid}/log/{entry_id}/remove")
+def commitment_log_remove(request: Request, cid: int, entry_id: int):
+    e = worklog.get(entry_id)
+    if e and e["task_id"] == cid:
+        worklog.remove(entry_id)
+    if "application/json" in request.headers.get("accept", ""):
+        return _log_reply(cid)
+    return _back_task(request, cid, "Запись убрана")
+
+
+@app.post("/commitments/{cid}/log/collect")
+def commitment_log_collect(request: Request, cid: int):
+    """«Собрать с Claude»: Claude ищет по задаче в переписке, встречах и Kaiten и дописывает ход — в фоне."""
+    from opsdash import jobs
+
+    if not records.get_commitment(cid):
+        return back(request, err="Такой задачи нет")
+    who = _brain.name()
+    if not jobs.submit("task-log", "chat", {"task_id": cid}):
+        return _back_task(request, cid, f"{who} уже собирает ход этой задачи — появится уведомление")
+    return _back_task(request, cid, f"{who} собирает ход задачи по переписке и встречам — когда закончит, "
+                                    "появится уведомление")
 
 
 @app.post("/commitments/{cid}/items")

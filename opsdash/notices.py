@@ -19,7 +19,7 @@ LIMIT = 20
 QUIET = {"housekeeping", "docs-index", "agents-index", "agents-watch", "ask", "voice", "recordings", "update-check"}
 # «Сейчас» в углу: что делает Claude или расшифровка; сбор и обслуживание — секунды, о них не пишем
 BUSY = {"triage", "process-meeting", "transcribe", "digest", "weekly", "groups", "briefs", "followup", "anthology",
-        "company-context", "chat", "update", "projects", "agent-brief"}
+        "company-context", "chat", "update", "projects", "agent-brief", "task-log"}
 
 
 def add(kind: str, title: str, text: str = "", link: str | None = None, level: str = "info",
@@ -168,6 +168,15 @@ def summary(name: str, args: dict, result: str, error: str | None) -> dict | Non
 
             c = store.row("SELECT * FROM commitments WHERE id=?", (b["commitment_id"],))
             return done("Промт для агента готов", f"«{records.headline(c)}»" if c else "", f"/agents?task={b['commitment_id']}")
+    elif name == "task-log":
+        from opsdash import records
+
+        c = store.row("SELECT * FROM commitments WHERE id=?", (args.get("task_id"),))
+        if c:
+            found = result.startswith("записей")
+            return done("Собрал ход задачи" if found else "Ход задачи: нового не нашлось",
+                        f"«{records.headline(c)}»" + (f" — {result}" if found else ""),
+                        f"/commitments?task={c['id']}", "ok" if found else "info")
     elif name == "update":
         return done("PULSE обновлён", result, "/settings?tab=updates")
     return None

@@ -252,6 +252,15 @@ def collect(settings: dict | None = None, transport: httpx.BaseTransport | None 
 
     tracked = [s for s in settings["kaiten"].get("spaces") or [] if s.get("track", True)]
     total = 0
+    # карточки открытых задач PULSE: перешла в другую колонку — событие в ходе задачи (opsdash.worklog)
+    tasks_by_card: dict[int, list[int]] = {}
+    for r in store.rows("SELECT id, kaiten_card_id FROM commitments WHERE status='open' AND archived_at IS NULL "
+                        "AND kaiten_card_id IS NOT NULL"):
+        tasks_by_card.setdefault(r["kaiten_card_id"], []).append(r["id"])
+    old_cols = {r["id"]: r["column_title"] for r in store.rows(
+        f"SELECT id, column_title FROM kaiten_cards WHERE id IN ({','.join('?' * len(tasks_by_card)) or 'NULL'})",
+        list(tasks_by_card))}
+    moved: list[tuple[int, str, str]] = []
     for sp in tracked:
         space_id = int(sp["id"])
         for b in kc.boards(space_id):
@@ -273,8 +282,12 @@ def collect(settings: dict | None = None, transport: httpx.BaseTransport | None 
             )
         seen = []
         for card in kc.cards(space_id):
-            save_card(normalize_card(card, kc, space_id, sp.get("title")))
+            norm = normalize_card(card, kc, space_id, sp.get("title"))
+            save_card(norm)
             seen.append(card["id"])
+            was = old_cols.get(card["id"])
+            if was and norm.get("column_title") and norm["column_title"] != was:
+                moved.append((card["id"], was, norm["column_title"]))
         total += len(seen)
         # карточки, которых больше нет на досках пространства (архив/перенос), убираем из зеркала
         if seen:
@@ -288,6 +301,11 @@ def collect(settings: dict | None = None, transport: httpx.BaseTransport | None 
         store.execute(f"DELETE FROM kaiten_cards WHERE space_id NOT IN ({marks})", tracked_ids)
     else:
         store.execute("DELETE FROM kaiten_cards")
+    from opsdash import worklog
+
+    for card_id, was, col in moved:
+        for tid in tasks_by_card.get(card_id, []):
+            worklog.event(tid, f"Kaiten: карточка перешла из «{was}» в «{col}»", source=f"kaiten:{card_id}")
     try:
         sync_blockers(kc)
     except Exception as e:  # noqa: BLE001 — блокировки не должны мешать зеркалу карточек

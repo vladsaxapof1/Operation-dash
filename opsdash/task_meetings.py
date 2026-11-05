@@ -36,6 +36,11 @@ def link(commitment_id: int, uid: str, *, title: str | None = None, start: str |
                                                                                  "end": end}
     store.execute("UPDATE commitments SET event_uid=?, event_info=?, updated=? WHERE id=?",
                   (uid, _snapshot(e), store.utcnow(), commitment_id))
+    from opsdash import worklog
+
+    start = store.parse_local(e.get("start")) if e.get("start") else None
+    worklog.event(commitment_id, f"Встреча по задаче: «{e.get('title') or 'без названия'}»"
+                  + (f" {start.astimezone(config.tz()):%d.%m %H:%M}" if start else ""))
 
 
 def unlink(commitment_id: int) -> None:

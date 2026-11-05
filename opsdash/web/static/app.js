@@ -228,6 +228,7 @@
     // окно всё равно заблокирует страницу. Такое окно переносим в body
     if (!dlg.open && !dlg.parentElement.checkVisibility()) document.body.appendChild(dlg);
     if (!dlg.open) dlg.showModal();
+    logScroll(dlg);
     // фокус — на поле заголовка, а при просмотре на само окно (иначе браузер обводит рамкой ✕)
     var first = edit ? (dlg.querySelector(".dlg-edit [name=title]") || dlg.querySelector(".dlg-edit input[type=text]"))
       : (remind && rem ? rem.querySelector("textarea") : dlg.querySelector(".dlg-box"));
@@ -280,6 +281,57 @@
       e.target.click();
     }
     if (e.key === "Escape") closeMenus();
+  });
+
+  // ход задачи в окне задачи: комментарий («жду ответа» — вопрос) сохраняется без перезагрузки — лента и строка
+  // «Сейчас» приходят готовыми; ⌘/Ctrl+Enter — записать; ✕ у записи — убрать
+  function logScroll(dlg) {
+    var list = dlg && dlg.querySelector("[data-log-list]");
+    if (list) list.scrollTop = list.scrollHeight;
+  }
+  var logApply = function (dlg, res) {
+    var list = dlg.querySelector("[data-log-list]");
+    if (list && res.list !== undefined) list.innerHTML = res.list;
+    var slot = dlg.querySelector("[data-now-slot]");
+    if (slot && res.now !== undefined) {
+      var box = document.createElement("div");
+      box.innerHTML = res.now;
+      if (box.firstElementChild) slot.replaceWith(box.firstElementChild);
+    }
+    var empty = dlg.querySelector("[data-log-empty]");
+    if (empty) empty.hidden = !!res.count;
+    logScroll(dlg);
+  };
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form.matches("[data-log-form], [data-log-remove]")) return;
+    var dlg = form.closest("dialog");
+    if (!dlg || !window.fetch) return;
+    e.preventDefault();
+    var adding = form.matches("[data-log-form]");
+    var err = dlg.querySelector("[data-log-err]");
+    var buttons = form.querySelectorAll("button");
+    buttons.forEach(function (b) { b.disabled = true; });
+    if (err) err.hidden = true;
+    fetch(form.action, { method: "POST", body: adding ? new FormData(form) : null, headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, err: "" }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.err || "");
+        if (adding) form.reset();
+        logApply(dlg, res);
+      })
+      .catch(function (x) {  // ответ PULSE — его словами; обрыв связи — своими
+        if (!err) return;
+        err.textContent = (x.name === "Error" && x.message) || "Не получилось сохранить — попробуйте ещё раз";
+        err.hidden = false;
+      })
+      .finally(function () { buttons.forEach(function (b) { b.disabled = false; }); });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target.closest("[data-log-form]")) {
+      e.preventDefault();
+      e.target.closest("form").requestSubmit();
+    }
   });
 
   // раскрывашки [data-reveal]: «+ связь», «+ пункты» в окне задачи, черновик ответа и напоминание в ленте Сводки

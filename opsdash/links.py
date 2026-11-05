@@ -11,24 +11,30 @@ from urllib.parse import quote
 from opsdash import config, store
 
 TELEGRAM_WEB = "https://web.telegram.org/a/#{}"
+_ASK = object()  # не передано — узнать из базы
 
 
-def original(source: str | None, chat_id, msg_id=None, sender_id: str | None = None) -> tuple[str, str] | None:
-    """(адрес, подпись кнопки) или None, если оригинал открыть нельзя (например, Я.Мессенджер)."""
+def original(source: str | None, chat_id, msg_id=None, sender_id: str | None = None, *, username=_ASK,
+             saved=_ASK) -> tuple[str, str] | None:
+    """(адрес, подпись кнопки) или None, если оригинал открыть нельзя (например, Я.Мессенджер).
+    username (@имя чата Telegram) и saved (ссылка Пачки из сообщения) можно передать заранее — когда ссылок много
+    (ход задачи на доске), их берут из базы одним запросом, а не по одному."""
     if not chat_id:
         return None
     if source == "telegram":
-        return _telegram(str(chat_id), msg_id)
+        return _telegram(str(chat_id), msg_id, username)
     if source == "mail":
         return _mail(str(chat_id), msg_id, sender_id)
     if source == "pachca":
-        return _pachca(str(chat_id), msg_id)
+        return _pachca(str(chat_id), msg_id, saved)
     return None
 
 
-def _telegram(chat_id: str, msg_id) -> tuple[str, str]:
-    chat = store.row("SELECT username FROM chats WHERE source='telegram' AND chat_id=?", (chat_id,)) or {}
-    username = (chat.get("username") or "").strip()
+def _telegram(chat_id: str, msg_id, username=_ASK) -> tuple[str, str]:
+    if username is _ASK:
+        username = (store.row("SELECT username FROM chats WHERE source='telegram' AND chat_id=?", (chat_id,)) or {}
+                    ).get("username")
+    username = (username or "").strip()
     if chat_id.startswith("-100"):  # супергруппа или канал
         if msg_id:
             base = f"https://t.me/{username}" if username else f"https://t.me/c/{chat_id[4:]}"
@@ -55,10 +61,11 @@ def _mail(chat_id: str, msg_id, sender_id: str | None) -> tuple[str, str]:
     return "https://mail.yandex.ru/", "Открыть Яндекс Почту"
 
 
-def _pachca(chat_id: str, msg_id) -> tuple[str, str]:
+def _pachca(chat_id: str, msg_id, saved=_ASK) -> tuple[str, str]:
     # Пачка сама отдаёт ссылку на сообщение (у ответа в треде она ведёт в тред) — берём сохранённую
     if msg_id:
-        saved = store.scalar("SELECT link FROM messages WHERE source='pachca' AND chat_id=? AND msg_id=?",
-                             (chat_id, str(msg_id)))
+        if saved is _ASK:
+            saved = store.scalar("SELECT link FROM messages WHERE source='pachca' AND chat_id=? AND msg_id=?",
+                                 (chat_id, str(msg_id)))
         return saved or f"https://app.pachca.com/chats/{chat_id}?message={msg_id}", "К сообщению"
     return f"https://app.pachca.com/chats/{chat_id}", "Открыть в Пачке"

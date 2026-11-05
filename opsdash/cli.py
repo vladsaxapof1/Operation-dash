@@ -18,7 +18,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from opsdash import config, records, store
+from opsdash import config, records, store, worklog
 
 
 def out(text: str = "") -> None:
@@ -320,11 +320,27 @@ def cmd_messages(a) -> None:
     elif a.action == "chat":
         sql = "SELECT * FROM messages WHERE (chat_title LIKE ? OR topic LIKE ?) AND ts >= ? ORDER BY ts DESC LIMIT ?"
         since = store.to_utc_iso(config.now() - timedelta(days=a.days))
-        items = list(reversed(store.rows(sql, (f"%{a.title}%", f"%{a.title}%", since, a.limit))))
+        items = []
+        # чат может быть подписан латиницей: «Олег» → «Oleg …»
+        for title in dict.fromkeys((a.title, _latin(a.title))):
+            items = list(reversed(store.rows(sql, (f"%{title}%", f"%{title}%", since, a.limit))))
+            if items:
+                break
         if not items:
             return out("Сообщений нет.")
         for m in items:
             out(f"«{m['chat_title']}» " + _msg_line(m))
+
+
+_LATIN = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+                  ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t",
+                   "u", "f", "kh", "ts", "ch", "sh", "sch", "", "y", "", "e", "yu", "ya"]))
+
+
+def _latin(text: str) -> str:
+    """«Олег» → «Oleg»: имя чата латиницей, если по-русски чата не нашлось."""
+    out = "".join(_LATIN.get(ch.lower(), ch) if ch.lower() in _LATIN else ch for ch in text)
+    return " ".join(w[:1].upper() + w[1:] if w[:1].isalpha() else w for w in out.split(" "))
 
 
 def cmd_briefs(a) -> None:
@@ -630,6 +646,8 @@ def _commitment_line(c: dict) -> str:
             + f" uid {mt['uid']}"
     elif c.get("meeting_hint"):
         line += " · предложено связать со встречей, ждёт директора"
+    if c.get("now"):
+        line += f" · {worklog.now_text(c)}"
     return line
 
 
@@ -716,6 +734,44 @@ def cmd_commitments(a) -> None:
             out(f"  {'✓' if r['done'] else '☐'} {r['text']}" + (f" — {r['note']}" if r.get("note") else ""))
         if not c["checklist"]:
             out("  пунктов нет — добавить: --add \"Приёмка\" --add \"Хранение\"")
+    elif a.action == "show":
+        c = records.get_commitment(a.id)
+        if not c:
+            fail(f"нет задачи [{a.id}]")
+        if a.json:
+            return as_json(c)
+        out(_commitment_line(c))
+        if c.get("quote"):
+            out(f"Цитата: «{c['quote']}»")
+        if c.get("note"):
+            out(f"Заметка: {c['note']}")
+        out("")
+        for line in worklog.lines(c):
+            out(line)
+    elif a.action == "log":
+        c = records.get_commitment(a.id)
+        if not c:
+            fail(f"нет задачи [{a.id}]")
+        if a.remove:
+            e = worklog.get(a.remove)
+            if not e or e["task_id"] != a.id:
+                fail(f"у задачи нет записи {a.remove} — ./ops commitments show {a.id} покажет ход")
+            worklog.remove(a.remove)
+            out(f"Запись {a.remove} убрана из хода задачи")
+            return
+        if not a.text:
+            for line in worklog.lines(c):
+                out(line)
+            return
+        kind = "ask" if a.ask else a.kind
+        try:
+            lid, new = worklog.add(a.id, a.text, kind=kind, source=a.source, quote=a.quote, at=a.at, by=a.by)
+        except ValueError as e:
+            fail(str(e))
+        out(f"{'Записано' if new else 'Уже было — запись обновлена'}: ход задачи [{a.id}] «{records.headline(c)}», "
+            f"запись {lid}")
+        if c["status"] != "open":
+            out("Задача уже закрыта — если работа продолжается, скажи директору (вернуть — её решение)")
     elif a.action == "merge":
         drop = records.get_commitment(a.id)
         if not drop:
@@ -1578,6 +1634,22 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--undo", action="append", help="пункт снова не готов")
     x.add_argument("--remove", action="append", help="убрать пункт")
     x.add_argument("--note", help="откуда известно, что готово (с --done)")
+    x = ms.add_parser("show", help="задача целиком: суть, связи и ход задачи — что по ней происходило")
+    x.add_argument("id", type=int)
+    x = ms.add_parser("log", help="ход задачи: записать, что произошло (из переписки, встречи), или показать ход")
+    x.add_argument("id", type=int)
+    x.add_argument("--text", help="что произошло, одной-двумя фразами: кто, что сказал или сделал, даты; "
+                                  "без --text — показать ход")
+    x.add_argument("--kind", default="update", choices=["update", "note"],
+                   help="update — что произошло (по умолчанию); note — комментарий директора (по её просьбе)")
+    x.add_argument("--ask", action="store_true",
+                   help="спросили или попросили и ждём ответа: пока нет новой записи — «ответа нет N дней»")
+    x.add_argument("--source", help="откуда: telegram:<id> | pachca:<id> | ymessenger:<id> | mail:<id> | "
+                                    "meeting:<id> | kaiten:<card> | manual")
+    x.add_argument("--quote", help="дословная цитата (у встречи — с [чч:мм:сс])")
+    x.add_argument("--at", help="когда случилось, YYYY-MM-DD[ HH:MM]; по умолчанию — время сообщения или встречи")
+    x.add_argument("--by", choices=["director", "claude"], help="кто пишет: director — директор попросила записать")
+    x.add_argument("--remove", type=int, metavar="ЗАПИСЬ", help="убрать запись (номер — из ./ops commitments show)")
     x = ms.add_parser("merge", help="задача — дубль другой: закрыть её, источник, связи и подзадачи — в ту")
     x.add_argument("id", type=int, help="дубль: эта задача закроется")
     x.add_argument("--into", type=int, required=True, help="задача, которая остаётся")
