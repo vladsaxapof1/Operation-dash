@@ -444,8 +444,10 @@ def test_tasks_board_and_list(client):
     assert [c["what"] for c in board["mine"]] == ["Собрать сценарий"] and board["mine"][0]["overdue"]
     assert board["to_me"][0]["due_today"] and [c["what"] for c in board["done"]] == ["Отправить отчёт"]
 
-    page = client.get("/commitments").text  # доска — вид по умолчанию
-    assert "<h1>Задачи</h1>" in page and 'class="board' in page
+    page = client.get("/commitments").text  # доска — вид по умолчанию; договорённости между коллегами скрыты
+    assert "<h1>Задачи</h1>" in page and 'class="board' in page and "Согласовать бюджет" not in page
+    page = client.get("/commitments?others=1").text  # «Показать: Между коллегами» — запоминается
+    assert "Согласовать бюджет" in page
     assert "просрочено 2 дня" in page and ">сегодня<" in page and "без срока" in page  # срок словами
     assert "<b>Я</b> → Тимур" in page and "<b>Пётр</b> → мне" in page and "<b>Олег</b> → Ирина" in page
     assert ">«Анна / Тимур»</a>" in page
@@ -468,9 +470,10 @@ def test_tasks_board_and_list(client):
     assert "Собрать сценарий" not in client.get(f"/commitments?created=custom&created_from={tomorrow}").text
     assert "Собрать сценарий" in client.get("/commitments?created=week").text
 
-    # колонка «Готово» — по кнопке «Показать готовые» под доской
-    assert 'data-col="done"' not in client.get("/commitments").text and "Показать готовые · 1" in client.get("/commitments").text
-    assert 'data-col="done"' in client.get("/commitments?done=1").text
+    # колонка «Готово» — по переключателю «Показать: Готово» под заголовком; запоминается
+    assert 'data-col="done"' not in client.get("/commitments").text and '>Готово<span class="badge">1</span>' in client.get("/commitments").text
+    assert 'data-col="done"' in client.get("/commitments?done=1").text and 'data-col="done"' in client.get("/commitments").text
+    assert 'data-col="done"' not in client.get("/commitments?done=0").text
 
     client.post(f"/commitments/{late}", data={"due": (today + timedelta(days=3)).isoformat()})
     assert not records.commitments_board()["mine"][0]["overdue"]

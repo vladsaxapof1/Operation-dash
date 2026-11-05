@@ -236,11 +236,14 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["err"] = request.query_params.get("err", "")
     ctx["pending_count"] = store.scalar("SELECT COUNT(*) FROM proposals WHERE status='pending'") or 0
     ctx["attention_count"] = store.scalar("SELECT COUNT(*) FROM attention WHERE status='open'") or 0
-    ctx["new_tasks_count"] = records.unseen_count()
+    # договорённости между коллегами директор может скрыть в «Задачах» — тогда и счётчики их не считают
+    others = ctx.get("others_pref")
+    others = task_prefs(request, query=False)["others"] == "1" if others is None else others
+    ctx["new_tasks_count"] = records.unseen_count(others)
     # меню: сколько ждёт в «Нужно от вас» (подтвердить, ответить, напомнить) и есть ли срочное; сколько задач в работе
     feed = ctx.get("feed") or needs_from_you()
     ctx["feed_count"], ctx["feed_urgent"] = feed["total"], feed["urgent"]
-    ctx["tasks_count"] = records.active_count()
+    ctx["tasks_count"] = records.active_count(others)
     ctx["sections_on"] = {name: config.section_on(name, settings) for name in config.SECTIONS}  # архивные — не в меню
     ctx["needs_setup"] = not any(settings[s].get("enabled")
                                  for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten",
@@ -738,6 +741,20 @@ def attention_action(request: Request, aid: int, action: str):
 
 BOARD_TITLES = [("mine", "Мои задачи"), ("to_me", "Мне должны"), ("other", "Между коллегами"), ("done", "Готово")]
 BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
+# переключатели «Задач», которые запоминает браузер (cookie): «Между коллегами» и «Готово» — показать эти колонки
+# (группы Ганта, в «Списке» — договорённости между коллегами), «Кратко / Подробно» — вид карточек на доске.
+# Ссылка с ?others=1 (?done=1, ?cards=full) меняет выбор и запоминает его
+TASK_PREFS = {"others": ("task_others", ("0", "1"), "0"), "done": ("task_done", ("0", "1"), "0"),
+              "cards": ("task_cards", ("short", "full"), "short")}
+
+
+def task_prefs(request: Request, query: bool = True) -> dict[str, str]:
+    prefs = {}
+    for key, (cookie, allowed, default) in TASK_PREFS.items():
+        value = request.query_params.get(key) if query else None
+        value = value if value in allowed else request.cookies.get(cookie)
+        prefs[key] = value if value in allowed else default
+    return prefs
 
 
 LIST_GROUPS = {"dir": "кто кому", "project": "по проекту", "person": "по человеку", "none": "без групп"}  # вид «Список»
@@ -751,7 +768,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
                 due: str = "", due_from: str = "", due_to: str = "", scale: str = "week", sort: str = "",
                 new: str = "", task: int = 0, parent: int = 0, archived: str = "", project: str = "",
-                done_projects: str = "", done: str = "", group: str = ""):
+                done_projects: str = "", group: str = ""):
     from opsdash import gantt, projects
 
     if view == "kaiten":  # Kaiten — вкладка «Задач» (5.7)
@@ -773,6 +790,23 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
                                       sort=sort, archived=show_archived, project=project or None, **dates)
              if view == "list" else None)
+    # «Между коллегами» по умолчанию скрыты: договорённости собираются и закрываются сами, но директор их не ведёт —
+    # не видно ни колонки, ни их в «Готово», ни в счётчиках. Ищете сами (поиск, человек, проект, в «Списке» —
+    # «между коллегами» в «Чьих задачах») — показываем и их, колонку — если нашлись
+    prefs = task_prefs(request)
+    others_pref, show_done = prefs["others"] == "1", prefs["done"] == "1"
+    explicit = bool(q or person or project) or (view == "list" and direction == "other")
+    if board is not None:
+        others_n = len(board["other"])
+        if not (others_pref or explicit):
+            board["other"] = []
+            board["done"] = [c for c in board["done"] if c["direction"] != "other"]
+        others_col = others_pref or bool(board["other"])
+    else:
+        others_n = sum(1 for c in items or [] if c["direction"] == "other")
+        if items is not None and not (others_pref or explicit):
+            items = [c for c in items if c["direction"] != "other"]
+        others_col = others_pref or (explicit and bool(others_n))
     shown = records.add_links([c for col in board.values() for c in col] if board else (items or []))
     if items is not None:  # «Список»: группы по проекту и по человеку (5.3)
         records.with_reminders(items)
@@ -805,8 +839,9 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     gantt_w = int(request.cookies["gantt_w"]) if request.cookies.get("gantt_w", "").isdigit() else 300
     timeline = gantt.layout([(key, title, board[key]) for key, title in BOARD_TITLES], scale) if view == "gantt" else None
     parent_task = next((o for o in records.task_options() if o["id"] == parent), None) if parent else None
-    # активные фильтры — строкой под заголовком, у каждого «× снять» (5.2); их число — на кнопке «Фильтр»
-    base = {k: v for k, v in request.query_params.items() if k not in ("msg", "err", "task", "add", "parent") and v}
+    # активные фильтры — строкой под заголовком, у каждого «× снять» (5.2); их число — на кнопке «Фильтр».
+    # Вид ссылки допишут сами (&view=…) — здесь его нет, чтобы не повторялся
+    base = {k: v for k, v in request.query_params.items() if k not in ("msg", "err", "task", "add", "parent", "view") and v}
 
     def without(*keys: str) -> str:
         return "?" + "&".join(f"{k}={quote(v)}" for k, v in base.items() if k not in keys)
@@ -831,6 +866,10 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     # переключатели «Новые» и «Без срока» под заголовком (вместо «× снять» у этих двух фильтров): второй щелчок снимает
     toggles = {key: (without(*keys) + ("" if on else add)).replace("?&", "?", 1) for key, keys, on, add in (
         ("new", ("new",), new == "1", "&new=1"), ("no_due", ("due", "due_from", "due_to"), due == "none", "&due=none"))}
+    # «Показать: Между коллегами, Готово» и «Кратко / Подробно» — щелчок переключает и запоминает (TASK_PREFS)
+    toggles |= {key: (without(key) + f"&{key}={value}").replace("?&", "?", 1) for key, value in (
+        ("others", "0" if others_pref else "1"), ("done", "0" if show_done else "1"))}
+    toggles |= {f"cards_{v}": (without("cards") + f"&cards={v}").replace("?&", "?", 1) for v in ("short", "full")}
     response = render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
                       direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
                       add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
@@ -842,16 +881,21 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0,
                       project=project, project_options=projects.options(),
                       projects=projects.list_projects("all" if done_projects else "active") if view == "projects" else [],
-                      done_projects=bool(done_projects), show_done=done == "1",
+                      done_projects=bool(done_projects), show_done=show_done, others_pref=others_pref,
+                      others_col=others_col, others_n=others_n, cards_full=prefs["cards"] == "full",
+                      tasks_all=records.active_count(),
                       group=group if group in LIST_GROUPS else "dir", list_groups=LIST_GROUPS,
                       filter_chips=chips, filter_count=sum(1 for c in chips if not c[0].startswith("поиск")),
-                      no_due_count=records.no_due_count(), no_due=no_due, due_choices=due_choices() if no_due else [],
+                      no_due_count=records.no_due_count(others_pref), no_due=no_due, due_choices=due_choices() if no_due else [],
                       toggles=toggles, later_after=horizon,
                       in_projects=store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL "
                                                "AND project_id IS NOT NULL") or 0,
                       done_projects_count=store.scalar("SELECT COUNT(*) FROM projects WHERE status='done'") or 0)
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
+    for key, (cookie, allowed, _) in TASK_PREFS.items():
+        if request.query_params.get(key) in allowed:
+            response.set_cookie(cookie, prefs[key], max_age=31536000, samesite="lax")
     return response
 
 
@@ -1344,10 +1388,10 @@ def commitment_reminders(request: Request, cid: int, act: str = Form(...), days:
 
 
 @app.post("/commitments/{cid}/seen")
-def commitment_seen(cid: int):
+def commitment_seen(request: Request, cid: int):
     """Директор увидела новую задачу (навела на карточку или открыла её) — снять отметку «новая» (app.js)."""
     records.mark_seen(cid)
-    return {"ok": True, "unseen": records.unseen_count()}
+    return {"ok": True, "unseen": records.unseen_count(task_prefs(request, query=False)["others"] == "1")}
 
 
 # --- база знаний: антология решений, уроков и удач ----------------------------------

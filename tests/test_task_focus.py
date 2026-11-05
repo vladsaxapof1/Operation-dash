@@ -42,7 +42,7 @@ def test_board_folds_far_tasks_to_the_bottom(client):
     far, edge, near, no_due, busy, other = _tasks()
     after = (records.today_local() + timedelta(days=14)).strftime("%d.%m")
     for sort in ("due", "created"):
-        page = client.get(f"/commitments?sort={sort}").text
+        page = client.get(f"/commitments?sort={sort}&others=1").text
         mine = page[page.index('data-col="mine"'):page.index('data-col="to_me"')]
         tile = mine.index('aria-controls="later-mine"')
         # срок через 14 дней и ближе, без срока и «в работе» — над плашкой; дальше — под ней, скрыты
@@ -59,7 +59,7 @@ def test_board_folds_far_tasks_to_the_bottom(client):
 
 def test_list_and_gantt_fold_far_tasks(client):
     far, *_ = _tasks()
-    page = client.get("/commitments?view=list").text
+    page = client.get("/commitments?view=list&others=1").text
     assert 'class="later-row"' in page and 'aria-controls="later-l1"' in page
     box = _later_box(page, "later-l1", "</tbody>")
     assert "План на следующий год" in box and "Сверка с банком" not in box

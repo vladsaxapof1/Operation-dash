@@ -99,8 +99,8 @@ def test_due_endpoint_json_and_form(client):
 def test_tasks_toggles_new_and_no_due(client):
     mine, to_me, other, dated = _tasks()
     records.mark_seen(other)
-    page = client.get("/commitments").text
-    assert ">Новые<span class=\"badge acc\" data-unseen>3</span>" in page and ">Без срока<span class=\"badge\">3</span>" in page
+    page = client.get("/commitments").text  # договорённости между коллегами скрыты — и в «Без срока» их нет
+    assert ">Новые<span class=\"badge acc\" data-unseen>3</span>" in page and ">Без срока<span class=\"badge\">2</span>" in page
     assert 'href="?new=1&view=board"' in page and 'href="?due=none&view=board"' in page
     assert f'data-new="{mine}"' in page and f'data-new="{other}"' not in page  # новая — синяя точка на карточке
 
@@ -110,6 +110,8 @@ def test_tasks_toggles_new_and_no_due(client):
 
     no_due = client.get("/commitments?due=none").text
     assert "План найма" not in no_due and "Разобрать сроки по одной" in no_due and 'id="due-dlg"' in no_due
+    assert "Свести графики" not in no_due
+    no_due = client.get("/commitments?due=none&others=1").text
     assert "Свести графики" in no_due and f'action="/commitments/{other}/due"' not in no_due  # коллег — не в разборе
     # в разборе на странице «Задач» — все показанные без срока, и те, что уже оставляли без срока
     records.set_due(to_me, None)

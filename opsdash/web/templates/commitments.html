@@ -20,25 +20,37 @@
   <span class="lt-hide">Скрыть задачи со сроком после {{ after }}</span>
 </button>
 {%- endmacro %}
+{% macro tick(on) %}<span class="tick" aria-hidden="true">{{ icons.icon('check', 12) if on }}</span>{% endmacro %}
 {#- шапка «Задач» одной строкой (5.2): слева заголовок и сводка с активными фильтрами, справа поиск, фильтр, сортировка,
     вид и «+ Задача» #}
 <div class="topline">
   <div>
     <h1>Задачи</h1>
     <p class="sub">
-      {%- if view == 'projects' %}{% set live = projects | rejectattr('status', 'equalto', 'done') | list %}{{ live | length }} {{ plural(live | length, 'проект', 'проекта', 'проектов') }} в работе · {{ in_projects }} {{ plural(in_projects, 'задача', 'задачи', 'задач') }} в проектах · {{ tasks_count - in_projects }} вне проектов
+      {%- if view == 'projects' %}{% set live = projects | rejectattr('status', 'equalto', 'done') | list %}{{ live | length }} {{ plural(live | length, 'проект', 'проекта', 'проектов') }} в работе · {{ in_projects }} {{ plural(in_projects, 'задача', 'задачи', 'задач') }} в проектах · {{ tasks_all - in_projects }} вне проектов
       {%- else %}{{ open_cards | length }} {{ plural(open_cards | length, 'активная', 'активных', 'активных') }}{% if n_late %} · {{ n_late }} {{ plural(n_late, 'просрочена', 'просрочены', 'просрочено') }}{% endif %}{% endif %}
       {%- for label, url in filter_chips %} · {{ label }} <a class="unfilter" href="{{ url }}&view={{ view }}" title="Снять фильтр">× снять</a>{% endfor %}
     </p>
     {#- «Новые» — задачи, которые добавил Claude и вы ещё не видели; «Без срока» — чтобы назначить сроки; второй
-        щелчок снимает фильтр #}
-    {% if view != 'projects' and (new or new_tasks_count or due == 'none' or no_due_count) %}
+        щелчок снимает фильтр. «Показать» — что по умолчанию скрыто: договорённости между коллегами (собираются
+        и закрываются сами, но вы их не ведёте) и готовые; «Кратко / Подробно» — вид карточек на доске. Выбор запоминается #}
+    {% if view != 'projects' %}
     <div class="tgl-row">
       {% if new or new_tasks_count %}<a class="fchip sm{{ ' on' if new }}" href="{{ toggles.new }}&view={{ view }}" aria-pressed="{{ 'true' if new else 'false' }}"
          title="{{ 'Показать все задачи' if new else 'Только задачи, которые добавил Claude и вы ещё не видели. Отметка снимается, когда задержите курсор на задаче или откроете её' }}"><i class="new-dot" aria-hidden="true"></i>Новые{% if new_tasks_count %}<span class="badge acc" data-unseen>{{ new_tasks_count }}</span>{% endif %}</a>{% endif %}
       {% if due == 'none' or no_due_count %}<a class="fchip sm{{ ' on' if due == 'none' }}" href="{{ toggles.no_due }}&view={{ view }}" aria-pressed="{{ 'true' if due == 'none' else 'false' }}"
          title="{{ 'Показать все задачи' if due == 'none' else 'Только открытые задачи без срока — чтобы назначить сроки' }}">Без срока{% if no_due_count %}<span class="badge">{{ no_due_count }}</span>{% endif %}</a>{% endif %}
       {% if no_due %}<button type="button" class="linkish small" data-dlg-open="due-dlg" title="Задачи без срока по одной: быстрый срок, своя дата или «оставить без срока»">Разобрать сроки по одной →</button>{% endif %}
+      <span class="tgl-show">
+        <span class="tgl-label">Показать</span>
+        <a class="fchip sm{{ ' on' if others_pref }}" href="{{ toggles.others }}&view={{ view }}" aria-pressed="{{ 'true' if others_pref else 'false' }}"
+           title="{{ 'Скрыть договорённости между коллегами' if others_pref else 'Договорённости между коллегами: PULSE собирает их со встреч и из переписки и закрывает сам. При поиске и фильтре по человеку или проекту они видны всегда' }}">{{ tick(others_pref) }}Между коллегами<span class="badge">{{ others_n }}</span></a>
+        {% if view != 'list' %}<a class="fchip sm{{ ' on' if show_done }}" href="{{ toggles.done }}&view={{ view }}" aria-pressed="{{ 'true' if show_done else 'false' }}"
+           title="Закрытые за последние две недели · архивные — в фильтре">{{ tick(show_done) }}Готово<span class="badge">{{ board.done | length }}</span></a>{% endif %}
+      </span>
+      {% if view == 'board' %}<span class="seg sm" role="group" aria-label="Вид карточек">
+        <a href="{{ toggles.cards_short }}&view=board" class="{{ 'active' if not cards_full }}" aria-pressed="{{ 'false' if cards_full else 'true' }}" title="Название, кто и срок; подробности — по щелчку">Кратко</a><a href="{{ toggles.cards_full }}&view=board" class="{{ 'active' if cards_full }}" aria-pressed="{{ 'true' if cards_full else 'false' }}" title="Плюс что сейчас по задаче, чего она ждёт, откуда взялась, проект и пункты">Подробно</a>
+      </span>{% endif %}
     </div>
     {% endif %}
   </div>
@@ -46,7 +58,6 @@
     {% if view != 'projects' %}
     <form method="get" class="toolbar" id="task-filters">
       <input type="hidden" name="view" value="{{ view }}">{% if view == 'gantt' %}<input type="hidden" name="scale" value="{{ scale }}">{% endif %}
-      {% if show_done %}<input type="hidden" name="done" value="1">{% endif %}
       {% if new %}<input type="hidden" name="new" value="1">{% endif %}
       {% if view == 'gantt' %}
       <div class="seg" aria-label="Масштаб">{% for key, title in [('day', 'День'), ('week', 'Неделя'), ('month', 'Месяц')] %}<a href="?view=gantt&scale={{ key }}{{ keep }}" class="{{ 'active' if scale == key }}">{{ title }}</a>{% endfor %}</div>
@@ -154,7 +165,7 @@
   {% endfor %}
   <div class="pj-card pj-new">
     <button type="button" class="linkish pj-new-b" data-dlg-open="pj-new-dlg">+ Новый проект</button>
-    <form method="post" action="/jobs/run" data-busy="Claude собирает проекты…" class="muted small"><input type="hidden" name="name" value="projects">или <button class="linkish" title="Claude пройдёт по задачам, встречам и переписке и предложит проекты, связи «ждёт» и объединение дублей — вы подтвердите">собрать проекты с Claude</button> — он предложит, какие из {{ tasks_count }} {{ plural(tasks_count, 'задачи', 'задач', 'задач') }} складываются в проекты</form>
+    <form method="post" action="/jobs/run" data-busy="Claude собирает проекты…" class="muted small"><input type="hidden" name="name" value="projects">или <button class="linkish" title="Claude пройдёт по задачам, встречам и переписке и предложит проекты, связи «ждёт» и объединение дублей — вы подтвердите">собрать проекты с Claude</button> — он предложит, какие из {{ tasks_all }} {{ plural(tasks_all, 'задачи', 'задач', 'задач') }} складываются в проекты</form>
   </div>
 </div>
 <dialog class="dlg" id="pj-new-dlg" aria-labelledby="pj-new-title">
@@ -165,9 +176,10 @@
   </form>
 </dialog>
 {% elif view == 'board' %}
-{#- доска (5.2): три колонки, «Готово» — по кнопке под доской #}
-{% set cols = [('mine', 'Мои задачи'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] + ([('done', 'Готово')] if show_done else []) %}
-<div class="board{{ ' with-done' if show_done }}">
+{#- доска (5.2): «Мои задачи» и «Мне должны»; «Между коллегами» и «Готово» — по переключателям «Показать» под заголовком #}
+{% set cols = [('mine', 'Мои задачи'), ('to_me', 'Мне должны')] + ([('other', 'Между коллегами')] if others_col else [])
+   + ([('done', 'Готово')] if show_done else []) %}
+<div class="board{{ ' wide' if cols | length > 3 }}" style="--cols: {{ cols | length }}">
   {% for key, title in cols %}
   {% set col = board[key] %}
   {% set late = col | selectattr('overdue') | list | length %}
@@ -179,15 +191,11 @@
       {% if key != 'done' %}<a class="ibtn ghost" href="?view=board&add={{ key }}#add" data-dlg-open="add-dlg" data-add-dir="{{ key }}" title="Добавить в «{{ title }}»" aria-label="Добавить в «{{ title }}»">{{ icons.icon('plus', 16) }}</a>{% endif %}
     </div>
     {% set far = col | selectattr('later') | list %}
-    {% for c in col | rejectattr('later') %}{{ ui.task_card(c, meetings) }}{% else %}{% if not far %}<div class="col-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endif %}{% endfor %}
+    {% for c in col | rejectattr('later') %}{{ ui.task_card(c, meetings, full=cards_full) }}{% else %}{% if not far %}<div class="col-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endif %}{% endfor %}
     {% if far %}{{ later_tile(far, 'later-' ~ key) }}
-    <div class="later-items" id="later-{{ key }}" hidden>{% for c in far %}{{ ui.task_card(c, meetings) }}{% endfor %}</div>{% endif %}
+    <div class="later-items" id="later-{{ key }}" hidden>{% for c in far %}{{ ui.task_card(c, meetings, full=cards_full) }}{% endfor %}</div>{% endif %}
   </section>
   {% endfor %}
-</div>
-<div class="board-foot">
-  <a class="btn" href="?view=board{{ keep }}{{ '' if show_done else '&done=1' }}">{{ 'Скрыть готовые' if show_done else 'Показать готовые · ' ~ (board.done | length) }}</a>
-  <span class="muted small">за последние две недели · архивные — в фильтре</span>
 </div>
 {% elif view == 'gantt' %}
 {#- Гант (5.5): полоса — от появления задачи до срока; подпись справа от полосы, внутри — только у длинных; без срока — точка.
@@ -240,7 +248,7 @@
           {% for x in gantt.weekends %}<i style="left: {{ x }}px; width: {{ gantt.px }}px"></i>{% endfor %}
           <b class="gantt-now" style="left: {{ gantt.now_x }}px"></b>
         </div>
-        {% for g in gantt.groups if g.key != 'done' or show_done %}
+        {% for g in gantt.groups if (g.key != 'done' or show_done) and (g.key != 'other' or others_col) %}
         {% set late = g['items'] | selectattr('overdue') | list | length %}
         <section class="gantt-group" data-kb-col="{{ g.key }}">
           <div class="gantt-group-h"><span class="gantt-group-t">{{ g.title }}</span><span class="col-n">{{ g['items'] | length }}</span>{% if late %}<span class="cnt bad" title="{{ late }} просрочено">{{ late }}</span>{% endif %}</div>
@@ -255,10 +263,6 @@
       </div>
     </div>
   </div>
-</div>
-<div class="board-foot">
-  <a class="btn" href="?view=gantt&scale={{ scale }}{{ keep }}{{ '' if show_done else '&done=1' }}">{{ 'Скрыть готовые' if show_done else 'Показать готовые · ' ~ (board.done | length) }}</a>
-  <span class="muted small">за последние две недели · архивные — в фильтре</span>
 </div>
 {% else %}
 {#- список (5.3): одна таблица, строки-группы по колонкам доски (или по проекту, человеку); клик по строке — окно задачи #}
@@ -287,7 +291,7 @@
 {% endmacro %}
 {% set groups = [] %}
 {% if group == 'dir' %}
-  {% for key, t in [('mine', 'Мои задачи'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}{% set _ = groups.append((t, items | selectattr('direction', 'equalto', key) | selectattr('status', 'equalto', 'open') | list)) %}{% endfor %}
+  {% for key, t in [('mine', 'Мои задачи'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] if key != 'other' or others_col %}{% set _ = groups.append((t, items | selectattr('direction', 'equalto', key) | selectattr('status', 'equalto', 'open') | list)) %}{% endfor %}
   {% set closed = items | rejectattr('status', 'equalto', 'open') | list %}{% if closed %}{% set _ = groups.append(('Готово и отменённые', closed)) %}{% endif %}
 {% elif group == 'project' %}
   {% for title, rows in items | groupby('project_title') %}{% set _ = groups.append((title or 'Вне проектов', rows)) %}{% endfor %}

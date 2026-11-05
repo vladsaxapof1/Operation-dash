@@ -349,16 +349,18 @@
 {%- if c.direction == 'mine' %}{{ c.whom or '' }}{% elif c.direction == 'to_me' %}{{ c.who or '' }}{% else %}{{ c.who or '?' }} → {{ c.whom or '—' }}{% endif -%}
 {%- endmacro %}
 
-{% macro task_card(c, meetings={}, show_project=True) %}
+{% macro task_card(c, meetings={}, show_project=True, full=False) %}
 {#- карточка на доске (3.5): ровно две строки — название и «человек · срок». Клик раскрывает её на месте: зависимости,
-    кнопки «готово / в работе / напомнить» и «открыть» (окно задачи). Второй клик сворачивает (app.js) #}
+    кнопки «готово / в работе / напомнить» и «открыть» (окно задачи). Второй клик сворачивает (app.js).
+    full — «Подробно» на доске: под ними сразу видно, что сейчас по задаче, чего она ждёт, и строка «откуда · проект ·
+    пункты»; только то, что есть, — пустых строк нет. По клику остаются кнопки #}
 {#- data-rel — связанные задачи: при наведении они подсвечиваются на доске (app.js) #}
 {% set rel = (c.children or []) | map(attribute='id') | list + ([c.parent.id] if c.parent else [])
    + (c.waits or []) | selectattr('task') | map(attribute='task.id') | list + (c.holds or []) | map(attribute='task.id') | list %}
 {% set open_waits = (c.waits or []) | rejectattr('done') | list if c.status == 'open' else [] %}
 {% set holds = c.holds if c.status == 'open' else [] %}
 {% set person = card_person(c) | trim %}
-<div class="task{{ ' overdue' if c.overdue }}{{ ' inwork' if c.in_work and c.status == 'open' }}{{ ' done' if c.status != 'open' }}{{ ' archived' if c.archived }}" data-task="{{ c.id }}" data-expand
+<div class="task{{ ' full' if full }}{{ ' overdue' if c.overdue }}{{ ' inwork' if c.in_work and c.status == 'open' }}{{ ' done' if c.status != 'open' }}{{ ' archived' if c.archived }}" data-task="{{ c.id }}" data-expand
      role="button" tabindex="0" aria-expanded="false"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}{% if rel %} data-rel="{{ rel | join(' ') }}"{% endif %}>
   <div class="task-what" title="{{ c.what }}">{{ c | headline }}</div>
   <div class="task-meta">
@@ -366,20 +368,34 @@
     {%- if c.status == 'done' %}<span class="ok-text">готово{% if c.closed_at %} {{ c.closed_at | local('%d.%m') }}{% endif %}</span>
     {%- elif c.status != 'open' %}отменена{% else %}{{ due_text(c) }}{% endif -%}
     {%- if c.in_work and c.status == 'open' %} · <span class="ok-text">в работе</span>{% endif -%}
-    {%- if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif -%}
+    {%- if c.items_total and not full %} · {{ c.items_done }} из {{ c.items_total }}{% endif -%}
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}
-    {%- if c.now and c.now.waiting %} · <span class="warn-text" title="{{ c.now.text }}">{{ c.now.waiting_short }}</span>{% endif -%}
+    {%- if c.now and c.now.waiting and not full %} · <span class="warn-text" title="{{ c.now.text }}">{{ c.now.waiting_short }}</span>{% endif -%}
     {%- if c.archived %} · архив{% endif -%}
     {%- set agent = agent_chip(c) | trim %}{% if agent %} · {{ agent }}{% endif -%}
-    {%- if open_waits %} · <span class="task-wait" title="Ждёт: {% for w in open_waits %}{{ ('«' ~ w.task.headline ~ '» (' ~ w.task.doer ~ ')') if w.task else w.event }}{{ '; ' if not loop.last }}{% endfor %}">{{ icons.icon('hourglass', 13) }}ждёт</span>{% endif -%}
+    {%- if open_waits and not full %} · <span class="task-wait" title="Ждёт: {% for w in open_waits %}{{ ('«' ~ w.task.headline ~ '» (' ~ w.task.doer ~ ')') if w.task else w.event }}{{ '; ' if not loop.last }}{% endfor %}">{{ icons.icon('hourglass', 13) }}ждёт</span>{% endif -%}
   </div>
-  <div class="task-more">
+  {#- что сейчас и связи: в «Кратко» — по клику, в «Подробно» — сразу под метой #}
+  {% set deps %}
     {% if c.now %}<div class="task-dep task-now">{{ icons.icon('inbox', 14) }}<span>{{ c.now.text | truncate(160) }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %} <span class="muted">· {{ c.now.day }}</span></span></div>{% endif %}
     {% for w in open_waits[:3] %}<div class="task-dep">{{ icons.icon('hourglass', 14) }}<span>ждёт {% if w.task %}{{ task_ref(w.task) }} — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% if w.until %} · {{ w.until | date }}{% endif %}{% endif %}{% if w.late %}, <span class="bad-text">просрочено</span>{% endif %}</span></div>{% endfor %}
     {% if c.status == 'open' and c.waits and not open_waits %}<div class="task-dep ok-text">{{ icons.icon('check', 14) }}<span>дождалась — можно делать</span></div>{% endif %}
     {% for h in holds[:3] %}<div class="task-dep"><span class="dep-ico">→</span><span>её ждёт {{ task_ref(h.task) }} — {{ 'вы' if h.task.direction == 'mine' else h.task.doer }}</span></div>{% endfor %}
     {% if c.parent %}<div class="task-dep"><span class="dep-ico">↳</span><span>часть {{ task_ref(c.parent) }}</span></div>{% endif %}
+  {% endset %}
+  {% if full %}
+  {%- set md = (c.source_ref or '')[:10] %}
+  {%- set marks -%}
+    {%- if c.source_type == 'meeting' and c.source_ref %}<span title="{{ meetings.get(c.source_ref, '') }}">встреча{% if md | length == 10 and md[4] == '-' and md[7] == '-' %} {{ md | date }}{% endif %}</span>
+    {%- elif c.source_type and c.source_type != 'manual' %}<span>{{ SOURCE_TITLES.get(c.source_type, c.source_type) }}</span>{% endif -%}
+    {%- if show_project and c.project %}<span class="tf-proj" title="Проект">«{{ c.project.title }}»</span>{% endif -%}
+    {%- if c.items_total %}<span class="tf-items" title="Готово {{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}"><span class="pj-bar"><i style="width: {{ (c.items_done * 100 / c.items_total) | round | int }}%"></i></span>{{ c.items_done }} из {{ c.items_total }}</span>{% endif -%}
+  {%- endset %}
+  {% if deps | trim or marks | trim %}<div class="task-full">{{ deps }}{% if marks | trim %}<div class="tf-marks">{{ marks }}</div>{% endif %}</div>{% endif %}
+  {% endif %}
+  <div class="task-more">
+    {% if not full %}{{ deps }}{% endif %}
     <div class="task-acts">
       {% if c.status == 'open' and not c.archived %}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="ibtn ok" title="Готово" aria-label="Готово">{{ icons.icon('check', 16) }}</button></form>

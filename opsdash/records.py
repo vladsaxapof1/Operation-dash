@@ -217,21 +217,28 @@ def mark_seen(cid: int) -> None:
     store.execute("UPDATE commitments SET seen_at=? WHERE id=? AND seen_at IS NULL", (store.utcnow(), cid))
 
 
-def unseen_count() -> int:
-    """Сколько открытых задач директор ещё не видела (добавил Claude) — значок у «Задач» в меню."""
-    return store.scalar(
-        "SELECT COUNT(*) FROM commitments WHERE status='open' AND seen_at IS NULL AND archived_at IS NULL") or 0
+def _others(others: bool) -> str:
+    """others=False — без договорённостей между коллегами: директор их скрыла в «Задачах» (переключатель
+    «Между коллегами»), и счётчики считают только то, что она видит."""
+    return "" if others else " AND direction!='other'"
 
 
-def active_count() -> int:
+def unseen_count(others: bool = True) -> int:
+    """Сколько открытых задач директор ещё не видела (добавил Claude) — на кнопке «Новые» в «Задачах»."""
+    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND seen_at IS NULL "
+                        "AND archived_at IS NULL" + _others(others)) or 0
+
+
+def active_count(others: bool = True) -> int:
     """Сколько задач и договорённостей в работе (открытые, не в архиве) — счётчик у «Задач» в меню."""
-    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL") or 0
+    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL"
+                        + _others(others)) or 0
 
 
-def no_due_count() -> int:
+def no_due_count(others: bool = True) -> int:
     """Сколько открытых задач без срока — на кнопке «Без срока» в «Задачах»."""
-    return store.scalar(
-        "SELECT COUNT(*) FROM commitments WHERE status='open' AND due IS NULL AND archived_at IS NULL") or 0
+    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND due IS NULL "
+                        "AND archived_at IS NULL" + _others(others)) or 0
 
 
 def due_queue() -> list[dict]:
