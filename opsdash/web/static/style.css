@@ -1129,6 +1129,7 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .dlg-remind > summary::-webkit-details-marker { display: none; }
 .dlg-remind > summary .ico { margin-top: 3px; color: var(--muted); }
 .dlg-remind > .remind { grid-column: 2 / -1; }
+.dlg-remind > .remind-on { grid-column: 2 / -1; margin: 0; font-size: 14px; }
 .dlg-adds { padding-left: 28px; font-size: 14px; color: var(--muted); }
 .dlg-pane { padding-left: 28px; display: grid; gap: 8px; }
 .dlg-pane[hidden] { display: none; }

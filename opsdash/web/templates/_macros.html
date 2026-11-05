@@ -531,9 +531,10 @@
         {% for k in c.children or [] %}<div class="rel{{ ' done' if k.status == 'done' }}"><span class="rel-ico">↳</span><div>Подзадача {{ task_ref(k) }} — {{ 'Я' if k.direction == 'mine' else (k.who or '?') }}{% if k.due %}, {{ k.due | date }}{% endif %}{% if k.status == 'done' %} — <span class="ok-text">готово</span>{% endif %}</div></div>{% endfor %}
         {{ task_meeting(c) }}
         {% if c.remind %}
-        <details class="dlg-remind rel"{{ ' open' if c.overdue }}>
-          <summary>{{ icons.icon('bell', 16) }}<span>Напомнить {{ c.who }} в Telegram{% if c.reminded_at %} <span class="muted small">· напоминали {{ c.reminded_at | local }}</span>{% endif %}</span></summary>
+        <details class="dlg-remind rel"{{ ' open' if c.overdue and not c.remind.off }}>
+          <summary>{{ icons.icon('bell', 16) }}<span>Напомнить {{ c.who }} в Telegram{% if c.reminded_at %} <span class="muted small">· напоминали {{ c.reminded_at | local }}</span>{% endif %}{% if c.remind.off %} <span class="muted small">· {{ c.remind.off }}</span>{% endif %}</span></summary>
           {{ remind_form(c) }}
+          {% if c.remind.off %}<form class="remind-on" method="post" action="/commitments/{{ c.id }}/reminders"><input type="hidden" name="act" value="on"><button class="linkish" title="Строка «Напомнить» снова появится на Сводке, когда подойдёт срок">Снова напоминать</button></form>{% endif %}
         </details>
         {% endif %}
         {% if not c.duplicate %}
@@ -740,6 +741,9 @@
     {% if r.to and r.to.link %}<a class="btn sm" href="{{ r.to.link }}" target="_blank" rel="noopener" title="Открыть чат с {{ r.to.label }}">↗ Telegram</a>{% endif %}
     {% if r.to %}<button class="btn sm primary" title="Сообщение уйдёт из вашего Telegram">Отправить</button>
     {% else %}<span class="muted small">Чат не найден — укажите @username в <a href="/people">«Людях»</a></span>{% endif %}
+    {#- отправили сами (скопировали в Telegram, сказали лично) — отметить без отправки; data-confirm="" — без вопроса формы #}
+    <button class="btn sm ghost" formaction="/commitments/{{ c.id }}/reminders" name="act" value="reminded" data-confirm=""
+            title="Напомнили сами — скопировали в Telegram или сказали лично. Строка уйдёт со Сводки до завтра">Уже напомнили</button>
   </div>
 </form>
 {% endmacro %}

@@ -429,14 +429,18 @@ def propose_answered(*, attention_id: int, quote: str | None = None, batch: str 
 
 
 def propose_reminder(*, commitment_id: int, text: str | None = None, batch: str | None = None,
-                     reason: str | None = None, source_ref: str | None = None) -> dict:
+                     reason: str | None = None, source_ref: str | None = None, manual: bool = False) -> dict:
     """Напомнить исполнителю задачи «мне должны» в Telegram — сообщение уйдёт от имени директора, поэтому
-    только после её «Да» (автономии для этого нет). text — свой текст, иначе по шаблону из настроек."""
+    только после её «Да» (автономии для этого нет). text — свой текст, иначе по шаблону из настроек.
+    Директор попросила не напоминать («Не напоминать 3 дня», «Больше не напоминать») — Claude не предлагает;
+    manual — директор сама нажала «Отправить»: её решение важнее."""
     c = store.row("SELECT * FROM commitments WHERE id=?", (int(commitment_id),))
     if not c:
         raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
     if c["direction"] != "to_me" or c["status"] != "open":
         raise ProposalError("Напоминать можно только по открытым задачам «мне должны»")
+    if not manual and (off := records.remind_off(c)):
+        raise ProposalError(f"Директор попросила по этой задаче: {off} — напоминание не предлагай")
     to = records.recipient(c)
     if not to:
         raise ProposalError(f"Не нашла чат Telegram с «{c['who']}» — укажите его @username в «Людях»")

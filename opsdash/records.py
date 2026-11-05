@@ -886,23 +886,75 @@ def with_reminders(items: list[dict], people: list[dict] | None = None) -> list[
             people = list_people() if people is None else people
             settings = settings or config.load_settings()
             to = recipient(c, people)
-            c["remind"] = {"to": to, "text": reminder_text(c, settings, to["label"] if to else None)}
+            c["remind"] = {"to": to, "text": reminder_text(c, settings, to["label"] if to else None),
+                           "off": remind_off(c)}
     return items
 
 
 def reminders() -> list[dict]:
     """«Напомните коллегам» на сводке: задачи «мне должны» со сроком сегодня, завтра или уже просроченные.
-    Кому напомнили меньше суток назад — не показываем."""
+    Кому напомнили меньше суток назад — не показываем; где директор попросила не напоминать (remind_off) — тоже."""
     since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(hours=20))
+    today = today_local()
     items = _mark(store.rows(
         "SELECT * FROM commitments WHERE status='open' AND archived_at IS NULL AND direction='to_me' "
-        "AND due IS NOT NULL AND due <= ? AND (reminded_at IS NULL OR reminded_at < ?) ORDER BY due, id",
-        ((today_local() + timedelta(days=1)).isoformat(), since)))
+        "AND due IS NOT NULL AND due <= ? AND (reminded_at IS NULL OR reminded_at < ?) "
+        "AND (remind_paused_until IS NULL OR remind_paused_until <= ?) "
+        "AND (remind_off_due IS NULL OR remind_off_due != due) ORDER BY due, id",
+        ((today + timedelta(days=1)).isoformat(), since, today.isoformat())))
     return add_links(items)
 
 
 def mark_reminded(cid: int) -> None:
     store.execute("UPDATE commitments SET reminded_at=?, updated=? WHERE id=?", (store.utcnow(), store.utcnow(), cid))
+
+
+def remind_off(c: dict) -> str | None:
+    """Почему по задаче сейчас не напоминаем: «не напоминать до 08.11» (отложили) или «больше не напоминать»
+    (по этому сроку; срок перенесли — снова напоминаем). None — напоминаем как обычно."""
+    paused = _as_date(c.get("remind_paused_until"))
+    if paused and paused > today_local():
+        return f"не напоминать до {paused:%d.%m}"
+    if c.get("remind_off_due") is not None and c["remind_off_due"] == (c.get("due") or ""):
+        return "больше не напоминать"
+    return None
+
+
+REMIND_ACTS = {"reminded", "pause", "off", "on"}
+
+
+def set_reminders(cid: int, act: str, until: str | date | None = None) -> None:
+    """Строка «Напомнить» на Сводке и окно задачи «мне должны»:
+    reminded — уже напомнили сами (лично, в другом чате): строка уйдёт до завтра, как после «Отправить»;
+    pause — не напоминать до until (с этого дня строка вернётся, если задачу не закроют);
+    off — больше не напоминать по этому сроку: перенесут срок — напоминания включатся сами;
+    on — снова напоминать. Предложение Claude «напомнить» по задаче после этого не ждёт ответа."""
+    if act not in REMIND_ACTS:
+        raise ValueError("Напоминание: reminded, pause, off или on")
+    c = store.row("SELECT id, direction, due FROM commitments WHERE id=?", (cid,))
+    if not c:
+        raise ValueError(f"Нет задачи [{cid}]")
+    if c["direction"] != "to_me":
+        raise ValueError("Напоминания — только у задач, которые должны вам")
+    now = store.utcnow()
+    if act == "reminded":
+        store.execute("UPDATE commitments SET reminded_at=?, updated=? WHERE id=?", (now, now, cid))
+    elif act == "pause":
+        day = _as_date(until.isoformat() if isinstance(until, date) else until)
+        if not day or day <= today_local():
+            raise ValueError("Не напоминать до — дата позже сегодняшней, ГГГГ-ММ-ДД")
+        store.execute("UPDATE commitments SET remind_paused_until=?, updated=? WHERE id=?", (day.isoformat(), now, cid))
+    elif act == "off":
+        store.execute("UPDATE commitments SET remind_off_due=COALESCE(due, ''), updated=? WHERE id=?", (now, cid))
+    else:
+        store.execute("UPDATE commitments SET remind_paused_until=NULL, remind_off_due=NULL, updated=? WHERE id=?",
+                      (now, cid))
+        return
+    note = {"reminded": "уже напомнили сами", "pause": "попросили пока не напоминать",
+            "off": "попросили больше не напоминать"}[act]
+    store.execute("UPDATE proposals SET status='rejected', decided_at=?, result=? WHERE kind='telegram.remind' "
+                  "AND status='pending' AND json_extract(payload, '$.commitment_id')=?",
+                  (now, store.json_col({"note": note}), cid))
 
 
 # --- загрузка людей ---------------------------------------------------------------------

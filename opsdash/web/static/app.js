@@ -546,10 +546,12 @@
     });
   });
 
-  // подтверждение перед отправкой формы
+  // подтверждение перед отправкой формы; у кнопки свой data-confirm («Уже напомнили» в форме «Отправить») —
+  // спрашиваем её текст, пустой — не спрашиваем
   document.querySelectorAll("form[data-confirm]").forEach(function (form) {
     form.addEventListener("submit", function (e) {
-      if (!window.confirm(form.dataset.confirm)) e.preventDefault();
+      var ask = e.submitter && e.submitter.hasAttribute("data-confirm") ? e.submitter.dataset.confirm : form.dataset.confirm;
+      if (ask && !window.confirm(ask)) e.preventDefault();
     });
   });
 

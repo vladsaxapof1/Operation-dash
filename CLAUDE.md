@@ -125,6 +125,8 @@
 - «Подготовь бриф / повестку к встрече …» → навык `meeting-brief`: `./ops calendar --days 7` (uid встречи),
   `./ops briefs context <uid>`, бриф — в `data/briefs/` и `./ops briefs set`.
 - «Напомни Петрову про …» → `./ops propose remind --commitment <id>` и скажи, что уйдёт после «Да».
+  «Я уже напомнила», «не напоминай про …» → `./ops commitments set <id> --remind reminded` (строка уйдёт до завтра),
+  `--remind YYYY-MM-DD` (не напоминать до даты), `--remind off` (больше не напоминать, до нового срока), `--remind on`.
 - «Отметь, что … сделано» → `./ops commitments set <id> --status done` (просьба директора — без предложения).
 - «Как там проект …?», «на ком стоит …?» → `./ops projects list`, `./ops projects show <id>`; «заведи проект …» →
   `./ops projects add --title "…" --goal "…" --tasks <id,id>`, «добавь задачу в проект» → `commitments set <id> --project <id>`.

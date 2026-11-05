@@ -48,8 +48,11 @@
   </div>
   <div class="frow-act">
     <button type="button" class="btn{{ ' primary' if c.overdue }}" data-reveal="rem-{{ c.id }}">{{ 'Напомнить в Telegram' if c.remind and c.remind.to else 'Напомнить' }}</button>
+    {#- убрать строку, не отправляя: напомнили сами, отложить, больше не напоминать по этому сроку; задача — по щелчку на названии #}
     {% call ui.menu() %}
-      <a class="menu-i" href="/commitments?task={{ c.id }}">Открыть задачу</a>
+      <form method="post" action="/commitments/{{ c.id }}/reminders"><input type="hidden" name="act" value="reminded"><button class="menu-i" title="Напомнили сами — лично или в другом чате. Если задачу не закроют, строка вернётся завтра">Уже напомнили</button></form>
+      <form method="post" action="/commitments/{{ c.id }}/reminders"><input type="hidden" name="act" value="pause"><input type="hidden" name="days" value="3"><button class="menu-i">Не напоминать 3 дня</button></form>
+      <form method="post" action="/commitments/{{ c.id }}/reminders"><input type="hidden" name="act" value="off"><button class="menu-i" title="Задача останется на доске со своим сроком. Перенесут срок — напоминания включатся снова">Больше не напоминать</button></form>
       <form method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="menu-i">Уже сделано — закрыть</button></form>
     {% endcall %}
   </div>

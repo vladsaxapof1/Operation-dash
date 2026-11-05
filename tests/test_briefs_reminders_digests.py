@@ -104,6 +104,56 @@ def test_reminder_finds_private_chat_by_name():
                                                               "label": "Ольга"}
 
 
+def test_reminder_dismiss_without_sending(client):
+    """Строку «Напомнить» можно убрать, не отправляя: «Уже напомнили» — до завтра, «Не напоминать 3 дня»,
+    «Больше не напоминать» — до нового срока. Дайджест по таким задачам напоминание не предлагает."""
+    from opsdash import overview
+
+    records.upsert_person("Пётр Иванов", telegram="@petr")
+    today = records.today_local()
+    a = records.add_commitment(direction="to_me", who="Пётр Иванов", what="Прогноз",
+                               due=(today - timedelta(days=1)).isoformat())
+    b = records.add_commitment(direction="to_me", who="Пётр Иванов", what="Бюджет", due=today.isoformat())
+    c = records.add_commitment(direction="to_me", who="Пётр Иванов", what="Отчёт", due=today.isoformat())
+    assert [x["id"] for x in records.reminders()] == [a, b, c]
+    home = client.get("/").text
+    assert all(t in home for t in ("Уже напомнили", "Не напоминать 3 дня", "Больше не напоминать", "Уже сделано — закрыть"))
+    assert f'formaction="/commitments/{a}/reminders"' in home, "«Уже напомнили» и рядом с «Копировать» / «↗ Telegram»"
+
+    digest = proposals.propose_reminder(commitment_id=a, batch="digest:x")
+    r = client.post(f"/commitments/{a}/reminders", data={"act": "reminded", "text": "любой"}, follow_redirects=False)
+    assert r.status_code == 303 and "err=" not in r.headers["location"]
+    assert records.get_commitment(a)["reminded_at"] and proposals.get(digest["id"])["status"] == "rejected"
+
+    client.post(f"/commitments/{b}/reminders", data={"act": "pause", "days": 3})
+    assert records.get_commitment(b)["remind_paused_until"] == (today + timedelta(days=3)).isoformat()
+    client.post(f"/commitments/{c}/reminders", data={"act": "off"})
+    assert records.reminders() == []
+    with pytest.raises(proposals.ProposalError, match="не напоминать"):
+        proposals.propose_reminder(commitment_id=b)  # дайджест не предлагает
+    assert proposals.propose_reminder(commitment_id=c, manual=True)["status"] == "pending", "«Отправить» — решение директора"
+    text = overview.overview_markdown()
+    assert f"директор: не напоминать до {today + timedelta(days=3):%d.%m}" in text and "директор: больше не напоминать" in text
+    board = client.get(f"/commitments?task={c}").text
+    assert "· больше не напоминать" in board and "Снова напоминать" in board
+
+    records.update_commitment(c, due=(today + timedelta(days=1)).isoformat())
+    assert [x["id"] for x in records.reminders()] == [c], "перенесли срок — напоминания по задаче включились сами"
+    store.execute("UPDATE commitments SET remind_paused_until=? WHERE id=?", (today.isoformat(), b))
+    assert [x["id"] for x in records.reminders()] == [b, c], "пауза кончилась — строка вернулась"
+
+    cli.main(["commitments", "set", str(b), "--remind", "off"])
+    assert [x["id"] for x in records.reminders()] == [c]
+    cli.main(["commitments", "set", str(b), "--remind", "on"])
+    cli.main(["commitments", "set", str(c), "--remind", (today + timedelta(days=2)).isoformat()])
+    assert [x["id"] for x in records.reminders()] == [b]
+    with pytest.raises(SystemExit):
+        cli.main(["commitments", "set", str(c), "--remind", today.isoformat()])  # «до» — только будущая дата
+    mine = records.add_commitment(direction="mine", whom="Пётр Иванов", what="Своё", due=today.isoformat())
+    r = client.post(f"/commitments/{mine}/reminders", data={"act": "off"}, follow_redirects=False)
+    assert "err=" in r.headers["location"] and records.get_commitment(mine)["remind_off_due"] is None
+
+
 def test_workload_counts_people_and_me():
     records.upsert_person("Пётр Иванов", aliases=["Петя"])
     yesterday = (records.today_local() - timedelta(days=1)).isoformat()

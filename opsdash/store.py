@@ -173,7 +173,9 @@ CREATE TABLE IF NOT EXISTS commitments (
     note TEXT,
     parent_id INTEGER,               -- часть какой задачи: директор передала работу дальше (Пётр → мне, для Тимура)
     seen_at TEXT,                    -- когда директор увидела задачу; пусто — «новая» (добавил Claude)
-    reminded_at TEXT,                -- когда напомнили исполнителю в Telegram (кнопка «Отправить»)
+    reminded_at TEXT,                -- когда напомнили исполнителю: «Отправить» в Telegram или «Уже напомнили»
+    remind_paused_until TEXT,        -- «Не напоминать 3 дня»: с этой даты (YYYY-MM-DD) строка «Напомнить» вернётся
+    remind_off_due TEXT,             -- «Больше не напоминать»: по этому сроку не напоминать; перенесли срок — снова
     in_work_at TEXT,                 -- директор отметила «В работе»: карточка сверху колонки, зелёная
     estimate_min INTEGER,            -- сколько займёт у директора, мин (opsdash.day); пусто — считаем 30
     estimate_by TEXT,                -- кто оценил: claude | user (оценку директора Claude не меняет)
@@ -468,6 +470,8 @@ MIGRATIONS = [
     ("commitments", "project_id", "INTEGER"),
     ("kaiten_cards", "blockers", "TEXT"),
     ("commitments", "no_due_at", "TEXT"),
+    ("commitments", "remind_paused_until", "TEXT"),  # «Не напоминать 3 дня» и «Больше не напоминать» на Сводке
+    ("commitments", "remind_off_due", "TEXT"),
 ]
 
 

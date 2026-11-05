@@ -1228,13 +1228,30 @@ def task_options():
 def commitment_remind(request: Request, cid: int, text: str = Form("")):
     """«Отправить» у напоминания: директор сама нажала и подтвердила — сообщение уходит из её Telegram сразу."""
     try:
-        p = proposals.propose_reminder(commitment_id=cid, text=text, reason="вы нажали «Отправить»")
+        p = proposals.propose_reminder(commitment_id=cid, text=text, reason="вы нажали «Отправить»", manual=True)
     except proposals.ProposalError as e:
         return back(request, err=str(e))
     p = proposals.approve(p["id"])
     if p["status"] == "failed":
         return back(request, err=proposals.result_text(p))
     return back(request, proposals.result_text(p))
+
+
+@app.post("/commitments/{cid}/reminders")
+def commitment_reminders(request: Request, cid: int, act: str = Form(...), days: int = Form(3)):
+    """Строка «Напомнить» на Сводке: «Уже напомнили» (сами — лично или в другом чате), «Не напоминать 3 дня»,
+    «Больше не напоминать» (по этому сроку); в окне задачи — «Снова напоминать»."""
+    until = records.today_local() + timedelta(days=max(1, min(days, 60)))
+    try:
+        records.set_reminders(cid, act, until if act == "pause" else None)
+    except ValueError as e:
+        return back(request, err=str(e))
+    return back(request, {
+        "reminded": "Отмечено: напомнили. Если задачу не закроют, строка вернётся завтра",
+        "pause": f"Не напоминать до {until:%d.%m} — потом строка вернётся, если задачу не закроют",
+        "off": "Больше не напоминать по этой задаче. Перенесут срок — напоминания включатся снова",
+        "on": "Напоминания по задаче снова включены",
+    }[act])
 
 
 @app.post("/commitments/{cid}/seen")

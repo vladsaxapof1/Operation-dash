@@ -594,6 +594,8 @@ def _commitment_line(c: dict) -> str:
         line += f" · можно поручить агенту: {c['agent_hint']}"
     if c.get("archived_at"):
         line += " · в архиве"
+    if c["direction"] == "to_me" and (off := records.remind_off(c)):
+        line += f" · директор: {off}"
     if c["kaiten_card_id"]:
         line += f" · kaiten #{c['kaiten_card_id']}"
     if c.get("project"):
@@ -736,6 +738,12 @@ def cmd_commitments(a) -> None:
             records.set_in_work(a.id, a.in_work == "on")
         if a.archived:
             records.set_archived(a.id, a.archived == "on")
+        if a.remind:
+            act = a.remind if a.remind in records.REMIND_ACTS - {"pause"} else "pause"
+            try:
+                records.set_reminders(a.id, act, a.remind if act == "pause" else None)
+            except ValueError as e:
+                fail(str(e))
         out("Сохранено")
         if a.estimate:
             _estimate(a.id, a.estimate)
@@ -1548,6 +1556,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--project", type=int, help="в проект с этим id (0 — убрать из проекта); подзадачи — следом")
     x.add_argument("--in-work", choices=["on", "off"], help="отметка «В работе» (по просьбе директора)")
     x.add_argument("--archived", choices=["on", "off"], help="убрать в архив или вернуть (по просьбе директора)")
+    x.add_argument("--remind", metavar="reminded|off|on|YYYY-MM-DD",
+                   help="напоминания по задаче «мне должны» (по просьбе директора): reminded — уже напомнила сама; "
+                        "YYYY-MM-DD — не напоминать до этой даты; off — больше не напоминать (до нового срока); on — снова")
     x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин (оценку директора Claude не меняет)")
     x.add_argument("--agent", help="можно поручить агенту: что он сделает; \"\" — снять пометку")
     x = ms.add_parser("wait", help="задача ждёт другую задачу или событие: без него её не закончить")

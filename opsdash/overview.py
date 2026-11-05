@@ -348,6 +348,7 @@ def overview_markdown(settings: dict | None = None) -> str:
                 f"{''.join(_wait_text(w) for w in c['waits'] if not w['done'])}"
                 f"{' · пункты ' + str(c['items_done']) + '/' + str(c['items_total']) if c.get('checklist') else ''}"
                 f"{' · срок под угрозой: ' + c['wait_risk'] if c.get('wait_risk') else ''}"
+                f"{_remind_note(c)}"
                 f"{' · предложено закрыть' if c.get('done_hint') else ''}" for c in s[key]] or ["- нет"]
     out.append("\n## Проекты")
     for p in s["projects"]:
@@ -374,6 +375,12 @@ def overview_markdown(settings: dict | None = None) -> str:
     out += [f"- {m['id']}: {m['title'] or ''} · {m['status']}" for m in s["meetings"]] or ["- нет"]
     out.append(f"\nНеразобранных сообщений: {s['unprocessed']}")
     return "\n".join(out)
+
+
+def _remind_note(c: dict) -> str:
+    """Директор попросила не напоминать по задаче «мне должны» — дайджест и Claude об этом знают."""
+    off = records.remind_off(c) if c["direction"] == "to_me" else None
+    return f" · директор: {off}" if off else ""
 
 
 def _wait_text(w: dict) -> str:
