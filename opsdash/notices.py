@@ -68,6 +68,11 @@ def running() -> list[dict]:
         elif j["name"] == "triage":
             n = store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0
             item["detail"] = f"{n} новых" if n else ""
+        elif j["name"] == "task-log":  # «Собрать с Claude»: какую задачу собирает
+            from opsdash import records, worklog
+
+            tasks = [store.row("SELECT * FROM commitments WHERE id=?", (tid,)) for tid in worklog._running_runs()]
+            item["detail"] = ", ".join(f"«{records.headline(t)}»" for t in tasks if t)
         out.append(item)
     return out
 

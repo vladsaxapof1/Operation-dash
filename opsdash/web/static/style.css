@@ -1173,23 +1173,40 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .log-head { display: flex; align-items: baseline; gap: 10px; }
 .log-head form { margin-left: auto; }
 .log-collect { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
-.log-list { margin: 0 0 0 5px; padding: 2px 0 2px 16px; list-style: none; display: grid; gap: 12px; align-content: start;
-  border-left: 2px solid var(--line); overflow-y: auto; overscroll-behavior: contain; }
+/* линия и кружки — внутри ленты: у ленты своя прокрутка, всё за её краем обрезается. Линия — фоном (local: тянется
+   на всю прокрутку), её середина — 5px от края; кружки по центру линии */
+.log-list { margin: 0; padding: 2px 0 2px 20px; list-style: none; display: grid; gap: 12px; align-content: start;
+  background: linear-gradient(var(--line), var(--line)) 4px 0 / 2px 100% no-repeat local;
+  overflow-y: auto; overscroll-behavior: contain; }
 .log-i { position: relative; font-size: 14px; line-height: 1.45; min-width: 0; }
-.log-i::before { content: ""; position: absolute; left: -23px; top: 5px; width: 8px; height: 8px; border-radius: 50%;
+.log-i::before { content: ""; position: absolute; left: -20px; top: 4px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--panel); border: 2px solid var(--faint); }
 .log-i.k-update::before { border-color: var(--accent); }
 .log-i.k-note::before { border-color: var(--accent); background: var(--accent); }
 .log-i.k-ask::before { border-color: var(--warn); }
 .log-i.k-ask.waiting::before { background: var(--warn); }
-.log-i.k-event::before { left: -21px; top: 8px; width: 6px; height: 6px; border: 0; background: var(--line-strong); }
+.log-i.k-event::before { left: -18px; top: 6px; width: 6px; height: 6px; border: 0; background: var(--line-strong); }
 .log-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: 12px; color: var(--muted); }
 .log-src { font-weight: 600; overflow-wrap: anywhere; }
 .log-i.k-origin .log-src { font-weight: 400; }
 .log-when { white-space: nowrap; }
-.log-x { margin-left: auto; visibility: hidden; }
-.log-x .linkish { font-size: 12px; }
-.log-i:hover .log-x, .log-x:focus-within { visibility: visible; }
+/* «изменить» и «удалить» у записи: видны всегда, бледно; ярче — при наведении на запись */
+.log-acts { margin-left: auto; display: inline-flex; gap: 2px; align-self: center; }
+.log-act { width: 24px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--faint);
+  cursor: pointer; display: inline-grid; place-items: center; opacity: .7; }
+.log-i:hover .log-act, .log-act:focus-visible { opacity: 1; }
+.log-act:hover { background: var(--panel-2); color: var(--accent); }
+.log-act.del:hover { color: var(--bad-text); }
+.log-i.editing .log-text, .log-i.editing .log-quote { display: none; }
+.log-edit { display: grid; gap: 6px; margin: 4px 0 0; }
+.log-edit textarea { width: 100%; max-width: none; font-size: 14px; resize: vertical; }
+.log-ev .log-ev-t { flex: 1; min-width: 0; }
+.log-busy { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border-radius: 10px; background: var(--accent-soft);
+  font-size: 13px; line-height: 1.4; }
+.log-busy .ask-dots { margin-top: 5px; flex: none; }
+.log-busy b { font-weight: 600; }
+.log-busy-step { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.log-done { margin: 0; }
 .log-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-quote { margin-top: 2px; font-size: 13px; font-style: italic; color: var(--muted); overflow-wrap: anywhere; }
 .log-wait { display: inline-block; padding: 0 7px; border-radius: 999px; background: var(--warn-soft); color: var(--warn-text);

@@ -459,23 +459,31 @@
 </div>{% endif %}</div>
 {%- endmacro %}
 
+{% macro log_acts(c, e, edit=True) -%}
+{#- кнопки записи хода: карандаш — поправить текст прямо в ленте, корзина — удалить (спросит). Видны всегда, бледно -#}
+<span class="log-acts">
+  {%- if edit %}<button type="button" class="log-act" data-log-edit title="Изменить запись" aria-label="Изменить запись">{{ icons.icon('edit', 14) }}</button>{% endif -%}
+  <form class="inline" method="post" action="/commitments/{{ c.id }}/log/{{ e.id }}/remove" data-log-remove data-log-confirm="Удалить запись из хода задачи?"><button class="log-act del" title="Удалить запись" aria-label="Удалить запись">{{ icons.icon('trash', 14) }}</button></form>
+</span>
+{%- endmacro %}
+
 {% macro log_entry(c, e) -%}
 {#- запись хода задачи. Событие PULSE — одной серой строкой; «появилась» — откуда задача; остальное — откуда (чат,
-    встреча, вы), когда, ссылка на сообщение, текст и цитата -#}
+    встреча, вы), когда, ссылка на сообщение, текст и цитата. Справа — «изменить» и «удалить» -#}
 <li class="log-i k-{{ e.kind }}{{ ' waiting' if e.waiting }}"{% if e.id %} data-log-id="{{ e.id }}"{% endif %}>
   {%- if e.kind == 'event' %}
-  <div class="log-ev"><span class="log-when">{{ e.when }}</span> {{ e.text }}{% if e.link %} <a href="{{ e.link }}" target="_blank" rel="noopener" title="{{ e.link_label }}">↗</a>{% endif %}
-    <form class="inline log-x" method="post" action="/commitments/{{ c.id }}/log/{{ e.id }}/remove" data-log-remove><button class="linkish muted" title="Убрать запись" aria-label="Убрать запись">✕</button></form></div>
+  <div class="log-ev"><span class="log-when">{{ e.when }}</span> <span class="log-ev-t">{{ e.text }}{% if e.link %} <a href="{{ e.link }}" target="_blank" rel="noopener" title="{{ e.link_label }}">↗</a>{% endif %}</span>
+    {{ log_acts(c, e, edit=False) }}</div>
   {%- else %}
   <div class="log-meta">
     <span class="log-src">{% if e.kind == 'origin' %}{{ 'появилась' if e.source_type and e.source_type != 'manual' else 'добавлена вручную' }}{% if e.source_type and e.source_type != 'manual' %} · {{ e.src }}{% endif %}{% else %}{{ e.src }}{% endif %}</span>
     <span class="log-when">{{ e.when }}</span>
     {%- if e.link %} <a class="log-link" href="{{ e.link }}"{% if e.link.startswith('http') %} target="_blank" rel="noopener"{% endif %} title="{{ e.link_label }}">↗</a>{% endif %}
-    {%- if e.author == 'claude' %} <span class="log-by" title="Записал {{ assistant() }}, разбирая переписку и встречи">· {{ assistant() }}</span>{% endif %}
-    {%- if e.id %}<form class="inline log-x" method="post" action="/commitments/{{ c.id }}/log/{{ e.id }}/remove" data-log-remove><button class="linkish muted" title="Убрать запись" aria-label="Убрать запись">✕</button></form>{% endif %}
+    {%- if e.author == 'claude' and e.source_type and e.source_type != 'manual' %} <span class="log-by" title="Записал {{ assistant() }}, разбирая переписку и встречи">· {{ assistant() }}</span>{% endif %}
+    {%- if e.id %}{{ log_acts(c, e) }}{% endif %}
   </div>
   {%- if e.kind != 'origin' %}
-  <div class="log-text">{{ e.text }}{% if e.waiting %} <span class="log-wait">{{ e.waiting }}</span>{% elif e.kind == 'ask' %} <span class="log-asked">вопрос</span>{% endif %}</div>
+  <div class="log-text"><span class="log-t">{{ e.text }}</span>{% if e.waiting %} <span class="log-wait">{{ e.waiting }}</span>{% elif e.kind == 'ask' %} <span class="log-asked">вопрос</span>{% endif %}</div>
   {%- if e.quote %}<div class="log-quote">«{{ e.quote }}»</div>{% endif %}
   {%- endif %}
   {%- endif %}
@@ -485,15 +493,22 @@
 {% macro task_log(c) %}
 {#- ход задачи — колонка справа в окне задачи (на узком экране — внизу): от появления до последнего апдейта. Claude
     дописывает его сам, разбирая переписку и встречи; PULSE — события (срок, «в работе», «ждёт», Kaiten); директор —
-    комментарии полем внизу. «Собрать с Claude» — поискать по задаче во всех источниках и дописать пропущенное #}
-<aside class="dlg-log" aria-label="Ход задачи">
+    комментарии полем внизу. «Собрать с Claude» — поискать по задаче во всех источниках и дописать пропущенное: пока
+    идёт, в ленте точки и что Claude делает сейчас, закончил — новые записи и итог (app.js, без перезагрузки) #}
+<aside class="dlg-log" aria-label="Ход задачи" data-log-task="{{ c.id }}" data-ai="{{ assistant() }}"{% if c.collecting %} data-log-state="{{ c.collecting }}"{% endif %}>
   <div class="log-head">
     <span class="dlg-sec">Ход задачи</span>
-    {% if c.status == 'open' and not c.duplicate %}<form class="inline" method="post" action="/commitments/{{ c.id }}/log/collect"><button class="linkish log-collect" title="{{ assistant() }} поищет по задаче в переписке, встречах и Kaiten и допишет в ход, что было: вопросы, ответы, договорённости">{{ icons.icon('ask', 14) }} Собрать с {{ assistant() }}</button></form>{% endif %}
+    {% if c.status == 'open' and not c.duplicate %}<form class="inline" method="post" action="/commitments/{{ c.id }}/log/collect" data-log-collect{% if c.collecting %} hidden{% endif %}><button class="linkish log-collect" title="{{ assistant() }} поищет по задаче в переписке, встречах и Kaiten и допишет в ход, что было: вопросы, ответы, договорённости">{{ icons.icon('ask', 14) }} Собрать с {{ assistant() }}</button></form>{% endif %}
   </div>
   <ol class="log-list" data-log-list>
     {% for e in c.log or [] %}{{ log_entry(c, e) }}{% endfor %}
   </ol>
+  <div class="log-busy" data-log-busy role="status" aria-live="polite"{% if not c.collecting %} hidden{% endif %}>
+    <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span><b data-log-busy-title>{{ 'Ждёт очереди' if c.collecting == 'queued' else assistant() ~ ' собирает ход задачи' }}</b>
+      <span class="log-busy-step" data-log-busy-step>{{ 'начнёт, как освободится' if c.collecting == 'queued' else 'ищет в переписке, встречах и Kaiten' }}</span></span>
+  </div>
+  <p class="log-done small" data-log-done role="status" hidden></p>
   {% if not c.log_count %}<p class="log-empty muted small" data-log-empty>Здесь будет видно, как движется задача: {{ assistant() }} допишет вопросы, ответы и договорённости из переписки и встреч, PULSE — переносы сроков и статусы. Свой комментарий — ниже.</p>{% endif %}
   <form class="log-form" method="post" action="/commitments/{{ c.id }}/log" data-log-form>
     <textarea name="text" rows="2" required placeholder="Что изменилось, комментарий…" aria-label="Запись в ход задачи"></textarea>

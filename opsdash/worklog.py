@@ -132,6 +132,52 @@ def event(task_id: int | None, text: str, *, source: str | None = None) -> None:
         store.log("worklog", f"событие для задачи [{task_id}] не записано: {e}", "warning")
 
 
+def edit(entry_id: int, text: str) -> None:
+    """Поправить текст записи (директор — в окне задачи). Откуда она и когда — не меняется."""
+    text = re.sub(r"\n{3,}", "\n\n", (text or "").strip())[:TEXT_MAX]
+    if not text:
+        raise ValueError("Текст записи пустой — если запись не нужна, удалите её")
+    store.execute("UPDATE task_log SET text=? WHERE id=?", (text, entry_id))
+
+
+COLLECT_JOB = "task-log"
+COLLECT_MAX_MIN = 30  # запуск «running» старше — завис (PULSE перезапускали посреди сбора), не считаем
+
+
+def _running_runs() -> dict[int, dict]:
+    """Идущие сейчас «Собрать с Claude»: {id задачи: запуск из «Офиса» (шаги Claude)}."""
+    since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(minutes=COLLECT_MAX_MIN))
+    out = {}
+    for r in store.rows("SELECT * FROM agent_runs WHERE job=? AND status='running' AND started >= ? ORDER BY id",
+                        (COLLECT_JOB, since)):
+        tid = (store.loads(r["args"], {}) or {}).get("task_id")
+        if tid:
+            out[int(tid)] = r
+    return out
+
+
+def _queued(task_id: int) -> bool:
+    import sys
+
+    jobs = sys.modules.get("opsdash.jobs")  # очереди есть только в работающем PULSE — из ./ops не спрашиваем
+    return bool(jobs and jobs.pending(COLLECT_JOB, {"task_id": task_id}))
+
+
+def collect_state(task_id: int) -> dict:
+    """Как идёт «Собрать с Claude» по задаче: state — running (step — что Claude делает сейчас), queued (ждёт своей
+    очереди) или idle; у idle — итог последнего сбора (result, ok)."""
+    run = _running_runs().get(task_id)
+    if run:
+        steps = store.loads(run["steps"], []) or []
+        return {"state": "running", "step": steps[-1]["t"] if steps else ""}
+    if _queued(task_id):
+        return {"state": "queued", "step": ""}
+    last = store.row("SELECT status, result FROM agent_runs WHERE job=? AND json_extract(args, '$.task_id')=? "
+                     "ORDER BY id DESC LIMIT 1", (COLLECT_JOB, task_id))
+    return {"state": "idle", "step": "", "result": (last or {}).get("result") or "",
+            "ok": (last or {}).get("status") != "error"}
+
+
 def get(entry_id: int) -> dict | None:
     return store.row("SELECT * FROM task_log WHERE id=?", (entry_id,))
 
@@ -263,10 +309,13 @@ def decorate(items: list[dict]) -> None:
     if not items:
         return
     by_task = entries([c["id"] for c in items], extra=[_origin(c) for c in items])
+    busy = _running_runs()
     for c in items:
         c["log"] = by_task.get(c["id"], [])
         c["log_count"] = sum(1 for e in c["log"] if e["kind"] != "origin")
         c["now"] = current(c["log"]) if c.get("status") == "open" else None
+        # «Собрать с Claude» идёт — окно задачи покажет это сразу и само обновит ленту, когда закончит
+        c["collecting"] = "running" if c["id"] in busy else ("queued" if _queued(c["id"]) else None)
 
 
 def add_links(items: list[dict]) -> None:

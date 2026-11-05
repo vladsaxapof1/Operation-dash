@@ -272,3 +272,46 @@ def test_triage_announces_task_log(monkeypatch):
     assert n["title"] == "Обновил ход задач: 2 — встреча «Закупки»" and n["link"] == "/commitments"
     assert "«Договор с поставщиком упаковки» — Пётр: договор на подписи" in n["text"]
     assert worklog.announce(worklog.last_id(), "triage") == 0
+
+
+def test_collect_progress_edit_and_corner(client, monkeypatch):
+    """«Собрать с Claude» без перезагрузки: состояние для окна задачи (в очереди → собирает и что делает → готово,
+    лента и итог), «Сейчас» в углу экрана называет задачу; «Изменить» у записи."""
+    from opsdash import notices
+
+    cid, m = _phones()
+    monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: True)
+    monkeypatch.setattr(jobs, "pending", lambda name, args=None: args == {"task_id": cid})
+    r = client.post(f"/commitments/{cid}/log/collect", headers={"Accept": "application/json"}).json()
+    assert r["ok"] and r["state"] == "queued"
+    assert records.get_commitment(cid)["collecting"] == "queued"
+
+    run = store.execute("INSERT INTO agent_runs(job, args, started, status, steps) VALUES('task-log', ?, ?, 'running', ?)",
+                        (store.json_col({"task_id": cid}), store.utcnow(),
+                         store.json_col([{"t": "Ищет в переписке: «упаков»", "at": store.utcnow()}])))
+    st = client.get(f"/api/commitments/{cid}/log").json()
+    assert st["state"] == "running" and st["step"] == "Ищет в переписке: «упаков»" and "list" not in st
+    page = client.get(f"/commitments?task={cid}").text
+    assert 'data-log-state="running"' in page and "собирает ход задачи" in page
+    store.execute("UPDATE jobs SET running=0")
+    store.execute("INSERT OR REPLACE INTO jobs(name, running) VALUES('task-log', 1)")
+    corner = [x for x in notices.running() if x["name"] == "task-log"]
+    assert corner and corner[0]["detail"] == "«Договор с поставщиком упаковки»"
+
+    worklog.add(cid, "Пётр: этим занимался Олег", source=f"pachca:{m['ans']}", by="claude")
+    store.execute("UPDATE agent_runs SET status='ok', result='записей в ходе: +1' WHERE id=?", (run,))
+    monkeypatch.setattr(jobs, "pending", lambda name, args=None: False)
+    st = client.get(f"/api/commitments/{cid}/log").json()
+    assert st["state"] == "idle" and st["result"] == "записей в ходе: +1" and st["ok"]
+    assert "Пётр: этим занимался Олег" in st["list"] and st["count"] == 1
+    assert records.get_commitment(cid)["collecting"] is None
+
+    eid = records.get_commitment(cid)["log"][-1]["id"]
+    r = client.post(f"/commitments/{cid}/log/{eid}/edit", data={"text": "Пётр: договором занимался Олег"},
+                    headers={"Accept": "application/json"}).json()
+    assert r["ok"] and "договором занимался Олег" in r["list"]
+    assert worklog.get(eid)["source_ref"] == str(m["ans"])  # откуда — как было
+    r = client.post(f"/commitments/{cid}/log/{eid}/edit", data={"text": " "}, headers={"Accept": "application/json"})
+    assert r.status_code == 400
+    r = client.post(f"/commitments/{cid}/log/999/edit", data={"text": "x"}, headers={"Accept": "application/json"})
+    assert r.status_code == 400

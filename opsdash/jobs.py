@@ -632,6 +632,13 @@ def unqueue(name: str, args: dict | None = None) -> bool:
     return False
 
 
+def pending(name: str, args: dict | None = None) -> bool:
+    """Ждёт ли задание в очередях PULSE или уже выполняется."""
+    with _pending_lock:
+        key = _key(name, args)
+        return key in _pending and key not in _dropped
+
+
 def running(name: str, args: dict | None = None) -> bool:
     """Выполняется ли задание в очередях PULSE прямо сейчас (а не просто ждёт)."""
     with _pending_lock:

@@ -229,6 +229,7 @@
     if (!dlg.open && !dlg.parentElement.checkVisibility()) document.body.appendChild(dlg);
     if (!dlg.open) dlg.showModal();
     logScroll(dlg);
+    logResume(dlg);
     // фокус — на поле заголовка, а при просмотре на само окно (иначе браузер обводит рамкой ✕)
     var first = edit ? (dlg.querySelector(".dlg-edit [name=title]") || dlg.querySelector(".dlg-edit input[type=text]"))
       : (remind && rem ? rem.querySelector("textarea") : dlg.querySelector(".dlg-box"));
@@ -283,8 +284,9 @@
     if (e.key === "Escape") closeMenus();
   });
 
-  // ход задачи в окне задачи: комментарий («жду ответа» — вопрос) сохраняется без перезагрузки — лента и строка
-  // «Сейчас» приходят готовыми; ⌘/Ctrl+Enter — записать; ✕ у записи — убрать
+  // ход задачи в окне задачи: комментарий («жду ответа» — вопрос), правка и удаление записи — без перезагрузки:
+  // лента и строка «Сейчас» приходят готовыми; ⌘/Ctrl+Enter — записать. «Собрать с Claude» — тоже без перезагрузки:
+  // в ленте точки и что Claude делает сейчас (опрос раз в 2,5 с), закончил — новые записи и итог
   function logScroll(dlg) {
     var list = dlg && dlg.querySelector("[data-log-list]");
     if (list) list.scrollTop = list.scrollHeight;
@@ -299,38 +301,156 @@
       if (box.firstElementChild) slot.replaceWith(box.firstElementChild);
     }
     var empty = dlg.querySelector("[data-log-empty]");
-    if (empty) empty.hidden = !!res.count;
+    if (empty && res.count !== undefined) empty.hidden = !!res.count;
     logScroll(dlg);
+  };
+  var logPost = function (form, body) {
+    return fetch(form.action, { method: "POST", body: body, headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, err: "" }; }); })
+      .then(function (res) { if (!res.ok) throw new Error(res.err || ""); return res; });
+  };
+  var logError = function (dlg, x) {  // ответ PULSE — его словами; обрыв связи — своими
+    var err = dlg.querySelector("[data-log-err]");
+    if (!err) return;
+    err.textContent = (x && x.name === "Error" && x.message) || "Не получилось сохранить — попробуйте ещё раз";
+    err.hidden = false;
+  };
+  // «Собрать с Claude»: точки и шаг, пока идёт; итог — когда закончил
+  var logBusy = function (dlg, res) {
+    var aside = dlg.querySelector("[data-log-task]");
+    var busy = dlg.querySelector("[data-log-busy]");
+    var btn = dlg.querySelector("[data-log-collect]");
+    var on = res && (res.state === "running" || res.state === "queued");
+    if (aside) { if (on) aside.dataset.logState = res.state; else delete aside.dataset.logState; }
+    if (btn) btn.hidden = !!on;
+    if (!busy) return;
+    busy.hidden = !on;
+    if (on) {
+      var title = busy.querySelector("[data-log-busy-title]");
+      var step = busy.querySelector("[data-log-busy-step]");
+      if (res.state === "queued") {
+        title.textContent = "Ждёт очереди";
+        step.textContent = "начнёт, как освободится";
+      } else {
+        title.textContent = ((aside && aside.dataset.ai) || "Claude") + " собирает ход задачи";
+        step.textContent = res.step || "ищет в переписке, встречах и Kaiten";
+      }
+    }
+  };
+  var logDone = function (dlg, res) {
+    var done = dlg.querySelector("[data-log-done]");
+    if (!done) return;
+    var m = /\+(\d+)/.exec(res.result || "");
+    done.className = "log-done small " + (res.ok === false ? "bad-text" : m ? "ok-text" : "muted");
+    done.textContent = res.ok === false ? "Не получилось собрать: " + (res.result || "ошибка — подробности в «Журнале»")
+      : m ? "Готово — добавлено записей: " + m[1] : "Готово — нового по задаче не нашлось";
+    done.hidden = false;
+    clearTimeout(done._t);
+    done._t = setTimeout(function () { done.hidden = true; }, 15000);
+  };
+  var logPoll = function (dlg) {
+    var aside = dlg && dlg.querySelector("[data-log-task]");
+    if (!aside || dlg._logTimer) return;
+    var tick = function () {
+      if (!dlg.open) { clearInterval(dlg._logTimer); dlg._logTimer = null; return; }  // откроют снова — продолжим
+      fetch("/api/commitments/" + aside.dataset.logTask + "/log", { cache: "no-store" })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) return;
+          logBusy(dlg, res);
+          if (res.state === "idle") {
+            clearInterval(dlg._logTimer);
+            dlg._logTimer = null;
+            logApply(dlg, res);
+            logDone(dlg, res);
+          }
+        })
+        .catch(function () { /* связь пропала — следующая попытка через 2,5 с */ });
+    };
+    dlg._logTimer = setInterval(tick, 2500);
+    tick();
+  };
+  var logResume = function (dlg) {  // окно открыли, а сбор уже идёт (нажали раньше или в другой вкладке)
+    var aside = dlg && dlg.querySelector("[data-log-task]");
+    if (aside && aside.dataset.logState) logPoll(dlg);
   };
   document.addEventListener("submit", function (e) {
     var form = e.target;
-    if (!form.matches("[data-log-form], [data-log-remove]")) return;
+    if (!form.matches("[data-log-form], [data-log-remove], [data-log-collect], [data-log-edit-form]")) return;
     var dlg = form.closest("dialog");
     if (!dlg || !window.fetch) return;
     e.preventDefault();
-    var adding = form.matches("[data-log-form]");
-    var err = dlg.querySelector("[data-log-err]");
+    if (form.dataset.logConfirm && !window.confirm(form.dataset.logConfirm)) return;
     var buttons = form.querySelectorAll("button");
     buttons.forEach(function (b) { b.disabled = true; });
+    var err = dlg.querySelector("[data-log-err]");
     if (err) err.hidden = true;
-    fetch(form.action, { method: "POST", body: adding ? new FormData(form) : null, headers: { Accept: "application/json" } })
-      .then(function (r) { return r.json().catch(function () { return { ok: false, err: "" }; }); })
+    var collect = form.matches("[data-log-collect]");
+    if (collect) {
+      var done = dlg.querySelector("[data-log-done]");
+      if (done) done.hidden = true;
+      logBusy(dlg, { state: "queued" });
+    }
+    var body = form.matches("[data-log-remove], [data-log-collect]") ? null : new FormData(form);
+    logPost(form, body)
       .then(function (res) {
-        if (!res.ok) throw new Error(res.err || "");
-        if (adding) form.reset();
+        if (collect) { logBusy(dlg, res); logPoll(dlg); return; }
+        if (form.matches("[data-log-form]")) form.reset();
         logApply(dlg, res);
       })
-      .catch(function (x) {  // ответ PULSE — его словами; обрыв связи — своими
-        if (!err) return;
-        err.textContent = (x.name === "Error" && x.message) || "Не получилось сохранить — попробуйте ещё раз";
-        err.hidden = false;
+      .catch(function (x) {
+        if (collect) logBusy(dlg, { state: "idle" });
+        logError(dlg, x);
       })
       .finally(function () { buttons.forEach(function (b) { b.disabled = false; }); });
   });
+  // «Изменить» у записи: текст становится полем, «Сохранить» / «Отмена» (Esc), ⌘/Ctrl+Enter — сохранить
+  document.addEventListener("click", function (e) {
+    var pen = e.target.closest("[data-log-edit]");
+    var cancel = e.target.closest("[data-log-edit-cancel]");
+    if (cancel) {
+      var li0 = cancel.closest(".log-i");
+      li0.querySelector("[data-log-edit-form]").remove();
+      li0.classList.remove("editing");
+      return;
+    }
+    if (!pen) return;
+    var li = pen.closest(".log-i");
+    var dlg = pen.closest("dialog");
+    if (!li || li.querySelector("[data-log-edit-form]")) return;
+    var aside = dlg.querySelector("[data-log-task]");
+    var form = document.createElement("form");
+    form.className = "log-edit";
+    form.method = "post";
+    form.action = "/commitments/" + aside.dataset.logTask + "/log/" + li.dataset.logId + "/edit";
+    form.setAttribute("data-log-edit-form", "");
+    var ta = document.createElement("textarea");
+    ta.name = "text";
+    ta.rows = 3;
+    ta.required = true;
+    ta.value = (li.querySelector(".log-t") || {}).textContent || "";
+    ta.setAttribute("aria-label", "Текст записи");
+    var row = document.createElement("div");
+    row.className = "log-form-row";
+    row.innerHTML = '<span class="grow"></span><button type="button" class="btn sm ghost" data-log-edit-cancel>Отмена</button>'
+      + '<button class="btn sm primary">Сохранить</button>';
+    form.appendChild(ta);
+    form.appendChild(row);
+    li.classList.add("editing");
+    li.appendChild(form);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target.closest("[data-log-form]")) {
+    var form = e.target.closest && e.target.closest("[data-log-form], [data-log-edit-form]");
+    if (!form) return;
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      e.target.closest("form").requestSubmit();
+      form.requestSubmit();
+    } else if (e.key === "Escape" && form.matches("[data-log-edit-form]")) {
+      e.preventDefault();  // Esc — отменить правку, а не закрыть окно задачи
+      e.stopPropagation();
+      form.querySelector("[data-log-edit-cancel]").click();
     }
   });
 

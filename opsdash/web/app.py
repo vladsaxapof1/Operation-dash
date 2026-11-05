@@ -1068,10 +1068,43 @@ def commitment_log_collect(request: Request, cid: int):
     if not records.get_commitment(cid):
         return back(request, err="Такой задачи нет")
     who = _brain.name()
-    if not jobs.submit("task-log", "chat", {"task_id": cid}):
+    started = jobs.submit("task-log", "chat", {"task_id": cid})
+    if "application/json" in request.headers.get("accept", ""):  # окно задачи: крутилка в ленте, без перезагрузки
+        return JSONResponse({"ok": True, **worklog.collect_state(cid)})
+    if not started:
         return _back_task(request, cid, f"{who} уже собирает ход этой задачи — появится уведомление")
     return _back_task(request, cid, f"{who} собирает ход задачи по переписке и встречам — когда закончит, "
                                     "появится уведомление")
+
+
+@app.get("/api/commitments/{cid}/log")
+def commitment_log_state(cid: int):
+    """Окно задачи, пока идёт «Собрать с Claude»: что Claude делает сейчас; закончил — лента, «Сейчас» и итог."""
+    if not records.get_commitment(cid):
+        return JSONResponse({"ok": False, "err": "Такой задачи нет"}, status_code=404)
+    st = worklog.collect_state(cid)
+    if st["state"] != "idle":
+        return {"ok": True, **st}
+    reply = json.loads(_log_reply(cid).body)
+    return {**reply, **st}
+
+
+@app.post("/commitments/{cid}/log/{entry_id}/edit")
+def commitment_log_edit(request: Request, cid: int, entry_id: int, text: str = Form("")):
+    """«Изменить» у записи хода: поправить текст (откуда и когда — как было)."""
+    as_json = "application/json" in request.headers.get("accept", "")
+    e = worklog.get(entry_id)
+    try:
+        if not e or e["task_id"] != cid:
+            raise ValueError("Такой записи у задачи нет")
+        worklog.edit(entry_id, text)
+    except ValueError as err:
+        if as_json:
+            return JSONResponse({"ok": False, "err": str(err)}, status_code=400)
+        return _back_task(request, cid, err=str(err))
+    if as_json:
+        return _log_reply(cid)
+    return _back_task(request, cid, "Запись исправлена")
 
 
 @app.post("/commitments/{cid}/items")
