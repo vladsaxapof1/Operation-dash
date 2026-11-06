@@ -483,6 +483,16 @@ def cmd_kb(a) -> None:
                 author="claude" if os.environ.get("OPSDASH_AGENT") else "director")
         except anthology.AnthologyError as e:
             fail(str(e))
+        if a.kind == "decision" and any(v for v in (a.stage, a.metric, a.before, a.after, a.waiting, a.tasks)):
+            from opsdash import decisions
+
+            try:
+                decisions.update(item_id, stage=a.stage, metric=a.metric, before=a.before, after=a.after,
+                                 waiting=a.waiting)
+                for tid in _ids(a.tasks):
+                    decisions.link(item_id, tid)
+            except decisions.DecisionError as e:
+                fail(str(e))
         out(f"Запись [{item_id}] сохранена" + (" как предложение — директор примет или отклонит" if a.proposed else ""))
     elif a.action in ("list", "search"):
         items = anthology.items(kind=a.kind, status=a.status, project=a.project, days=getattr(a, "days", None),
@@ -504,6 +514,58 @@ def cmd_kb(a) -> None:
         out("Сохранено")
     elif a.action == "import":
         out(anthology.import_notes())
+
+
+def cmd_decisions(a) -> None:
+    """Реестр решений (MEM-3): стадия, метрика «было → стало», чего ждём, задачи-исполнители."""
+    from opsdash import decisions
+
+    try:
+        if a.action == "list":
+            rows = decisions.items(stage=a.stage, project=a.project, orphan=a.orphan, q=a.search, limit=a.limit)
+            if a.json:
+                return as_json(rows)
+            for r in rows:
+                metric = (f" · {r['metric'] or 'метрика'}: {r['before_value'] or '—'} → {r['after_value'] or '—'}"
+                          if r["metric"] or r["before_value"] or r["after_value"] else "")
+                tasks = (", ".join(f"[commitment {t['id']}]{' ✓' if t['status'] == 'done' else ''}" for t in r["tasks"])
+                         or ("НЕТ ЗАДАЧ — без исполнения" if r["orphan"] else "задач нет"))
+                out(f"[decision {r['id']}] {r['when']} · {r.get('project') or 'без направления'} · {r['stage_title']} · "
+                    f"{r['title']}{metric}" + (f" · ждём: {r['waiting_for']}" if r["waiting_for"] else "")
+                    + f" · исполняют: {tasks}")
+            if not rows:
+                out("Решений нет.")
+        elif a.action == "show":
+            r = decisions.get(a.id)
+            if not r:
+                fail(f"нет решения {a.id}")
+            if a.json:
+                return as_json(r)
+            out(f"[decision {r['id']}] {r['title']}\nСтадия: {r['stage_title']} · {r['when']} · {r.get('project') or ''}")
+            if r["metric"] or r["before_value"] or r["after_value"]:
+                out(f"Метрика: {r['metric'] or ''}: было {r['before_value'] or '—'} → стало {r['after_value'] or '—'}")
+            if r["waiting_for"]:
+                out(f"Ждём: {r['waiting_for']}")
+            if r["details"]:
+                out(r["details"])
+            if r["source_type"] and r["source_type"] != "manual":
+                out(f"Источник: {r['source_type']}:{r['source_ref'] or ''}" + (f" — «{r['quote']}»" if r["quote"] else ""))
+            for t in r["tasks"]:
+                out(f"- [commitment {t['id']}] {t['status']} · {t['title']}" + (f" · {t['who']}" if t["who"] else ""))
+            if not r["tasks"]:
+                out("Задач нет" + (" — решение без исполнения" if r["orphan"] else ""))
+        elif a.action == "set":
+            decisions.update(a.id, stage=a.stage, metric=a.metric, before=a.before, after=a.after, waiting=a.waiting)
+            out("Сохранено")
+        elif a.action == "link":
+            for tid in _ids(a.task):
+                decisions.link(a.id, tid)
+            out("Связано")
+        elif a.action == "unlink":
+            decisions.unlink(a.task)
+            out("Связь убрана")
+    except decisions.DecisionError as e:
+        fail(str(e))
 
 
 def cmd_meetings(a) -> None:
@@ -1578,6 +1640,14 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--source", help="meeting:<id> | document:<путь> | telegram:<id сообщения> | kaiten:<id карточки>")
     x.add_argument("--quote", help="«[чч:мм:сс] дословно» — откуда это известно")
     x.add_argument("--proposed", action="store_true", help="только предложить: директор примет или отклонит")
+    # реестр решений (только для --kind decision)
+    x.add_argument("--stage", choices=["discussing", "decided", "waiting"],
+                   help="решение: обсуждается | принято (по умолчанию) | ждёт (чего — в --waiting)")
+    x.add_argument("--metric", help="решение: что меняем — «средний чек апсейла ОРК»")
+    x.add_argument("--before", help="решение: было — «12 тыс.»")
+    x.add_argument("--after", help="решение: стало или цель — «15 тыс.»")
+    x.add_argument("--waiting", help="решение: чего ждём — «согласования собственника до 15.11»")
+    x.add_argument("--tasks", help="решение: id задач, которые его исполняют, через запятую")
     for name in ("list", "search"):
         x = ms.add_parser(name, help="записи" if name == "list" else "найти по словам")
         if name == "search":
@@ -1920,6 +1990,30 @@ def build_parser() -> argparse.ArgumentParser:
     x = ms.add_parser("rejected", help="отклонённые за последние дни — с причинами «Нет» (для уроков)")
     x.add_argument("--days", type=int, default=14)
     s.set_defaults(fn=cmd_proposals)
+
+    s = sub.add_parser("decisions", help="реестр решений: стадия, метрика «было → стало», чего ждём, задачи")
+    ms = s.add_subparsers(dest="action", required=True)
+    x = ms.add_parser("list", help="актуальные решения, новые сверху")
+    x.add_argument("--stage", choices=["discussing", "decided", "waiting", "implemented"])
+    x.add_argument("--project", help="направление")
+    x.add_argument("--orphan", action="store_true", help="только без исполнения: приняты больше недели назад, задач нет")
+    x.add_argument("--search", help="найти по словам")
+    x.add_argument("--limit", type=int, default=100)
+    x = ms.add_parser("show")
+    x.add_argument("id", type=int)
+    x = ms.add_parser("set", help="стадия и поля реестра; пустая строка — очистить поле")
+    x.add_argument("id", type=int)
+    x.add_argument("--stage", choices=["discussing", "decided", "waiting", "implemented"])
+    x.add_argument("--metric")
+    x.add_argument("--before")
+    x.add_argument("--after")
+    x.add_argument("--waiting")
+    x = ms.add_parser("link", help="задача исполняет решение")
+    x.add_argument("id", type=int, help="id решения")
+    x.add_argument("--task", required=True, help="id задач через запятую")
+    x = ms.add_parser("unlink", help="убрать связь задачи с решением")
+    x.add_argument("--task", type=int, required=True)
+    s.set_defaults(fn=cmd_decisions)
 
     s = sub.add_parser("skills", help="навыки PULSE и «Ваши правила» к ним")
     ms = s.add_subparsers(dest="action", required=True)

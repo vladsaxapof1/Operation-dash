@@ -19,7 +19,7 @@ LIMIT = 20
 QUIET = {"housekeeping", "docs-index", "agents-index", "agents-watch", "ask", "voice", "recordings", "update-check"}
 # «Сейчас» в углу: что делает Claude или расшифровка; сбор и обслуживание — секунды, о них не пишем
 BUSY = {"triage", "process-meeting", "transcribe", "digest", "weekly", "groups", "briefs", "followup", "anthology",
-        "company-context", "chat", "update", "projects", "agent-brief", "task-log", "first-finds", "lessons"}
+        "company-context", "chat", "update", "projects", "agent-brief", "task-log", "first-finds", "lessons", "decisions"}
 
 
 def add(kind: str, title: str, text: str = "", link: str | None = None, level: str = "info",

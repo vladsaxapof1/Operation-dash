@@ -30,7 +30,7 @@ from starlette.concurrency import run_in_threadpool
 
 from opsdash import __version__, briefs, config, digests, overview, proposals, records, store, worklog
 from opsdash import day as day_mod
-from opsdash.web import agent_views, settings_views, skills_views, welcome_views
+from opsdash.web import agent_views, decisions_views, settings_views, skills_views, welcome_views
 
 HERE = Path(__file__).parent
 app = FastAPI(title="PULSE", docs_url=None, redoc_url=None, openapi_url=None)
@@ -249,6 +249,9 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["sections_on"] = {name: config.section_on(name, settings) for name in config.SECTIONS}  # архивные — не в меню
     ctx["needs_setup"] = not config.any_enabled(settings)
     ctx["calendars_on"] = config.any_enabled(settings, "calendar")  # подключён хоть один календарь
+    from opsdash import decisions
+
+    ctx["decisions_orphans"] = decisions.summary()["orphans"]  # меню «Решения»: сколько без исполнения
     ctx["messages_on"] = config.any_enabled(settings, "messages")  # хоть один мессенджер или почта
     ctx["voice_tip"] = None if ctx["nav"] == "meetings" else _voice_tip(request)
     ctx["build"] = build()
@@ -2467,6 +2470,7 @@ def help_page(request: Request, slug: str = "", example: str = ""):
 settings_views.register(app, render, back)
 welcome_views.register(app, render, back)
 skills_views.register(app, render, back)
+decisions_views.register(app, render, back)
 agent_views.register(app, render, templates, back)
 
 

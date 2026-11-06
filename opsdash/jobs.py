@@ -336,6 +336,19 @@ def job_lessons(**_) -> str:
     return f"предложено правил: {n}" if n else "повторов в отказах нет — правил не предлагаю"
 
 
+def job_decisions(**_) -> str:
+    """Реестр решений (MEM-3): связать решения с задачами, «было → стало», «чего ждём» — навык decisions."""
+    from opsdash import decisions
+
+    before = decisions.summary()
+    settings = config.load_settings()
+    prompt = ("Обнови реестр решений строго по навыку decisions (.claude/skills/decisions/SKILL.md): свяжи решения "
+              "с задачами, которые их исполняют, вынеси «было → стало» и «чего ждём». Это фоновый запуск.")
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="decisions", timeout_min=20)
+    after = decisions.summary()
+    return f"без исполнения: было {before['orphans']}, стало {after['orphans']}"
+
+
 def job_company_context(**_) -> str:
     settings = config.load_settings()
     prompt = (
@@ -512,6 +525,7 @@ REGISTRY = {
     "estimates": job_estimates,
     "first-finds": lambda **kw: _first_finds(),
     "lessons": job_lessons,
+    "decisions": job_decisions,
 }
 
 TITLES = {
@@ -545,6 +559,7 @@ TITLES = {
     "estimates": "Оценки времени у задач (Claude)",
     "first-finds": "Первые находки: разбор переписки за 5 дней (Claude)",
     "lessons": "Уроки из ваших «Нет» (Claude)",
+    "decisions": "Реестр решений: связи с задачами (Claude)",
 }
 
 
@@ -790,6 +805,15 @@ def tick(settings: dict | None = None) -> list[str]:
     if (sch.get("lessons_weekly") and config.now(settings).weekday() == 4  # пятница: уроки из «Нет» за две недели
             and _daily("lessons", sch["lessons_weekly"], settings)):
         go("lessons", "heavy")
+    if (sch.get("decisions_weekly") and config.now(settings).weekday() == 0  # понедельник: решения ↔ задачи
+            and _daily("decisions", sch["decisions_weekly"], settings)):
+        go("decisions", "heavy")
+    # реестр решений появился в 2.0.20: накопленные решения без связей выглядели бы «без исполнения» — один раз
+    # в рабочее время помощник связывает их с задачами сам, не дожидаясь понедельника
+    if not store.get_state("decisions_backfill") and in_work_hours(settings):
+        if store.scalar("SELECT 1 FROM anthology WHERE kind='decision' AND status='accepted' LIMIT 1"):
+            store.set_state("decisions_backfill", config.now(settings).date().isoformat())
+            go("decisions", "heavy")
     if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
             and _daily("projects", sch["projects_weekly"], settings)):
         go("projects", "heavy")

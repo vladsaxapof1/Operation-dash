@@ -19,6 +19,7 @@
   ("Сегодня", [("home", "/", "Сводка", feed_count), ("commitments", "/commitments", "Задачи", tasks_count),
                ("calendar", "/calendar", "Календарь", 0)]),
   ("Память", [("meetings", "/meetings", "Встречи", 0), ("chats", "/chats", "Переписка", 0),
+              ("decisions", "/decisions", "Решения", decisions_orphans),
               ("digests", "/digests", "Дайджесты", 0), ("people", "/people", "Люди", 0)]
              + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])
              + ([("kb", "/kb", "База знаний", 0)] if sections_on.kb else [])),
@@ -27,7 +28,7 @@
 ] %}
 {% set nav_system = [("settings", "/settings", "Настройки", 0), ("journal", "/journal", "Журнал", 0), ("help", "/help", "Справка", 0)] %}
 {% macro nav_link(key, href, title, n) -%}
-<a href="{{ href }}" class="{{ 'active' if active_key == key }}"{% if active_key == key %} aria-current="page"{% endif %} title="{{ title }}">{{ icons.icon(key) }}<span class="lbl">{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'home' and feed_urgent else (' acc' if active_key == key else '') }}">{{ n }}</span>{% endif %}</a>
+<a href="{{ href }}" class="{{ 'active' if active_key == key }}"{% if active_key == key %} aria-current="page"{% endif %} title="{{ title }}{{ (' — без исполнения: ' ~ n) if key == 'decisions' and n }}">{{ icons.icon(key) }}<span class="lbl">{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'home' and feed_urgent else (' warn' if key == 'decisions' else (' acc' if active_key == key else '')) }}">{{ n }}</span>{% endif %}</a>
 {%- endmacro %}
 <div class="layout">
   <aside class="sidebar">
