@@ -1,0 +1,364 @@
+# Подключения PULSE — одно описание на источник (беклог CON-1). Отсюда берут текст каталог подключений,
+# окно подключения и статус на карточке. Код (проверки, сбор, формы) — в opsdash/connectors.py, opsdash/sources/
+# и шаблонах templates/connectors/.
+#
+# Поля:
+#   id        — ключ: вкладка настроек (?tab=<id>), шаблон окна templates/connectors/<id>.html
+#   title     — название на карточке
+#   group     — группа каталога (groups ниже)
+#   logo      — файл в static/logos/; нет файла — плашка цвета color с буквами mono
+#   catches   — «что ловит», одна строка на карточке
+#   enables   — что станет возможно, 2–4 примера
+#   reads     — что PULSE читает; skips — чего не читает; never — чего не делает никогда
+#   how       — как подключается, коротко; minutes — сколько займёт
+#   section   — раздел настроек с флагом enabled; health — ключ состояния сбора (overview.sources_health)
+#   steps     — шаги окна: title и check (проверка из connectors.CHECKS — сделан ли шаг)
+#   page      — у источников без окна: куда ведёт кнопка (сейчас окно есть у всех)
+#   assistant — помощник (claude / chatgpt): работает один из двух, переключатель — в каталоге и в окне
+#   help      — раздел справки «Подключения»
+#   region    — ru: российский сервис (для каталога на других языках)
+
+groups:
+  - {id: messengers, title: Мессенджеры}
+  - {id: mail, title: Почта}
+  - {id: calendars, title: Календари}
+  - {id: tasks, title: Задачи}
+  - {id: meetings, title: Встречи и документы}
+  - {id: notifications, title: Уведомления}
+  - {id: ai, title: Помощник}
+
+connectors:
+  - id: telegram
+    title: Telegram
+    group: messengers
+    color: "#2AABEE"
+    mono: TG
+    catches: Договорённости и просьбы в личных чатах и рабочих группах, которые вы отметите
+    enables:
+      - «Пришлю до пятницы» в личке — задача со сроком и ссылкой на сообщение
+      - Кто ждёт вашего ответа — с черновиком, отправляете вы
+      - Вечерняя сводка рабочих групп за день
+    reads: Только отмеченные чаты — или все личные, если включите
+    skips: Чаты, помеченные «никогда», и ботов
+    never: Не пишет и не отправляет от вашего имени
+    how: Вход по QR-коду с телефона и ключи приложения с my.telegram.org
+    minutes: 5
+    section: telegram
+    health: telegram
+    help: telegram
+    steps:
+      - {title: "Ключи приложения", check: telegram_keys}
+      - {title: "Вход в аккаунт", check: telegram_login}
+      - {title: "Какие чаты читать", check: telegram_chats}
+
+  - id: pachca
+    title: Пачка
+    group: messengers
+    color: "#5B4CF5"
+    mono: П
+    catches: Рабочие чаты и треды Пачки — как Telegram
+    enables:
+      - Поручения и сроки из рабочих чатов — в задачи
+      - Где ждут вашего ответа — с черновиком
+    reads: Только отмеченные чаты и треды в них
+    skips: Остальные чаты пространства
+    never: Не пишет от вашего имени
+    how: Персональный токен с правами только на чтение
+    minutes: 3
+    section: pachca
+    health: pachca
+    help: пачка
+    region: ru
+    steps:
+      - {title: "Токен", check: pachca_token}
+      - {title: "Какие чаты читать", check: pachca_chats}
+
+  - id: ymessenger
+    title: Я.Мессенджер
+    group: messengers
+    color: "#FC3F1D"
+    mono: Я
+    catches: Чаты Яндекс Мессенджера, куда добавлен бот PULSE
+    enables:
+      - Договорённости из рабочих чатов — в задачи
+      - Где ждут вашего ответа
+    reads: Только чаты, куда добавили бота
+    skips: Личные переписки — бот их не видит, это ограничение Яндекса
+    never: Не пишет в чаты
+    how: Бот, которого создаёт администратор Яндекс 360
+    minutes: 10
+    section: ymessenger
+    health: ymessenger
+    help: яндекс-мессенджер
+    region: ru
+    steps:
+      - {title: "Токен бота", check: ymessenger_token}
+      - {title: "Какие чаты читать", check: ymessenger_chats}
+
+  - id: mail
+    title: Яндекс Почта
+    group: mail
+    color: "#FC3F1D"
+    mono: Я
+    catches: Входящие и отправленные письма — просьбы, сроки, вложения
+    enables:
+      - Письма, где ждут вашего ответа, — на Сводке с черновиком
+      - Что вы обещали в письмах — в ваших задачах
+    reads: Выбранные папки; «Отправленные» — если включите
+    skips: Отправителей из списка «не обращать внимания»
+    never: Не отправляет письма и не помечает их прочитанными
+    how: Адрес и пароль приложения Яндекс ID
+    minutes: 3
+    section: mail
+    health: mail
+    help: яндекс-почта
+    region: ru
+    steps:
+      - {title: "Адрес и пароль приложения", check: mail_password}
+
+  - id: gmail
+    title: Gmail
+    group: mail
+    color: "#EA4335"
+    mono: G
+    catches: Входящие Gmail — просьбы, сроки, вложения
+    enables:
+      - Письма, где ждут вашего ответа, — на Сводке с черновиком
+      - Что вы обещали в письмах — в ваших задачах
+    reads: «Основные» входящие или выбранные папки; «Отправленные» — если включите
+    skips: «Промоакции», «Соцсети» и «Оповещения», если читать только основные
+    never: Не отправляет письма и не помечает их прочитанными
+    how: Адрес и пароль приложения Google (нужна двухэтапная аутентификация)
+    minutes: 5
+    section: gmail
+    health: gmail
+    help: gmail
+    steps:
+      - {title: "Адрес и пароль приложения", check: gmail_password}
+
+  - id: imap
+    title: Другая почта
+    group: mail
+    color: "#5C6675"
+    mono: "@"
+    catches: Любой ящик по IMAP — Fastmail, iCloud, Zoho, Outlook.com, почта на своём домене
+    enables:
+      - Письма, где ждут вашего ответа, — на Сводке с черновиком
+      - Что вы обещали в письмах — в ваших задачах
+    reads: Выбранные папки; «Отправленные» — если включите
+    skips: Отправителей из списка «не обращать внимания»
+    never: Не отправляет письма и не помечает их прочитанными
+    how: Адрес, IMAP-сервер и пароль (у многих почт — пароль приложения)
+    minutes: 5
+    section: imap
+    health: imap
+    help: другая-почта-imap
+    steps:
+      - {title: "Сервер, адрес и пароль", check: imap_password}
+
+  - id: calendar
+    title: Яндекс Календарь
+    group: calendars
+    color: "#FC3F1D"
+    mono: Я
+    catches: Встречи на сегодня и вперёд; можно создавать встречи из PULSE
+    enables:
+      - Встречи дня на Сводке и в Календаре, окна между ними — под задачи
+      - Брифы к встречам за час до начала
+      - «Назначь встречу по задаче» — встреча появится после вашего «Да»
+    reads: Выбранные календари на неделю-две вперёд
+    skips: Остальные календари аккаунта
+    never: Не создаёт и не меняет встречи без вашего «Да»
+    how: Логин и пароль приложения для CalDAV
+    minutes: 3
+    section: calendar
+    health: calendar
+    help: яндекс-календарь
+    region: ru
+    steps:
+      - {title: "Логин и пароль приложения", check: calendar_password}
+
+  - id: google_calendar
+    title: Google Календарь
+    group: calendars
+    color: "#1A73E8"
+    mono: "31"
+    catches: Встречи из Google Календаря — только чтение
+    enables:
+      - Встречи дня на Сводке и в Календаре, окна между ними — под задачи
+      - Брифы к встречам за час до начала
+    reads: Календари, чьи секретные адреса iCal вы добавите
+    skips: Остальные календари
+    never: Не создаёт и не меняет встречи в Google
+    how: Секретный адрес календаря в формате iCal
+    minutes: 3
+    section: google_calendar
+    health: google_calendar
+    help: google-календарь
+    steps:
+      - {title: "Секретный адрес iCal", check: google_ical}
+
+  - id: caldav
+    title: Другой календарь
+    group: calendars
+    color: "#5C6675"
+    mono: CD
+    catches: Любой календарь по CalDAV — iCloud, Fastmail, Nextcloud, Zoho; только чтение
+    enables:
+      - Встречи дня на Сводке и в Календаре, окна между ними — под задачи
+      - Брифы к встречам за час до начала
+    reads: Выбранные календари на неделю-две вперёд
+    skips: Остальные календари аккаунта
+    never: Не создаёт и не меняет встречи
+    how: Адрес CalDAV-сервера, логин и пароль приложения
+    minutes: 5
+    section: caldav
+    health: caldav
+    help: другой-календарь-caldav
+    steps:
+      - {title: "Сервер, логин и пароль", check: caldav_password}
+
+  - id: ics_calendar
+    title: Календарь по ссылке
+    group: calendars
+    color: "#5C6675"
+    mono: ICS
+    catches: Outlook, iCloud и любой календарь, который даёт ссылку .ics или webcal; только чтение
+    enables:
+      - Встречи дня на Сводке и в Календаре, окна между ними — под задачи
+      - Брифы к встречам за час до начала
+    reads: Календари, чьи ссылки вы добавите
+    skips: Остальные календари
+    never: Не создаёт и не меняет встречи
+    how: Ссылка на календарь (опубликовать или поделиться — «ссылка ICS»)
+    minutes: 3
+    section: ics_calendar
+    health: ics_calendar
+    help: календарь-по-ссылке-ics
+    steps:
+      - {title: "Ссылка на календарь", check: ics_urls}
+
+  - id: kaiten
+    title: Kaiten
+    group: tasks
+    color: "#7B61FF"
+    mono: K
+    catches: Карточки отслеживаемых пространств — кто что делает и что застряло
+    enables:
+      - «Поставь задачу Петрову» — карточка в Kaiten после вашего «Да»
+      - Карточки без движения — с напоминанием исполнителю
+      - Задачи со встреч и из переписки связываются с карточками
+    reads: Пространства, которые вы выберете
+    skips: Остальные пространства
+    never: Не создаёт карточки и не пишет комментарии без вашего «Да»
+    how: Адрес вашего Kaiten и API-токен из профиля
+    minutes: 5
+    section: kaiten
+    health: kaiten
+    help: kaiten
+    region: ru
+    steps:
+      - {title: "Адрес и токен", check: kaiten_token}
+      - {title: "Какие пространства отслеживать", check: kaiten_spaces}
+      - {title: "Куда создавать карточки", check: kaiten_targets}
+
+  - id: recordings
+    title: Записи встреч
+    group: meetings
+    color: "#0CA678"
+    mono: ●
+    catches: Записи из Zoom, Телемоста и диктофона — расшифровка на этом компьютере
+    enables:
+      - Итоги встречи через несколько минут после конца — решения, задачи, сроки
+      - Кто что сказал — по голосам
+    reads: Новые файлы в папках, которые вы укажете
+    skips: Старые записи в этих папках
+    never: Не отправляет звук в интернет — расшифровка идёт здесь
+    how: Папка, куда программа видеосвязи сохраняет записи
+    minutes: 2
+    help: записи-встреч
+
+  - id: knowledge
+    title: Документы
+    group: meetings
+    color: "#495057"
+    mono: Д
+    catches: Презентации, таблицы и документы из ваших папок — для ответов и брифов
+    enables:
+      - «Что у нас в бюджете по складу?» — ответ со ссылкой на слайд или лист
+    reads: Файлы в папках, которые вы укажете
+    skips: Остальные папки компьютера
+    never: Не меняет и не отправляет файлы
+    how: Папки на этом компьютере
+    minutes: 2
+    help: документы
+    archived_section: docs
+
+  - id: bot
+    title: Telegram-бот
+    group: notifications
+    color: "#229ED9"
+    mono: TG
+    catches: Дайджесты, итоги встреч и кнопки «Да / Нет» у вас в Telegram
+    enables:
+      - Утренний и вечерний дайджест
+      - Подтвердить предложение одной кнопкой с телефона
+      - Спросить голосом: «что мне обещал Петров?»
+    reads: Только ваши сообщения боту
+    skips: Сообщения других людей — бот отвечает только вам
+    never: Не пишет никому, кроме вас
+    how: Бот от @BotFather и привязка командой /start
+    minutes: 5
+    section: telegram_bot
+    health: bot
+    help: telegram-бот
+    steps:
+      - {title: "Токен бота", check: bot_token}
+      - {title: "Привязка к вам", check: bot_paired}
+
+  - id: claude
+    title: Claude
+    group: ai
+    color: "#D97757"
+    mono: C
+    assistant: claude
+    catches: Разбирает встречи и переписку, пишет дайджесты, черновики и брифы — по вашей подписке Claude
+    enables:
+      - Итоги встреч, разбор сообщений, утренний и вечерний дайджест
+      - Ответы в боте и в «Спросить Claude»
+      - Модель на каждую работу — opus, sonnet или haiku — и расход подписки
+    reads: Текст, который PULSE даёт ему для разбора
+    skips: Пароли и ключи из secrets/, интернет в фоновых заданиях
+    never: Не действует во внешних системах без вашего «Да»
+    how: Claude Code на этом компьютере и вход в ваш аккаунт Claude
+    minutes: 5
+    help: claude-и-chatgpt
+
+  - id: chatgpt
+    title: ChatGPT
+    group: ai
+    color: "#10A37F"
+    mono: GPT
+    assistant: chatgpt
+    catches: То же самое по подписке ChatGPT — через Codex из приложения ChatGPT
+    enables:
+      - Итоги встреч, разбор сообщений, дайджесты — по той же инструкции, что у Claude
+      - Ответы в боте и в «Спросить»
+    reads: Текст, который PULSE даёт ему для разбора
+    skips: Пароли и ключи из secrets/, интернет
+    never: Не действует во внешних системах без вашего «Да»
+    how: Приложение ChatGPT (Codex входит в него) и вход в аккаунт
+    minutes: 5
+    help: claude-и-chatgpt
+
+# «Скоро» (CON-8): что подключаем следующим. Серые карточки внизу каталога, кнопка «Нужно мне» открывает задачу
+# разработчику на GitHub (репозиторий обновлений) — телеметрии нет, спрос узнаём только так
+soon:
+  - {id: slack, title: Slack, color: "#4A154B", mono: S, catches: "Личные сообщения, упоминания и выбранные каналы"}
+  - {id: outlook, title: Outlook и Microsoft 365, color: "#0078D4", mono: O, catches: "Почта и календарь через вход Microsoft"}
+  - {id: whatsapp, title: WhatsApp, color: "#25D366", mono: W, catches: "Переписка с клиентами и партнёрами"}
+  - {id: teams, title: Microsoft Teams, color: "#5059C9", mono: T, catches: "Чаты и встречи Teams"}
+  - {id: zoom, title: Записи Zoom и Google Meet, color: "#0B5CFF", mono: Z, catches: "Облачные записи и расшифровки — без папки"}
+  - {id: notion, title: Notion, color: "#2F3437", mono: N, catches: "Задачи и заметки — вместо Kaiten"}
+  - {id: linear, title: Linear и Jira, color: "#5E6AD2", mono: L, catches: "Задачи команды — вместо Kaiten"}
+  - {id: hubspot, title: HubSpot и Pipedrive, color: "#FF7A59", mono: H, catches: "Что обещали клиентам — из CRM"}

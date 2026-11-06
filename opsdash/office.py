@@ -52,12 +52,8 @@ DESKS = [
      "jobs": ["chat", "agent-brief"], "run": [], "link": ("/ask", "Спросить Claude")},
 ]
 TRACKED = {job for desk in DESKS for job in desk["jobs"]}  # сбор не пишем: он раз в 15 минут, хватит таблицы jobs
-COURIER = [  # рабочее место «Курьер»: сборщики без Claude — (задание, раздел настроек, название)
-    ("collect:telegram", "telegram", "Telegram"), ("collect:ymessenger", "ymessenger", "Я.Мессенджер"),
-    ("collect:pachca", "pachca", "Пачка"), ("collect:mail", "mail", "Почта"), ("collect:gmail", "gmail", "Gmail"),
-    ("collect:calendar", "calendar", "Календарь"), ("collect:google_calendar", "google_calendar", "Google Календарь"),
-    ("collect:kaiten", "kaiten", "Kaiten"),
-]
+# рабочее место «Курьер»: сборщики без Claude — (задание, раздел настроек, название)
+COURIER = [(f"collect:{src}", src, s["title"]) for src, s in config.SOURCES.items()]
 STATES = {
     "working": "работает", "queued": "в очереди", "error": "ошибка", "idle": "свободен", "off": "не подключён",
     "waiting": "ждёт ответа", "blocked": "ждёт разрешения?", "rest": "не активна", "done": "готово",

@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раз�
     created TEXT
 );
 
-CREATE TABLE IF NOT EXISTS claude_runs (      -- каждый запуск Claude: расход для «Настройки → Claude» (opsdash.usage)
+CREATE TABLE IF NOT EXISTS claude_runs (      -- каждый запуск Claude: расход для «Настройки → Подключения → Claude» (opsdash.usage)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT,
     model TEXT,                      -- модель, на которую ушло больше всего

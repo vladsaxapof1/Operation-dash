@@ -1202,7 +1202,7 @@ def watch(settings: dict | None = None, now: datetime | None = None) -> list[str
     from opsdash import notices
 
     settings = settings or config.load_settings()
-    if not (settings["calendar"].get("enabled") or settings["google_calendar"].get("enabled")):
+    if not config.any_enabled(settings, "calendar"):
         return []
     now = now if now is not None else config.now(settings)
     p = plan(now.date(), settings, now)

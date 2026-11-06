@@ -1,0 +1,79 @@
+{#- окно подключения: telegram (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-h"><h2>1. Ключи приложения</h2></div><div class="card-b">
+  <form method="post" action="/settings/telegram/api">
+    <div class="form-row">
+      <div><label>api_id</label><input type="text" name="api_id" value="{{ settings.telegram.api_id }}" placeholder="1234567"></div>
+      <div><label>api_hash</label>{{ secret_input('api_hash', 'TELEGRAM_API_HASH', '32 символа') }}</div>
+    </div>
+    <div class="hint">Берутся на <a href="https://my.telegram.org/apps" target="_blank">my.telegram.org → API development tools</a>.</div>
+    <div class="form-actions"><button class="btn">Сохранить ключи</button></div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>2. Вход в аккаунт</h2></div><div class="card-b">
+  {% if tg_me %}
+    <p>✅ Вход выполнен: <b>{{ tg_me.name }}</b>{% if tg_me.username %} (@{{ tg_me.username }}){% endif %}</p>
+    <div class="actions">{{ check_btn('telegram') }}
+      <form class="inline" method="post" action="/settings/telegram/logout" data-confirm="Удалить сессию Telegram с этого компьютера?"><button class="btn danger">Выйти</button></form></div>
+  {% elif request.query_params.get('need') == 'password' or tg_qr.qr_state == 'password' %}
+    <form method="post" action="/settings/telegram/password">
+      <label>Облачный пароль Telegram</label><input type="password" name="password" required autocomplete="off">
+      <div class="hint">Включена двухэтапная проверка — это пароль, который вы задавали в Telegram (Настройки → Конфиденциальность → Облачный пароль).</div>
+      <div class="form-actions"><button class="btn primary">Войти</button></div>
+    </form>
+    <form method="post" action="/settings/telegram/cancel" style="margin-top:8px"><button class="btn sm ghost">Отменить</button></form>
+  {% elif tg_login_state == 'qr' %}
+    <div data-tg-qr="{{ tg_qr.qr_state }}" data-version="{{ tg_qr.qr_version }}">
+    {% if tg_qr.qr_state == 'waiting' %}
+      <img src="/settings/telegram/qr.svg?v={{ tg_qr.qr_version }}" alt="QR-код для входа в Telegram" width="220" height="220" style="display:block;background:#fff;border-radius:10px">
+      <ol class="small">
+        <li>Откройте Telegram на телефоне → <b>Настройки → Устройства</b>.</li>
+        <li>Нажмите <b>«Подключить устройство»</b> и наведите камеру на QR-код.</li>
+      </ol>
+      <div class="hint">Код сам обновляется каждые полминуты — перезагружать страницу не нужно.</div>
+    {% elif tg_qr.qr_state == 'ok' %}
+      <p>✅ QR-код отсканирован — завершаю вход…</p>
+    {% else %}
+      <p>{{ 'Не получилось: ' ~ tg_qr.qr_error if tg_qr.qr_state == 'error' else 'QR-код устарел.' }}</p>
+      <form method="post" action="/settings/telegram/qr"><button class="btn primary">Показать новый QR-код</button></form>
+    {% endif %}
+      <form id="tg-qr-done" method="post" action="/settings/telegram/qr/done" hidden></form>
+    </div>
+    <form method="post" action="/settings/telegram/cancel" style="margin-top:8px"><button class="btn sm ghost">Отменить</button></form>
+  {% elif tg_login_state == 'code' %}
+    <form method="post" action="/settings/telegram/code">
+      <label>Код из Telegram</label><input type="text" name="code" required autocomplete="one-time-code" style="max-width:200px">
+      <div class="hint">Код пришёл в приложение Telegram (чат «Telegram»), не по SMS.</div>
+      <div class="form-actions"><button class="btn primary">Подтвердить</button></div>
+    </form>
+    <form method="post" action="/settings/telegram/cancel" style="margin-top:8px"><button class="btn sm ghost">Отменить</button></form>
+  {% else %}
+    <form method="post" action="/settings/telegram/qr">
+      <div class="hint" style="margin-top:0">Проще всего — отсканировать QR-код телефоном, на котором открыт Telegram.</div>
+      <div class="form-actions"><button class="btn primary" {{ 'disabled' if not settings.telegram.api_id }}>Войти по QR-коду</button></div>
+      {% if not settings.telegram.api_id %}<div class="hint">Сначала сохраните ключи (шаг 1).</div>{% endif %}
+    </form>
+    <details style="margin-top:14px">
+      <summary class="small muted">Войти по номеру телефона и коду</summary>
+      <form method="post" action="/settings/telegram/login">
+        <label>Номер телефона аккаунта</label><input type="text" name="phone" value="{{ settings.telegram.phone }}" placeholder="+79991234567" required>
+        <div class="form-actions"><button class="btn" {{ 'disabled' if not settings.telegram.api_id }}>Получить код</button></div>
+      </form>
+    </details>
+  {% endif %}
+</div></section>
+
+<section class="card"><div class="card-h"><h2>3. Какие чаты читать</h2>
+  <form class="inline" method="post" action="/settings/telegram/dialogs"><button class="btn sm" {{ 'disabled' if not tg_me }}>↻ Обновить список</button></form></div>
+<div class="card-b">
+  <form method="post" action="/settings/telegram/options">
+    <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if settings.telegram.enabled }}> Читать Telegram</label>
+    <label class="check"><input type="checkbox" name="include_all_private" {{ 'checked' if settings.telegram.include_all_private }}> Читать все личные переписки (кроме ботов и помеченных «никогда»)</label>
+    <label>При первом подключении загрузить сообщения за, дней</label><input type="number" name="backfill_days" value="{{ settings.telegram.backfill_days }}" min="0" max="30" style="max-width:120px">
+    <div class="form-actions"><button class="btn">Сохранить</button></div>
+  </form>
+  {% if chats %}
+  {{ chat_picker('telegram', never=True) }}
+  {% else %}<p class="muted">Список чатов появится после входа.</p>{% endif %}
+</div></section>

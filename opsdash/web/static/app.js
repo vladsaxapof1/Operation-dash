@@ -1100,6 +1100,21 @@
     });
   });
 
+  // --- Подключения: окно источника поверх каталога (CON-3). Старые ссылки «Почта#gmail» и «Календарь#google» —
+  // в окна Gmail и Google Календаря; закрыли окно — адрес снова у каталога, чтобы «Обновить» не открывало его опять
+  var connDlg = document.getElementById("conn-dlg");
+  if (connDlg) {
+    var oldHash = { mail: { "#gmail": "gmail" }, calendar: { "#google": "google_calendar" },
+                    claude: { "#chatgpt": "chatgpt" } }[connDlg.dataset.conn];
+    if (oldHash && oldHash[location.hash]) location.replace("/settings?tab=" + oldHash[location.hash]);
+    connDlg.addEventListener("close", function () { history.replaceState(null, "", "/settings?tab=connections"); });
+    // окно открывается сверху — с описанием источника и шагами, а не прокрученным к первому полю формы
+    if (connDlg.contains(document.activeElement)) document.activeElement.blur();
+    connDlg.scrollTop = 0;
+    var anchor = location.hash.length > 1 && connDlg.querySelector(location.hash.replace(/[^#\w-]/g, ""));
+    if (anchor) anchor.scrollIntoView({ block: "start" });  // «Расход Claude» (#usage) — сразу к нему
+  }
+
   // --- вход в Telegram по QR: меняем картинку при смене токена, после сканирования завершаем вход ---
   var qrBox = document.querySelector("[data-tg-qr]");
   if (qrBox) {

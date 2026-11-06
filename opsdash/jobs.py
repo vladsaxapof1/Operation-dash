@@ -28,13 +28,10 @@ _pending_lock = threading.Lock()
 # --- задания ------------------------------------------------------------------
 
 def collect_source(name: str) -> str:
-    from opsdash.sources import calendar, kaiten, mail, pachca, telegram, ymessenger
+    from opsdash import sources
 
-    fn = {"telegram": telegram.collect, "ymessenger": ymessenger.collect, "pachca": pachca.collect,
-          "mail": mail.collect, "gmail": mail.collect_gmail, "calendar": calendar.collect,
-          "google_calendar": calendar.google_collect, "kaiten": kaiten.collect}[name]
-    result = fn()
-    if name in ("calendar", "google_calendar"):  # появились встречи — не посвящена ли какая-то открытой задаче
+    result = sources.collector(name)()
+    if config.SOURCES[name]["kind"] == "calendar":  # появились встречи — не посвящена ли какая-то открытой задаче
         from opsdash import day, task_meetings
 
         task_meetings.suggest()
@@ -163,7 +160,7 @@ def job_process_meeting(meeting_id: str, **_) -> str:
     return "готово"
 
 
-MESSAGE_SOURCES = ("telegram", "ymessenger", "pachca", "mail", "gmail")
+MESSAGE_SOURCES = config.sources_of("messages")
 
 
 def collect_messages_now(settings: dict, timeout: float = 180) -> None:
@@ -431,6 +428,12 @@ def job_housekeeping(**_) -> str:
         day.watch()
     except Exception as e:  # noqa: BLE001 — обслуживание не должно падать из-за сигнала
         store.log("day", f"сигналы дня: {e}", "warning")
+    from opsdash import doctor
+
+    try:  # «Здоровье»: источник замолчал или падает дольше часа — раз в день по источнику (угол экрана и Telegram)
+        doctor.watch()
+    except Exception as e:  # noqa: BLE001
+        store.log("doctor", f"проверка здоровья: {e}", "warning")
     return "готово"
 
 
@@ -459,14 +462,7 @@ def job_estimates(**_) -> str:
 
 
 REGISTRY = {
-    "collect:telegram": lambda **kw: collect_source("telegram"),
-    "collect:ymessenger": lambda **kw: collect_source("ymessenger"),
-    "collect:pachca": lambda **kw: collect_source("pachca"),
-    "collect:mail": lambda **kw: collect_source("mail"),
-    "collect:gmail": lambda **kw: collect_source("gmail"),
-    "collect:calendar": lambda **kw: collect_source("calendar"),
-    "collect:google_calendar": lambda **kw: collect_source("google_calendar"),
-    "collect:kaiten": lambda **kw: collect_source("kaiten"),
+    **{f"collect:{src}": (lambda src: lambda **kw: collect_source(src))(src) for src in config.SOURCES},
     "recordings": job_recordings,
     "docs-index": job_docs_index,
     "agents-index": job_agents_index,
@@ -495,14 +491,9 @@ REGISTRY = {
 }
 
 TITLES = {
-    "collect:telegram": "Сбор: Telegram",
-    "collect:ymessenger": "Сбор: Я.Мессенджер",
-    "collect:pachca": "Сбор: Пачка",
+    **{f"collect:{src}": f"Сбор: {s['title']}" for src, s in config.SOURCES.items()},
     "collect:mail": "Сбор: почта",
-    "collect:gmail": "Сбор: Gmail",
     "collect:calendar": "Сбор: календарь",
-    "collect:google_calendar": "Сбор: Google Календарь",
-    "collect:kaiten": "Сбор: Kaiten",
     "recordings": "Поиск новых записей",
     "docs-index": "Индекс документов",
     "agents-index": "Опыт агентов: индекс сессий",
@@ -721,12 +712,8 @@ def tick(settings: dict | None = None) -> list[str]:
         if submit(name, kind, args):
             started.append(name)
 
-    for src, minutes in (("telegram", sch["collect_minutes"]), ("ymessenger", sch["collect_minutes"]),
-                         ("pachca", sch["collect_minutes"]),
-                         ("mail", sch["collect_minutes"]), ("gmail", sch["collect_minutes"]),
-                         ("calendar", sch["calendar_minutes"]), ("google_calendar", sch["calendar_minutes"]),
-                         ("kaiten", sch["kaiten_minutes"])):
-        if settings[src].get("enabled") and _due(f"collect:{src}", minutes):
+    for src in config.SOURCES:
+        if settings[src].get("enabled") and _due(f"collect:{src}", config.source_minutes(src, settings)):
             go(f"collect:{src}")
     if _due("recordings", 1):
         go("recordings")
@@ -793,6 +780,7 @@ def start_workers(stop: threading.Event) -> list[threading.Thread]:
         _queues[kind] = queue.Queue()
     # задания, прерванные выключением компьютера, — продолжаем (поставленные на паузу ждут «Продолжить»)
     store.execute("UPDATE jobs SET running=0")
+    store.set_state("daemon_started", store.utcnow())  # «Здоровье»: сигнал «источник замолчал» — не раньше этого срока
     office.interrupted()
     store.execute("UPDATE ask_messages SET status='failed', error='Прервано перезапуском PULSE — спросите ещё раз' "
                   "WHERE status='running'")

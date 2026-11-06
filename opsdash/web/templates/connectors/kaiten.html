@@ -1,0 +1,56 @@
+{#- окно подключения: kaiten (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-h"><h2>Подключение и «без движения»</h2></div><div class="card-b">
+  <form method="post" action="/settings/kaiten">
+    {{ enabled_box('kaiten', 'Подключить Kaiten') }}
+    <div class="form-row">
+      <div><label>Адрес вашего Kaiten</label><input type="text" name="domain" value="{{ settings.kaiten.domain }}" placeholder="company.kaiten.ru"></div>
+      <div><label>API-токен</label>{{ secret_input('token', 'KAITEN_TOKEN') }}</div>
+    </div>
+    <div class="hint">Токен: Kaiten → профиль → API-ключ. <a href="/help/02-подключения#kaiten">Подробно</a>.{% if kaiten_me %} Вход как <b>{{ kaiten_me.name }}</b>.{% endif %}</div>
+    <div class="form-row">
+      <div><label>«Без движения» — дней</label><input type="number" name="stale_days" value="{{ settings.kaiten.stale_days }}" min="1" max="60"></div>
+      <div><label>Считать от</label><select name="stale_basis"><option value="moved" {{ 'selected' if settings.kaiten.stale_basis == 'moved' }}>последнего перемещения по доске</option><option value="updated" {{ 'selected' if settings.kaiten.stale_basis == 'updated' }}>любого изменения карточки</option></select></div>
+    </div>
+    <label>Какие карточки проверять</label>
+    <div class="actions"><label class="check"><input type="checkbox" name="stale_states" value="2" {{ 'checked' if 2 in settings.kaiten.stale_states }}> в работе</label><label class="check"><input type="checkbox" name="stale_states" value="1" {{ 'checked' if 1 in settings.kaiten.stale_states }}> в очереди</label></div>
+    {% if boards %}
+    <label>Не проверять доски</label>
+    <select name="exclude_boards" multiple size="{{ [boards|length, 6]|min }}">{% for b in boards %}<option value="{{ b.id }}" {{ 'selected' if b.id in settings.kaiten.exclude_boards }}>{{ b.title }}</option>{% endfor %}</select>
+    <div class="hint">Ctrl+клик — выбрать несколько.</div>
+    {% endif %}
+    <label>Текст напоминания в карточке</label><input type="text" name="nudge_text" value="{{ settings.kaiten.nudge_text }}">
+    <div class="hint">{username} — исполнитель, {days} — сколько дней без движения.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('kaiten') }}</div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>Какие пространства отслеживать</h2></div><div class="card-b" id="kaiten-spaces" data-tracked='{{ settings.kaiten.spaces | tojson }}'>
+  <p class="muted small">Загружаю список пространств…</p>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>Куда создавать карточки</h2></div><div class="card-b">
+  <p class="hint" style="margin-top:0">«Направление» — место на доске, куда Claude предлагает новые карточки. Например: «Операционка» → доска «Проекты», колонка «Очередь». Claude выбирает направление по смыслу задачи.</p>
+  {% if settings.kaiten.targets %}
+  <div class="table-wrap"><table class="t"><thead><tr><th>Направление</th><th>Куда</th><th></th></tr></thead><tbody>
+  {% for t in settings.kaiten.targets %}
+    <tr><td><b>{{ t.name }}</b>{% if t.name == settings.kaiten.default_target %} <span class="chip acc">по умолчанию</span>{% endif %}</td><td class="small">{{ t.path or ('доска ' ~ t.board_id) }}</td>
+    <td class="right nowrap">{% if t.name != settings.kaiten.default_target %}<form class="inline" method="post" action="/settings/kaiten/targets/default"><input type="hidden" name="name" value="{{ t.name }}"><button class="btn sm ghost">По умолчанию</button></form>{% endif %}
+      <form class="inline" method="post" action="/settings/kaiten/targets/delete"><input type="hidden" name="name" value="{{ t.name }}"><button class="btn sm danger">Удалить</button></form></td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% endif %}
+  <form method="post" action="/settings/kaiten/targets/add" id="target-form" style="margin-top:12px">
+    <div class="form-row">
+      <div><label>Название направления</label><input type="text" name="name" required placeholder="Операционка"></div>
+      <div><label>Пространство</label><select name="space_id" data-kaiten-space required><option value="">—</option></select></div>
+    </div>
+    <div class="form-row">
+      <div><label>Доска</label><select name="board_id" data-kaiten-board required><option value="">—</option></select></div>
+      <div><label>Колонка</label><select name="column_id" data-kaiten-column><option value="">первая</option></select></div>
+      <div><label>Дорожка</label><select name="lane_id" data-kaiten-lane><option value="">по умолчанию</option></select></div>
+    </div>
+    <input type="hidden" name="path" data-kaiten-path>
+    <div class="form-actions"><button class="btn">Добавить направление</button></div>
+  </form>
+</div></section>

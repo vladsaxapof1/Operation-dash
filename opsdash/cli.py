@@ -168,17 +168,37 @@ def cmd_status(a) -> None:
         out(f"  {jobs.TITLES.get(j['name'], j['name'])}: {store.local(j['last_run'])} · {state}")
 
 
-def cmd_check(a) -> None:
-    from opsdash import bot, brain
-    from opsdash.sources import calendar, kaiten, mail, pachca, telegram, ymessenger
+def cmd_doctor(a) -> None:
+    """Здоровье PULSE: строка на систему и на каждый источник — что сейчас и что сделать (беклог CON-5)."""
+    from opsdash import daemon, doctor
 
-    checks = {
-        "claude": brain.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "pachca": pachca.check,
-        "mail": mail.check, "gmail": mail.check_gmail, "calendar": calendar.check,
-        "google_calendar": calendar.google_check, "kaiten": kaiten.check,
-        "bot": lambda: "бот @" + bot.get_bot().me().get("username", "?"),
-    }
-    names = list(checks) if a.what == "all" else [a.what]
+    res = doctor.run(include_off=a.all)
+    if a.json:
+        out(json.dumps(res, ensure_ascii=False, indent=2))
+        return
+    mark = {"ok": "✓", "warn": "!", "bad": "✗", "off": "–"}
+    out(f"PULSE: {'работает — ' + daemon.url() if daemon.is_running() else 'не запущен'} · {res['summary']}")
+    for title, rows in (("Система", res["system"]), ("Подключения", res["sources"])):
+        out(f"\n{title}")
+        if not rows:
+            out("  ничего не подключено — Настройки → Подключения")
+        for r in rows:
+            out(f"  {mark[r['level']]} {r['title']}: {r['text']}")
+            if r["fix"] and r["level"] in ("warn", "bad"):
+                out(f"      → {r['fix']}")
+    if res["worst"] == "bad":
+        sys.exit(1)
+
+
+def cmd_check(a) -> None:
+    from opsdash import bot, brain, sources
+
+    settings = config.load_settings()
+    checks = {"claude": brain.check, **{k: sources.checker(k) for k in config.SOURCES},
+              "bot": lambda: "бот @" + bot.get_bot().me().get("username", "?")}
+    # «все» — помощник и то, что включено: выключенный источник проверять незачем
+    names = ([n for n in checks if n == "claude" or settings["telegram_bot" if n == "bot" else n].get("enabled")]
+             if a.what == "all" else [a.what])
     ok = True
     for n in names:
         try:
@@ -194,8 +214,7 @@ def cmd_collect(a) -> None:
     from opsdash import jobs
 
     settings = config.load_settings()
-    names = (["telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten"]
-             if a.what == "all" else [a.what])
+    names = list(config.SOURCES) if a.what == "all" else [a.what]
     for n in names:
         if a.what == "all" and not settings[n].get("enabled"):
             continue
@@ -1419,15 +1438,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--open", action="store_true", help="открыть настройки «Полный доступ к диску»")
     s.set_defaults(fn=cmd_mac)
     sub.add_parser("status", help="состояние источников и заданий").set_defaults(fn=cmd_status)
+    s = sub.add_parser("doctor", help="здоровье PULSE: система и подключения — что не так и что сделать")
+    s.add_argument("--all", action="store_true", help="показать и выключенные источники")
+    s.set_defaults(fn=cmd_doctor)
     s = sub.add_parser("check", help="проверить подключения")
     s.add_argument("what", nargs="?", default="all",
-                   choices=["all", "claude", "telegram", "ymessenger", "pachca", "mail", "gmail", "calendar",
-                            "google_calendar", "kaiten", "bot"])
+                   choices=["all", "claude", *config.SOURCES, "bot"])
     s.set_defaults(fn=cmd_check)
     s = sub.add_parser("collect", help="собрать данные сейчас")
     s.add_argument("what", nargs="?", default="all",
-                   choices=["all", "telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar",
-                            "kaiten"])
+                   choices=["all", *config.SOURCES])
     s.set_defaults(fn=cmd_collect)
     s = sub.add_parser("run", help="выполнить задание сейчас")
     s.add_argument("job", choices=["triage", "digest", "stale", "recordings", "transcribe", "process-meeting", "housekeeping",

@@ -244,6 +244,8 @@ def propose_calendar_cancel(*, uid: str, batch: str | None = None, reason: str |
                             source_ref: str | None = None) -> dict:
     if uid.startswith("google:"):
         raise ProposalError("Встреча из Google Календаря — PULSE его только читает, отменить её можно только в Google")
+    if uid.startswith(("caldav:", "ics:")):
+        raise ProposalError("Встреча из календаря, который PULSE только читает, — отменить её можно только в нём")
     ev = store.row("SELECT * FROM events WHERE uid=?", (uid,))
     if not ev:
         raise ProposalError(f"Нет встречи с uid {uid} (обновите календарь: ./ops collect calendar)")

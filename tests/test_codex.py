@@ -225,13 +225,13 @@ def test_notify_from_sandbox_waits_for_pulse(settings_with, monkeypatch, capsys)
 
 def test_settings_switch_engine(client, fake_codex, settings_with):
     settings_with(ai={"engine": "claude"})
-    page = client.get("/settings?tab=claude").text
-    assert "Кто работает в PULSE" in page and "Codex найден" in page and "вход: <b>ChatGPT</b>" in page
-    assert "Спросить Claude" in page
+    page = client.get("/settings?tab=chatgpt").text  # окно ChatGPT поверх каталога «Подключений»
+    assert 'aria-label="Кто работает в PULSE"' in page and "Codex найден" in page and "вход: <b>ChatGPT</b>" in page
+    assert "Спросить Claude" in page and "Переключить на ChatGPT" in page
     r = client.post("/settings/ai", data={"engine": "chatgpt"}, follow_redirects=False)
     assert r.status_code == 303 and config.load_settings()["ai"]["engine"] == "chatgpt"
-    page = client.get("/settings?tab=claude").text
-    assert "Спросить ChatGPT" in page and "сейчас разбирает\n    <b>ChatGPT</b>" in page
+    page = client.get("/settings?tab=chatgpt").text
+    assert "Спросить ChatGPT" in page and "Сейчас в PULSE работает ChatGPT." in page
     assert "ChatGPT — подробно" in client.get("/ask").text  # выбор в чате — глубина рассуждения ChatGPT
     client.post("/settings/chatgpt", data={"path": fake_codex["path"], "model": "gpt-test"})
     assert config.load_settings()["chatgpt"]["model"] == "gpt-test"

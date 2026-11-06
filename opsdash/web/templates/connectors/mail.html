@@ -1,0 +1,19 @@
+{#- окно подключения: mail (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b">
+  <form method="post" action="/settings/mail">
+    {{ enabled_box('mail', 'Читать почту') }}
+    <label>Адрес почты</label><input type="email" name="email" value="{{ settings.mail.email }}" placeholder="anna@company.ru">
+    <label>Пароль приложения (тип «Почта»)</label>{{ secret_input('password', 'MAIL_APP_PASSWORD', 'не обычный пароль, а пароль приложения') }}
+    <div class="hint"><a href="https://id.yandex.ru/security/app-passwords" target="_blank">Яндекс ID → Безопасность → Пароли приложений</a>. В настройках почты должен быть включён доступ по IMAP. <a href="/help/02-подключения#яндекс-почта">Подробно</a>.</div>
+    <label>Папки</label><textarea name="folders" rows="2">{{ settings.mail.folders | join('\n') }}</textarea>
+    <label class="check"><input type="checkbox" name="include_sent" {{ 'checked' if settings.mail.include_sent }}> Читать «Отправленные» — чтобы видеть, что вы обещали в письмах</label>
+    <label>Не обращать внимания на отправителей (части адреса, по одной в строке)</label><textarea name="ignore_senders" rows="3">{{ settings.mail.ignore_senders | join('\n') }}</textarea>
+    <div class="form-row">
+      <div><label>IMAP-сервер</label><input type="text" name="host" value="{{ settings.mail.host }}"></div>
+      <div><label>Загрузить письма за, дней</label><input type="number" name="backfill_days" value="{{ settings.mail.backfill_days }}" min="0" max="30"></div>
+    </div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('mail') }}</div>
+  </form>
+  <p class="hint">PULSE только читает письма и не помечает их прочитанными.</p>
+</div></section>

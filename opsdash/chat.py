@@ -20,7 +20,7 @@ from opsdash import brain, config, records, store
 
 MODELS = {"fable": "Fable — самая сильная", "opus": "Opus — подробно", "sonnet": "Sonnet — быстро",
           "haiku": "Haiku — очень быстро"}
-# у ChatGPT модель одна (Настройки → Claude / ChatGPT), а выбор в чате — насколько глубоко думать (codex.effort_for)
+# у ChatGPT модель одна (Настройки → Подключения → Помощник), а выбор в чате — насколько глубоко думать (codex.effort_for)
 MODELS_CHATGPT = {"fable": "ChatGPT — максимум", "opus": "ChatGPT — подробно", "sonnet": "ChatGPT — быстро",
                   "haiku": "ChatGPT — очень быстро"}
 # сколько Claude думает перед ответом (--effort); «авто» — как решит сам Claude Code

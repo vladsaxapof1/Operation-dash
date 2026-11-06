@@ -28,7 +28,9 @@
 </div>
 
 {% if not connected and not hide_cal_banner %}
-<div class="alert info alert-x-wrap" data-dismiss="hide_cal_banner">Показаны встречи, которые PULSE уже знает. Подключите <a href="/settings?tab=calendar">Яндекс Календарь</a> или <a href="/settings?tab=calendar#google">Google Календарь</a>, чтобы видеть всё расписание и создавать встречи отсюда.
+<div class="alert info alert-x-wrap" data-dismiss="hide_cal_banner">Показаны встречи, которые PULSE уже знает. Подключите календарь, чтобы видеть всё расписание:
+  <a href="/settings?tab=calendar">Яндекс</a> (в нём можно и создавать встречи отсюда), <a href="/settings?tab=google_calendar">Google</a>,
+  <a href="/settings?tab=ics_calendar">Outlook и iCloud по ссылке</a> или <a href="/settings?tab=caldav">другой по CalDAV</a>.
   <button type="button" class="alert-x" data-dismiss-btn aria-label="Скрыть" title="Скрыть">{{ icons.icon('close', 16) }}</button></div>
 {% endif %}
 
@@ -129,7 +131,7 @@
       {% set t = d.plan %}{% if t and (t.count or t.late or t.waiting) %}
       <a class="mtasks{{ ' late' if t.late }}" href="?start={{ d.date }}&view=week" title="{% for b in t.blocks if b.item.id %}{{ b.s | hm }} {{ b.item.title }}{{ ' (в работе)' if b.item.in_work }}{{ '; ' if not loop.last }}{% endfor %}{% for x in t.late %}; «{{ x.item.title }}» — {{ x.why }}{% endfor %}{% for x in t.waiting or [] %}; ждёт: «{{ x.item.title }}» — {{ x.why }}{% endfor %}"><span class="tdot{{ ' work' if t.work }}" aria-hidden="true"></span>задачи: {{ t.count }}{% if t.minutes %} · {{ t.minutes | dur }}{% endif %}{% if t.late %} · не влезает {{ t.late | length }}{% endif %}{% if t.waiting %} · ждут {{ t.waiting | length }}{% endif %}</a>
       {% endif %}
-      {% for e in d.events[:3] %}<button type="button" class="mev{{ ' past' if e.past }}{{ ' google' if e.uid.startswith('google:') }}" data-ev="{{ e.n }}" title="{{ e.title }} · {{ ev_time(e) }}">{% if not e.all_day %}<span>{{ e.start | local('%H:%M') }}</span> {% endif %}{{ e.title or 'Без названия' }}</button>{% endfor %}
+      {% for e in d.events[:3] %}<button type="button" class="mev{{ ' past' if e.past }}{{ ' google' if e.uid.startswith(('google:', 'caldav:', 'ics:')) }}" data-ev="{{ e.n }}" title="{{ e.title }} · {{ ev_time(e) }}">{% if not e.all_day %}<span>{{ e.start | local('%H:%M') }}</span> {% endif %}{{ e.title or 'Без названия' }}</button>{% endfor %}
       {% if d.events | length > 3 %}<a class="mev-more" href="?start={{ d.date }}&view=list">ещё {{ d.events | length - 3 }}</a>{% endif %}
     </div>
     {% endfor %}

@@ -1,0 +1,30 @@
+{#- окно подключения: другая почта по IMAP — Fastmail, iCloud, Zoho, свой домен (MORE-2) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+{% import "_macros.html" as ui %}
+<section class="card"><div class="card-b">
+  <form method="post" action="/settings/imap">
+    {{ enabled_box('imap', 'Читать эту почту') }}
+    <div class="form-row">
+      <div><label>Адрес почты</label><input type="email" name="email" value="{{ settings.imap.email }}" placeholder="anna@company.com"></div>
+      <div><label>Логин {{ ui.help('Нужен, только если вход не по адресу почты — например, имя пользователя корпоративного сервера.') }}</label><input type="text" name="login" value="{{ settings.imap.login }}" placeholder="как адрес почты"></div>
+    </div>
+    <div class="form-row">
+      <div><label>IMAP-сервер</label><input type="text" name="host" value="{{ settings.imap.host }}" placeholder="imap.fastmail.com"></div>
+      <div><label>Порт</label><input type="number" name="port" value="{{ settings.imap.port or 993 }}" min="1" max="65535" style="max-width:120px"></div>
+    </div>
+    <div class="hint">Сервер есть в справке вашей почты, раздел про IMAP или почтовые программы. Например: iCloud —
+      <code class="nowrap">imap.mail.me.com</code>, Fastmail — <code class="nowrap">imap.fastmail.com</code>, Zoho — <code class="nowrap">imap.zoho.com</code>,
+      Outlook.com — <code class="nowrap">outlook.office365.com</code>. Подключение — только зашифрованное (SSL).</div>
+    <label>Пароль</label>{{ secret_input('password', 'IMAP_PASSWORD', 'пароль приложения или пароль почты') }}
+    <div class="hint">У iCloud, Fastmail, Zoho и Outlook.com для почтовых программ нужен отдельный пароль приложения —
+      создаётся в настройках безопасности аккаунта.</div>
+    <label class="check"><input type="checkbox" name="include_sent" {{ 'checked' if settings.imap.include_sent }}> Читать «Отправленные» — чтобы видеть, что вы обещали в письмах</label>
+    <div class="form-row">
+      <div><label>Папки</label><textarea name="folders" rows="2">{{ settings.imap.folders | join('\n') }}</textarea></div>
+      <div><label>Загрузить письма за, дней</label><input type="number" name="backfill_days" value="{{ settings.imap.backfill_days }}" min="0" max="30"></div>
+    </div>
+    <div class="hint">Отправители из списка «Не обращать внимания» у Яндекс Почты пропускаются и здесь.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('imap') }}</div>
+  </form>
+  <p class="hint">PULSE только читает письма и не помечает их прочитанными.</p>
+</div></section>

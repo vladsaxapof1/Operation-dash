@@ -349,7 +349,7 @@ def test_google_calendar_read_only_via_ical(monkeypatch, settings_with):
     assert {r["calendar"] for r in google} == {"Google: anna@gmail.com"}
     assert any(r["uid"] == "y1" for r in rows)  # Яндекс не тронут
 
-    monkeypatch.setattr(calendar, "_calendars", lambda settings: [])  # сбор Яндекса чистит только своё
+    monkeypatch.setattr(calendar, "_calendars", lambda settings, section="calendar": [])  # сбор Яндекса чистит только своё
     calendar.collect()
     assert [r["uid"] for r in store.rows("SELECT uid FROM events") if not r["uid"].startswith("google:")] == []
     assert store.scalar("SELECT COUNT(*) FROM events WHERE uid LIKE 'google:%'") == 3
@@ -364,7 +364,7 @@ def test_google_calendar_read_only_via_ical(monkeypatch, settings_with):
 
 def test_write_calendar_by_name(monkeypatch, settings_with):
     cals = [SimpleNamespace(name="Мои события"), SimpleNamespace(name="Не забыть")]
-    monkeypatch.setattr(calendar, "_calendars", lambda settings: cals)
+    monkeypatch.setattr(calendar, "_calendars", lambda settings, section="calendar": cals)
     settings = settings_with(calendar={"write_calendar": ""})
     assert calendar._write_calendar(settings).name == "Мои события"  # по умолчанию — первый
     assert calendar._write_calendar(settings, "не забыть").name == "Не забыть"

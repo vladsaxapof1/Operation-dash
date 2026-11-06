@@ -245,9 +245,9 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["feed_count"], ctx["feed_urgent"] = feed["total"], feed["urgent"]
     ctx["tasks_count"] = records.active_count(others)
     ctx["sections_on"] = {name: config.section_on(name, settings) for name in config.SECTIONS}  # архивные — не в меню
-    ctx["needs_setup"] = not any(settings[s].get("enabled")
-                                 for s in ("telegram", "mail", "gmail", "calendar", "google_calendar", "kaiten",
-                                           "ymessenger", "pachca"))
+    ctx["needs_setup"] = not config.any_enabled(settings)
+    ctx["calendars_on"] = config.any_enabled(settings, "calendar")  # подключён хоть один календарь
+    ctx["messages_on"] = config.any_enabled(settings, "messages")  # хоть один мессенджер или почта
     ctx["voice_tip"] = None if ctx["nav"] == "meetings" else _voice_tip(request)
     ctx["build"] = build()
     ctx["nav_collapsed"] = request.cookies.get("nav") == "collapsed"  # меню свёрнуто в иконки (app.js)
@@ -554,13 +554,11 @@ def due_choices() -> list[dict]:
 
 def _next_collect(settings: dict) -> datetime | None:
     """Когда PULSE в следующий раз соберёт сообщения и встречи — для строки «Следующий сбор в …»."""
-    sch, best = settings["schedule"], None
-    for src, minutes in (("telegram", sch["collect_minutes"]), ("ymessenger", sch["collect_minutes"]),
-                         ("pachca", sch["collect_minutes"]), ("mail", sch["collect_minutes"]),
-                         ("gmail", sch["collect_minutes"]), ("calendar", sch["calendar_minutes"]),
-                         ("google_calendar", sch["calendar_minutes"]), ("kaiten", sch["kaiten_minutes"])):
+    best = None
+    for src in config.SOURCES:
         if not settings[src].get("enabled"):
             continue
+        minutes = config.source_minutes(src, settings)
         last = store.parse_ts((store.row("SELECT last_run FROM jobs WHERE name=?", (f"collect:{src}",)) or {}).get("last_run"))
         due = last + timedelta(minutes=minutes) if last else datetime.now(config.tz(settings))
         best = due if best is None or due < best else best
@@ -609,7 +607,7 @@ def refresh(request: Request):
     from opsdash import jobs
 
     settings = config.load_settings()
-    for src in ("telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten"):
+    for src in config.SOURCES:
         if settings[src].get("enabled"):
             jobs.submit(f"collect:{src}")
     jobs.submit("recordings")
@@ -1561,7 +1559,7 @@ def docs_reindex(request: Request):
 # --- календарь ------------------------------------------------------------------
 
 MEETING_MINUTES = [15, 30, 45, 60, 90, 120]
-CALENDAR_SOURCES = {"calendar": "Яндекс", "google_calendar": "Google"}
+CALENDAR_SOURCES = {"calendar": "Яндекс", "google_calendar": "Google", "caldav": "CalDAV", "ics_calendar": "По ссылке"}
 
 
 MONTHS_NOM = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
@@ -1679,7 +1677,7 @@ async def calendar_refresh(request: Request):
         except Exception as e:  # noqa: BLE001 — показываем, что не обновилось, остальное обновлено
             errors.append(f"{title}: {e}")
     if not done and not errors:
-        return back(request, err="Календари не подключены — Настройки → Календарь")
+        return back(request, err="Календари не подключены — Настройки → Подключения")
     return back(request, ("Календарь обновлён — " + " · ".join(done)) if done else "", err=" · ".join(errors))
 
 
@@ -2328,11 +2326,9 @@ def journal(request: Request, kind: str = "", limit: int = 120, level: str = "")
     job_rows = {j["name"]: j for j in store.rows("SELECT * FROM jobs")}
     off = config.archived_jobs(settings)  # задания архивных разделов не показываем — о них строка под списком
     sch = settings["schedule"]
-    sources = ("telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten")
     every = lambda m: f"каждые {m} мин"  # noqa: E731
-    collect = [(f"collect:{src}", {"calendar": sch["calendar_minutes"], "google_calendar": sch["calendar_minutes"],
-                                   "kaiten": sch["kaiten_minutes"]}.get(src, sch["collect_minutes"]))
-               for src in sources if settings[src].get("enabled")]
+    collect = [(f"collect:{src}", config.source_minutes(src, settings))
+               for src in config.SOURCES if settings[src].get("enabled")]
     groups = [
         ("Сбор", [(name, every(m)) for name, m in collect] + [("recordings", "следит за папкой записей")]
                  + ([("docs-index", every(sch.get("docs_minutes") or 30))] if settings["knowledge"].get("folders") else [])),
@@ -2342,7 +2338,7 @@ def journal(request: Request, kind: str = "", limit: int = 120, level: str = "")
         ("Напоминания", [("stale", f"каждый день в {config.hhmm(sch.get('stale_check'))}" if sch.get("stale_check") else "выключено")]),
     ]
     groups = [(g, [(n, w) for n, w in items if n not in off]) for g, items in groups]
-    not_connected = [overview.SOURCE_TITLES.get(s_, s_) for s_ in sources if not settings[s_].get("enabled")]
+    not_connected = [overview.SOURCE_TITLES.get(s_, s_) for s_ in config.SOURCES if not settings[s_].get("enabled")]
     nxt = _next_collect(settings)
     return render(request, "journal.html", nav="journal", events=shown, counts=counts, kind=kind, limit=limit,
                   more=len(events) > len(shown) or len(shown) >= limit, jobs=job_rows, groups=groups, titles=jobs.TITLES,

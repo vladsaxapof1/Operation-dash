@@ -1,0 +1,19 @@
+{#- окно подключения: calendar (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b">
+  <form method="post" action="/settings/calendar">
+    {{ enabled_box('calendar', 'Подключить календарь') }}
+    <label>Логин (адрес почты)</label><input type="text" name="login" value="{{ settings.calendar.login }}">
+    <label>Пароль приложения (тип «Календарь CalDAV»)</label>{{ secret_input('password', 'CALDAV_APP_PASSWORD') }}
+    <div class="hint">Отдельный пароль приложения, не тот, что для почты. <a href="/help/02-подключения#яндекс-календарь">Подробно</a>.</div>
+    <label>Какие календари читать (названия, пусто = все)</label><textarea name="calendars" rows="2">{{ settings.calendar.calendars | join('\n') }}</textarea>
+    <div class="form-row">
+      <div><label>Календарь для новых встреч (по умолчанию)</label>
+        {% if calendar_names %}<select name="write_calendar"><option value="">первый в списке</option>{% for n in calendar_names %}<option {{ 'selected' if n == settings.calendar.write_calendar }}>{{ n }}</option>{% endfor %}</select>
+        {% else %}<input type="text" name="write_calendar" value="{{ settings.calendar.write_calendar }}" placeholder="пусто = первый">{% endif %}</div>
+      <div><label>Смотреть вперёд, дней</label><input type="number" name="days_ahead" value="{{ settings.calendar.days_ahead }}" min="1" max="60"></div>
+    </div>
+    <label>Адрес CalDAV</label><input type="text" name="url" value="{{ settings.calendar.url }}">
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('calendar') }}</div>
+  </form>
+</div></section>

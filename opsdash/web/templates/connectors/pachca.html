@@ -1,0 +1,24 @@
+{#- окно подключения: pachca (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<div class="alert info">PULSE читает Пачку вашим персональным токеном — видит то же, что вы, но берёт <b>только отмеченные чаты</b> (и треды в них) и ничего не пишет от вашего имени. По умолчанию персональные токены в Пачке выпускают только администраторы — <a href="/help/02-подключения#пачка">что попросить у администратора</a>.</div>
+<section class="card"><div class="card-h"><h2>1. Токен</h2></div><div class="card-b">
+  {% if pachca_me %}<p>✅ Токен принят: <b>{{ pachca_me.name or ('сотрудник #' ~ pachca_me.id) }}</b></p>{% endif %}
+  <form method="post" action="/settings/pachca">
+    {{ enabled_box('pachca', 'Читать Пачку') }}
+    <label>Персональный токен</label>{{ secret_input('token', 'PACHCA_TOKEN') }}
+    <div class="hint">Пачка → <b>Интеграции → API</b> → «Создать токен». Отметьте только права на чтение:
+      <code class="nowrap">chats:read</code>, <code class="nowrap">messages:read</code>, <code class="nowrap">threads:read</code>,
+      <code class="nowrap">users:read</code>.
+      Токен показывается один раз — скопируйте его сразу. Если страницы «API» нет, токены в вашем пространстве
+      выпускают только администраторы: администратор может разрешить это всем сотрудникам
+      (настройка «Кто может создавать персональные токены»).</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('pachca') }}</div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>2. Какие чаты читать</h2>
+  <form class="inline" method="post" action="/settings/pachca/chats"><button class="btn sm" {{ 'disabled' if not secrets.get('PACHCA_TOKEN') }}>↻ Обновить список</button></form></div>
+<div class="card-b">
+  {% if chats %}{{ chat_picker('pachca') }}
+  {% else %}<p class="muted">Список чатов появится после сохранения токена.</p>{% endif %}
+</div></section>

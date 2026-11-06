@@ -1,0 +1,14 @@
+{#- окно подключения: документы — папки для поиска (раздел «Документы») (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/knowledge">
+    <label>Папки с рабочими документами (по одной в строке)</label>
+    <textarea name="folders" rows="3">{{ settings.knowledge.folders | join('\n') }}</textarea>
+    <div class="hint">PULSE раз в полчаса собирает из них текст презентаций, таблиц Excel, документов Word, PDF и заметок — для <a href="/docs">поиска</a> и для Claude. Только чтение — файлы не меняются. Подойдут и папки Яндекс Диска, синхронизированные на компьютер.</div>
+    <label>Не заглядывать в папки (имена, по одному в строке)</label>
+    <textarea name="exclude" rows="3">{{ settings.knowledge.exclude | join('\n') }}</textarea>
+    <div class="hint">Служебные папки (начинаются с точки: .git, .obsidian) пропускаются всегда. Код, картинки, аудио и видео не индексируются.</div>
+    {% if is_mac %}<div class="hint">Для папок в «Документах», на «Рабочем столе» и в iCloud macOS один раз спросит разрешение — нажмите «Разрешить».</div>{% endif %}
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>

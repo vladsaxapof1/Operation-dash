@@ -1,0 +1,36 @@
+{#- окно подключения: ChatGPT — Codex, вход, модель (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+{% include "connectors/_assistant_switch.html" %}
+<section class="card" id="chatgpt"><div class="card-b">
+  {% if not codex_path %}
+    <p>⚠ Codex не найден — это помощник ChatGPT, который работает на компьютере.</p>
+    <ol class="small">
+      <li>Установите приложение <b>ChatGPT</b> (chatgpt.com/download) и войдите своим аккаунтом — Codex входит в него.{% if not is_mac %} Или поставьте Codex отдельно: <code>npm install -g @openai/codex</code>{% endif %}</li>
+      <li>Обновите эту страницу — PULSE найдёт Codex сам.</li>
+    </ol>
+  {% elif codex_login and not codex_login.loggedIn %}
+    <p>⚠ Codex найден, но <b>вход не выполнен</b> — без него ChatGPT не сможет работать в PULSE.</p>
+    {% if is_mac or is_windows %}
+    <form method="post" action="/settings/chatgpt/login"><button class="btn primary">Войти в ChatGPT</button></form>
+    <div class="hint">Откроется {{ 'Терминал' if is_mac else 'окно PowerShell' }}, а за ним браузер: войдите аккаунтом ChatGPT и обновите эту страницу.</div>
+    {% else %}
+    <div class="hint">Выполните в терминале <code>"{{ codex_path }}" login</code>, войдите в браузере и обновите эту страницу.</div>
+    {% endif %}
+  {% else %}
+    <p>✅ Codex найден{% if codex_login and codex_login.how %}, вход: <b>{{ codex_login.how }}</b>{% endif %}.</p>
+  {% endif %}
+  <div class="hint">Где лежит: <code>{{ codex_path or 'не найден' }}</code></div>
+  <form method="post" action="/settings/chatgpt">
+    <label>Путь к codex (если не находится сам)</label><input type="text" name="path" value="{{ settings.chatgpt.path }}" placeholder="{{ '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex' if is_mac else 'C:\\Users\\…\\AppData\\Roaming\\npm\\codex.cmd' }}">
+    <div class="hint">Обычно не нужен: PULSE сам находит Codex в приложении ChatGPT и установленный отдельно.</div>
+    <label>Модель</label>
+    {% if codex_models %}
+    <select name="model" style="max-width:320px"><option value="">По умолчанию — как выберет Codex</option>{% for m in codex_models %}<option value="{{ m.slug }}" title="{{ m.about }}" {{ 'selected' if settings.chatgpt.model == m.slug }}>{{ m.title }}</option>{% endfor %}{% if settings.chatgpt.model and settings.chatgpt.model not in codex_models | map(attribute='slug') | list %}<option value="{{ settings.chatgpt.model }}" selected>{{ settings.chatgpt.model }}</option>{% endif %}</select>
+    {% else %}
+    <input type="text" name="model" value="{{ settings.chatgpt.model }}" placeholder="по умолчанию — как выберет Codex" style="max-width:320px">
+    {% endif %}
+    <div class="hint">Модель одна на все задачи, а насколько глубоко думать — по задаче, как модели Claude выше: где стоит opus — глубоко, sonnet — обычно, haiku — быстро. Время на один запуск — то же, что у Claude.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('chatgpt') }}</div>
+  </form>
+  <div class="hint">ChatGPT работает по той же инструкции и с теми же данными, что Claude: встречи, переписка, задачи, документы. Писать может только в папку PULSE, интернета у него нет, во внешние системы — только предложениями «Да / Нет». Уведомления в Telegram PULSE отправляет сам — сразу, как ChatGPT закончит.</div>
+</div></section>

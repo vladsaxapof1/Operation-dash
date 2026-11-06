@@ -215,7 +215,8 @@ def test_chat_list_sorted_by_last_message_and_saved_instantly(client):
     store.upsert_chat("telegram", "3", "Вера", "private")
     store.upsert_chat("telegram", "2", None, None, last_ts="2026-10-01T00:00:00+00:00")  # старее — не затирает
     page = client.get("/settings?tab=telegram").text
-    assert 'title="Telegram (личный аккаунт)"' in page and 'title="Telegram-бот (уведомления)"' in page  # подменю
+    assert 'data-conn="telegram"' in page and "data-open-on-load" in page  # окно Telegram поверх каталога подключений
+    assert ">Мессенджеры<" in page and ">Уведомления<" in page  # Telegram и Telegram-бот — в разных группах каталога
     assert page.index("Борис") < page.index("«Альфа» чат") < page.index("Вера")  # свежие сверху, без сообщений — внизу
     assert 'data-kind="private">Личные <span class="muted" data-kind-count="private">2</span>' in page  # фильтр по типу
     assert 'data-kind="bot"' not in page.split("<table")[0]  # ботов нет — и кнопки «Боты» нет
@@ -266,6 +267,7 @@ def test_sources_card_bot_and_claude(client, monkeypatch, settings_with):
     from opsdash import brain, overview
 
     settings_with(telegram_bot={"enabled": True, "owner_chat_id": "42"})
+    config.set_secret("TELEGRAM_BOT_TOKEN", "123:abc")
     monkeypatch.setattr(brain, "find_claude", lambda *a, **k: None)
     health = {h["key"]: h for h in overview.sources_health()}
     assert health["bot"]["status"] == "ok" and health["bot"]["note"] == "подключён"
@@ -273,8 +275,8 @@ def test_sources_card_bot_and_claude(client, monkeypatch, settings_with):
 
     monkeypatch.setattr(brain, "find_claude", lambda *a, **k: "/x/claude")
     monkeypatch.setattr(brain, "login_status", lambda *a, **k: {"loggedIn": False})
-    page = client.get("/settings?tab=connections").text  # источники и Claude — в Настройки → Подключения
-    assert "нужен вход" in page and "подключён" in page and "ожидает" not in page
+    page = client.get("/settings?tab=connections").text  # источники и Claude — карточками в Настройки → Подключения
+    assert "нужен вход" in page and "подключено" in page and "ожидает" not in page
     monkeypatch.setattr(brain, "login_status", lambda *a, **k: {"loggedIn": True})
     assert {h["key"]: h for h in overview.sources_health()}["claude"]["status"] == "ok"
 
@@ -308,7 +310,7 @@ def test_claude_error_shows_reason_not_raw_json(tmp_path, settings_with):
     settings_with(claude={"path": str(fake)})
     with pytest.raises(brain.BrainError) as err:
         brain.run("привет")
-    assert str(err.value) == "Claude: не выполнен вход — Настройки → Claude → «Войти в Claude»"
+    assert str(err.value) == "Claude: не выполнен вход — Настройки → Подключения → Claude → «Войти в Claude»"
 
 
 def test_calendar_week_and_new_meeting(client, monkeypatch, settings_with):
@@ -367,7 +369,7 @@ def test_google_calendar_settings_and_marker(client):
     assert calendar.google_urls() == ["https://a.ics", "https://b.ics"] and config.load_settings()["google_calendar"]["enabled"]
     client.post("/settings/google_calendar", data={"urls": "", "enabled": "on"})  # пусто — адреса не трогаем
     assert len(calendar.google_urls()) == 2
-    assert "сохранено адресов: 2" in client.get("/settings?tab=calendar").text
+    assert "сохранено адресов: 2" in client.get("/settings?tab=google_calendar").text
     client.post("/settings/google_calendar", data={"urls": "", "forget": "on"})
     assert calendar.google_urls() == []
 

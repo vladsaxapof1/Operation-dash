@@ -57,7 +57,7 @@ DEFAULTS: dict = {
         "model_digest": "sonnet",
         "model_ask": "sonnet",
         "model_briefs": "sonnet",
-        "chat_effort": "",  # «Спросить Claude»: сколько думать перед ответом (Настройки → Claude), пусто — как решит Claude
+        "chat_effort": "",  # «Спросить Claude»: сколько думать перед ответом (Настройки → Подключения → Claude), пусто — как решит Claude
         "timeout_minutes": 30,
     },
     # кто работает в PULSE: claude — Claude Code, chatgpt — Codex из приложения ChatGPT (opsdash.codex).
@@ -151,6 +151,23 @@ DEFAULTS: dict = {
         "primary_only": True,
         "backfill_days": 3,
     },
+    "imap": {  # «другой сервер» (MORE-2): любая почта по IMAP — Fastmail, iCloud, Zoho, корпоративная; пароль — IMAP_PASSWORD
+        "enabled": False,
+        "email": "",
+        "login": "",  # если вход не по адресу почты
+        "host": "",
+        "port": 993,
+        "folders": ["INBOX"],
+        "include_sent": True,
+        "backfill_days": 3,
+    },
+    "caldav": {  # «другой сервер»: любой календарь по CalDAV — только чтение; пароль — CALDAV_OTHER_PASSWORD
+        "enabled": False,
+        "url": "",
+        "login": "",
+        "calendars": [],
+    },
+    "ics_calendar": {"enabled": False},  # календарь по ссылке .ics (Outlook, iCloud…) — только чтение; ссылки — ICS_CALENDAR_URLS
     "calendar": {
         "enabled": False,
         "login": "",
@@ -217,7 +234,41 @@ SECRET_KEYS = {
     "CALDAV_APP_PASSWORD": "Яндекс Календарь: пароль приложения",
     "GOOGLE_CALENDAR_ICAL": "Google Календарь: секретные адреса iCal",
     "KAITEN_TOKEN": "Kaiten: API-токен",
+    "IMAP_PASSWORD": "Почта по IMAP: пароль",
+    "CALDAV_OTHER_PASSWORD": "Календарь по CalDAV: пароль",
+    "ICS_CALENDAR_URLS": "Календарь по ссылке: адреса .ics",
 }
+
+# Источники, которые PULSE собирает по расписанию. Ключ — раздел настроек и задание collect:<ключ>; every — какой
+# интервал из «Расписания»; kind: messages (письма и сообщения), calendar (встречи), tasks (Kaiten).
+# Сборщик и проверка — opsdash.sources.collector / checker. Новый источник — строка здесь и запись в connectors.yaml
+SOURCES = {
+    "telegram": {"title": "Telegram", "every": "collect_minutes", "kind": "messages"},
+    "ymessenger": {"title": "Я.Мессенджер", "every": "collect_minutes", "kind": "messages"},
+    "pachca": {"title": "Пачка", "every": "collect_minutes", "kind": "messages"},
+    "mail": {"title": "Почта", "every": "collect_minutes", "kind": "messages"},
+    "gmail": {"title": "Gmail", "every": "collect_minutes", "kind": "messages"},
+    "imap": {"title": "Почта по IMAP", "every": "collect_minutes", "kind": "messages"},
+    "calendar": {"title": "Календарь", "every": "calendar_minutes", "kind": "calendar"},
+    "google_calendar": {"title": "Google Календарь", "every": "calendar_minutes", "kind": "calendar"},
+    "caldav": {"title": "Календарь CalDAV", "every": "calendar_minutes", "kind": "calendar"},
+    "ics_calendar": {"title": "Календарь по ссылке", "every": "calendar_minutes", "kind": "calendar"},
+    "kaiten": {"title": "Kaiten", "every": "kaiten_minutes", "kind": "tasks"},
+}
+
+
+def source_minutes(key: str, settings: dict) -> int:
+    """Как часто собирать источник — из «Расписания»."""
+    return int(settings["schedule"][SOURCES[key]["every"]])
+
+
+def sources_of(kind: str) -> tuple[str, ...]:
+    return tuple(k for k, s in SOURCES.items() if s["kind"] == kind)
+
+
+def any_enabled(settings: dict, kind: str | None = None) -> bool:
+    """Подключён ли хоть один источник (или хоть один календарь — kind="calendar")."""
+    return any(settings[k].get("enabled") for k, s in SOURCES.items() if kind is None or s["kind"] == kind)
 
 _lock = threading.RLock()
 

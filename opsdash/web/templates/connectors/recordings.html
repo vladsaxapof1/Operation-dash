@@ -1,0 +1,44 @@
+{#- окно подключения: записи встреч — папки, распознавание речи, ваш голос (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/recordings">
+    <label>Папки с записями (по одной в строке)</label>
+    <textarea name="folders" rows="4">{{ settings.recordings.folders | join('\n') }}</textarea>
+    {% if is_mac %}
+    <div class="hint">По умолчанию — data/recordings в папке PULSE. Добавьте папку Zoom (обычно <code>~/Documents/Zoom</code>) и папку Яндекс Диска, куда Телемост сохраняет записи (обычно внутри <code>~/Yandex.Disk.localized</code>). Путь можно скопировать в Finder: правый клик по папке, зажать Option → «Скопировать путь до…». Старые файлы из папок не разбираются — только новые.</div>
+    <div class="hint">Для папок в «Документах», на «Рабочем столе» и в «Загрузках» macOS один раз спросит разрешение — нажмите «Разрешить». Не спросила — см. <a href="/help/05-обслуживание#macos-нет-доступа-к-папкам">справку</a>.</div>
+    {% else %}
+    <div class="hint">По умолчанию — data/recordings в папке PULSE. Добавьте папку Zoom (обычно <code>C:\Users\…\Documents\Zoom</code>) и папку Яндекс Диска, куда Телемост сохраняет записи. Путь можно скопировать в Проводнике: Shift + правый клик → «Копировать как путь». Старые файлы из папок не разбираются — только новые.</div>
+    {% endif %}
+    {% if existing %}<div class="hint">Найдены: {% for f in existing %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+    <label>Модель распознавания речи</label>
+    <select name="whisper_model">{% for v, t in whisper_models %}<option value="{{ v }}" {{ 'selected' if settings.recordings.whisper_model == v }}>{{ t }}</option>{% endfor %}</select>
+    <div class="hint">Первый запуск скачает модель (~1,5 ГБ для turbo). Час записи на обычном ноутбуке расшифровывается примерно за 15–40 минут.</div>
+    <div class="form-row">
+      {% if is_apple_silicon %}
+      <div><label>Движок</label><select name="engine"><option value="auto" {{ 'selected' if settings.recordings.engine != 'faster-whisper' }}>видеоядра Apple Silicon (MLX) — быстро</option><option value="faster-whisper" {{ 'selected' if settings.recordings.engine == 'faster-whisper' }}>процессор (faster-whisper)</option></select></div>
+      <input type="hidden" name="device" value="cpu">
+      {% elif is_mac %}
+      <input type="hidden" name="device" value="cpu">
+      {% else %}
+      <div><label>Где считать</label><select name="device"><option value="auto" {{ 'selected' if settings.recordings.device == 'auto' }}>видеокарта, если получится</option><option value="cpu" {{ 'selected' if settings.recordings.device == 'cpu' }}>процессор</option><option value="cuda" {{ 'selected' if settings.recordings.device == 'cuda' }}>видеокарта NVIDIA (нужны библиотеки CUDA)</option></select></div>
+      {% endif %}
+      <div><label>Язык</label><input type="text" name="language" value="{{ settings.recordings.language }}"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="diarization" {{ 'checked' if settings.recordings.diarization }}> Размечать, кто говорит (Спикер 1, 2…; имена подставит Claude)</label>
+    <label>Чувствительность разметки спикеров</label><input type="number" step="0.05" min="0.5" max="1.2" name="diarization_threshold" value="{{ settings.recordings.diarization_threshold }}" style="max-width:120px">
+    <div class="hint">Больше — меньше спикеров. Если один человек делится на двух — увеличьте до 1.0; если двое сливаются — уменьшите до 0.8.</div>
+    <label class="check"><input type="checkbox" name="auto_process" {{ 'checked' if settings.recordings.auto_process }}> Сразу после расшифровки отдавать встречу на разбор Claude</label>
+    <label>Зеркало HuggingFace (если модели не скачиваются)</label><input type="text" name="hf_endpoint" value="{{ settings.recordings.hf_endpoint }}" placeholder="например https://hf-mirror.com">
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>Ваш голос</h2></div><div class="card-b">
+  {% if voice_samples %}
+  <p>✅ PULSE знает ваш голос (по {{ voice_samples }} {{ plural(voice_samples, 'записи', 'записям', 'записям') }}) и сам подписывает вашу речь в новых расшифровках.</p>
+  <form class="inline" method="post" action="/settings/voice/forget" data-confirm="Забыть ваш голос? Подписывать вас в записях PULSE перестанет, пока вы снова не отметите «Это я»."><button class="btn sm ghost danger">Забыть голос</button></form>
+  {% else %}
+  <p class="muted">PULSE ещё не знает ваш голос. Откройте любую встречу и в блоке «Кто в записи» нажмите «Это я» у своего спикера — дальше PULSE будет узнавать вас сам.</p>
+  {% endif %}
+</div></section>

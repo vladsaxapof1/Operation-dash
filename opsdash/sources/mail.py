@@ -1,6 +1,6 @@
-"""Почта по IMAP (пароль приложения): Яндекс Почта и, вторым ящиком, Gmail. Письма только
-читаются и не помечаются прочитанными (BODY.PEEK). Письма обоих ящиков хранятся как source="mail";
-чаты Gmail отличаются приставкой «gmail:» (gmail:INBOX)."""
+"""Почта по IMAP (пароль приложения): Яндекс Почта, Gmail и любой другой сервер («Почта по IMAP»). Письма только
+читаются и не помечаются прочитанными (BODY.PEEK). Письма всех ящиков хранятся как source="mail";
+чаты Gmail и другого сервера отличаются приставкой: «gmail:INBOX», «imap:INBOX»."""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ ACCOUNTS = {
              "help": "Проверьте пароль приложения и что IMAP включён в настройках почты"},
     "gmail": {"secret": "GMAIL_APP_PASSWORD", "host": "imap.gmail.com", "prefix": "gmail:", "title": "Gmail",
               "help": "Нужен пароль приложения Google (myaccount.google.com/apppasswords), а не обычный пароль"},
+    "imap": {"secret": "IMAP_PASSWORD", "host": "", "prefix": "imap:", "title": "Почта",
+             "help": "Проверьте сервер, логин и пароль; у многих почт нужен отдельный пароль приложения"},
 }
 
 
@@ -194,9 +196,15 @@ def _connect(settings: dict, account: str = "mail") -> imaplib.IMAP4_SSL:
     pwd = config.get_secret(acc["secret"])
     if not ms.get("email") or not pwd:
         raise MailError("Укажите адрес почты и пароль приложения")
-    imap = imaplib.IMAP4_SSL(ms.get("host") or acc["host"], 993, timeout=60)
+    host = ms.get("host") or acc["host"]
+    if not host:
+        raise MailError("Укажите IMAP-сервер почты, например imap.fastmail.com")
     try:
-        imap.login(ms["email"], pwd)
+        imap = imaplib.IMAP4_SSL(host, int(ms.get("port") or 993), timeout=60)
+    except OSError as e:
+        raise MailError(f"Нет связи с сервером {host}: {e}") from e
+    try:
+        imap.login(ms.get("login") or ms["email"], pwd)
     except imaplib.IMAP4.error as e:
         raise MailError(f"{acc['title']} не пустила: {e}. {acc['help']}") from e
     return imap
@@ -289,3 +297,11 @@ def collect_gmail(settings: dict | None = None) -> str:
 
 def check_gmail(settings: dict | None = None) -> str:
     return check(settings, "gmail")
+
+
+def collect_imap(settings: dict | None = None) -> str:
+    return collect(settings, "imap")
+
+
+def check_imap(settings: dict | None = None) -> str:
+    return check(settings, "imap")

@@ -42,7 +42,9 @@
     {% if rest %}<details class="chat-more"><summary>Ещё {{ rest | length }} {{ plural(rest | length, 'чат', 'чата', 'чатов') }}</summary>
       {% for c in rest %}{{ chat_item(c) }}{% endfor %}</details>{% endif %}
     {% else %}
-    <p class="empty">PULSE пока не читает ни одного чата. <a href="/settings?tab=connections">Подключить источники</a>.</p>
+    <p class="empty">PULSE пока не читает ни одного чата. Подключите <a href="/settings?tab=telegram">Telegram</a>,
+      <a href="/settings?tab=pachca">Пачку</a> или почту — <a href="/settings?tab=gmail">Gmail</a>, <a href="/settings?tab=imap">другую</a>.
+      Все источники — в <a href="/settings?tab=connections">Подключениях</a>.</p>
     {% endfor %}
     {% if off_sources %}<p class="chat-off muted small">{{ off_sources | join(', ') }} — не {{ 'подключена' if off_sources | length == 1 and off_sources[0] == 'почта' else ('подключён' if off_sources | length == 1 else 'подключены') }} · <a href="/settings?tab=connections">подключить</a></p>{% endif %}
   </aside>

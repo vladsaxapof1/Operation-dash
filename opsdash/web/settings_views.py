@@ -9,73 +9,34 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from opsdash import config, store
+from opsdash import config, connectors, store
 
+# все вкладки настроек (?tab=…); источники с окном подключения открываются каталогом «Подключений» с их окном
 TABS = [
-    ("general", "Основное"),
-    ("updates", "Обновления"),
-    ("connections", "Подключения"),
-    ("telegram", "Telegram"),
-    ("bot", "Telegram-бот"),
-    ("ymessenger", "Я.Мессенджер"),
-    ("pachca", "Пачка"),
-    ("mail", "Почта"),
-    ("calendar", "Календарь"),
-    ("kaiten", "Kaiten"),
-    ("recordings", "Записи встреч"),
-    ("knowledge", "Документы"),
-    ("office", "Офис"),
-    ("autonomy", "Автономия"),
-    ("schedule", "Расписание"),
-    ("day", "День"),
-    ("claude", "Claude / ChatGPT"),
-    ("archive", "Архивные разделы"),
+    ("general", "Основное"), ("updates", "Обновления"), ("connections", "Подключения"),
+    ("telegram", "Telegram"), ("bot", "Telegram-бот"), ("ymessenger", "Я.Мессенджер"), ("pachca", "Пачка"),
+    ("mail", "Яндекс Почта"), ("gmail", "Gmail"), ("calendar", "Яндекс Календарь"), ("google_calendar", "Google Календарь"),
+    ("imap", "Другая почта"), ("caldav", "Другой календарь"), ("ics_calendar", "Календарь по ссылке"),
+    ("kaiten", "Kaiten"), ("recordings", "Записи встреч"), ("knowledge", "Документы"), ("office", "Офис"),
+    ("autonomy", "Автономия"), ("schedule", "Расписание"), ("day", "День"), ("claude", "Claude"), ("chatgpt", "ChatGPT"),
+    ("data", "Ваши данные"), ("archive", "Архивные разделы"),
 ]
-TAB_NOTES = {"telegram": "личный аккаунт", "bot": "уведомления"}  # приписка серым — чтобы не путать два Telegram
-# Настройки → Подключения (5.17): семь источников — статус, что даёт, куда нажать. Почта и календарь — по два сервиса
-CONNECTIONS = [
-    ("bot", "Telegram-бот", ("bot",), "Уведомления, дайджесты, кнопки «Да/Нет» и вопросы голосом в Telegram"),
-    ("kaiten", "Kaiten", ("kaiten",), "Зеркало отслеживаемых пространств: задачи, карточки без движения"),
-    ("telegram", "Telegram", ("telegram",), "Читать чаты, которые вы разрешите; Claude готовит черновики, отправляете вы"),
-    ("mail", "Почта", ("mail", "gmail"), "Входящие Яндекс Почты или Gmail: просьбы, сроки, вложения"),
-    ("calendar", "Календарь", ("calendar", "google_calendar"), "Яндекс или Google Календарь: встречи в Сводке и Календаре, брифы"),
-    ("pachca", "Пачка", ("pachca",), "Рабочие чаты Пачки — как Telegram"),
-    ("ymessenger", "Я.Мессенджер", ("ymessenger",), "Чаты Яндекс Мессенджера — как Telegram"),
-]
-RANK = {"ok": 3, "error": 2, "pending": 1, "off": 0}
 
 
-def connection_rows(settings: dict) -> tuple[list[dict], dict]:
-    """Строки «Подключений» и состояние Claude: из нескольких сервисов источника — самый «живой»."""
-    from opsdash import overview
+def settings_menu(settings: dict, catalog: dict) -> list[dict]:
+    """Подменю Настроек (3.10): пункты, разделитель перед системными. Источники, записи встреч, документы, Claude
+    и ChatGPT — карточками в «Подключениях» (окно поверх каталога): в подменю только «N из M», оранжевым — если
+    у какого-то источника ошибка или не хватает шага, или выбранный помощник не работает."""
+    from opsdash import __version__
 
-    health = {h["key"]: h for h in overview.sources_health(settings)}
-    rows = []
-    for tab, title, keys, what in CONNECTIONS:
-        best = max((health[k] for k in keys if k in health), key=lambda h: RANK[h["status"]])
-        rows.append({"tab": tab, "title": title, "what": what, **best,
-                     "service": best["title"] if len(keys) > 1 and best["status"] != "off" else ""})
-    return rows, health.get("claude") or {}
-
-
-def settings_menu(settings: dict) -> list[dict]:
-    """Подменю Настроек (3.10): пункты и вложенные источники с «есть / нет»; разделитель перед системными."""
-    from opsdash import __version__, brain
-
-    subs = []
-    for tab, title, keys, _ in CONNECTIONS:
-        on = any(settings["telegram_bot" if k == "bot" else k].get("enabled") for k in keys)
-        subs.append({"tab": tab, "title": title, "on": on})
-    on = sum(s["on"] for s in subs)
     menu = [{"tab": "general", "title": "Основное"},
-            {"tab": "connections", "title": "Подключения", "note": f"{on} из {len(subs)}", "subs": subs},
-            {"tab": "recordings", "title": "Записи встреч"}, {"tab": "schedule", "title": "Расписание"},
-            {"tab": "day", "title": "День"},
-            {"tab": "autonomy", "title": "Автономия"}, {"tab": "claude", "title": "Claude / ChatGPT", "note": brain.name(settings)}, {"tab": "office", "title": "Офис"}]
-    if config.section_on("docs", settings):
-        menu.append({"tab": "knowledge", "title": "Документы"})
+            {"tab": "connections", "title": "Подключения", "note": f"{catalog['on']} из {catalog['total']}",
+             "warn": bool(catalog["problems"])},
+            {"tab": "schedule", "title": "Расписание"}, {"tab": "day", "title": "День"},
+            {"tab": "autonomy", "title": "Автономия"}, {"tab": "office", "title": "Офис"}]
     archived = sum(not config.section_on(n, settings) for n in config.SECTIONS)
-    menu += [{"sep": True}, {"tab": "updates", "title": "Обновления", "note": __version__},
+    menu += [{"sep": True}, {"tab": "data", "title": "Ваши данные"},
+             {"tab": "updates", "title": "Обновления", "note": __version__},
              {"tab": "archive", "title": "Архивные разделы", "note": str(archived) if archived else ""}]
     return menu
 
@@ -157,18 +118,27 @@ def register(app: FastAPI, render, back) -> None:
 
         settings = config.load_settings()
         secrets = config.load_secrets()
-        tabs = [t for t in TABS if t[0] != "knowledge" or config.section_on("docs", settings)]  # папки — часть «Документов»
-        ctx = {"tab": tab, "tabs": tabs, "tab_notes": TAB_NOTES, "secrets": {k: config.mask(v) for k, v in secrets.items()},
-               "whisper_models": WHISPER_MODELS, "themes": THEMES}
+        tab = {"connection": "connections"}.get(tab, tab)
+        catalog = connectors.catalog(settings)
+        # вкладка источника (?tab=telegram — старые ссылки, бот, возврат после «Сохранить») — это каталог
+        # «Подключений» с окном этого источника поверх него (CON-3)
+        panel = tab if tab in connectors.panel_ids() else ""
+        ctx = {"tab": tab, "menu_tab": "connections" if panel else tab, "secrets": {k: config.mask(v) for k, v in secrets.items()},
+               "whisper_models": WHISPER_MODELS, "themes": THEMES, "catalog": catalog,
+               "conn": next((c for g in catalog["groups"] for c in g["cards"] if c["id"] == panel), None)}
         if tab == "archive":
             ctx["sections"] = archive_rows(settings)
+        if tab == "data":
+            ctx["data"] = connectors.data_overview(settings)
         if tab == "claude":
             from opsdash import chat
 
             ctx["efforts"] = chat.EFFORTS
-        if tab == "connections":
-            ctx["connections"], ctx["claude_health"] = connection_rows(settings)
-        ctx["menu"] = settings_menu(settings)
+        ctx["menu"] = settings_menu(settings, catalog)
+        if ctx["menu_tab"] == "connections":
+            from opsdash import doctor
+
+            ctx["health"] = doctor.run(settings, catalog=catalog)  # блок «Здоровье» над каталогом (CON-5)
         if tab == "updates":
             from opsdash import updates
 
@@ -191,12 +161,14 @@ def register(app: FastAPI, render, back) -> None:
         elif tab == "kaiten":
             ctx["boards"] = store.rows("SELECT * FROM kaiten_boards ORDER BY title")
             ctx["kaiten_me"] = store.get_state("kaiten_me")
-        elif tab == "calendar":
+        elif tab in ("calendar", "google_calendar", "ics_calendar"):
             from opsdash.sources import calendar
 
             ctx["google_urls"] = len(calendar.google_urls())
-            ctx["calendar_names"] = calendar.write_calendar_names(settings)[0]
-        elif tab == "claude":
+            ctx["ics_urls"] = len(calendar.ics_urls())
+            if tab == "calendar":
+                ctx["calendar_names"] = calendar.write_calendar_names(settings)[0]
+        elif tab in ("claude", "chatgpt"):
             from opsdash import codex
 
             ctx["claude_path"] = brain.find_claude(settings)
@@ -221,19 +193,15 @@ def register(app: FastAPI, render, back) -> None:
 
     @app.post("/settings/check/{what}")
     async def settings_check(what: str):
-        from opsdash import bot, brain, codex
-        from opsdash.sources import calendar, kaiten, mail, pachca, telegram, ymessenger
+        from opsdash import bot, brain, codex, sources
 
         def bot_check():
             me = bot.get_bot().me()
             store.set_state("bot_username", me.get("username"))
             return f"бот @{me.get('username')}"
 
-        checks = {
-            "claude": brain.check, "chatgpt": codex.check, "telegram": telegram.check, "ymessenger": ymessenger.check, "pachca": pachca.check,
-            "mail": mail.check, "gmail": mail.check_gmail, "google_calendar": calendar.google_check,
-            "calendar": calendar.check, "kaiten": kaiten.check, "bot": bot_check,
-        }
+        checks = {"claude": brain.check, "chatgpt": codex.check, "bot": bot_check,
+                  **{k: sources.checker(k) for k in config.SOURCES}}
         if what not in checks:
             return JSONResponse({"ok": False, "message": "неизвестная проверка"})
         try:
@@ -563,7 +531,7 @@ def register(app: FastAPI, render, back) -> None:
             "backfill_days": int(backfill_days),
         })
         collect_soon("gmail")
-        return back(request, "Сохранено", to="/settings?tab=mail#gmail")
+        return back(request, "Сохранено", to="/settings?tab=gmail")
 
     # --- календарь ---
 
@@ -586,12 +554,55 @@ def register(app: FastAPI, render, back) -> None:
         bad = [u for u in new if not u.startswith("https://")]
         if bad:
             return back(request, err="Это не похоже на адрес iCal (должен начинаться с https://): " + bad[0][:80],
-                        to="/settings?tab=calendar#google")
+                        to="/settings?tab=google_calendar")
         if new or checkbox(forget):
             config.set_secret("GOOGLE_CALENDAR_ICAL", " ".join(new) or None)
         config.update_settings("google_calendar", {"enabled": checkbox(enabled)})
         collect_soon("google_calendar")
-        return back(request, "Сохранено", to="/settings?tab=calendar#google")
+        return back(request, "Сохранено", to="/settings?tab=google_calendar")
+
+    # --- «другой сервер» (MORE-2): любая почта по IMAP, любой календарь по CalDAV или по ссылке .ics ---
+
+    @app.post("/settings/imap")
+    def imap_save(request: Request, email: str = Form(""), login: str = Form(""), host: str = Form(""),
+                  port: int = Form(993), password: str = Form(""), enabled: str = Form(None),
+                  folders: str = Form("INBOX"), include_sent: str = Form(None), backfill_days: int = Form(3)):
+        host = host.strip().removeprefix("imaps://").removeprefix("imap://").strip("/")
+        if password.strip():
+            config.set_secret("IMAP_PASSWORD", password.strip())
+        config.update_settings("imap", {
+            "enabled": checkbox(enabled), "email": email.strip(), "login": login.strip(), "host": host,
+            "port": int(port or 993), "folders": lines(folders) or ["INBOX"], "include_sent": checkbox(include_sent),
+            "backfill_days": int(backfill_days),
+        })
+        collect_soon("imap")
+        return back(request, "Сохранено", to="/settings?tab=imap")
+
+    @app.post("/settings/caldav")
+    def caldav_save(request: Request, url: str = Form(""), login: str = Form(""), password: str = Form(""),
+                    enabled: str = Form(None), calendars: str = Form("")):
+        url = url.strip()
+        if url and not url.startswith(("https://", "http://")):
+            return back(request, err="Адрес CalDAV должен начинаться с https://", to="/settings?tab=caldav")
+        if password.strip():
+            config.set_secret("CALDAV_OTHER_PASSWORD", password.strip())
+        config.update_settings("caldav", {"enabled": checkbox(enabled), "url": url, "login": login.strip(),
+                                          "calendars": lines(calendars)})
+        collect_soon("caldav")
+        return back(request, "Сохранено", to="/settings?tab=caldav")
+
+    @app.post("/settings/ics_calendar")
+    def ics_calendar_save(request: Request, urls: str = Form(""), enabled: str = Form(None), forget: str = Form(None)):
+        new = lines(urls)
+        bad = [u for u in new if not u.startswith(("https://", "webcal://"))]
+        if bad:
+            return back(request, err="Это не похоже на ссылку на календарь (https:// или webcal://): " + bad[0][:80],
+                        to="/settings?tab=ics_calendar")
+        if new or checkbox(forget):
+            config.set_secret("ICS_CALENDAR_URLS", " ".join(new) or None)
+        config.update_settings("ics_calendar", {"enabled": checkbox(enabled)})
+        collect_soon("ics_calendar")
+        return back(request, "Сохранено", to="/settings?tab=ics_calendar")
 
     # --- Kaiten ---
 
@@ -821,17 +832,18 @@ def register(app: FastAPI, render, back) -> None:
         from opsdash import brain
 
         if engine not in brain.ENGINES:
-            return back(request, err="Неизвестный выбор", to="/settings?tab=claude")
+            return back(request, err="Неизвестный выбор")
         was = brain.busy()
         config.update_settings("ai", {"engine": engine})
         note = (f" — {brain.ENGINES[was]} доработает начатое, дальше работает {brain.ENGINES[engine]}"
                 if was and was != engine else "")
-        return back(request, f"Теперь в PULSE работает {brain.ENGINES[engine]}{note}", to="/settings?tab=claude")
+        # назад — откуда переключали: каталог «Подключений» или окно помощника
+        return back(request, f"Теперь в PULSE работает {brain.ENGINES[engine]}{note}")
 
     @app.post("/settings/chatgpt")
     def chatgpt_save(request: Request, path: str = Form(""), model: str = Form("")):
         config.update_settings("chatgpt", {"path": path.strip().strip('"'), "model": model.strip()})
-        return back(request, "Сохранено", to="/settings?tab=claude#chatgpt")
+        return back(request, "Сохранено", to="/settings?tab=chatgpt")
 
     @app.post("/settings/chatgpt/login")
     async def chatgpt_login(request: Request):
@@ -840,10 +852,10 @@ def register(app: FastAPI, render, back) -> None:
         try:
             await run_in_threadpool(codex.open_login)
         except brain.BrainError as e:
-            return back(request, err=str(e), to="/settings?tab=claude#chatgpt")
+            return back(request, err=str(e), to="/settings?tab=chatgpt")
         where = "Терминал" if sys.platform == "darwin" else "окно PowerShell"
         return back(request, f"Открыла {where}: войдите в ChatGPT в браузере, затем обновите эту страницу",
-                    to="/settings?tab=claude#chatgpt")
+                    to="/settings?tab=chatgpt")
 
     @app.post("/settings/claude/login")
     async def claude_login(request: Request):

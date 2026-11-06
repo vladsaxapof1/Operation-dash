@@ -1,0 +1,17 @@
+{#- окно подключения: другой календарь по CalDAV — iCloud, Fastmail, Nextcloud, Zoho (MORE-2), только чтение #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b">
+  <form method="post" action="/settings/caldav">
+    {{ enabled_box('caldav', 'Читать этот календарь') }}
+    <label>Адрес CalDAV-сервера</label><input type="text" name="url" value="{{ settings.caldav.url }}" placeholder="https://caldav.fastmail.com">
+    <div class="hint">Например: iCloud — <code class="nowrap">https://caldav.icloud.com</code>, Fastmail — <code class="nowrap">https://caldav.fastmail.com</code>,
+      Zoho — <code class="nowrap">https://calendar.zoho.com</code>, Nextcloud — <code class="nowrap">https://ваш-сервер/remote.php/dav</code>.</div>
+    <div class="form-row">
+      <div><label>Логин</label><input type="text" name="login" value="{{ settings.caldav.login }}" placeholder="anna@icloud.com"></div>
+      <div><label>Пароль</label>{{ secret_input('password', 'CALDAV_OTHER_PASSWORD', 'пароль приложения') }}</div>
+    </div>
+    <label>Какие календари читать (названия, пусто = все)</label><textarea name="calendars" rows="2">{{ settings.caldav.calendars | join('\n') }}</textarea>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('caldav') }}</div>
+  </form>
+  <p class="hint">PULSE только читает этот календарь: новые встречи создаются в Яндекс Календаре, а отменить встречу можно только в самом календаре.</p>
+</div></section>

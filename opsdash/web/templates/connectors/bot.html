@@ -1,0 +1,28 @@
+{#- окно подключения: bot (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/bot">
+    {{ enabled_box('telegram_bot', 'Бот включён') }}
+    <label>Токен бота от @BotFather</label>{{ secret_input('token', 'TELEGRAM_BOT_TOKEN', '123456:ABC-DEF…') }}
+    <div class="form-row">
+      <div><label>Тихие часы с</label><input type="time" lang="ru" name="quiet_start" value="{{ settings.telegram_bot.quiet_hours.start | hhmm }}"></div>
+      <div><label>до</label><input type="time" lang="ru" name="quiet_end" value="{{ settings.telegram_bot.quiet_hours.end | hhmm }}"></div>
+    </div>
+    <div class="hint">В тихие часы приходят только срочные сообщения, остальное — утром.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('bot') }}</div>
+  </form>
+</div></section>
+<section class="card"><div class="card-h"><h2>Привязка к вам</h2></div><div class="card-b">
+  {% if settings.telegram_bot.owner_chat_id %}
+    <p>✅ Бот привязан к вашему Telegram.</p>
+    <div class="actions">
+      <form class="inline" method="post" action="/settings/bot/test"><button class="btn">Отправить проверочное сообщение</button></form>
+      <form class="inline" method="post" action="/settings/bot/unpair" data-confirm="Отвязать бота?"><button class="btn ghost danger">Отвязать</button></form>
+    </div>
+  {% else %}
+    <p>Откройте бота в Telegram и отправьте ему команду:</p>
+    <p style="font-size:20px"><code>/start {{ pair_code }}</code></p>
+    {% if bot_username %}<p><a class="btn primary" href="https://t.me/{{ bot_username }}?start={{ pair_code }}" target="_blank">Открыть @{{ bot_username }} в Telegram</a></p>{% endif %}
+    <div class="hint">Бот будет отвечать только вам. PULSE должен быть запущен. После привязки обновите страницу.</div>
+  {% endif %}
+</div></section>

@@ -1,9 +1,11 @@
-"""Яндекс Календарь по CalDAV (пароль приложения «Календарь») и Google Календарь — только чтение,
-по секретным адресам iCal (без OAuth и паролей).
+"""Яндекс Календарь по CalDAV (пароль приложения «Календарь»), Google Календарь по секретным адресам iCal,
+любой другой календарь по CalDAV и любой календарь по ссылке .ics — три последних только читаются.
 
 Чтение: встречи на ближайшие дни — для сводок и чтобы привязать запись к встрече
 (тема, участники). Запись (создать/отменить) — только в Яндекс и только через подтверждение.
-Встречи Google хранятся в той же таблице с приставкой «google:» в uid.
+Встречи Google, другого CalDAV и календарей по ссылке хранятся в той же таблице с приставкой в uid:
+«google:», «caldav:», «ics:» — по ней каждый сбор чистит только свои встречи, а интерфейс знает, что они только для
+чтения.
 """
 
 from __future__ import annotations
@@ -15,29 +17,35 @@ from opsdash import config, store
 
 SOURCE = "calendar"
 GOOGLE = "google:"  # приставка uid у встреч из Google Календаря
+CALDAV = "caldav:"  # другой календарь по CalDAV
+ICS = "ics:"  # календарь по ссылке .ics
+READ_ONLY = (GOOGLE, CALDAV, ICS)  # встречи этих календарей PULSE только читает
 
 
 class CalendarError(Exception):
     pass
 
 
-def _client(settings: dict):
+def _client(settings: dict, section: str = "calendar"):
     import caldav
 
-    cs = settings["calendar"]
-    pwd = config.get_secret("CALDAV_APP_PASSWORD")
+    cs = settings[section]
+    pwd = config.get_secret("CALDAV_APP_PASSWORD" if section == "calendar" else "CALDAV_OTHER_PASSWORD")
     if not cs.get("login") or not pwd:
         raise CalendarError("Укажите логин (адрес почты) и пароль приложения для календаря")
-    return caldav.DAVClient(url=cs.get("url") or "https://caldav.yandex.ru", username=cs["login"], password=pwd)
+    url = cs.get("url") or ("https://caldav.yandex.ru" if section == "calendar" else "")
+    if not url:
+        raise CalendarError("Укажите адрес CalDAV-сервера, например https://caldav.fastmail.com")
+    return caldav.DAVClient(url=url, username=cs["login"], password=pwd)
 
 
-def _calendars(settings: dict):
-    client = _client(settings)
+def _calendars(settings: dict, section: str = "calendar"):
+    client = _client(settings, section)
     try:
         cals = client.principal().calendars()
     except Exception as e:  # noqa: BLE001
         raise CalendarError(f"Календарь не пустил: {e}") from e
-    wanted = [c.strip().lower() for c in settings["calendar"].get("calendars") or [] if c.strip()]
+    wanted = [c.strip().lower() for c in settings[section].get("calendars") or [] if c.strip()]
     if wanted:
         cals = [c for c in cals if (c.name or "").strip().lower() in wanted]
     return cals
@@ -116,9 +124,11 @@ def _window(settings: dict) -> tuple[datetime, datetime]:
     return start, end
 
 
-def _forget_missing(start: datetime, end: datetime, seen: list[str], google: bool) -> None:
-    """Встречи в окне, которых больше нет в календаре, — отменены. Яндекс и Google чистятся каждый своё."""
-    own = "uid LIKE 'google:%'" if google else "uid NOT LIKE 'google:%'"
+def _forget_missing(start: datetime, end: datetime, seen: list[str], prefix: str = "") -> None:
+    """Встречи в окне, которых больше нет в календаре, — отменены. Каждый календарь чистит только своё:
+    по приставке uid (Яндекс — без приставки)."""
+    own = (f"uid LIKE '{prefix}%'" if prefix
+           else " AND ".join(f"uid NOT LIKE '{p}%'" for p in READ_ONLY))
     params = [store.to_utc_iso(start), store.to_utc_iso(end)]
     if seen:
         marks = ",".join("?" for _ in seen)
@@ -128,14 +138,16 @@ def _forget_missing(start: datetime, end: datetime, seen: list[str], google: boo
         store.execute(f"DELETE FROM events WHERE start >= ? AND start <= ? AND {own}", params)
 
 
-def collect(settings: dict | None = None) -> str:
+def collect(settings: dict | None = None, section: str = "calendar") -> str:
     settings = settings or config.load_settings()
     tzinfo = config.tz(settings)
     start, end = _window(settings)
+    prefix = "" if section == "calendar" else CALDAV
     seen = []
     failed = False
-    cals = _calendars(settings)
-    store.set_state("calendar_names", [c.name or "" for c in cals])  # для выбора календаря в форме «Новая встреча»
+    cals = _calendars(settings, section)
+    if section == "calendar":  # для выбора календаря в форме «Новая встреча» — писать можно только в Яндекс
+        store.set_state("calendar_names", [c.name or "" for c in cals])
     for cal in cals:
         try:
             found = cal.search(start=start, end=end, event=True, expand=True)
@@ -148,58 +160,85 @@ def collect(settings: dict | None = None) -> str:
                 item = parse_component(comp, cal.name or "", tzinfo)
                 if not item:
                     continue
+                item["uid"] = prefix + item["uid"]
                 save_event(item)
                 seen.append(item["uid"])
     if failed:  # не удаляем то, что просто не удалось прочитать
         return f"встреч в окне: {len(seen)} (часть календарей не прочиталась)"
-    _forget_missing(start, end, seen, google=False)
+    _forget_missing(start, end, seen, prefix)
     return f"встреч в окне: {len(seen)}"
 
 
-# --- Google Календарь: секретные адреса iCal ---------------------------------------
+def caldav_collect(settings: dict | None = None) -> str:
+    """Другой календарь по CalDAV (Fastmail, iCloud, Nextcloud…) — только чтение."""
+    return collect(settings, "caldav")
+
+
+def caldav_check(settings: dict | None = None) -> str:
+    return check(settings, "caldav")
+
+
+# --- календари по ссылке iCal: Google (секретный адрес) и любой другой .ics -------------------------
 
 def google_urls() -> list[str]:
     return config.get_secret("GOOGLE_CALENDAR_ICAL").split()
 
 
-def _google_feed(url: str):
+def ics_urls() -> list[str]:
+    return config.get_secret("ICS_CALENDAR_URLS").split()
+
+
+def _feed(url: str, label: str = "Google Календарь", hint: str = "проверьте адрес"):
     import httpx
     from icalendar import Calendar
 
+    if url.startswith("webcal://"):  # так ссылки отдают Outlook и iCloud
+        url = "https://" + url[len("webcal://"):]
     try:
         r = httpx.get(url, timeout=60, follow_redirects=True)
         r.raise_for_status()
         return Calendar.from_ical(r.content)
     except httpx.HTTPStatusError as e:
-        raise CalendarError(f"Google Календарь не отдал встречи (код {e.response.status_code}) — "
-                            "проверьте секретный адрес iCal") from e
+        raise CalendarError(f"{label} не отдал встречи (код {e.response.status_code}) — {hint}") from e
     except (httpx.HTTPError, ValueError) as e:
-        raise CalendarError(f"Google Календарь: не удалось прочитать адрес ({e})") from e
+        raise CalendarError(f"{label}: не удалось прочитать адрес ({e})") from e
 
 
-def google_collect(settings: dict | None = None) -> str:
+GOOGLE_HINT = "проверьте секретный адрес iCal"
+
+
+def _google_feed(url: str):
+    return _feed(url, "Google Календарь", GOOGLE_HINT)
+
+
+def _collect_feeds(settings: dict | None, urls: list[str], prefix: str, label: str, title: str, names_key: str,
+                   hint: str = "проверьте адрес") -> str:
     import recurring_ical_events
 
     settings = settings or config.load_settings()
     tzinfo = config.tz(settings)
-    urls = google_urls()
-    if not urls:
-        raise CalendarError("Добавьте секретный адрес iCal Google Календаря в настройках")
     start, end = _window(settings)
     seen, names = [], []
     for url in urls:  # ошибка любого адреса — ошибка сбора: иначе его встречи удалились бы как отменённые
-        feed = _google_feed(url)
-        name = "Google: " + str(feed.get("x-wr-calname") or "календарь")
+        feed = _feed(url, label, hint)
+        name = title + str(feed.get("x-wr-calname") or "календарь")
         names.append(name)
         for comp in recurring_ical_events.of(feed).between(start, end):  # повторы разворачиваются, переносы учтены
             item = parse_component(comp, name, tzinfo)
             if item:
-                item["uid"] = GOOGLE + item["uid"]
+                item["uid"] = prefix + item["uid"]
                 save_event(item)
                 seen.append(item["uid"])
-    _forget_missing(start, end, seen, google=True)
-    store.set_state("google_calendar_names", names)
+    _forget_missing(start, end, seen, prefix)
+    store.set_state(names_key, names)
     return f"встреч в окне: {len(seen)}"
+
+
+def google_collect(settings: dict | None = None) -> str:
+    urls = google_urls()
+    if not urls:
+        raise CalendarError("Добавьте секретный адрес iCal Google Календаря в настройках")
+    return _collect_feeds(settings, urls, GOOGLE, "Google Календарь", "Google: ", "google_calendar_names", GOOGLE_HINT)
 
 
 def google_check(settings: dict | None = None) -> str:
@@ -210,9 +249,25 @@ def google_check(settings: dict | None = None) -> str:
     return "календари: " + ", ".join(names)
 
 
-def check(settings: dict | None = None) -> str:
+def ics_collect(settings: dict | None = None) -> str:
+    """Календарь по ссылке .ics (Outlook, iCloud, Fastmail…) — только чтение."""
+    urls = ics_urls()
+    if not urls:
+        raise CalendarError("Добавьте ссылку на календарь (.ics) в настройках")
+    return _collect_feeds(settings, urls, ICS, "Календарь по ссылке", "", "ics_calendar_names")
+
+
+def ics_check(settings: dict | None = None) -> str:
+    urls = ics_urls()
+    if not urls:
+        raise CalendarError("Добавьте ссылку на календарь (.ics)")
+    names = [str(_feed(u, "Календарь по ссылке").get("x-wr-calname") or "календарь") for u in urls]
+    return "календари: " + ", ".join(names)
+
+
+def check(settings: dict | None = None, section: str = "calendar") -> str:
     settings = settings or config.load_settings()
-    cals = _calendars(settings)
+    cals = _calendars(settings, section)
     return "календари: " + (", ".join(c.name or "?" for c in cals) or "не найдены")
 
 
@@ -281,6 +336,8 @@ def create_event(title: str, start: str, end: str, attendees: list[str], descrip
 def cancel_event(uid_key: str) -> None:
     if uid_key.startswith(GOOGLE):
         raise CalendarError("Встреча из Google Календаря — PULSE его только читает, отмените её в Google Календаре")
+    if uid_key.startswith(READ_ONLY):
+        raise CalendarError("Встреча из календаря, который PULSE только читает, — отмените её в самом календаре")
     settings = config.load_settings()
     uid = uid_key.split("#", 1)[0]
     if "#" in uid_key:

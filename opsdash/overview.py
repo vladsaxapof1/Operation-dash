@@ -16,6 +16,9 @@ SOURCE_TITLES = {
     "gmail": "Gmail",
     "calendar": "Календарь",
     "google_calendar": "Google Календарь",
+    "imap": "Почта по IMAP",
+    "caldav": "Календарь CalDAV",
+    "ics_calendar": "Календарь по ссылке",
     "kaiten": "Kaiten",
     "recordings": "Записи встреч",
     "bot": "Telegram-бот",
@@ -111,7 +114,7 @@ def week_grid(monday: date, settings: dict | None = None, *, ndays: int = 7, hou
     allday, timed = [], []
     for n, e in enumerate(events):
         e["n"] = n
-        e["google"] = e["uid"].startswith("google:")
+        e["google"] = e["uid"].startswith(("google:", "caldav:", "ics:"))  # календарь только для чтения — своим цветом
         e["past"] = store.parse_ts(e["end"]) <= now
         s, f = store.parse_ts(e["start"]).astimezone(tz), store.parse_ts(e["end"]).astimezone(tz)
         e["s_local"], e["e_local"] = s, f
@@ -197,7 +200,7 @@ def sources_health(settings: dict | None = None) -> list[dict]:
     settings = settings or config.load_settings()
     jobs = {j["name"]: j for j in store.rows("SELECT * FROM jobs")}
     out = []
-    for key in ("telegram", "ymessenger", "pachca", "mail", "gmail", "calendar", "google_calendar", "kaiten"):
+    for key in config.SOURCES:
         enabled = settings.get(key, {}).get("enabled")
         job = jobs.get(f"collect:{key}") or {}
         if not enabled:
@@ -224,7 +227,7 @@ def sources_health(settings: dict | None = None) -> list[dict]:
 
 
 def _claude_health(settings: dict) -> dict:
-    """Состояние того, кто сейчас работает в PULSE: Claude или ChatGPT (Настройки → Claude / ChatGPT)."""
+    """Состояние того, кто сейчас работает в PULSE: Claude или ChatGPT (Настройки → Подключения → Помощник)."""
     from opsdash import brain
 
     if brain.engine(settings) == "chatgpt":
@@ -234,18 +237,18 @@ def _claude_health(settings: dict) -> dict:
         path = codex.find(settings)
         login = codex.login_status(path, settings, max_age=60) if path else None
         if not path:
-            item.update(status="error", note="не найден", error="Codex (ChatGPT) не найден — Настройки → Claude / ChatGPT")
+            item.update(status="error", note="не найден", error="Codex (ChatGPT) не найден — Настройки → Подключения → ChatGPT")
         elif login and not login["loggedIn"]:
             item.update(status="error", note="нужен вход",
-                        error="Вход в ChatGPT не выполнен — Настройки → Claude / ChatGPT → «Войти в ChatGPT»")
+                        error="Вход в ChatGPT не выполнен — Настройки → Подключения → ChatGPT → «Войти в ChatGPT»")
         return item
     item = {"key": "claude", "title": "Claude", "status": "ok", "last_ok": None, "error": None, "note": "подключён"}
     path = brain.find_claude(settings)
     login = brain.login_status(path, settings, max_age=60) if path else None
     if not path:
-        item.update(status="error", note="не найден", error="Claude Code не найден — Настройки → Claude")
+        item.update(status="error", note="не найден", error="Claude Code не найден — Настройки → Подключения → Claude")
     elif login and not login["loggedIn"]:
-        item.update(status="error", note="нужен вход", error="Вход в Claude не выполнен — Настройки → Claude → «Войти в Claude»")
+        item.update(status="error", note="нужен вход", error="Вход в Claude не выполнен — Настройки → Подключения → Claude → «Войти в Claude»")
     return item
 
 

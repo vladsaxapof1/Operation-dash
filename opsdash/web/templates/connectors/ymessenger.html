@@ -1,0 +1,24 @@
+{#- окно подключения: ymessenger (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<div class="alert info"><b>Важно:</b> бот Яндекс Мессенджера видит только те чаты, куда его добавили. Ваши личные переписки он читать не может — это ограничение Яндекса. Бота создаёт администратор Яндекс 360 — <a href="/help/02-подключения#яндекс-мессенджер">что ему написать</a>.</div>
+<section class="card"><div class="card-b" style="padding-top:12px">
+  <form method="post" action="/settings/ymessenger">
+    {{ enabled_box('ymessenger', 'Читать Яндекс Мессенджер') }}
+    <label>OAuth-токен бота</label>{{ secret_input('token', 'YM_BOT_TOKEN') }}
+    <label>Ваш логин в Яндекс 360</label><input type="text" name="my_login" value="{{ settings.ymessenger.my_login }}" placeholder="anna@company.ru">
+    <div class="hint">Чтобы отличать ваши сообщения от чужих.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('ymessenger') }}</div>
+  </form>
+</div></section>
+<section class="card"><div class="card-h"><h2>Чаты с ботом</h2></div><div class="card-b">
+  {% if chats %}
+  <form method="post" action="/settings/chats">
+    <input type="hidden" name="source" value="ymessenger">
+    <div class="table-wrap"><table class="t"><thead><tr><th>Название (можно переименовать)</th><th>Читать</th></tr></thead><tbody>
+    {% for c in chats %}<tr><td><input type="text" name="title__{{ c.chat_id }}" value="{{ c.title }}"></td>
+      <td><select name="chat__{{ c.chat_id }}" style="width:auto"><option value="1" {{ 'selected' if c.enabled == 1 }}>читать</option><option value="0" {{ 'selected' if c.enabled != 1 }}>нет</option></select></td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+  {% else %}<p class="muted">Чаты появятся после первого сообщения в чате, куда добавлен бот.</p>{% endif %}
+</div></section>

@@ -1,0 +1,23 @@
+{#- окно подключения: gmail (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b">
+  <form method="post" action="/settings/gmail">
+    {{ enabled_box('gmail', 'Читать Gmail') }}
+    <label>Адрес Gmail</label><input type="email" name="email" value="{{ settings.gmail.email }}" placeholder="anna@gmail.com">
+    <label>Пароль приложения Google</label>{{ secret_input('password', 'GMAIL_APP_PASSWORD', '16 букв, не обычный пароль') }}
+    <ol class="small">
+      <li>Включите двухэтапную аутентификацию: <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank">Аккаунт Google → Безопасность</a>.</li>
+      <li>Создайте пароль приложения: <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a> → название «PULSE» → «Создать».</li>
+      <li>Скопируйте 16 букв сюда (пробелы можно оставить) и нажмите «Сохранить».</li>
+    </ol>
+    <div class="hint">Если пункта «Пароли приложений» нет — у рабочего Google-аккаунта их может запрещать администратор.</div>
+    <label class="check"><input type="checkbox" name="primary_only" {{ 'checked' if settings.gmail.primary_only }}> Только «Основные» входящие — без «Промоакций», «Соцсетей» и «Оповещений»</label>
+    <label class="check"><input type="checkbox" name="include_sent" {{ 'checked' if settings.gmail.include_sent }}> Читать «Отправленные»</label>
+    <div class="form-row">
+      <div><label>Папки</label><textarea name="folders" rows="2">{{ settings.gmail.folders | join('\n') }}</textarea></div>
+      <div><label>Загрузить письма за, дней</label><input type="number" name="backfill_days" value="{{ settings.gmail.backfill_days }}" min="0" max="30"></div>
+    </div>
+    <div class="hint">Отправители из списка «Не обращать внимания» у Яндекс Почты пропускаются и здесь.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('gmail') }}</div>
+  </form>
+</div></section>

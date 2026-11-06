@@ -263,7 +263,7 @@ def index(settings: dict | None = None) -> str:
     settings = settings or config.load_settings()
     roots = folders(settings)
     if not roots:
-        raise DocsError("Не выбраны папки с документами — Настройки → Документы")
+        raise DocsError("Не выбраны папки с документами — Настройки → Подключения → Документы")
     exclude = settings["knowledge"].get("exclude") or []
     known = {r["path"]: r for r in store.rows("SELECT path, mtime, size, status FROM docs")}
     seen, changed, errors = set(), 0, 0

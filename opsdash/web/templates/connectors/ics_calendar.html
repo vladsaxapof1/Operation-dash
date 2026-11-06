@@ -1,0 +1,18 @@
+{#- окно подключения: календарь по ссылке .ics / webcal — Outlook, iCloud и другие (MORE-2), только чтение #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b">
+  <form method="post" action="/settings/ics_calendar">
+    {{ enabled_box('ics_calendar', 'Читать календари по ссылке') }}
+    <label>Ссылки на календари (по одной в строке)</label>
+    <textarea name="urls" rows="2" autocomplete="off" placeholder="{{ ('сохранено ссылок: ' ~ ics_urls ~ ' — оставьте пустым, чтобы не менять') if ics_urls else 'https://… .ics или webcal://…' }}"></textarea>
+    <ul class="small">
+      <li><b>Outlook / Microsoft 365:</b> Outlook в браузере → ⚙ Настройки → Календарь → Общие календари → «Опубликовать календарь» → ссылка ICS.</li>
+      <li><b>iCloud:</b> Календарь на iPhone или icloud.com → «поделиться» у календаря → «Открытый календарь» → скопировать ссылку.</li>
+      <li>Подойдёт любая ссылка, которая начинается с <code>https://</code> или <code>webcal://</code> и отдаёт календарь в формате .ics.</li>
+    </ul>
+    <div class="hint">Ссылка даёт доступ к вашим встречам — храните её как пароль: она сохраняется только на этом компьютере.</div>
+    {% if ics_urls %}<label class="check"><input type="checkbox" name="forget"> Забыть сохранённые ссылки</label>{% endif %}
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('ics_calendar') }}</div>
+  </form>
+  <p class="hint">PULSE только читает эти календари: новые встречи создаются в Яндекс Календаре.</p>
+</div></section>

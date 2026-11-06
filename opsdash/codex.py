@@ -1,4 +1,4 @@
-"""ChatGPT как «мозг» PULSE: Codex CLI в фоне (`codex exec`) — замена Claude Code на выбор (Настройки → Claude / ChatGPT).
+"""ChatGPT как «мозг» PULSE: Codex CLI в фоне (`codex exec`) — замена Claude Code на выбор (Настройки → Подключения → Помощник).
 
 Codex берём из приложения ChatGPT (оно носит его с собой) или установленный отдельно; вход — аккаунтом ChatGPT,
 расход — в рамках подписки. Работает в папке проекта по той же инструкции CLAUDE.md и тем же навыкам: инструкцию
@@ -75,7 +75,7 @@ def _codex(settings: dict) -> str:
     codex = find(settings)
     if not codex:
         raise brain.BrainError("Не найден Codex (ChatGPT). Установите приложение ChatGPT или Codex CLI и войдите — "
-                               "Настройки → Claude / ChatGPT")
+                               "Настройки → Подключения → Помощник")
     return codex
 
 
@@ -270,7 +270,7 @@ def stream(prompt: str, *, settings: dict, model: str | None = None, resume: str
     codex = _codex(settings)
     status = login_status(codex, settings, max_age=300)
     if status and not status["loggedIn"]:
-        raise brain.BrainError("ChatGPT: не выполнен вход — Настройки → Claude / ChatGPT → «Войти в ChatGPT»")
+        raise brain.BrainError("ChatGPT: не выполнен вход — Настройки → Подключения → ChatGPT → «Войти в ChatGPT»")
     thread = resume[len(SESSION_PREFIX):] if resume else None
     level = effort_for(model, effort)
     cmd = _command(settings, codex, model=model, resume=thread, effort=level, own_config=own_config)
@@ -336,7 +336,7 @@ def stream(prompt: str, *, settings: dict, model: str | None = None, resume: str
     if not done or proc.returncode != 0:
         reason = failure or stderr.strip()[-1500:] or f"код {proc.returncode}"
         if "not logged in" in reason.lower() or "401 unauthorized" in reason.lower():
-            reason = "не выполнен вход — Настройки → Claude / ChatGPT → «Войти в ChatGPT»"
+            reason = "не выполнен вход — Настройки → Подключения → ChatGPT → «Войти в ChatGPT»"
         raise brain.BrainError(f"ChatGPT: {reason[:1500]}")
     tokens = sum(int((usage or {}).get(k) or 0) for k in ("input_tokens", "output_tokens"))
     store.log(job, f"ChatGPT закончил за {round(time.monotonic() - started)} с"

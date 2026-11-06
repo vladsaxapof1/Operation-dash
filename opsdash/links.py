@@ -24,6 +24,8 @@ def original(source: str | None, chat_id, msg_id=None, sender_id: str | None = N
     if source == "telegram":
         return _telegram(str(chat_id), msg_id, username)
     if source == "mail":
+        if str(chat_id).startswith("imap:"):  # почта по IMAP: у сервера нет известного веб-адреса письма
+            return None
         return _mail(str(chat_id), msg_id, sender_id)
     if source == "pachca":
         return _pachca(str(chat_id), msg_id, saved)

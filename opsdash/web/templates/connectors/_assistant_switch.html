@@ -1,0 +1,19 @@
+{#- верх окна Claude и ChatGPT: работает ли этот помощник в PULSE, кнопка переключить и пояснение, почему работает
+    только один (brain.turn). Тот же выбор — переключателем над карточками помощников в каталоге #}
+{% set me = conn.assistant %}
+<div class="conn-switch{{ ' is-on' if engine == me }}">
+  {% if engine == me %}
+  <p><b>Сейчас в PULSE работает {{ engines[me] }}.</b> Встречи, сообщения, дайджесты, брифы, бот и «Спросить» —
+    на нём, в рамках вашей подписки {{ engines[me] }}.</p>
+  {% else %}
+  <p>Сейчас в PULSE работает <b>{{ engines[engine] }}</b>. {{ engines[me] }} включится, если переключить.</p>
+  <form method="post" action="/settings/ai"><input type="hidden" name="engine" value="{{ me }}"><button class="btn">Переключить на {{ engines[me] }}</button></form>
+  {% endif %}
+</div>
+{% if engine_busy and engine_busy != engine %}<p class="small warn-text" style="margin:0">{{ engines[engine_busy] }} доделывает начатое — {{ engines[engine] }} начнёт, как только он закончит.</p>{% endif %}
+<details class="conn-spoiler">
+  <summary>Почему работает только один помощник</summary>
+  <p class="small">Оба помощника работают по одной инструкции и с одними данными, поэтому вдвоём они разбирали бы одно
+    и то же. Если переключить посреди задания, его доделает прежний, а следующие возьмёт выбранный. Разговоры в
+    «Спросить» продолжатся: новый помощник получит их начало пересказом.</p>
+</details>

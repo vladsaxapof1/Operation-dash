@@ -1,0 +1,138 @@
+{#- Настройки → Подключения: каталог карточками по группам (CON-2) и окно источника поверх него (CON-3).
+    Тексты — opsdash/connectors.yaml, состояние — opsdash/connectors.py, формы источников — connectors/<id>.html #}
+{% macro logo(c, size=40) -%}
+<span class="conn-logo" style="--logo: {{ c.color }}; --size: {{ size }}px" aria-hidden="true">
+  {%- if c.logo %}<img src="/static/logos/{{ c.logo }}" alt="">{% else %}<span class="conn-mono{{ ' long' if c.mono | length > 1 }}">{{ c.mono }}</span>{% endif -%}
+</span>
+{%- endmacro %}
+{% macro status(c) -%}
+{% set cls = {'ok': 'ok', 'pending': 'warn', 'setup': 'warn', 'error': 'bad'}.get(c.kind, '') %}
+{% set dot = {'ok': 'ok', 'pending': 'warn', 'setup': 'warn', 'error': 'bad', 'paused': 'off', 'off': 'off', 'standby': 'off'}.get(c.kind, '') %}
+<span class="st small conn-st {{ cls }}">{% if dot %}<span class="dot {{ dot }}"></span>{% endif %}<span>{{ c.label }}{% if c.kind == 'ok' and c.last_ok %} · обновлено {{ c.last_ok | ago }}{% endif %}</span></span>
+{%- endmacro %}
+{% macro action(c) -%}
+{%- if c.assistant %}{{ 'Установить' if c.kind == 'off' else ('Войти' if c.label.endswith('нужен вход') else 'Настроить') }}
+{%- else %}{{ {'off': 'Подключить', 'error': 'Починить', 'setup': 'Продолжить', 'paused': 'Включить'}.get(c.kind, 'Настроить') }}{% endif %}
+{%- endmacro %}
+
+<div class="conn-head">
+  <div>
+    <h2>Подключения</h2>
+    <p class="muted small">Подключено {{ catalog.on }} из {{ catalog.total }}{% if catalog.problems %} · <span class="warn-text">{{ catalog.problems }} {{ 'требует' if catalog.problems == 1 else 'требуют' }} внимания</span>{% endif %}</p>
+  </div>
+  <p class="conn-private small">Всё хранится на этом компьютере: пароли и ключи — в папке <code>secrets</code>, письма и сообщения — в <code>data</code>. Наружу уходит только текст для разбора — в {{ catalog.engine }} по вашей подписке. <a href="/settings?tab=data">Что PULSE делает с данными →</a></p>
+</div>
+
+{% if health %}
+{#- «Здоровье» (CON-5): система одной строкой плиток — помощник, фоновые задания, уведомления, записи, диск, ошибки,
+    автозапуск; что не так — с подсказкой, что сделать. Источники — на своих карточках ниже. То же — ./ops doctor #}
+{% set hcls = {'ok': 'ok', 'warn': 'warn', 'bad': 'bad', 'off': ''} %}
+<section class="conn-health" aria-labelledby="conn-health-h">
+  <div class="conn-health-head">
+    <h3 id="conn-health-h">Здоровье</h3>
+    <span class="st small {{ hcls[health.system_worst] }}"><span class="dot {{ hcls[health.system_worst] or 'off' }}"></span>{{ health.system_summary }}</span>
+  </div>
+  <ul class="conn-health-grid">
+    {% for r in health.system %}
+    <li class="conn-hrow is-{{ r.level }}">
+      <span class="dot {{ hcls[r.level] or 'off' }}"></span>
+      <div class="conn-hrow-b">
+        <div><b>{{ r.title }}</b> <span class="conn-hrow-t">{{ r.text }}</span></div>
+        {% if r.fix and r.level in ('warn', 'bad') %}<div class="conn-hrow-fix">{{ r.fix }}{% if r.link %} <a href="{{ r.link }}">Открыть →</a>{% endif %}</div>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% for g in catalog.groups %}
+<section class="conn-group" aria-labelledby="cg-{{ g.id }}">
+  {% if g.id == 'ai' %}
+  {#- помощники: работает один из двух — переключатель здесь же, пояснение под спойлером #}
+  <div class="conn-group-h">
+    <h3 id="cg-{{ g.id }}">{{ g.title }}</h3>
+    <form method="post" action="/settings/ai" class="seg" aria-label="Кто работает в PULSE">{% for key, title in catalog.engines.items() %}<button name="engine" value="{{ key }}" class="{{ 'active' if catalog.engine_key == key }}"{% if catalog.engine_key == key %} aria-pressed="true"{% endif %}>{{ title }}</button>{% endfor %}</form>
+  </div>
+  <details class="conn-spoiler">
+    <summary>Работает только один помощник — сейчас {{ catalog.engine }}</summary>
+    <p class="small">Claude и ChatGPT работают по одной инструкции и с одними данными, поэтому одновременно включён один.
+      Переключить можно в любой момент: начатое доделает прежний, следующее возьмёт выбранный, а разговоры в «Спросить»
+      продолжатся с пересказом начала.</p>
+  </details>
+  {% else %}
+  <h3 id="cg-{{ g.id }}">{{ g.title }}</h3>
+  {% endif %}
+  <div class="conn-grid">
+    {% for c in g.cards %}
+    <a class="conn-card{{ ' is-off' if c.kind == 'off' }}{{ ' is-active' if c.active }}" href="{{ ('/settings?tab=' ~ c.id) if c.panel else c.page }}">
+      <div class="conn-card-h">{{ logo(c) }}<div class="conn-card-t"><div class="conn-name">{{ c.title_now }}</div>{{ status(c) }}</div></div>
+      <p class="conn-catch">{{ c.catches }}</p>
+      <div class="conn-card-f"><span class="btn sm">{{ action(c) }}</span>{% if c.minutes and c.kind == 'off' %}<span class="muted small">около {{ c.minutes }} мин</span>{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% if catalog.soon %}
+{#- «Скоро» (CON-8): что подключаем следующим; «Нужно мне» — задача разработчику на GitHub с названием сервиса #}
+<section class="conn-group conn-soon" aria-labelledby="cg-soon">
+  <div class="conn-group-h"><h3 id="cg-soon">Скоро</h3></div>
+  <p class="conn-soon-note small">Подключения, которые делаем следующими.{% if catalog.soon[0].request %} «Нужно мне» откроет задачу
+    разработчику на GitHub с названием сервиса — так видно, что подключать первым. PULSE ничего не отправляет сам.{% endif %}</p>
+  <div class="conn-grid">
+    {% for c in catalog.soon %}
+    <div class="conn-card is-soon">
+      <div class="conn-card-h">{{ logo(c) }}<div class="conn-card-t"><div class="conn-name">{{ c.title }}</div><span class="st small conn-st muted">скоро</span></div></div>
+      <p class="conn-catch">{{ c.catches }}</p>
+      {% if c.request %}<div class="conn-card-f"><a class="btn sm" href="{{ c.request }}" target="_blank" rel="noopener">Нужно мне ↗</a></div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+<p class="muted small">Порядок подключения, если с нуля: Telegram-бот → Telegram → почта → календарь → Kaiten. Пошагово — в <a href="/help/02-подключения">справке</a>.</p>
+
+{% if conn %}
+{#- окно источника: слева — что станет возможно и что PULSE читает, справа — шаги и формы. Сохранили форму — страница
+    открывается снова с этим же окном (?tab=<источник>); закрыли — адрес возвращается к каталогу (app.js) #}
+<dialog class="dlg dlg-conn" id="conn-dlg" aria-labelledby="conn-title" data-open-on-load data-conn="{{ conn.id }}">
+  <div class="conn-dlg">
+    <aside class="conn-aside">
+      <div class="conn-aside-h">{{ logo(conn, 48) }}<div><h2 id="conn-title" class="dlg-title">{{ conn.title_now }}</h2>{{ status(conn) }}</div></div>
+      <p class="conn-catch">{{ conn.catches }}</p>
+      <div>
+        <h3>Что станет возможно</h3>
+        <ul class="conn-enables">{% for e in conn.enables %}<li>{{ e }}</li>{% endfor %}</ul>
+      </div>
+      <div>
+        <h3>Что PULSE читает</h3>
+        <dl class="conn-facts">
+          <dt>Читает</dt><dd>{{ conn.reads }}</dd>
+          <dt>Не читает</dt><dd>{{ conn.skips }}</dd>
+          <dt>Никогда</dt><dd>{{ conn.never }}</dd>
+        </dl>
+      </div>
+      <p class="conn-how small">{{ conn.how }} · около {{ conn.minutes }} мин</p>
+      <a class="small" href="/help/02-подключения#{{ conn.help }}" target="_blank" rel="noopener">Подробная инструкция →</a>
+    </aside>
+    <div class="conn-main">
+      <div class="conn-main-h">
+        {% if conn.steps | length > 1 %}
+        <ol class="conn-steps" aria-label="Шаги подключения">
+          {% for st in conn.steps %}<li class="{{ 'done' if st.done }}{{ ' now' if conn.todo and st.title == conn.todo.title }}"><span class="conn-step-n">{{ '✓' if st.done else loop.index }}</span><span>{{ st.title }}</span></li>{% endfor %}
+        </ol>
+        {% else %}<span></span>{% endif %}
+        <button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">✕</button>
+      </div>
+      {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+      {% if err %}<div class="alert bad">{{ err }}</div>{% endif %}
+      {% if conn.kind == 'error' %}<div class="alert bad"><b>Сбор не работает: {{ conn.label[8:] if conn.label.startswith('ошибка: ') else conn.label }}.</b>{% if conn.error %}<div class="small conn-err">{{ conn.error[:300] }}</div>{% endif %}</div>
+      {% elif conn.kind == 'pending' %}<div class="alert info">Готово. Первый сбор — в течение нескольких минут, статус на карточке обновится сам.</div>
+      {% elif conn.kind == 'paused' %}<div class="alert info">Настроено, но выключено — PULSE ничего не собирает. Включите галочкой ниже и сохраните.</div>
+      {% endif %}
+      {% include "connectors/" ~ conn.id ~ ".html" %}
+    </div>
+  </div>
+</dialog>
+{% endif %}

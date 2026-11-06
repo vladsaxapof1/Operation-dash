@@ -1407,13 +1407,6 @@ a.task:hover { text-decoration: none; }
   .frow-act { width: 100%; padding-left: 42px; }
 }
 
-/* Настройки → Подключения */
-.conn-row { display: grid; grid-template-columns: 190px minmax(0, 1fr) auto; gap: 16px; align-items: center; }
-.conn-name { font-size: 15px; }
-.conn-row .st { white-space: normal; align-items: baseline; }
-.conn-what { font-size: 14px; color: var(--muted); }
-@media (max-width: 760px) { .conn-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } .conn-row .btn { justify-self: start; } }
-
 /* Встречи 2.0: лента по дням */
 .page-tools { margin: -8px 0 20px; }
 .tb-search.wide { width: 260px !important; }
@@ -1735,3 +1728,114 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
   .tb-search.wide { width: 100% !important; }
 }
 .hello-list { margin: 0; padding-left: 20px; text-align: left; font-size: 14px; color: var(--muted); display: grid; gap: 4px; }
+
+/* --- Настройки → Подключения: каталог карточками (CON-2) и окно источника (CON-3) --- */
+.conn-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 28px; flex-wrap: wrap; margin-bottom: 4px; }
+.conn-head p { margin: 2px 0 0; }
+.conn-private { max-width: 460px; color: var(--muted); }
+.conn-group h3 { margin-top: 22px; }
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.conn-card { display: grid; grid-template-rows: auto 1fr auto; gap: 10px; padding: 16px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius); }
+.conn-card:hover { text-decoration: none; border-color: var(--line-strong); box-shadow: var(--shadow-card); }
+.conn-card:hover .btn { border-color: var(--faint); background: var(--panel-2); }
+.conn-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.conn-card-h { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.conn-card-t { min-width: 0; }
+.conn-name { font-size: 16px; font-weight: 600; line-height: 1.3; }
+.conn-st { white-space: normal; align-items: baseline; }
+.conn-st .dot { transform: translateY(-1px); }
+.conn-catch { margin: 0; font-size: 14px; color: var(--muted); }
+.conn-card-f { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.conn-logo { --size: 40px; width: var(--size); height: var(--size); flex: none; display: grid; place-items: center; overflow: hidden;
+  border-radius: calc(var(--size) / 4); background: var(--logo, var(--muted)); color: #fff; }
+.conn-logo:has(img) { background: none; }
+.conn-logo img { width: 100%; height: 100%; display: block; }
+.conn-mono { font-weight: 700; font-size: calc(var(--size) * .42); line-height: 1; letter-spacing: -.02em; }
+.conn-mono.long { font-size: calc(var(--size) * .34); }
+
+.dlg-conn { width: min(1060px, calc(100vw - 32px)); }
+.conn-dlg { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: min(560px, calc(100vh - 50px)); }
+.conn-aside { position: sticky; top: 0; align-self: start; display: grid; gap: 14px; padding: 24px 22px;
+  background: var(--panel-2); border-right: 1px solid var(--line); min-height: min(560px, calc(100vh - 50px)); align-content: start; }
+.conn-aside h3 { margin: 4px 0 6px; }
+.conn-aside-h { display: flex; gap: 12px; align-items: center; }
+.conn-aside .dlg-title { font-size: 19px; }
+.conn-enables { margin: 0; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
+.conn-facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; font-size: 14px; }
+.conn-facts dt { color: var(--muted); }
+.conn-facts dd { margin: 0; }
+.conn-how { margin: 0; color: var(--muted); }
+.conn-main { padding: 18px 28px 26px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.conn-main-h { display: flex; align-items: flex-start; gap: 12px; }
+.conn-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; flex: 1; font-size: 14px; color: var(--muted); }
+.conn-steps li { display: flex; align-items: center; gap: 7px; }
+.conn-step-n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--line-strong); background: var(--panel); }
+.conn-steps li.done { color: var(--text); }
+.conn-steps li.done .conn-step-n { background: var(--ok-soft); color: var(--ok-text); border-color: transparent; }
+.conn-steps li.now { color: var(--text); font-weight: 600; }
+.conn-steps li.now .conn-step-n { background: var(--accent); color: #fff; border-color: transparent; }
+.conn-main .dlg-x { margin: -4px -10px 0 auto; }
+.conn-main .alert { margin: 0; }
+.conn-err { margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
+/* формы источников — те же, что были вкладками: в окне без рамок карточек, шаги разделены линией */
+.conn-main .card { border: 0; border-radius: 0; background: none; margin: 0; }
+.conn-main .card + .card { border-top: 1px solid var(--line); padding-top: 6px; }
+.conn-main .card-h, .conn-main .card-b { padding-left: 0; padding-right: 0; }
+.conn-main .card-b { padding-bottom: 8px; }
+.conn-main > .card:first-of-type .card-b { padding-top: 0; }
+/* «Здоровье» над каталогом: плитки системы, что не так — с подсказкой (CON-5) */
+.conn-health { margin: 14px 0 4px; padding: 14px 16px 16px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); }
+.conn-health-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.conn-health-head h3 { margin: 0; }
+.conn-health-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px 18px; }
+.conn-hrow { display: flex; gap: 9px; align-items: baseline; font-size: 14px; min-width: 0; }
+.conn-hrow .dot { transform: translateY(-1px); }
+.conn-hrow-b { min-width: 0; }
+.conn-hrow-t { color: var(--muted); overflow-wrap: anywhere; }
+.conn-hrow.is-warn .conn-hrow-t { color: var(--warn-text); }
+.conn-hrow.is-bad .conn-hrow-t { color: var(--bad-text); }
+.conn-hrow-fix { margin-top: 2px; font-size: 13px; color: var(--muted); }
+.conn-hrow.is-warn, .conn-hrow.is-bad { grid-column: 1 / -1; }  /* что не так — во всю ширину, с подсказкой */
+
+/* помощники: переключатель над карточками, выбранный — с рамкой акцента; верх окна Claude / ChatGPT */
+.conn-group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin: 22px 0 6px; }
+.conn-group-h h3 { margin: 0; }
+.conn-group-h .seg button { min-width: 92px; }
+.conn-spoiler { margin: 0 0 10px; }
+.conn-spoiler summary { cursor: pointer; font-size: 14px; color: var(--muted); width: fit-content; }
+.conn-spoiler summary:hover { color: var(--text); }
+.conn-spoiler p { margin: 6px 0 0; max-width: 680px; color: var(--muted); }
+.conn-card.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.conn-switch { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-size: 14px; }
+.conn-switch p { margin: 0; flex: 1 1 320px; }
+.conn-switch.is-on { background: var(--accent-soft); border-color: transparent; }
+.conn-main > .conn-spoiler { margin: -2px 0 0; }
+@media (max-width: 760px) {
+  .conn-dlg { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .conn-aside { position: static; border-right: 0; border-bottom: 1px solid var(--line); min-height: 0; padding: 18px 16px; }
+  .conn-main { padding: 14px 16px 20px; }
+  .conn-main .dlg-x { position: absolute; top: 10px; right: 10px; margin: 0; }  /* крестик — сразу виден, над описанием */
+  .conn-aside-h { padding-right: 36px; }
+}
+
+/* Настройки → Ваши данные (CON-7) */
+.data-intro p, .data-howto p { margin: 0 0 10px; max-width: 760px; }
+.data-intro p:last-child, .data-howto p:last-child { margin-bottom: 0; }
+.data-runs { list-style: none; margin: 0 0 8px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 24px; font-size: 14px; }
+.data-runs li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dashed var(--line); padding: 3px 0; }
+.data-conn td { vertical-align: top; }
+
+/* ONB-4: пока ничего не подключено — баннер на Сводке с кнопкой в каталог, пустая лента объясняет почему */
+.setup-alert-act { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin-top: 8px; }
+.feed-setup { margin: 0; padding: 18px 20px; }
+
+/* «Скоро» (CON-8): серые карточки — ещё не подключаются */
+.conn-soon-note { margin: -2px 0 10px; color: var(--muted); max-width: 720px; }
+.conn-card.is-soon { background: var(--panel-2); border-style: dashed; }
+.conn-card.is-soon .conn-logo { filter: grayscale(.85); opacity: .75; }
+.conn-card.is-soon:hover { box-shadow: none; border-color: var(--line); }

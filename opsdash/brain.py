@@ -4,7 +4,7 @@ Claude работает в папке проекта: читает CLAUDE.md и 
 пользуется командой ./ops и пишет только в data/. Писать во внешние системы
 он может только через очередь подтверждений (./ops propose ...).
 
-Вместо Claude можно выбрать ChatGPT (Настройки → Claude / ChatGPT, opsdash.codex): run и stream запускают
+Вместо Claude можно выбрать ChatGPT (Настройки → Подключения → Помощник, opsdash.codex): run и stream запускают
 выбранного. Одновременно работает только один (turn): переключили посреди задания — новый ждёт, пока прежний
 закончит то, что уже начал.
 """
@@ -280,12 +280,12 @@ def _result(data, returncode: int, stderr: str, out: str, job: str, model: str |
             limits: dict | None = None) -> dict:
     from opsdash import usage
 
-    usage.record(job, model, data if isinstance(data, dict) else None, limits)  # расход и лимиты — в «Настройки → Claude»
+    usage.record(job, model, data if isinstance(data, dict) else None, limits)  # расход и лимиты — в «Настройки → Подключения → Claude»
     if isinstance(data, dict) and (returncode != 0 or data.get("is_error")) and (data.get("result") or data.get("subtype")):
         # в JSON-ответе есть причина — показываем её, а не весь ответ целиком
         reason = str(data.get("result") or data.get("subtype"))
         if "not logged in" in reason.lower():
-            reason = "не выполнен вход — Настройки → Claude → «Войти в Claude»"
+            reason = "не выполнен вход — Настройки → Подключения → Claude → «Войти в Claude»"
         raise BrainError(f"Claude: {reason[:1500]}")
     if returncode != 0 or not isinstance(data, dict):
         err = (stderr or out or "").strip()[-1500:]

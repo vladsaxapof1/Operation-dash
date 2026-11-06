@@ -1,0 +1,67 @@
+{#- Настройки → Ваши данные (CON-7): где лежит, что уходит помощнику, что читает каждое подключение, как отключить и
+    удалить. Тексты по подключениям — opsdash/connectors.yaml (reads / skips / never), цифры — connectors.data_overview #}
+{% set d = data %}
+<section class="card">
+  <div class="card-h"><h2>Что PULSE делает с данными</h2></div>
+  <div class="card-b data-intro">
+    <p><b>Всё лежит на этом компьютере.</b> У PULSE нет своего облака и сервера: переписка, письма, встречи, задачи,
+      пароли и ключи хранятся в папке PULSE и никуда не копируются.</p>
+    <p><b>Наружу уходит только текст для разбора</b> — в {{ d.engine }} по вашей подписке: новые сообщения и письма из
+      подключённых чатов, расшифровки встреч, задачи для дайджестов и ответов. Как {{ d.engine }} хранит этот текст,
+      определяют условия вашей подписки {{ 'OpenAI' if d.engine == 'ChatGPT' else 'Anthropic' }}.</p>
+    <p><b>Ничего не уходит:</b> пароли и ключи, чаты и папки, которые вы не отметили, звук встреч — расшифровка идёт
+      здесь, на компьютере.</p>
+    <p><b>Во внешние системы — только после вашего «Да».</b> Карточки Kaiten, встречи в календаре, напоминания
+      коллегам: PULSE предлагает, вы подтверждаете кнопкой. Сам он никому не пишет.</p>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-h"><h2>Где лежит</h2></div>
+  <p class="card-b muted small" style="margin:0;padding-bottom:8px">Папка PULSE: <code>{{ d.root }}</code></p>
+  <div class="table-wrap"><table class="t">
+    <thead><tr><th>Что</th><th>Где</th><th>Занимает</th></tr></thead>
+    <tbody>
+      {% for p in d.places %}<tr><td>{{ p.what }}</td><td><code>{{ p.where }}</code></td><td class="nowrap">{{ p.size }}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <div class="card-h"><h2>Что получал помощник за 7 дней</h2>{% if d.runs_total %}<span class="muted small">запусков: {{ d.runs_total }}</span>{% endif %}</div>
+  <div class="card-b">
+    {% if d.runs %}
+    <ul class="data-runs">{% for r in d.runs %}<li><span>{{ r.title }}</span><span class="muted">{{ r.n }}</span></li>{% endfor %}</ul>
+    <div class="hint">Каждый запуск получает только то, что нужно для этой работы: разбор сообщений — новые сообщения,
+      разбор встречи — её расшифровку, ответ на вопрос — то, что помощник нашёл командами PULSE. Сколько это стоило
+      бы по ценам API — в <a href="/settings?tab=claude#usage">окне Claude</a>.</div>
+    {% else %}<p class="muted" style="margin:0">За неделю помощник не запускался.</p>{% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-h"><h2>Что читает каждое подключение</h2></div>
+  <div class="table-wrap"><table class="t data-conn">
+    <thead><tr><th>Подключение</th><th>Читает</th><th>Не читает</th><th>Никогда</th></tr></thead>
+    <tbody>
+      {% for g in catalog.groups %}{% for c in g.cards %}
+      <tr>
+        <td class="nowrap"><a href="/settings?tab={{ c.id }}">{{ c.title_now }}</a><div class="small muted">{{ c.label }}</div></td>
+        <td class="small">{{ c.reads }}</td><td class="small">{{ c.skips }}</td><td class="small">{{ c.never }}</td>
+      </tr>
+      {% endfor %}{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <div class="card-h"><h2>Как отключить и удалить</h2></div>
+  <div class="card-b data-howto">
+    <p><b>Отключить источник.</b> Откройте его окно в «Подключениях» и снимите галочку «Читать …» — новые данные
+      перестанут собираться, собранные останутся. У Telegram там же «Выйти»: сессия удалится с компьютера.</p>
+    <p><b>Забыть пароль или ключ.</b> В окне источника — «Забыть сохранённые адреса» у календарей; для остальных
+      удалите строку из <code>secrets/.env</code> или отзовите токен в самом сервисе.</p>
+    <p><b>Удалить всё.</b> Остановите PULSE (STOP) и удалите папки <code>data</code> (собранное),
+      <code>secrets</code> (ключи) и <code>config</code> (настройки). Программа останется — при запуске начнёт с нуля.</p>
+  </div>
+</section>

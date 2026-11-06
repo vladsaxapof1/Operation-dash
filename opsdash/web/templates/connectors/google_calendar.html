@@ -1,0 +1,18 @@
+{#- окно подключения: google_calendar (каталог «Подключения», _connections.html) #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<section class="card"><div class="card-b">
+  <form method="post" action="/settings/google_calendar">
+    {{ enabled_box('google_calendar', 'Читать Google Календарь') }}
+    <label>Секретные адреса в формате iCal (по одному в строке)</label>
+    <textarea name="urls" rows="2" autocomplete="off" placeholder="{{ ('сохранено адресов: ' ~ google_urls ~ ' — оставьте пустым, чтобы не менять') if google_urls else 'https://calendar.google.com/calendar/ical/…/private-…/basic.ics' }}"></textarea>
+    <ol class="small">
+      <li>Откройте <a href="https://calendar.google.com/calendar/r/settings" target="_blank">Google Календарь → ⚙ Настройки</a>.</li>
+      <li>Слева в «Настройки моих календарей» выберите календарь → <b>«Интеграция календаря»</b>.</li>
+      <li>Скопируйте <b>«Секретный адрес в формате iCal»</b> и вставьте сюда. Для нескольких календарей — по адресу в строке.</li>
+    </ol>
+    <div class="hint">Адрес даёт доступ к вашим встречам — храните его как пароль: он сохраняется только на этом компьютере. Если пункта нет — в рабочем аккаунте Google его мог отключить администратор.</div>
+    {% if google_urls %}<label class="check"><input type="checkbox" name="forget"> Забыть сохранённые адреса</label>{% endif %}
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('google_calendar') }}</div>
+  </form>
+  <p class="hint">PULSE только читает Google Календарь: новые встречи создаются в Яндекс Календаре, а отменить встречу из Google можно только в самом Google.</p>
+</div></section>

@@ -130,7 +130,11 @@
 </div>
 
 {% if needs_setup and not hide_setup %}
-<div class="alert info alert-x-wrap" data-dismiss="hide_setup">Источники ещё не подключены. Начните с <a href="/settings?tab=bot">Telegram-бота</a> и <a href="/settings?tab=kaiten">Kaiten</a>, затем — <a href="/settings?tab=telegram">Telegram</a>, <a href="/settings?tab=pachca">Пачка</a>, <a href="/settings?tab=mail">почта</a> и <a href="/settings?tab=calendar">календарь</a>. Пошагово — в <a href="/help/02-подключения">справке</a>.
+{#- ONB-4: пока ничего не подключено — что появится и куда нажать; каждый источник — окно в каталоге #}
+<div class="alert info alert-x-wrap setup-alert" data-dismiss="hide_setup"><b>PULSE пока ничего не видит</b> — подключите переписку и календарь,
+  и здесь появятся сообщения, где ждут вашего ответа, договорённости со сроками и встречи дня. Каждый источник — 3–5 минут.
+  <div class="setup-alert-act"><a class="btn sm primary" href="/settings?tab=connections">Открыть подключения</a>
+    <span class="small">или сразу: <a href="/settings?tab=bot">Telegram-бот</a> · <a href="/settings?tab=telegram">Telegram</a> · <a href="/settings?tab=gmail">Gmail</a> · <a href="/settings?tab=calendar">календарь</a></span></div>
   <button type="button" class="alert-x" data-dismiss-btn aria-label="Скрыть" title="Скрыть">{{ icons.icon('close', 16) }}</button></div>
 {% endif %}
 
@@ -145,7 +149,13 @@
     </div>
     <section class="card feed">
       {% for it in feed['items'] %}{{ feed_row(it) }}{% endfor %}
-      <div class="feed-foot">{% if feed['items'] %}Остальные задачи и договорённости не требуют действий сегодня{% else %}От вас сейчас ничего не ждут{% endif %} · <a href="/commitments">Все {{ tasks_count }} на доске →</a></div>
+      {% if not feed['items'] and not messages_on %}
+      {#- ONB-4: лента пуста, потому что переписка не подключена, — а не потому, что от вас ничего не ждут #}
+      <p class="empty feed-setup">Здесь появятся письма и сообщения, где ждут вашего ответа, и предложения на «Да».
+        Подключите <a href="/settings?tab=telegram">Telegram</a>, <a href="/settings?tab=gmail">Gmail</a>,
+        <a href="/settings?tab=imap">другую почту</a> или <a href="/settings?tab=pachca">Пачку</a>.</p>
+      {% endif %}
+      <div class="feed-foot">{% if feed['items'] %}Остальные задачи и договорённости не требуют действий сегодня{% elif messages_on %}От вас сейчас ничего не ждут{% else %}Переписка не подключена{% endif %} · <a href="/commitments">Все {{ tasks_count }} на доске →</a></div>
     </section>
     {% if no_due %}{{ ui.due_dialog(no_due, due_choices, meeting_titles) }}{% endif %}
     {{ ui.task_datalist() }}
@@ -160,11 +170,11 @@
         <span class="grow"></span><a class="small" href="/calendar">неделя →</a>
       </div>
       {% set today = day.days[0] %}
-      {% if settings.calendar.enabled or settings.google_calendar.enabled or day.events %}{{ dayui.verdict(dp) }}{% endif %}
+      {% if calendars_on or day.events %}{{ dayui.verdict(dp) }}{% endif %}
       {% if day.allday %}
       <div class="day-allday">{% for a in day.allday %}<button type="button" class="ev ev-allday{{ ' google' if a.ev.google }}" data-ev="{{ a.ev.n }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>{% endfor %}</div>
       {% endif %}
-      {% if settings.calendar.enabled or settings.google_calendar.enabled or day.events %}
+      {% if calendars_on or day.events %}
       <div class="day" style="--hour: {{ day.hour_px }}px">
         <div class="wk-hours">{% for h in day.hours %}<div class="wk-hour"><span>{{ '%02d:00' % h }}</span></div>{% endfor %}</div>
         <div class="day-col" style="height: {{ day.height }}px">
@@ -181,7 +191,9 @@
         </div>
       </div>
       {% else %}
-      <p class="empty">Календарь не подключён — <a href="/settings?tab=calendar">подключить</a>.</p>
+      <p class="empty">Подключите календарь — здесь появятся встречи дня и окна между ними под задачи:
+        <a href="/settings?tab=calendar">Яндекс</a> · <a href="/settings?tab=google_calendar">Google</a> ·
+        <a href="/settings?tab=ics_calendar">Outlook и iCloud по ссылке</a> · <a href="/settings?tab=caldav">CalDAV</a>.</p>
       {% endif %}
       {% for e in day.events %}{{ ui.ev_detail(e) }}{{ ui.brief_dialog(e) }}{% endfor %}
       <div class="ev-pop" hidden data-ev-pop></div>
