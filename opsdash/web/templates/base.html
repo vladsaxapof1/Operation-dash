@@ -43,7 +43,8 @@
       {% for key, href, title, n in nav_system %}{{ nav_link(key, href, title, n) }}{% endfor %}
     </nav>
     <p class="muted small side-foot">Версия {{ version }}{% if build %} · {{ build }}{% endif %}<br>Работает на этом компьютере
-      {% if update_available %}<br><a class="update-link" href="/settings?tab=updates">● Доступно обновление</a>{% endif %}</p>
+      {% if update_available %}<br><a class="update-link" href="/settings?tab=updates">● Доступно обновление</a>
+      {% elif restart_needed %}<br><a class="update-link" href="/settings?tab=updates">● Перезапустите PULSE — версия {{ restart_needed.version or restart_needed.sha[:7] }} уже скачана</a>{% endif %}</p>
   </aside>
   <main class="main">
     {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}

@@ -50,12 +50,19 @@
 <section class="card" id="updates"><div class="card-h"><h2>Обновления PULSE</h2>
   {% if upd.checked_at %}<span class="muted small">проверено {{ upd.checked_at | ago }}</span>{% endif %}</div>
 <div class="card-b">
-  {% if updating %}
+  {% if updating == 'restart' %}
+  <div class="alert info" data-wait-build="{{ build }}" data-wait-job="restart">Перезапускаю PULSE с новой версией — обычно 10–30 секунд, страница обновится сама.</div>
+  {% elif updating %}
   {# после «Обновить»: страница ждёт, пока PULSE перезапустится с новой версией (app.js), и обновляется сама #}
   <div class="alert info" data-wait-build="{{ build }}">Обновляю PULSE: скачиваю новую версию и ставлю библиотеки, затем он перезапустится.
     Обычно это 1–3 минуты — страница обновится сама.</div>
+  {% elif restart_needed and not upd.available %}
+  {# файлы обновили мимо кнопки «Обновить» (git pull, слияние в приложении Claude), а PULSE не перезапускался #}
+  <div class="alert warn update-restart">Файлы PULSE уже обновлены до версии <b>{{ restart_needed.version or restart_needed.sha[:7] }}</b>
+    ({{ restart_needed.sha[:7] }}), но работает прежняя — {{ version }} ({{ build }}). Новые разделы и исправления появятся после перезапуска.
+    <form class="inline" method="post" action="/updates/restart" data-confirm="Перезапустить PULSE? Это 10–30 секунд; начатые фоновые задания повторятся по расписанию."><button class="btn primary sm">Перезапустить</button></form></div>
   {% endif %}
-  <div>Стоит версия <b>{{ installed.sha[:7] or 'неизвестно' }}</b>{% if installed.date %} от {{ installed.date | local('%d.%m.%Y') }}{% endif %}
+  <div>{{ 'Скачана' if restart_needed and not updating else 'Стоит' }} версия <b>{{ installed.sha[:7] or 'неизвестно' }}</b>{% if installed.date %} от {{ installed.date | local('%d.%m.%Y') }}{% endif %}
     <span class="muted small">{{ '· из git' if installed.how == 'git' }}</span></div>
   {% if upd.error %}<div class="alert bad" style="margin-top:10px">Не удалось проверить: {{ upd.error }}</div>
   {% elif upd.available and not updating %}
@@ -63,7 +70,7 @@
     <div><b>Доступна новая версия {{ upd.latest.sha[:7] }}</b> от {{ upd.latest.date | local('%d.%m %H:%M') }}</div>
     {% if upd.changes %}<ul>{% for c in upd.changes %}<li>{{ c }}</li>{% endfor %}</ul>{% else %}<div class="muted small">«{{ upd.latest.message }}»</div>{% endif %}
   </div>
-  {% elif upd.latest and not updating %}<div class="muted small" style="margin-top:6px">Это последняя версия.</div>{% endif %}
+  {% elif upd.latest and not updating and not restart_needed %}<div class="muted small" style="margin-top:6px">Это последняя версия.</div>{% endif %}
   <div class="form-actions">
     {% if upd.available and not updating %}<form class="inline" method="post" action="/updates/apply" data-confirm="PULSE скачает новую версию и перезапустится — это 1–3 минуты. Данные, настройки и пароли не меняются. Обновить?"><button class="btn primary">Обновить</button></form>{% endif %}
     <form class="inline" method="post" action="/updates/check" data-busy="Проверяю…"><button class="btn">Проверить обновления</button></form>

@@ -207,7 +207,7 @@ def register(app: FastAPI, render, back) -> None:
             from opsdash import updates
 
             ctx["upd"], ctx["installed"] = updates.last_check(), updates.installed()
-            ctx["updating"] = bool(request.query_params.get("updating"))
+            ctx["updating"] = request.query_params.get("updating") or ""  # «1» — обновление, «restart» — перезапуск
         ctx.update(panel_context(tab, settings, sort))
         return render(request, "settings.html", nav="settings", **ctx)
 

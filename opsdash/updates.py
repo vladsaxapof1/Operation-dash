@@ -352,6 +352,32 @@ def apply(settings: dict | None = None, root: Path | None = None, transport: htt
     return f'версия {before["sha"][:7] or "?"} → {after["sha"][:7]}' + (" (библиотеки — при перезапуске)" if later else "")
 
 
+_stale: dict = {"at": 0.0, "value": None}
+
+
+def files_version(root: Path | None = None) -> str:
+    """Номер версии в файлах PULSE (opsdash/__init__.py) — может быть новее запущенного кода."""
+    try:
+        text = ((root or config.APP_DIR) / "opsdash" / "__init__.py").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    found = re.search(r'__version__ = "([^"]+)"', text)
+    return found.group(1) if found else ""
+
+
+def stale(running_sha: str, max_age: float = 60) -> dict | None:
+    """Файлы PULSE новее запущенного кода: их обновили мимо кнопки «Обновить» (git pull, слияние в приложении Claude),
+    а PULSE не перезапускался. Тогда {"sha", "version"} новой версии, иначе None. Git спрашиваем не чаще раза в минуту."""
+    import time
+
+    now = time.monotonic()
+    if now - _stale["at"] > max_age:
+        cur = installed()
+        newer = bool(cur["sha"]) and bool(running_sha) and not cur["sha"].startswith(running_sha)
+        _stale.update(at=now, value={"sha": cur["sha"], "version": files_version()} if newer else None)
+    return _stale["value"]
+
+
 def restart(in_daemon: bool) -> None:
     """Перезапустить PULSE с новым кодом. Изнутри PULSE — через пару секунд, чтобы страница успела получить ответ."""
     from opsdash import daemon, macos

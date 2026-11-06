@@ -227,3 +227,39 @@ def test_git_update_explains_local_edits_and_own_commits(git_pair):
     _sh(pulse, "commit", "-qam", "своё")
     with pytest.raises(updates.UpdateError, match="свои коммиты, которых нет в ветке claude/pult-v1"):
         updates.apply(settings, root=pulse)
+
+
+def test_files_updated_without_button_offer_restart(monkeypatch):
+    """Файлы обновили мимо «Обновить» (git pull, слияние в приложении Claude), а PULSE не перезапускался: меню и
+    «Обновления» предлагают перезапустить, «Перезапустить» — задание restart (библиотеки и перезапуск)."""
+    from opsdash.web import app as webapp
+
+    running = webapp.build()
+    client = TestClient(webapp.app, base_url="http://localhost:8765")
+    monkeypatch.setattr(updates, "_stale", {"at": 0.0, "value": None})
+    assert updates.stale(running) is None  # файлы — те же, что запущены
+    page = client.get("/settings?tab=updates").text
+    assert "Перезапустить" not in page and "Перезапустите PULSE" not in page
+    monkeypatch.setattr(updates, "installed", lambda root=None: {"sha": "f" * 40, "date": "2026-11-06T20:00:00+03:00",
+                                                                 "how": "git"})
+    monkeypatch.setattr(updates, "files_version", lambda root=None: "9.9.9")
+    monkeypatch.setattr(updates, "_stale", {"at": 0.0, "value": None})
+    assert updates.stale(running) == {"sha": "f" * 40, "version": "9.9.9"}
+    page = client.get("/settings?tab=updates").text
+    assert "Файлы PULSE уже обновлены до версии <b>9.9.9</b>" in page and "/updates/restart" in page
+    assert "Это последняя версия" not in page
+    assert "Перезапустите PULSE — версия 9.9.9 уже скачана" in client.get("/").text  # и в меню на любой странице
+    started = []
+    monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: started.append(name) or True)
+    r = client.post("/updates/restart", headers={"referer": "http://localhost:8765/settings?tab=updates"},
+                    follow_redirects=False)
+    assert started == ["restart"] and "updating=restart" in r.headers["location"]
+    assert 'data-wait-job="restart"' in client.get("/settings?tab=updates&updating=restart").text
+
+
+def test_restart_job_syncs_libraries_then_restarts(monkeypatch):
+    calls = []
+    monkeypatch.setattr(updates, "libraries_busy", lambda: False)
+    monkeypatch.setattr(updates, "sync_libraries", lambda root: calls.append("sync"))
+    monkeypatch.setattr(updates, "restart", lambda in_daemon: calls.append("restart"))
+    assert jobs.job_restart() == "перезапуск" and calls == ["sync", "restart"]

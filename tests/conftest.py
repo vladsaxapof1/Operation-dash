@@ -24,6 +24,9 @@ def clean_home():
         shutil.rmtree(_HOME / sub, ignore_errors=True)
     store._initialized.clear()
     config.ensure_dirs()
+    from opsdash import updates
+
+    updates._stale.update(at=0.0, value=None)  # «файлы новее запущенного» — проверка заново в каждом тесте
     yield _HOME
 
 

@@ -259,6 +259,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["nav_collapsed"] = request.cookies.get("nav") == "collapsed"  # меню свёрнуто в иконки (app.js)
     ctx["theme"] = settings["web"].get("theme") or "system"  # system / light / dark — подключение dark.css
     ctx["update_available"] = bool((store.get_state("update_check") or {}).get("available"))
+    ctx["restart_needed"] = restart_needed()
     ctx["design_intro"] = store.get_state(store.DESIGN_INTRO) == "show"  # окно «У PULSE новый дизайн» — один раз
     from opsdash import notices
 
@@ -476,6 +477,27 @@ def build() -> str:
     from opsdash import updates
 
     return updates.installed()["sha"][:7]
+
+
+build()  # запоминаем коммит сразу при запуске: файлы могут обновить раньше, чем откроют первую страницу
+
+
+def restart_needed() -> dict | None:
+    """Файлы обновлены, а PULSE работает на прежнем коде — меню и «Обновления» предлагают перезапустить."""
+    from opsdash import updates
+
+    try:
+        return updates.stale(build())
+    except Exception:  # noqa: BLE001 — git недоступен: подсказку просто не показываем
+        return None
+
+
+@app.post("/updates/restart")
+def updates_restart(request: Request):
+    from opsdash import jobs
+
+    jobs.submit("restart", "interactive")
+    return back(request, to="/settings?tab=updates&updating=restart")
 
 
 @app.post("/updates/check")

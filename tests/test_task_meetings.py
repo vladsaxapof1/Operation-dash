@@ -33,7 +33,9 @@ def test_suggest_finds_meeting_for_task_and_respects_no(settings_with):
     lead = _task("Собраться ещё раз по лид-продаже", whom="Пётр Иванов")
     other = _task("Прислать прогноз по ключевым клиентам", whom="Анна")
     _task("Купить подарок")
-    _event("lead", "Лид-продажа: пересаживаемся", 26, attendees=["Пётр Иванов"])
+    local = config.now()  # завтра в полдень: «через 26 часов» поздно вечером — это уже послезавтра
+    tomorrow_noon = (local + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+    _event("lead", "Лид-продажа: пересаживаемся", (tomorrow_noon - local).total_seconds() / 3600, attendees=["Пётр Иванов"])
     _event("forecast", "Прогноз Q4", 50, attendees=["Анна Смирнова"])  # одно общее слово, но тот же человек
     _event("general", "Встреча", 3)
     assert task_meetings.suggest() == 2

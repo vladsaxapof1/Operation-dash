@@ -488,6 +488,18 @@ def job_update(**_) -> str:
     return result
 
 
+def job_restart(**_) -> str:
+    """Перезапустить PULSE с уже скачанной версией: файлы обновили мимо кнопки «Обновить» (updates.stale)."""
+    from opsdash import updates
+
+    later = updates.libraries_busy()
+    if not later:
+        updates.sync_libraries(config.APP_DIR)
+    store.log("update", "перезапуск с новой версией файлов" + (" (библиотеки — при перезапуске)" if later else ""))
+    updates.restart(in_daemon=in_daemon())
+    return "перезапуск"
+
+
 def job_estimates(**_) -> str:
     """Разовая доразметка оценок времени у старых задач директора (opsdash.day)."""
     from opsdash import day
@@ -528,6 +540,7 @@ REGISTRY = {
     "housekeeping": job_housekeeping,
     "update-check": job_update_check,
     "update": job_update,
+    "restart": job_restart,
     "estimates": job_estimates,
     "first-finds": lambda **kw: _first_finds(),
     "lessons": job_lessons,
@@ -562,6 +575,7 @@ TITLES = {
     "housekeeping": "Обслуживание",
     "update-check": "Проверка обновлений PULSE",
     "update": "Обновление PULSE",
+    "restart": "Перезапуск PULSE",
     "estimates": "Оценки времени у задач (Claude)",
     "first-finds": "Первые находки: разбор переписки за 5 дней (Claude)",
     "lessons": "Уроки из ваших «Нет» (Claude)",

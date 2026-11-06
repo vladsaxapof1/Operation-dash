@@ -1086,12 +1086,14 @@
         }
         // задание закончилось, а PULSE так и не перезапустился — значит, обновление не удалось
         return fetch("/api/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
-          var busy = st.running.indexOf("update") >= 0 || st.queued.indexOf("update") >= 0;
+          var job = waitBuild.dataset.waitJob || "update";
+          var busy = st.running.indexOf(job) >= 0 || st.queued.indexOf(job) >= 0;
           idle = busy ? 0 : idle + 1;
           if (idle >= 4) {
             clearInterval(poll);
             waitBuild.className = "alert bad";
-            waitBuild.textContent = "Обновление не удалось — подробности в «Журнале» (задание «Обновление PULSE»).";
+            waitBuild.textContent = job === "restart" ? "PULSE не перезапустился — закройте его и откройте снова (или START)."
+              : "Обновление не удалось — подробности в «Журнале» (задание «Обновление PULSE»).";
           }
         });
       }).catch(function () { idle = 0; /* перезапускается — подождём */ });
