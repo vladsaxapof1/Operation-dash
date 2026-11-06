@@ -309,6 +309,12 @@ CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раз�
     created TEXT
 );
 
+CREATE TABLE IF NOT EXISTS decision_topics (  -- темы решений (opsdash.decisions): «о чём» одной строкой
+    name TEXT PRIMARY KEY,           -- тема — поле anthology.project до « / »
+    about TEXT,                      -- «KPI на ноябрь для команд: цели, веса метрик, как считаем качество звонков»
+    updated TEXT
+);
+
 CREATE TABLE IF NOT EXISTS skill_rules (      -- «Ваши правила» к навыку (opsdash.skills): подмешиваются в его запуск
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     skill TEXT NOT NULL,             -- имя навыка: triage, process-meeting…
@@ -514,6 +520,9 @@ MIGRATIONS = [
     ("anthology", "prev_id", "INTEGER",
      "UPDATE anthology SET stage='decided' WHERE stage IN ('implemented', 'waiting')"),
     ("anthology", "relation", "TEXT"),       # changes | refines | follows | cancels
+    # вопрос (2–4 слова: «Розница: веса тимлида») и что по нему решено после этого решения — коротко (2.0.22)
+    ("anthology", "question", "TEXT"),
+    ("anthology", "answer", "TEXT"),
 ]
 
 

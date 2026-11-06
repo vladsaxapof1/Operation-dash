@@ -181,7 +181,7 @@
       {% for d in decisions %}
       {% if loop.index == 6 %}<details class="side-more"><summary class="small">ещё {{ decisions | length - 5 }}</summary>{% endif %}
       <div class="side-row{{ ' done' if not d.current }}"><div class="grow">
-        <a class="side-t" href="{{ decision_ref(d) }}" title="{{ d.details or d.title }}">{{ d.title }}</a>
+        <a class="side-t" href="{{ decision_ref(d) }}" title="{{ d.title }}">{% if d.q %}<b>{{ d.q }}:</b> {% endif %}{{ d.a }}</a>
         <div class="side-x">{{ d.topic }}{% if d.subtopic %} / {{ d.subtopic }}{% endif %}
           {%- if d.stage == 'discussing' %} · ждёт решения{% endif %}
           {%- if d.prev %} · <a href="{{ decision_ref(d.prev) }}" title="{{ d.prev.title }}">{{ d.relation_title }} решение от {{ d.prev.when | date }}</a>{% endif %}

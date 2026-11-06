@@ -337,22 +337,22 @@ def job_lessons(**_) -> str:
 
 
 def job_decisions(**_) -> str:
-    """Решения по темам (MEM-3): темы без синонимов, цепочки «меняет / уточняет / продолжает / отменяет», следующий шаг
-    у открытых вопросов — навык decisions."""
+    """Решения по темам (MEM-3): темы без синонимов и «о чём», вопросы и что по ним решено, цепочки «меняет / уточняет /
+    продолжает / отменяет», следующий шаг у открытых вопросов — навык decisions."""
     from opsdash import decisions
 
     def state() -> tuple[int, int]:
         rows = decisions.items(current=False)
-        return sum(bool(r["prev"]) for r in rows), len({r["topic"] for r in rows})
+        return sum(bool(r["prev"]) for r in rows), sum(bool((r.get("question") or "").strip()) for r in rows)
 
-    links0, topics0 = state()
+    links0, named0 = state()
     settings = config.load_settings()
     prompt = ("Обнови решения строго по навыку decisions (.claude/skills/decisions/SKILL.md): наведи порядок в темах, "
-              "собери цепочки решений и найди следующий шаг у открытых вопросов. "
-              "Это фоновый запуск.")
-    brain.run(prompt, model=settings["claude"]["model_digest"], job="decisions", timeout_min=30)
-    links1, topics1 = state()
-    return f"связей в цепочках: было {links0}, стало {links1}; тем: было {topics0}, стало {topics1}"
+              "собери цепочки, сформулируй вопросы, что по ним решено и о чём каждая тема, найди следующий шаг у "
+              "открытых вопросов. Это фоновый запуск.")
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="decisions", timeout_min=40)
+    links1, named1 = state()
+    return f"связей в цепочках: было {links0}, стало {links1}; решений с вопросом: было {named0}, стало {named1}"
 
 
 def job_company_context(**_) -> str:
@@ -814,10 +814,11 @@ def tick(settings: dict | None = None) -> list[str]:
     if (sch.get("decisions_weekly") and config.now(settings).weekday() == 0  # понедельник: решения ↔ задачи
             and _daily("decisions", sch["decisions_weekly"], settings)):
         go("decisions", "heavy")
-    # цепочки решений появились в 2.0.21: накопленные решения ни с чем не связаны — один раз в рабочее время помощник собирает цепочки сам, не дожидаясь понедельника
-    if not store.get_state("decisions_chains") and in_work_hours(settings):
+    # вопросы и «о чём» тем появились в 2.0.22 (цепочки — в 2.0.21): у накопленных решений их нет — один раз в рабочее
+    # время помощник формулирует их и связывает решения сам, не дожидаясь понедельника
+    if not store.get_state("decisions_questions") and in_work_hours(settings):
         if store.scalar("SELECT 1 FROM anthology WHERE kind='decision' AND status='accepted' LIMIT 1"):
-            store.set_state("decisions_chains", config.now(settings).date().isoformat())
+            store.set_state("decisions_questions", config.now(settings).date().isoformat())
             go("decisions", "heavy")
     if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
             and _daily("projects", sch["projects_weekly"], settings)):

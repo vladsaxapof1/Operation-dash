@@ -483,12 +483,13 @@ def cmd_kb(a) -> None:
                 author="claude" if os.environ.get("OPSDASH_AGENT") else "director")
         except anthology.AnthologyError as e:
             fail(str(e))
-        if a.kind == "decision" and any(v for v in (a.stage, a.metric, a.before, a.after, a.waiting, a.tasks, a.prev)):
+        if a.kind == "decision" and any(v for v in (a.stage, a.metric, a.before, a.after, a.waiting, a.tasks, a.prev,
+                                                    a.question, a.answer)):
             from opsdash import decisions
 
             try:
                 decisions.update(item_id, stage=a.stage, metric=a.metric, before=a.before, after=a.after,
-                                 waiting=a.waiting, prev=a.prev,
+                                 waiting=a.waiting, prev=a.prev, question=a.question, answer=a.answer,
                                  relation=a.relation if a.prev else None)
                 for tid in _ids(a.tasks):
                     decisions.link(item_id, tid)
@@ -537,7 +538,8 @@ def cmd_decisions(a) -> None:
                 if r["superseded_by"] else "")
         tasks = ", ".join(f"[commitment {t['id']}]{' ✓' if t['status'] == 'done' else ''}" for t in r["tasks"])
         sub = f" / {r['subtopic']}" if r["subtopic"] else ""
-        return (f"[decision {r['id']}] {r['when']} · {r['topic']}{sub} · {r['stage_title']} · {r['title']}"
+        qa = f" · вопрос «{r['q']}»: {r['a']}" if r["q"] else ""
+        return (f"[decision {r['id']}] {r['when']} · {r['topic']}{sub} · {r['stage_title']} · {r['title']}{qa}"
                 f"{metric}{step}{prev}{gone}" + (f" · задачи: {tasks}" if tasks else ""))
 
     try:
@@ -555,12 +557,11 @@ def cmd_decisions(a) -> None:
             if a.json:
                 return as_json(ts)
             for t in ts:
-                extra = ", ".join(x for x in (
-                    f"ждут решения {t['open']}" if t["open"] else "",
-                    f"цепочек {t['chains']}" if t["chains"] else "") if x)
+                extra = f" · ждут решения {t['open']}" if t["open"] else ""
                 subs = f" · подтемы: {', '.join(t['subtopics'])}" if t["subtopics"] else ""
-                out(f"{t['name']} — действует {t['current']} из {t['total']}" + (f" · {extra}" if extra else "")
-                    + f" · последнее {t['last']['when']}{subs}")
+                about = f" — {t['about']}" if t["about"] else " — о чём: не написано"
+                out(f"{t['name']}{about} · вопросов {t['questions']}, решений {t['total']}{extra} · "
+                    f"обновлено {t['updated']}{subs}")
             if not ts:
                 out("Решений нет.")
         elif a.action == "topic":
@@ -585,7 +586,11 @@ def cmd_decisions(a) -> None:
         elif a.action == "set":
             decisions.update(a.id, stage=a.stage, metric=a.metric, before=a.before, after=a.after,
                              waiting=a.next if a.next is not None else a.waiting, project=a.topic,
+                             question=a.question, answer=a.answer,
                              prev=a.prev, relation=a.relation)
+            out("Сохранено")
+        elif a.action == "about":
+            decisions.set_about(a.name, a.text)
             out("Сохранено")
         elif a.action == "rename-topic":
             n = decisions.rename_topic(a.name, a.to)
@@ -1679,6 +1684,8 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--prev", type=int, help="решение: id прежнего решения по тому же вопросу (./ops decisions topic)")
     x.add_argument("--relation", choices=["changes", "refines", "follows", "cancels"], default="refines",
                    help="как новое связано с прежним: меняет | уточняет (по умолчанию) | продолжает | отменяет")
+    x.add_argument("--question", help="решение: вопрос, 2–4 слова — «Розница: веса тимлида» (как у прежнего решения цепочки)")
+    x.add_argument("--answer", help="решение: что по вопросу решено после него, коротко — «35 / 12,5 / 12,5 / 40»")
     x.add_argument("--metric", help="решение: что меняем — «средний чек апсейла ОРК»")
     x.add_argument("--before", help="решение: было — «12 тыс.»")
     x.add_argument("--after", help="решение: стало или цель — «15 тыс.»")
@@ -2038,8 +2045,8 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--all", action="store_true", help="и заменённые, отменённые — вся история")
     x.add_argument("--search", help="найти по словам")
     x.add_argument("--limit", type=int, default=200)
-    ms.add_parser("topics", help="темы: сколько действует, ждёт решения, цепочки")
-    x = ms.add_parser("topic", help="тема: что сейчас действует и как к этому пришли (цепочки)")
+    ms.add_parser("topics", help="темы: о чём, сколько вопросов, ждут решения")
+    x = ms.add_parser("topic", help="тема: о чём, ждут решения, что решено по вопросам и история")
     x.add_argument("name")
     x = ms.add_parser("show")
     x.add_argument("id", type=int)
@@ -2051,11 +2058,16 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--relation", choices=["changes", "refines", "follows", "cancels"],
                    help="меняет | уточняет | продолжает | отменяет прежнее")
     x.add_argument("--topic", help="тема (с подтемой через « / »): перенести решение")
+    x.add_argument("--question", help="вопрос, 2–4 слова: «Розница: веса тимлида»; пустая строка — убрать")
+    x.add_argument("--answer", help="что по вопросу решено после этого решения, коротко; пустая строка — убрать")
     x.add_argument("--metric")
     x.add_argument("--before")
     x.add_argument("--after")
     x.add_argument("--next", help="следующий шаг или чего ждём")
     x.add_argument("--waiting", help=argparse.SUPPRESS)
+    x = ms.add_parser("about", help="о чём тема — одной строкой")
+    x.add_argument("name")
+    x.add_argument("--text", required=True)
     x = ms.add_parser("rename-topic", help="переименовать тему или влить в другую — подтемы сохранятся")
     x.add_argument("name")
     x.add_argument("--to", required=True)

@@ -2,57 +2,56 @@
 {% import "_icons.html" as icons %}
 {% import "_decisions.html" as dm %}
 {% block title %}Решения{% endblock %}
-{#- Решения по темам (MEM-3, 2.0.21): темы — сколько действует, ждёт решения, цепочки;
-    поиск и «без следующего шага» — списком по темам. Страница темы — decision_topic.html. Логика — opsdash.decisions #}
+{#- Решения (2.0.22): «Изменилось за неделю» (было → стало) и темы — о чём, сколько вопросов, сколько ждут решения,
+    когда обновлялась. Поиск и «без следующего шага» — строками по темам. Тема — decision_topic.html #}
 {% set sum = summary %}
 {% block content %}
 <div class="topline"><div><h1>Решения</h1>
-  <p class="sub">Что решили на встречах и в документах — по темам. В каждой теме видно, что действует сейчас и как к
-    этому пришли: какое решение какое поменяло, уточнило или отменило.</p></div>
-  <form method="post" action="/decisions-run"><button class="btn lg">{{ icons.icon('ask', 16) }}Собрать цепочки с {{ ai_name or 'помощником' }}</button></form>
-</div>
-
-<div class="dec-stats">
-  <a class="dec-stat{{ ' active' if mode == 'topics' }}" href="/decisions"><b>{{ sum.topics }}</b> {{ plural(sum.topics, 'тема', 'темы', 'тем') }}</a>
-  <span class="dec-stat flat"><b>{{ sum.current }}</b> действует</span>
-  {% if sum.open %}<span class="dec-stat flat"><b>{{ sum.open }}</b> ждут решения</span>{% endif %}
-  {% if sum.total > sum.current %}<span class="dec-stat flat"><b>{{ sum.total - sum.current }}</b> заменено или отменено</span>{% endif %}
-  {% if sum.attention or f == 'attention' %}<a class="dec-stat warn{{ ' active' if f == 'attention' }}" href="?f=attention" title="Ждут решения, а следующего шага нет — кто и что делает дальше"><b>{{ sum.attention }}</b> без следующего шага</a>{% endif %}
+  <p class="sub">Что решили на встречах — по темам. В теме — вопросы: что по каждому решено сейчас и как к этому пришли.</p></div>
+  <form method="post" action="/decisions-run"><button class="btn lg">{{ icons.icon('ask', 16) }}Обновить с {{ ai_name or 'помощником' }}</button></form>
 </div>
 
 <form class="dec-filters" method="get">
   <label class="sk-search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Найти решение…" aria-label="Найти решение"></label>
+  {% if sum.attention %}<a class="dec-stat warn{{ ' active' if f == 'attention' }}" href="?f=attention" title="Ждут решения, а следующего шага нет — кто и что делает дальше"><b>{{ sum.attention }}</b> без следующего шага</a>{% endif %}
   {% if q or f %}<a class="small" href="/decisions">× к темам</a>{% endif %}
 </form>
 
 {% if mode == 'topics' %}
-<section class="card">
+{% if changed %}
+<section class="card dq-card">
+  <div class="card-h"><h2>Изменилось за неделю</h2><span class="muted small">решения, которые поменяли или отменили прежние</span></div>
+  {% for ch in changed %}
+  <a class="dq-ch" href="/decisions?topic={{ ch.topic | urlencode }}#d{{ ch.id }}">
+    <span class="dq-date">{{ ch.when | date }}</span>
+    <span class="dq-q">{{ ch.question or '—' }}<span class="dq-sub">{{ ch.topic }}</span></span>
+    <span class="dq-now"><span class="dq-was">{{ ch.was }}</span><span class="dq-arrow">→</span>{{ 'отменили' if ch.cancelled else ch.now }}</span>
+  </a>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card dq-card">
   {% if topics %}
-  <ul class="list dec-topics">
-    {% for t in topics %}
-    <li class="dec-topic">
-      <a class="dec-topic-name" href="/decisions?topic={{ t.name | urlencode }}">{{ t.name }}</a>
-      <div class="dec-topic-last small muted"><span>{{ t.last.when | date }}</span> {{ t.last.title }}</div>
-      <div class="dec-topic-n">
-        <span><b>{{ t.current }}</b> действует</span>
-        {% if t.chains %}<span class="dec-chip chain">{{ icons.icon('link', 13) }}{{ t.chains }} {{ plural(t.chains, 'цепочка', 'цепочки', 'цепочек') }}</span>{% endif %}
-        {% if t.open %}<span class="dec-chip open">{{ t.open }} ждут решения</span>{% endif %}
-        {% if t.no_step %}<span class="dec-chip warn">{{ t.no_step }} без шага</span>{% endif %}
-      </div>
-    </li>
-    {% endfor %}
-  </ul>
+  <div class="dq-thead"><span>Тема</span><span>О чём</span><span class="num">Вопросов</span><span class="num">Ждут решения</span><span class="num">Обновлено</span></div>
+  {% for t in topics %}
+  <a class="dq-trow" href="/decisions?topic={{ t.name | urlencode }}">
+    <span class="dq-tname">{{ t.name }}</span>
+    <span class="dq-tabout">{% if t.about %}{{ t.about }}{% else %}<span class="muted">{{ t.labels | join(' · ') or t.last.a }}</span>{% endif %}</span>
+    <span class="num">{{ t.questions }}</span>
+    <span class="num">{% if t.open %}<span class="dq-pill{{ '' if t.no_step else ' calm' }}">{{ t.open }}</span>{% else %}<span class="muted">—</span>{% endif %}</span>
+    <span class="num dq-date">{{ t.updated | date }}</span>
+  </a>
+  {% endfor %}
   {% else %}
   <p class="empty">Решений пока нет. Они появятся из разборов встреч: всё, что «решили» на встрече, PULSE записывает сюда — по темам.</p>
   {% endif %}
 </section>
 {% else %}
 {% for group, rows in groups.items() %}
-<section class="card dec-group">
+<section class="card dq-card">
   <div class="card-h"><h2><a href="/decisions?topic={{ group | urlencode }}">{{ group }}</a></h2><span class="muted small">{{ rows | length }}</span></div>
-  <ul class="list dec-list">
-    {% for d in rows %}{{ dm.row(d, stages, meetings, link_topic=True) }}{% endfor %}
-  </ul>
+  {% for d in rows %}{{ dm.listrow(d) }}{% endfor %}
 </section>
 {% else %}
 <section class="card"><p class="empty">{% if q %}Ничего не нашлось.{% else %}Всё в порядке: у каждого открытого вопроса есть следующий шаг.{% endif %}</p></section>

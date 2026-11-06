@@ -472,6 +472,16 @@
     if (pane) { pane.hidden = false; pane.closest(".frow").scrollIntoView({ block: "center" }); }
   }
 
+  // «Решения»: ссылка на решение (#d<id>) или вопрос (#q<id>) — раскрываем вопрос и показываем это решение
+  if (/^#[dq]\d+$/.test(location.hash)) {
+    var dmark = document.getElementById(location.hash.slice(1));
+    if (dmark) {
+      for (var dp = dmark; dp; dp = dp.parentElement) if (dp.tagName === "DETAILS" && dp.classList.contains("dq")) dp.open = true;
+      dmark.scrollIntoView({ block: "center" });
+      dmark.classList.add("is-target");
+    }
+  }
+
   // «Спросить Claude»: поиск по разговорам — прячем непохожие, пустые дни тоже
   var askFind = document.querySelector("[data-ask-find]");
   if (askFind) askFind.addEventListener("input", function () {

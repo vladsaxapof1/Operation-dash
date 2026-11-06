@@ -1,4 +1,4 @@
-"""Решения по темам (MEM-3, 2.0.21): по каждой теме — что сейчас действует и как к этому пришли.
+"""Решения по темам (MEM-3; 2.0.21 — цепочки, 2.0.22 — вопросы): тема → вопросы → что решено сейчас и история.
 
 Решения — записи базы знаний вида decision (opsdash.anthology): их пишет разбор встреч (`./ops kb add`) и импорт
 заметок-решений из документов. Здесь к ним добавлено:
@@ -7,6 +7,11 @@
 - **цепочка** — решение ссылается на прежнее (prev_id) и говорит, как с ним связано (relation): меняет, уточняет,
   продолжает или отменяет. Прежнее решение, которое заменили или отменили, больше не действует, но остаётся в
   цепочке — видно, как к нынешнему пришли;
+- **вопрос** — цепочка решений по одному вопросу; у вопроса короткая подпись (anthology.question: «Розница: веса
+  тимлида»), у каждого решения — что по вопросу решено после него (anthology.answer: «35 / 12,5 / 12,5 / 40»).
+  «Сейчас» вопроса — answer последнего решения цепочки. Пока помощник их не заполнил — берём из сути решения:
+  «Розница в ноябре: веса 20/20» → вопрос «Розница в ноябре», сейчас «веса 20/20»;
+- **о чём тема** — одна строка (таблица decision_topics);
 - **статус** — принято или ждёт решения (открытый вопрос), **следующий шаг / чего ждём** (waiting_for);
 - метрика «было → стало» и задачи, которые решение исполняют (commitments.decision_id).
 
@@ -28,6 +33,10 @@ RELATIONS = {"changes": "меняет", "refines": "уточняет", "follows"
 RELATIONS_PAST = {"changes": "заменено", "refines": "уточнено", "follows": "продолжено", "cancels": "отменено"}
 SUPERSEDING = {"changes", "cancels"}  # после них прежнее решение не действует
 CHANGED_DAYS = 3  # решение поменяли или отменили за эти дни — в сводке для дайджеста
+WEEK_DAYS = 7  # «Изменилось за неделю» в разделе
+# как решение связано с прежним — глаголом в истории вопроса
+VERBS = {"start": "решили", "open": "обсуждали", "changes": "поменяли", "refines": "уточнили",
+         "follows": "продолжили", "cancels": "отменили"}
 NO_TOPIC = "Без темы"
 # стадии 2.0.20: «ждёт» — это «принято» + «чего ждём», «внедрено» — «принято»
 LEGACY_STAGES = {"waiting": "decided", "implemented": "decided"}
@@ -45,6 +54,21 @@ def split_topic(project: str | None) -> tuple[str, str]:
 
 def _short(d: dict) -> dict:
     return {"id": d["id"], "title": d["title"], "when": d["when"], "topic": d["topic"]}
+
+
+_SPLIT = re.compile(r"\s*(?::\s|\s[—–-]\s)\s*")
+
+
+def guess_qa(title: str) -> tuple[str, str]:
+    """Вопрос и ответ из сути решения, пока помощник их не сформулировал: «Розница в ноябре: веса 20/20» →
+    («Розница в ноябре», «веса 20/20»), «Премия продаж — всем 80%» → («Премия продаж», «всем 80%»). Не делится — вопроса
+    нет, вся суть — ответ (на странице строка займёт и колонку вопроса)."""
+    title = " ".join((title or "").split())
+    parts = _SPLIT.split(title, maxsplit=1)
+    if len(parts) == 2 and 3 <= len(parts[0]) <= 48 and parts[1]:
+        answer = parts[1]
+        return parts[0], answer[:1].upper() + answer[1:]
+    return "", title
 
 
 def _load() -> list[dict]:
@@ -70,12 +94,16 @@ def _load() -> list[dict]:
         r["open_tasks"] = sum(t["status"] == "open" for t in r["tasks"])
         r["when"] = r.get("happened") or (r.get("created") or "")[:10]
         r["topic"], r["subtopic"] = split_topic(r.get("project"))
+        q, a = guess_qa(r["title"])
+        r["q"] = (r.get("question") or "").strip() or q
+        r["a"] = (r.get("answer") or "").strip() or a
         r["next"] = []
     for r in rows:  # прежнее решение — только среди актуальных; ссылка на устаревшее не рвёт показ
         prev = by_id.get(r.get("prev_id") or 0)
         rel = r.get("relation") if r.get("relation") in RELATIONS else "refines"
         r["relation"] = rel if prev else None
         r["relation_title"] = RELATIONS[rel] if prev else ""
+        r["verb"] = VERBS[rel] if prev else VERBS["open" if r["stage"] == "discussing" else "start"]
         r["prev"] = _short(prev) if prev else None
         if prev:
             prev["next"].append({**_short(r), "relation": rel, "relation_title": RELATIONS[rel]})
@@ -124,8 +152,8 @@ def get(did: int) -> dict | None:
     return next((r for r in _load() if r["id"] == did), None)
 
 
-def _chains(rows: list[dict]) -> list[list[dict]]:
-    """Цепочки — связные группы по prev_id, внутри по дате; свежие цепочки выше. Одиночные решения — не цепочки."""
+def _components(rows: list[dict]) -> list[list[dict]]:
+    """Связные группы по prev_id (одиночные решения — тоже группа), внутри — по дате."""
     parent = {r["id"]: r["id"] for r in rows}
 
     def root(x: int) -> int:
@@ -140,8 +168,31 @@ def _chains(rows: list[dict]) -> list[list[dict]]:
     groups: dict[int, list[dict]] = {}
     for r in rows:
         groups.setdefault(root(r["id"]), []).append(r)
-    chains = [sorted(g, key=lambda r: (r["when"], r["id"])) for g in groups.values() if len(g) > 1]
-    return sorted(chains, key=lambda c: (c[-1]["when"], c[-1]["id"]), reverse=True)
+    return [sorted(g, key=lambda r: (r["when"], r["id"])) for g in groups.values()]
+
+
+def _chains(rows: list[dict]) -> list[list[dict]]:
+    """Цепочки — группы из двух и больше решений; свежие выше."""
+    return sorted((c for c in _components(rows) if len(c) > 1), key=lambda c: (c[-1]["when"], c[-1]["id"]),
+                  reverse=True)
+
+
+def _question(nodes: list[dict]) -> dict:
+    """Вопрос — цепочка решений: подпись, что решено сейчас (ответ последнего решения), с какого числа, история."""
+    latest = nodes[-1]
+    label = next((n["question"].strip() for n in reversed(nodes) if (n.get("question") or "").strip()), latest["q"])
+    return {"id": nodes[0]["id"], "label": label, "now": latest["a"], "since": latest["when"], "latest": latest,
+            "nodes": nodes, "changes": len(nodes) - 1, "open": latest["stage"] == "discussing",
+            "waiting": (latest.get("waiting_for") or "").strip(), "no_step": latest["no_step"],
+            "topic": latest["topic"], "subtopic": latest["subtopic"],
+            "ids": [n["id"] for n in nodes], "cancelled": latest.get("relation") == "cancels"}
+
+
+def questions(rows: list[dict] | None = None) -> list[dict]:
+    """Все вопросы, свежие выше. Вопрос относится к теме своего последнего решения."""
+    rows = _load() if rows is None else rows
+    qs = [_question(c) for c in _components(rows)]
+    return sorted(qs, key=lambda q: (q["since"], q["latest"]["id"]), reverse=True)
 
 
 def _counts(rows: list[dict]) -> dict:
@@ -154,50 +205,79 @@ def _counts(rows: list[dict]) -> dict:
             "with_metric": sum(bool(r.get("metric") or r.get("after_value")) for r in cur)}
 
 
+def abouts() -> dict[str, str]:
+    return {r["name"]: r["about"] for r in store.rows("SELECT name, about FROM decision_topics") if r["about"]}
+
+
+def set_about(name: str, text: str) -> None:
+    """«О чём тема» — одна строка; пустая — убрать."""
+    text = " ".join((text or "").split())[:200]
+    store.execute("INSERT INTO decision_topics(name, about, updated) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE "
+                  "SET about=excluded.about, updated=excluded.updated", (name, text or None, store.utcnow()))
+
+
 def topics() -> list[dict]:
-    """Темы: сколько решений действует, ждут решения, сколько заменено, цепочки; свежие темы выше."""
+    """Темы: о чём, сколько вопросов, сколько ждут решения, когда обновлялась; свежие темы выше."""
     rows = _load()
+    about = abouts()
     by_topic: dict[str, list[dict]] = {}
-    for r in rows:
-        by_topic.setdefault(r["topic"], []).append(r)
+    for q in questions(rows):
+        by_topic.setdefault(q["topic"], []).append(q)
     out = []
-    for name, rs in by_topic.items():
-        last = max(rs, key=lambda r: (r["when"], r["id"]))
-        out.append({"name": name, **_counts(rs), "chains": len(_chains(rs)), "last": last,
-                    "subtopics": sorted({r["subtopic"] for r in rs if r["subtopic"]})})
-    out.sort(key=lambda t: (t["last"]["when"], t["last"]["id"]), reverse=True)
+    for name, qs in by_topic.items():
+        mine = [r for r in rows if r["topic"] == name]
+        out.append({"name": name, "about": about.get(name, ""), "questions": len(qs),
+                    "open": sum(q["open"] for q in qs), "no_step": sum(q["no_step"] for q in qs),
+                    "updated": qs[0]["since"], "labels": list(dict.fromkeys(q["label"] for q in qs if q["label"]))[:3], **_counts(mine),
+                    "chains": sum(q["changes"] > 0 for q in qs), "last": qs[0]["latest"],
+                    "subtopics": sorted({r["subtopic"] for r in mine if r["subtopic"]})})
+    out.sort(key=lambda t: (t["updated"], t["last"]["id"]), reverse=True)
     return sorted(out, key=lambda t: t["name"] == NO_TOPIC)  # «Без темы» — в конце
 
 
 def topic_view(name: str) -> dict | None:
-    """Страница темы: «Сейчас по теме» (действующие: сначала ждут решения, потом принятые — свежие выше) и цепочки.
-    В цепочку попадают и решения других тем, если они связаны с решениями этой."""
+    """Страница темы: о чём, ждут решения, что решено (по вопросу — последнее решение и история)."""
     rows = _load()
-    mine = [r for r in rows if r["topic"] == name]
-    if not mine:
+    qs = [q for q in questions(rows) if q["topic"] == name]
+    if not qs:
         return None
-    ids = {r["id"] for r in mine}
-    linked = [r for r in rows if r["id"] not in ids and (
-        (r["prev"] and r["prev"]["id"] in ids) or any(n["id"] in ids for n in r["next"]))]
-    now = sorted((r for r in mine if r["current"]), key=lambda r: (r["when"], r["id"]), reverse=True)
-    now.sort(key=lambda r: r["stage"] != "discussing")  # открытые вопросы — сверху
-    return {"name": name, "now": now, "chains": _chains(mine + linked), "counts": _counts(mine),
-            "subtopics": sorted({r["subtopic"] for r in mine if r["subtopic"]}),
-            "history": sorted((r for r in mine if not r["current"]), key=lambda r: (r["when"], r["id"]), reverse=True)}
+    mine = [r for r in rows if r["topic"] == name]
+    return {"name": name, "about": abouts().get(name, ""), "open": [q for q in qs if q["open"]],
+            "decided": [q for q in qs if not q["open"]], "questions": qs, "counts": _counts(mine),
+            "updated": qs[0]["since"], "chains": _chains(mine),
+            "subtopics": sorted({r["subtopic"] for r in mine if r["subtopic"]})}
+
+
+def changed(days: int = WEEK_DAYS, limit: int = 10) -> list[dict]:
+    """Что поменяли или отменили за последние дни: вопрос, было (ответ прежнего решения) → стало."""
+    since = (date.today() - timedelta(days=days)).isoformat()
+    rows = _load()
+    by_id = {r["id"]: r for r in rows}
+    label = {i: q["label"] for q in questions(rows) for i in q["ids"]}
+    out = []
+    for r in rows:
+        if r["prev"] and r["relation"] in SUPERSEDING and r["when"] >= since and r["prev"]["id"] in by_id:
+            out.append({"id": r["id"], "when": r["when"], "topic": r["topic"], "question": label.get(r["id"], r["q"]),
+                        "was": by_id[r["prev"]["id"]]["a"], "now": r["a"], "relation": r["relation"],
+                        "cancelled": r["relation"] == "cancels", "row": r})
+    return sorted(out, key=lambda x: (x["when"], x["id"]), reverse=True)[:limit]
 
 
 def summary() -> dict:
-    """Для шапки раздела, меню и сводки: темы, действующие решения, ждут решения, без шага."""
+    """Для шапки раздела, меню и сводки: темы, вопросы, ждут решения, без шага, изменилось за неделю."""
     rows = _load()
-    c = _counts(rows)
-    return {**c, "topics": len({r["topic"] for r in rows}),
+    qs = questions(rows)
+    return {**_counts(rows), "topics": len({q["topic"] for q in qs}), "questions": len(qs),
+            "open": sum(q["open"] for q in qs), "no_step": sum(q["no_step"] for q in qs),
+            "attention": sum(q["no_step"] for q in qs),
             "projects": sorted({r["project"] for r in rows if r.get("project")}),
             "topic_names": sorted({r["topic"] for r in rows if r["topic"] != NO_TOPIC})}
 
 
 def update(did: int, *, stage: str | None = None, metric: str | None = None,
            before: str | None = None, after: str | None = None, waiting: str | None = None,
-           project: str | None = None, prev: int | None = None, relation: str | None = None) -> None:
+           project: str | None = None, prev: int | None = None, relation: str | None = None,
+           question: str | None = None, answer: str | None = None) -> None:
     """Поля решения. Пустая строка — очистить поле, None — не трогать; prev=0 — убрать связь с прежним."""
     d = get(did)
     if not d:
@@ -208,7 +288,8 @@ def update(did: int, *, stage: str | None = None, metric: str | None = None,
         if stage not in STAGES:
             raise DecisionError(f"Статус — один из: {', '.join(STAGES)}")
         sets["stage"], sets["stage_at"] = stage, store.utcnow()
-    for col, val in (("metric", metric), ("before_value", before), ("after_value", after), ("waiting_for", waiting)):
+    for col, val in (("metric", metric), ("before_value", before), ("after_value", after), ("waiting_for", waiting),
+                     ("question", question), ("answer", answer)):
         if val is not None:
             sets[col] = " ".join(val.split())[:300] or None
     if project is not None:
@@ -261,6 +342,12 @@ def rename_topic(old: str, new: str) -> int:
             n += 1
     if not n:
         raise DecisionError(f"Нет темы «{old}» (./ops decisions topics)")
+    name = split_topic(new)[0]
+    about = abouts()
+    if name != old and about.get(old) and not about.get(name):  # «о чём» переезжает вместе с темой
+        set_about(name, about[old])
+    if name != old:
+        store.execute("DELETE FROM decision_topics WHERE name=?", (old,))
     return n
 
 
@@ -301,17 +388,20 @@ def superseded() -> dict[int, dict]:
 
 def attention_lines(limit: int = 6) -> list[str]:
     """Для ./ops overview (а через неё — для дайджеста): ждёт решения, а следующего шага нет. Самые давние сверху."""
-    rows = sorted(items(attention=True), key=lambda r: r["when"])[:limit]
-    return [f"[decision {r['id']}] {r['when']} · {r['topic']} · {r['title']} — ждёт решения, следующего шага нет"
-            for r in rows]
+    qs = sorted((q for q in questions() if q["no_step"]), key=lambda q: q["since"])[:limit]
+    return [f"[decision {q['latest']['id']}] {q['since']} · {q['topic']} · {_qtext(q['label'], q['now'])} — ждёт "
+            "решения, следующего шага нет" for q in qs]
+
+
+def _qtext(label: str, now: str) -> str:
+    return f"«{label}»: {now}" if label else now
 
 
 def changed_lines(days: int = CHANGED_DAYS, limit: int = 6) -> list[str]:
-    """Для ./ops overview: решения, которые за последние дни поменяли или отменили, — что на что."""
-    since = (date.today() - timedelta(days=days)).isoformat()
-    rows = [r for r in items() if r["prev"] and r["relation"] in SUPERSEDING and r["when"] >= since]
-    return [f"[decision {r['id']}] {r['when']} · {r['topic']} · «{r['title']}» — {r['relation_title']} решение от "
-            f"{r['prev']['when']} «{r['prev']['title']}»" for r in rows[:limit]]
+    """Для ./ops overview: решения, которые за последние дни поменяли или отменили, — было → стало."""
+    return [f"[decision {c['id']}] {c['when']} · {c['topic']} · " + (f"«{c['question']}»: " if c["question"] else "")
+            + f"было «{c['was']}» → " + ("отменили" if c["cancelled"] else f"стало «{c['now']}»")
+            for c in changed(days, limit)]
 
 
 def ref(r: dict) -> str:
@@ -351,24 +441,25 @@ def link_summary(text: str, rows: list[dict]) -> str:
 
 
 def topic_text(name: str) -> str:
-    """Тема текстом — для `./ops decisions topic` и копирования: что сейчас действует и цепочки."""
+    """Тема текстом — для `./ops decisions topic`: о чём, ждут решения, что решено по вопросам и история."""
     v = topic_view(name)
     if not v:
         return f"Нет темы «{name}»"
-    out = [f"# {name}", "", "## Сейчас по теме"]
-    for r in v["now"]:
-        metric = (f" · {r.get('metric') or 'метрика'}: {r.get('before_value') or '—'} → {r.get('after_value') or '—'}"
-                  if r.get("metric") or r.get("before_value") or r.get("after_value") else "")
-        step = f" · следующий шаг: {r['waiting_for']}" if r.get("waiting_for") else ""
-        prev = f" · {r['relation_title']} решение от {_ddmm(r['prev']['when'])}" if r["prev"] else ""
-        out.append(f"- [decision {r['id']}] {_ddmm(r['when'])} · {r['stage_title']} · {r['title']}{metric}{step}{prev}")
-    if v["chains"]:
-        out += ["", "## Как к этому пришли"]
-        for i, chain in enumerate(v["chains"], 1):
-            out.append(f"Цепочка {i}:")
-            for r in chain:
-                rel = f"{r['relation_title']} [{r['prev']['id']}] → " if r["prev"] else ""
-                state = f" ({r['state_title']})" if not r["current"] else ""
-                other = f" · тема «{r['topic']}»" if r["topic"] != name else ""
-                out.append(f"  {_ddmm(r['when'])} {rel}[decision {r['id']}] {r['title']}{state}{other}")
+    out = [f"# {name}"] + ([v["about"]] if v["about"] else [])
+
+    def block(q: dict) -> list[str]:
+        step = f" · ждём: {q['waiting']}" if q["waiting"] else (" · следующего шага нет" if q["no_step"] else "")
+        lines = [f"- {_qtext(q['label'], q['now'])} (с {_ddmm(q['since'])}){step}"]
+        if q["changes"]:
+            for r in q["nodes"]:
+                gone = f" ({r['state_title']})" if not r["current"] else ""
+                lines.append(f"    {_ddmm(r['when'])} {r['verb']}: {r['a']} [decision {r['id']}]{gone}")
+        else:
+            lines[0] += f" [decision {q['latest']['id']}]"
+        return lines
+
+    if v["open"]:
+        out += ["", "## Ждут решения"] + [x for q in v["open"] for x in block(q)]
+    if v["decided"]:
+        out += ["", "## Что решено"] + [x for q in v["decided"] for x in block(q)]
     return "\n".join(out)

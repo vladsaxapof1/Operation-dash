@@ -1,7 +1,7 @@
-"""Раздел «Решения» — решения по темам и цепочки (MEM-3). Логика — opsdash.decisions.
+"""Раздел «Решения» — темы → вопросы → что решено сейчас и история (MEM-3). Логика — opsdash.decisions.
 
-/decisions — темы; ?topic=<тема> — страница темы: ждут решения, цепочки «как к этому пришли», отдельные решения;
-?q=… — поиск, ?f=attention — что требует внимания (по всем темам)."""
+/decisions — «Изменилось за неделю» и темы; ?topic=<тема> — тема: о чём, ждут решения, что решено;
+?q=… — поиск, ?f=attention — ждут решения без следующего шага (по всем темам)."""
 
 from __future__ import annotations
 
@@ -13,18 +13,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from opsdash import decisions, records
 
 
-def _tsv(rows: list[dict]) -> str:
-    """«Скопировать таблицей»: тема, метрика, решение, было, стало, статус, следующий шаг, дата, что поменяло.
-    Вставляется в Google Таблицы и Excel по колонкам."""
-    head = ["Тема", "Метрика", "Решение", "Было", "Стало", "Статус", "Следующий шаг / чего ждём", "Дата",
-            "Связь с прежним"]
+def _tsv(name: str, qs: list[dict]) -> str:
+    """«Скопировать таблицей»: тема, вопрос, что решено сейчас, статус, чего ждём, с какого числа, сколько раз меняли,
+    метрика «было → стало». Вставляется в Google Таблицы и Excel по колонкам."""
+    head = ["Тема", "Вопрос", "Сейчас", "Статус", "Чего ждём", "С", "Изменений", "Метрика", "Было", "Стало"]
     out = ["\t".join(head)]
-    for r in rows:
-        topic = r["topic"] + (f" / {r['subtopic']}" if r["subtopic"] else "")
-        cells = [topic, r.get("metric") or "", r["title"], r.get("before_value") or "", r.get("after_value") or "",
-                 r["stage_title"], r.get("waiting_for") or "", decisions._ddmm(r["when"]),
-                 f"{r['relation_title']} решение от {decisions._ddmm(r['prev']['when'])} «{r['prev']['title']}»"
-                 if r["prev"] else ""]
+    for q in qs:
+        r = q["latest"]
+        topic = name + (f" / {q['subtopic']}" if q["subtopic"] else "")
+        cells = [topic, q["label"], q["now"], r["stage_title"], q["waiting"], decisions._ddmm(q["since"]),
+                 q["changes"] or "", r.get("metric") or "", r.get("before_value") or "", r.get("after_value") or ""]
         out.append("\t".join(" ".join(str(c).split()) for c in cells))
     return "\n".join(out)
 
@@ -41,39 +39,42 @@ def register(app: FastAPI, render, back) -> None:
             if not view:  # тему переименовали или её последнее решение устарело — к списку тем (не back: зациклится)
                 return RedirectResponse(f"/decisions?err={quote(f'Нет темы «{topic}» — её переименовали или решений в ней не осталось')}",
                                         status_code=303)
-            chained = {r["id"] for chain in view["chains"] for r in chain}
-            single = [r for r in view["now"] if r["id"] not in chained and r["stage"] == "decided"]
             options = sorted((r for r in decisions.items(topic=topic, current=False)),
                              key=lambda r: (r["when"], r["id"]), reverse=True)
-            return render(request, "decision_topic.html", **common, v=view, single=single, options=options,
-                          tsv=_tsv(view["now"]), topic=topic)
+            return render(request, "decision_topic.html", **common, v=view, options=options,
+                          tsv=_tsv(topic, view["open"] + view["decided"]), topic=topic)
         if q.strip() or f == "attention":
             rows = (decisions.items(q=q.strip(), current=False) if q.strip() else decisions.items(attention=True))
             groups: dict[str, list[dict]] = {}
             for r in rows:
                 groups.setdefault(r["topic"], []).append(r)
             return render(request, "decisions.html", **common, mode="list", groups=groups, q=q, f=f,
-                          topics=[], total=len(rows))
+                          topics=[], total=len(rows), changed=[], week_days=decisions.WEEK_DAYS)
         return render(request, "decisions.html", **common, mode="topics", topics=decisions.topics(), q="", f="",
-                      groups={}, total=0)
+                      groups={}, total=0, changed=decisions.changed(), week_days=decisions.WEEK_DAYS)
 
     @app.post("/decisions/topic-rename")
-    def decision_topic_rename(request: Request, old: str = Form(""), new: str = Form("")):
+    def decision_topic_rename(request: Request, old: str = Form(""), new: str = Form(""), about: str = Form(None)):
+        """«Тема»: о чём (одна строка) и название — переименовать или влить в другую."""
+        name, msg = old, "Сохранено"
         try:
-            n = decisions.rename_topic(old, new)
+            if about is not None:
+                decisions.set_about(old, about)
+            if new.strip() and decisions.split_topic(new)[0] != old:
+                n = decisions.rename_topic(old, new)
+                name, msg = decisions.split_topic(new)[0], f"Тема переименована — решений: {n}"
         except decisions.DecisionError as e:
             return back(request, err=str(e))
-        name = decisions.split_topic(new)[0]
-        return RedirectResponse(f"/decisions?topic={quote(name)}&msg={quote(f'Тема переименована — решений: {n}')}",
-                                status_code=303)
+        return RedirectResponse(f"/decisions?topic={quote(name)}&msg={quote(msg)}", status_code=303)
 
     @app.post("/decisions/{did}")
-    def decision_save(request: Request, did: int, stage: str = Form(None), metric: str = Form(None), before: str = Form(None), after: str = Form(None),
-                      waiting: str = Form(None), project: str = Form(None), prev: str = Form(None),
-                      relation: str = Form(None)):
+    def decision_save(request: Request, did: int, stage: str = Form(None), metric: str = Form(None),
+                      before: str = Form(None), after: str = Form(None), waiting: str = Form(None),
+                      project: str = Form(None), prev: str = Form(None), relation: str = Form(None),
+                      question: str = Form(None), answer: str = Form(None)):
         try:
             decisions.update(did, stage=stage, metric=metric, before=before, after=after,
-                             waiting=waiting, project=project,
+                             waiting=waiting, project=project, question=question, answer=answer,
                              prev=None if prev is None else int(prev or 0), relation=relation or None)
         except (decisions.DecisionError, ValueError) as e:
             return back(request, err=str(e))
@@ -121,4 +122,4 @@ def register(app: FastAPI, render, back) -> None:
         from opsdash import jobs
 
         jobs.submit("decisions", "heavy")
-        return back(request, "Запустила: помощник соберёт цепочки решений по темам — ход в «Офисе»")
+        return back(request, "Запустила: помощник сформулирует вопросы и «о чём» тем и свяжет решения — ход в «Офисе»")
