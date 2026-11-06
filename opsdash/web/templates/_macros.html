@@ -437,7 +437,7 @@
       {% if c.due_hint %}<p class="warn-text small">Срок {{ c.due | date }} под угрозой с самого начала: {{ c.due_hint_why }}. Реальнее — {{ c.due_hint | day_text }}.</p>{% endif %}
       <div class="due-pick" role="group" aria-label="Срок">
         {% if c.due_hint %}<button type="button" class="due-q" data-due-pick="{{ c.due_hint }}" aria-pressed="false">Реальнее<span>{{ c.due_hint | day_text }}</span></button>{% endif %}
-        {% for ch in (choices | rejectattr('iso', 'equalto', c.due_hint) | list)[:3 if c.due_hint else 4] %}<button type="button" class="due-q" data-due-pick="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
+        {% for ch in (choices | rejectattr('iso', 'equalto', c.due_hint) | list)[:4 if c.due_hint else 5] %}<button type="button" class="due-q" data-due-pick="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
       </div>
       <label class="due-own">или своя дата <input type="date" name="due" required></label>
       <p class="bad-text small" data-due-err hidden></p>

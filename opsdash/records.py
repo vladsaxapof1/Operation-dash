@@ -275,13 +275,17 @@ def due_change(was: str | None, new: str | None) -> str:
 
 
 def due_choices(today: date | None = None) -> list[tuple[str, date]]:
-    """Быстрые сроки в «Уточнить срок»: завтра, послезавтра, до конца недели (пятница; в выходные — следующая),
-    до конца месяца."""
+    """Быстрые сроки в «Уточнить срок»: сегодня, завтра, послезавтра, до конца недели (пятница; в выходные —
+    следующая), до конца месяца. Одна дата — одна кнопка: в пятницу «до конца недели» — это «сегодня»."""
     today = today or today_local()
     next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
-    return [("Завтра", today + timedelta(days=1)), ("Послезавтра", today + timedelta(days=2)),
-            ("До конца недели", today + timedelta(days=(4 - today.weekday()) % 7)),
-            ("До конца месяца", next_month - timedelta(days=1))]
+    out: list[tuple[str, date]] = []
+    for label, d in (("Сегодня", today), ("Завтра", today + timedelta(days=1)), ("Послезавтра", today + timedelta(days=2)),
+                     ("До конца недели", today + timedelta(days=(4 - today.weekday()) % 7)),
+                     ("До конца месяца", next_month - timedelta(days=1))):
+        if d not in {x for _, x in out}:
+            out.append((label, d))
+    return out
 
 
 def set_in_work(cid: int, on: bool) -> None:

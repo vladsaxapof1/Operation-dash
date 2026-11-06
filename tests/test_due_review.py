@@ -26,16 +26,22 @@ def _tasks():
     return mine, to_me, other, dated
 
 
-@pytest.mark.parametrize("today, expected", [
-    (date(2026, 11, 3), ["2026-11-04", "2026-11-05", "2026-11-06", "2026-11-30"]),  # вторник
-    (date(2026, 11, 6), ["2026-11-07", "2026-11-08", "2026-11-06", "2026-11-30"]),  # пятница — неделя кончается сегодня
-    (date(2026, 11, 7), ["2026-11-08", "2026-11-09", "2026-11-13", "2026-11-30"]),  # суббота — следующая пятница
-    (date(2026, 12, 30), ["2026-12-31", "2027-01-01", "2027-01-01", "2026-12-31"]),
-    (date(2027, 2, 10), ["2027-02-11", "2027-02-12", "2027-02-12", "2027-02-28"]),
+ALL = ["Сегодня", "Завтра", "Послезавтра", "До конца недели", "До конца месяца"]
+
+
+@pytest.mark.parametrize("today, labels, expected", [
+    (date(2026, 11, 3), ALL, ["2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-30"]),  # вторник
+    # пятница — неделя кончается сегодня: «до конца недели» — та же дата, что «сегодня», второй кнопки нет
+    (date(2026, 11, 6), ["Сегодня", "Завтра", "Послезавтра", "До конца месяца"],
+     ["2026-11-06", "2026-11-07", "2026-11-08", "2026-11-30"]),
+    (date(2026, 11, 7), ALL, ["2026-11-07", "2026-11-08", "2026-11-09", "2026-11-13", "2026-11-30"]),  # суббота
+    (date(2026, 12, 30), ["Сегодня", "Завтра", "Послезавтра"], ["2026-12-30", "2026-12-31", "2027-01-01"]),
+    (date(2027, 2, 10), ["Сегодня", "Завтра", "Послезавтра", "До конца месяца"],
+     ["2027-02-10", "2027-02-11", "2027-02-12", "2027-02-28"]),
 ])
-def test_due_choices(today, expected):
+def test_due_choices(today, labels, expected):
     choices = records.due_choices(today)
-    assert [label for label, _ in choices] == ["Завтра", "Послезавтра", "До конца недели", "До конца месяца"]
+    assert [label for label, _ in choices] == labels
     assert [d.isoformat() for _, d in choices] == expected
 
 
@@ -68,7 +74,7 @@ def test_home_feed_row_and_dialog(client):
     assert 'id="due-dlg"' in page and f'action="/commitments/{mine}/due"' in page
     assert page.index(f"/commitments/{mine}/due") < page.index(f"/commitments/{to_me}/due")
     assert f"/commitments/{other}/due" not in page  # сроки договорённостей коллег директор не разбирает
-    assert 'data-due-pick="' in page and "До конца недели" in page
+    assert 'data-due-pick="' in page and ">Сегодня<span>" in page and ">Завтра<span>" in page
     assert "Всё · 2" in page
     # в меню у «Сводки» задачи без срока не считаются: там — то, что ждёт действия
     from opsdash.web.app import needs_from_you
