@@ -1315,6 +1315,9 @@ def cmd_propose(a) -> None:
         elif a.kind == "remind":
             p = proposals.propose_reminder(commitment_id=a.commitment, text=a.text, batch=a.batch, reason=a.reason,
                                            source_ref=source_ref)
+        elif a.kind == "rule":
+            p = proposals.propose_rule(skill=a.skill, text=a.text, quote=a.quote, batch=a.batch, reason=a.reason,
+                                       source_ref=source_ref)
         else:
             fail("неизвестный тип")
     except proposals.ProposalError as e:
@@ -1347,6 +1350,42 @@ def cmd_proposals(a) -> None:
     elif a.action == "reject":
         p = proposals.reject(a.id)
         out(f"[{p['id']}] отклонено")
+    elif a.action == "rejected":  # материал для уроков «Нет» (навык lessons)
+        from opsdash import skills
+
+        items = skills.rejected(a.days)
+        if a.json:
+            return as_json(items)
+        for p in items:
+            why = p["reject_reason_text"] + (f" — {p['reject_note']}" if p["reject_note"] else "")
+            out(f"[{p['id']}] {store.local(p['decided_at'])} · {p['kind']} · {p['title']}"
+                + (f" · почему «Нет»: {why}" if why else " · причину не указала")
+                + (f" · предлагали потому что: {p['reason']}" if p["reason"] else ""))
+        if not items:
+            out(f"За {a.days} дн. отклонённых нет.")
+
+
+def cmd_skills(a) -> None:
+    from opsdash import skills
+
+    if a.action == "list":
+        cat = skills.catalog()
+        if a.json:
+            return as_json(cat)
+        for area in cat["areas"]:
+            out(area["title"])
+            for s in area["skills"]:
+                out(f"  {s['id']} — {s['title']}: {s['label']}" + (f" · правил: {s['rules']}" if s["rules"] else ""))
+    elif a.action == "rules":
+        if not skills.get(a.skill):
+            fail(f"нет навыка «{a.skill}» — ./ops skills list")
+        items = skills.rules(a.skill)
+        if a.json:
+            return as_json(items)
+        for r in items:
+            out(f"[{r['id']}] {'вкл' if r['enabled'] else 'выкл'} · {r['text']}" + (" · урок из «Нет»" if r["source"] == "lesson" else ""))
+        if not items:
+            out("Правил нет.")
 
 
 def cmd_notify(a) -> None:
@@ -1830,6 +1869,11 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--uid", required=True, help="uid встречи (./ops calendar)")
     x = ps.add_parser("cancel-meeting", parents=[common], help="отменить встречу")
     x.add_argument("--uid", required=True)
+    x = ps.add_parser("rule", parents=[common],
+                      help="правило для навыка из уроков «Нет» (навык lessons) — включится после «Да» директора")
+    x.add_argument("--skill", required=True, help="навык: ./ops skills list")
+    x.add_argument("--text", required=True, help="правило обычными словами — как его прочтёт навык")
+    x.add_argument("--quote", help="на чём основано: какие предложения и с какой причиной отклонены")
     x = ps.add_parser("remind", parents=[common], help="напомнить исполнителю задачи «мне должны» в Telegram (после «Да»)")
     x.add_argument("--commitment", type=int, required=True, help="id задачи «мне должны»")
     x.add_argument("--text", help="свой текст; без него — по шаблону из настроек")
@@ -1873,7 +1917,16 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--batch")
     x = ms.add_parser("reject")
     x.add_argument("id", type=int)
+    x = ms.add_parser("rejected", help="отклонённые за последние дни — с причинами «Нет» (для уроков)")
+    x.add_argument("--days", type=int, default=14)
     s.set_defaults(fn=cmd_proposals)
+
+    s = sub.add_parser("skills", help="навыки PULSE и «Ваши правила» к ним")
+    ms = s.add_subparsers(dest="action", required=True)
+    ms.add_parser("list", help="навыки: что делают, сколько правил")
+    x = ms.add_parser("rules", help="правила директора к навыку")
+    x.add_argument("skill")
+    s.set_defaults(fn=cmd_skills)
 
     s = sub.add_parser("notify", help="написать директору в Telegram")
     s.add_argument("text", help="HTML-разметка Telegram: <b>, <i>, <a href>")

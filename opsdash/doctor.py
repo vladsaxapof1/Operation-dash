@@ -190,8 +190,24 @@ def _autostart() -> dict | None:
                 "После перезагрузки PULSE не запустится сам. Включите: ./ops mac install (или INSTALL ещё раз).")
 
 
+def _skills() -> dict | None:
+    """Системные навыки не изменены на этом компьютере (SK-3). Без git проверить нельзя — строки нет."""
+    from opsdash import skills
+
+    mods = skills.modified()
+    if mods is None:
+        return None
+    if mods:
+        names = ", ".join(skills.get(sid)["title"] for sid in mods)
+        return _row("system", "skills", "Навыки", "warn", f"изменены на этом компьютере: {names}",
+                    "Изменённый навык может работать не так, как задумано. На его странице — «Вернуть заводской».",
+                    "/skills")
+    return _row("system", "skills", "Навыки", "ok", "системные — как в этой версии PULSE", "", "/skills")
+
+
 def system_rows(settings: dict) -> list[dict]:
-    rows = [_assistant(settings), _jobs(), _bot(settings), _transcribe(settings), _disk(), _errors(), _autostart()]
+    rows = [_assistant(settings), _jobs(), _bot(settings), _transcribe(settings), _skills(), _disk(), _errors(),
+            _autostart()]
     return [r for r in rows if r]
 
 

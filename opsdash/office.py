@@ -33,7 +33,8 @@ DESKS = [
     {"key": "triage", "title": "Секретарь",
      "what": "Разбирает сообщения: кто ждёт ответа, какие прозвучали задачи, как движутся старые; по понедельникам "
              "собирает проекты",
-     "jobs": ["triage", "projects", "task-log"], "run": [("triage", "Разобрать сейчас"), ("projects", "Собрать проекты")],
+     "jobs": ["triage", "projects", "task-log", "lessons"],
+     "run": [("triage", "Разобрать сейчас"), ("projects", "Собрать проекты"), ("lessons", "Уроки из «Нет»")],
      "link": ("/chats", "Переписка")},
     {"key": "meetings", "title": "Стенографист", "what": "Разбирает встречи: решения, задачи, текст итогов",
      "jobs": ["process-meeting", "followup"], "run": [], "link": ("/meetings", "Встречи")},

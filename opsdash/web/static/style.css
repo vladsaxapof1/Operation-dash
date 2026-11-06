@@ -1888,3 +1888,63 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .finds { display: grid; gap: 12px; }
 .finds section h3 { margin: 4px 0 6px; }
 .find { margin: 0 0 4px; font-size: 15px; overflow-wrap: anywhere; }
+
+/* --- Навыки (SK-1 – SK-4): каталог карточками и страница навыка --- */
+.alert.warn { background: var(--warn-soft); color: var(--warn-text); }
+.sk-tools { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: 4px 0 6px; }
+.sk-search { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; height: 36px; border: 1px solid var(--line-strong);
+  border-radius: 8px; background: var(--panel); color: var(--muted); }
+.sk-search input { border: 0; outline: 0; background: none; height: 34px; width: 200px; padding: 0; color: var(--text); }
+.sk-tools .seg button { min-width: 0; }
+.sk-area h3 { margin-top: 20px; }
+.sk-ico { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--accent-soft);
+  color: var(--accent); }
+.sk-ico.lg { width: 48px; height: 48px; border-radius: 12px; }
+.sk-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.crumbs { margin: -6px 0 6px; }
+.sk-head { display: flex; gap: 14px; align-items: center; }
+.sk-head .sub { margin: 4px 0 0; }
+.sk-page { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.sk-about { display: grid; gap: 12px; padding-top: 16px; }
+.sk-what-lg { margin: 0; font-size: 17px; }
+.sk-facts { margin: 0; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 16px; font-size: 15px; }
+.sk-facts dt { color: var(--muted); }
+.sk-facts dd { margin: 0; }
+.sk-lock { display: flex; align-items: center; gap: 6px; margin: 0; }
+.sk-rules { margin: 4px 0 12px; }
+.sk-rule { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.sk-rule.is-off .sk-rule-t { color: var(--muted); }
+.sk-rule-t { overflow-wrap: anywhere; }
+.sk-rule-act { display: flex; gap: 4px; flex: none; }
+.sk-rule-act form { margin: 0; }
+.sk-rule-add textarea { width: 100%; }
+.sk-text summary { list-style: none; cursor: pointer; }
+.sk-text summary::-webkit-details-marker { display: none; }
+.sk-text summary h2::after { content: " ▸"; color: var(--faint); font-weight: 400; }
+.sk-text[open] summary h2::after { content: " ▾"; }
+/* текст навыка — как Markdown-документ: абзацы целиком, отступы у списков, код блоками */
+.sk-desc { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; background: var(--panel-2); font-size: 14px; color: var(--muted); }
+.sk-desc b { color: var(--text); font-weight: 600; }
+.sk-doc { max-width: 860px; }  /* читается прокруткой страницы, без своей полосы прокрутки */
+.sk-doc > :first-child { margin-top: 0; }
+.sk-doc h1 { font-size: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.sk-doc h2 { font-size: 17px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.sk-doc p { margin: 8px 0; }
+.sk-doc ul, .sk-doc ol { margin: 6px 0 10px; padding-left: 24px; }
+.sk-doc li { margin: 4px 0; }
+.sk-doc li > ul, .sk-doc li > ol { margin: 4px 0; }
+.sk-doc code { font-size: 13px; overflow-wrap: anywhere; }
+.sk-doc pre { background: var(--panel-2); border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+.sk-doc pre code { background: none; white-space: pre; overflow-wrap: normal; }
+.sk-runs li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; }
+@media (max-width: 960px) { .sk-page { grid-template-columns: minmax(0, 1fr); } .sk-facts { grid-template-columns: minmax(0, 1fr); } }
+
+/* «Нет» — почему? (MOD-3): полоса внизу экрана после отказа */
+.why-bar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40; width: min(720px, calc(100vw - 32px));
+  display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; padding: 10px 12px 10px 16px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-pop); font-size: 14px; }
+.why-bar .why-t { flex: 1 1 100%; }
+.why-bar .why-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.why-bar .why-note { flex: 1 1 200px; height: 30px; }
+.why-bar .alert-x { position: static; margin-left: auto; }
+@media (max-width: 760px) { .why-bar { bottom: 76px; } }

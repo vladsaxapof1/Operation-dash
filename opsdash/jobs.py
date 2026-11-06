@@ -321,6 +321,21 @@ def job_anthology(**_) -> str:
     return "обзор недели для базы знаний готов"
 
 
+def job_lessons(**_) -> str:
+    """Уроки из «Нет» (MOD-3): повторяющиеся отказы → предложения правил для навыков (навык lessons)."""
+    from opsdash import skills
+
+    if not skills.rejected(14):
+        return "отклонённых за две недели нет — уроков нет"
+    before = store.scalar("SELECT COUNT(*) FROM proposals WHERE kind='skill.rule'") or 0
+    settings = config.load_settings()
+    prompt = ("Найди уроки в отклонённых предложениях строго по навыку lessons (.claude/skills/lessons/SKILL.md). "
+              "Это фоновый запуск: директор видит итог только через ./ops notify и предложения на «Да».")
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="lessons", timeout_min=15)
+    n = (store.scalar("SELECT COUNT(*) FROM proposals WHERE kind='skill.rule'") or 0) - before
+    return f"предложено правил: {n}" if n else "повторов в отказах нет — правил не предлагаю"
+
+
 def job_company_context(**_) -> str:
     settings = config.load_settings()
     prompt = (
@@ -496,6 +511,7 @@ REGISTRY = {
     "update": job_update,
     "estimates": job_estimates,
     "first-finds": lambda **kw: _first_finds(),
+    "lessons": job_lessons,
 }
 
 TITLES = {
@@ -528,6 +544,7 @@ TITLES = {
     "update": "Обновление PULSE",
     "estimates": "Оценки времени у задач (Claude)",
     "first-finds": "Первые находки: разбор переписки за 5 дней (Claude)",
+    "lessons": "Уроки из ваших «Нет» (Claude)",
 }
 
 
@@ -770,6 +787,9 @@ def tick(settings: dict | None = None) -> list[str]:
             and config.now(settings).weekday() == 0  # понедельник, до утреннего дайджеста
             and _daily("company-context", sch["context_weekly"], settings)):
         go("company-context", "heavy")
+    if (sch.get("lessons_weekly") and config.now(settings).weekday() == 4  # пятница: уроки из «Нет» за две недели
+            and _daily("lessons", sch["lessons_weekly"], settings)):
+        go("lessons", "heavy")
     if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
             and _daily("projects", sch["projects_weekly"], settings)):
         go("projects", "heavy")

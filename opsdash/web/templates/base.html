@@ -22,7 +22,8 @@
               ("digests", "/digests", "Дайджесты", 0), ("people", "/people", "Люди", 0)]
              + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])
              + ([("kb", "/kb", "База знаний", 0)] if sections_on.kb else [])),
-  (ai_name or "Claude", [("ask", "/ask", "Спросить " ~ (ai_name or "Claude"), 0), ("office", "/office", "Офис", 0)]),
+  (ai_name or "Claude", [("ask", "/ask", "Спросить " ~ (ai_name or "Claude"), 0), ("skills", "/skills", "Навыки", 0),
+                         ("office", "/office", "Офис", 0)]),
 ] %}
 {% set nav_system = [("settings", "/settings", "Настройки", 0), ("journal", "/journal", "Журнал", 0), ("help", "/help", "Справка", 0)] %}
 {% macro nav_link(key, href, title, n) -%}
@@ -95,6 +96,15 @@
   </details>
 </nav>
 {% if design_intro %}{% include "_design_intro.html" %}{% endif %}
+{% if why_p %}
+{#- «Нет» — почему? (MOD-3): одна строка с причинами; ответ учитывает навык «Уроки из ваших „Нет“». Можно не отвечать #}
+<div class="why-bar" role="dialog" aria-label="Почему «Нет»" data-why="{{ why_p.id }}">
+  <span class="why-t">«Нет» — почему? <span class="muted">Так PULSE поймёт, что предлагать не стоит.</span></span>
+  <div class="why-chips">{% for key, t in WHY_REASONS.items() %}<button type="button" class="btn sm" data-why-reason="{{ key }}">{{ t }}</button>{% endfor %}</div>
+  <input type="text" class="why-note" placeholder="другое — словами" maxlength="300" data-why-note hidden>
+  <button type="button" class="alert-x" data-why-close aria-label="Не отвечать" title="Не отвечать">✕</button>
+</div>
+{% endif %}
 <script src="/static/app.js?v={{ static_v }}"></script>
 <script src="/static/day.js?v={{ static_v }}"></script>
 <script src="/static/agents.js?v={{ static_v }}"></script>

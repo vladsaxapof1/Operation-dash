@@ -315,6 +315,12 @@ def stream(prompt: str, *, model: str | None = None, resume: str | None = None, 
     on_step = office.step_recorder(on_step)  # шаги — и в раздел «Офис», если это фоновое задание
     settings = config.load_settings()
     who = who if who in ENGINES else engine(settings)
+    try:  # «Ваши правила» к навыку этого задания (opsdash.skills, SK-4) — дополняют навык, Claude и ChatGPT одинаково
+        from opsdash import skills
+
+        prompt = prompt + skills.rules_prompt(job)
+    except Exception as e:  # noqa: BLE001 — без правил запуск всё равно должен пройти
+        store.log(job, f"правила навыка не подмешаны: {e}", "warning")
     if resume and session_engine(resume) != who:  # разговор начинал другой — продолжить его этот не может
         raise BrainError(f"разговор начат с {ENGINES[session_engine(resume)]}, а сейчас работает {ENGINES[who]}")
     with turn(who, job, on_step):

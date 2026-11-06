@@ -378,6 +378,19 @@ def handle_callback(bot: Bot, cq: dict, chat_id: str) -> None:
         if p:
             bot.send(chat_id, f"{e(p['title'])}\n{e(proposals.result_text(p))}")
         _refresh_buttons(bot, cq)
+        if p and parts[1] == "r" and p["status"] == "rejected":  # «Нет» — почему? (MOD-3); можно не отвечать
+            from opsdash import skills
+
+            bot.send(chat_id, "«Нет» — почему? Так PULSE поймёт, что предлагать не стоит.",
+                     [[{"text": t, "callback_data": f"w:{pid}:{k}"} for k, t in skills.REASONS.items() if k != "other"]])
+    elif parts[0] == "w" and len(parts) == 3 and parts[1].isdigit():
+        from opsdash import skills
+
+        ok = skills.set_reason(int(parts[1]), parts[2])
+        bot.answer_callback(cq["id"], "Учту" if ok else "Не найдено")
+        if ok and message_id:
+            bot.edit(chat_id, message_id, f"«Нет» — {e(skills.REASONS[parts[2]])}. Учту: повторяющиеся причины станут "
+                                          "правилом после вашего «Да».", [])
     elif parts[0] == "b" and len(parts) in (3, 4):
         items = batch_items(parts[2], parts[3] if len(parts) == 4 else parts[2])
         results = [proposals.approve(p["id"]) if parts[1] == "a" else proposals.reject(p["id"]) for p in items]

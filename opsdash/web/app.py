@@ -30,7 +30,7 @@ from starlette.concurrency import run_in_threadpool
 
 from opsdash import __version__, briefs, config, digests, overview, proposals, records, store, worklog
 from opsdash import day as day_mod
-from opsdash.web import agent_views, settings_views, welcome_views
+from opsdash.web import agent_views, settings_views, skills_views, welcome_views
 
 HERE = Path(__file__).parent
 app = FastAPI(title="PULSE", docs_url=None, redoc_url=None, openapi_url=None)
@@ -61,12 +61,13 @@ def f_date(value) -> str:
 UNSAFE_URL = re.compile(r'(href|src)\s*=\s*"\s*(javascript|data|vbscript):[^"]*"', re.IGNORECASE)
 
 
-def f_md(text: str) -> str:
+def f_md(text: str, breaks: bool = True) -> str:
     """Markdown → HTML. Сырой HTML в тексте экранируется: расшифровки и разборы приходят
-    из файлов и переписки, им нельзя доверять."""
+    из файлов и переписки, им нельзя доверять. breaks=False — переносы строк внутри абзаца не рвут его
+    (тексты с ручным переносом по ширине: навыки, справка)."""
     text = (text or "").replace("<", "&lt;")
     out = md.markdown(
-        text, extensions=["tables", "sane_lists", "nl2br", "toc"],
+        text, extensions=["tables", "sane_lists", "toc"] + (["nl2br"] if breaks else []),
         extension_configs={"toc": {"slugify": slugify_unicode}},
     )
     # внутри `кода` Markdown экранирует & ещё раз: «&lt;» стало бы видно как есть — `C:\Users\&lt;вы>`
@@ -218,6 +219,7 @@ templates.env.globals.update(
     is_apple_silicon=sys.platform == "darwin" and platform.machine() == "arm64",
     proposal_links=proposals.links,  # ссылки у предложений — для макросов (они не видят переменных страницы)
     proposal_action=proposals.action,  # надпись на кнопке подтверждения: «Закрыть задачу», «Напомнить»…
+    WHY_REASONS=__import__("opsdash.skills", fromlist=["REASONS"]).REASONS,  # причины «Нет» (MOD-3)
 )
 templates.env.filters.update(dur=day_mod.dur, hm=day_mod.hm, est=day_mod.est_text,  # «Реальность дня»
                              day_text=day_mod.day_text)
@@ -260,6 +262,9 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["running_now"] = notices.running()
     from opsdash import brain
 
+    why = request.query_params.get("why", "")  # только что «Нет» — спросить почему (MOD-3)
+    p = proposals.get(int(why)) if why.isdigit() else None
+    ctx["why_p"] = p if p and p["status"] == "rejected" and not p.get("reject_reason") else None
     ctx["ai_name"] = brain.name(settings)  # кто работает: «Claude» или «ChatGPT» — в меню и в «Спросить»
     return templates.TemplateResponse(request, name, ctx)
 
@@ -630,13 +635,19 @@ def refresh(request: Request):
 
 @app.post("/proposals/{pid}/{action}")
 def proposal_action(request: Request, pid: int, action: str):
+    if action not in ("approve", "reject"):
+        return back(request, err="Неизвестное действие")
     if action == "approve":
         p = proposals.approve(pid)
         if p["status"] == "failed":
             return back(request, err=proposals.result_text(p))
         return back(request, proposals.result_text(p))
     proposals.reject(pid)
-    return back(request, "Отклонено")
+    # «Нет» — почему? (MOD-3): страница, куда вернулись, покажет полосу с причинами для этого предложения
+    resp = back(request, "Отклонено")
+    loc, _, frag = resp.headers["location"].partition("#")
+    resp.headers["location"] = loc + ("&" if "?" in loc else "?") + f"why={pid}" + (f"#{frag}" if frag else "")
+    return resp
 
 
 @app.post("/proposals/batch")
@@ -2455,6 +2466,7 @@ def help_page(request: Request, slug: str = "", example: str = ""):
 
 settings_views.register(app, render, back)
 welcome_views.register(app, render, back)
+skills_views.register(app, render, back)
 agent_views.register(app, render, templates, back)
 
 

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}{{ sk.title }} · Навыки{% endblock %}
+{#- Страница навыка (SK-2 – SK-4): что делает, когда, что читает и предлагает; «Ваши правила» — дополняют навык
+    в каждом запуске (skills.rules_prompt); последние запуски; текст навыка — только чтение; изменённый на этом
+    компьютере — «Вернуть заводской» #}
+{% set cls = {'ok': 'ok', 'warn': 'warn', 'need': 'warn'}.get(sk.kind, '') %}
+{% set dot = {'ok': 'ok', 'warn': 'warn', 'need': 'warn', 'off': 'off', 'idle': 'off'}[sk.kind] %}
+{% block content %}
+<p class="crumbs small"><a href="/skills">← Навыки</a></p>
+<div class="topline"><div class="sk-head"><span class="sk-ico lg">{{ icons.icon(area_icons[sk.area], 24) }}</span>
+  <div><h1>{{ sk.title }}</h1>
+    <p class="sub"><span class="st {{ cls }}"><span class="dot {{ dot }}"></span>{{ sk.label }}{% if sk.kind == 'ok' and sk.last_run %} · последний запуск {{ sk.last_run | ago }}{% endif %}</span>
+      {% if sk.link and sk.kind in ('need', 'off', 'warn') %} · <a href="{{ sk.link }}">{{ 'Подключить' if sk.kind == 'need' else 'Открыть' }}</a>{% endif %}</p></div></div>
+  {% if sk.run %}<form method="post" action="/skills/{{ sk.id }}/run"><button class="btn lg">{{ icons.icon('play', 16) }}{{ sk.run.label }}</button></form>{% endif %}
+</div>
+
+<div class="sk-page">
+  <div class="sk-main">
+    <section class="card"><div class="card-b sk-about">
+      <p class="sk-what-lg">{{ sk.what }}</p>
+      <dl class="sk-facts">
+        <dt>Пример</dt><dd>{{ sk.example }}</dd>
+        <dt>Когда</dt><dd>{{ sk.when }}</dd>
+        <dt>Что читает</dt><dd>{{ sk.reads }}</dd>
+        <dt>Что предлагает</dt><dd>{{ sk.proposes }}{% if sk.proposes[:7] != 'Ничего' %} — <span class="muted">только после вашего «Да»</span>{% endif %}</dd>
+      </dl>
+      <p class="sk-lock small muted">{{ icons.icon('lock', 14) }} Системный навык — обновляется вместе с PULSE. Сам текст навыка не меняется: своё поведение задайте правилами ниже.</p>
+      {% if sk.id in cat.modified %}
+      <div class="alert warn" style="margin:0">Навык {{ cat.modified[sk.id] }} на этом компьютере — он может работать не так, как задумано, и при обновлении PULSE изменения потеряются.
+        <form method="post" action="/skills/{{ sk.id }}/restore" data-confirm="Вернуть навык к версии этого PULSE? Изменения в его файле пропадут." style="margin-top:8px"><button class="btn sm">Вернуть заводской</button></form></div>
+      {% endif %}
+    </div></section>
+
+    <section class="card" id="rules">
+      <div class="card-h"><h2>Ваши правила</h2><span class="muted small">{{ rules | selectattr('enabled') | list | length }} включено</span></div>
+      <div class="card-b">
+        <p class="hint" style="margin-top:0">Пишите обычными словами — как попросили бы помощника. Правила добавляются к навыку в каждом
+          запуске и важнее его общих указаний, но не отменяют главного: во внешние системы — только после вашего «Да».</p>
+        {% if rules %}
+        <ul class="list sk-rules">
+          {% for r in rules %}
+          <li class="sk-rule{{ ' is-off' if not r.enabled }}">
+            <div class="sk-rule-t">{{ r.text }}
+              <div class="small muted">{% if r.source == 'lesson' %}урок из ваших «Нет» · {% endif %}{{ 'выключено' if not r.enabled else ('с ' ~ (r.created | date)) }}</div></div>
+            <div class="sk-rule-act">
+              <form method="post" action="/skills/rules/{{ r.id }}"><input type="hidden" name="action" value="{{ 'off' if r.enabled else 'on' }}"><button class="btn sm ghost">{{ 'Выключить' if r.enabled else 'Включить' }}</button></form>
+              <form method="post" action="/skills/rules/{{ r.id }}" data-confirm="Удалить правило?"><input type="hidden" name="action" value="delete"><button class="btn sm ghost danger" title="Удалить" aria-label="Удалить">{{ icons.icon('trash', 15) }}</button></form>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <form method="post" action="/skills/{{ sk.id }}/rules" class="sk-rule-add">
+          <textarea name="text" rows="2" maxlength="500" required placeholder="{{ {'triage': 'Например: рассылки и уведомления сервисов не разбирай', 'process-meeting': 'Например: в итогах встреч пиши короче — до 5 пунктов', 'digest': 'Например: в утреннем дайджесте не больше трёх «ждут ответа»', 'groups-digest': 'Например: группу «Флудилка» в сводку не включай', 'meeting-brief': 'Например: в брифах к 1:1 сначала открытые задачи человека'}.get(sk.id, 'Например: пиши короче, без вступлений') }}"></textarea>
+          <div class="form-actions" style="margin-top:8px"><button class="btn primary">Добавить правило</button></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
+      <details class="sk-text"><summary class="card-h"><h2>Текст навыка</h2><span class="muted small">как его читает {{ ai_name or 'помощник' }} · только чтение</span></summary>
+        <div class="card-b">
+          {% if meta.description %}<p class="sk-desc"><b>Когда {{ ai_name or 'помощник' }} берёт этот навык:</b> {{ meta.description }}</p>{% endif %}
+          <div class="doc sk-doc">{{ text | md(False) | safe }}</div>
+        </div></details>
+    </section>
+  </div>
+
+  <aside class="sk-side">
+    <section class="card"><div class="card-h"><h2>Последние запуски</h2><a href="/office">Офис →</a></div>
+      <div class="card-b">
+        {% if runs %}
+        <ul class="list sk-runs">{% for r in runs %}<li><span>{{ r.created | ago }}</span><span class="muted small">{{ r.title }}{% if r.duration_s %} · {{ (r.duration_s / 60) | round(1) | string | replace('.', ',') }} мин{% endif %}{% if not r.ok %} · <span class="bad-text">ошибка</span>{% endif %}</span></li>{% endfor %}</ul>
+        {% else %}<p class="muted small" style="margin:0">Запусков пока не было.</p>{% endif %}
+      </div>
+    </section>
+  </aside>
+</div>
+{% endblock %}

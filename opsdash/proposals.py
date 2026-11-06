@@ -29,6 +29,7 @@ KINDS = {
     "project.create": "Собрать задачи в проект",
     "attention.done": "Закрыть «нужен ответ» — директор ответила",
     "telegram.remind": "Напомнить коллеге в Telegram",
+    "skill.rule": "Правило для навыка — урок из ваших «Нет»",
 }
 
 # надпись на кнопке подтверждения — что произойдёт, а не просто «Да»
@@ -46,6 +47,7 @@ ACTIONS = {
     "project.create": "Создать проект",
     "attention.done": "Отметить отвеченным",
     "telegram.remind": "Напомнить",
+    "skill.rule": "Включить правило",
 }
 
 
@@ -458,6 +460,28 @@ def propose_reminder(*, commitment_id: int, text: str | None = None, batch: str 
                    source_ref=source_ref, batch=batch)
 
 
+def propose_rule(*, skill: str, text: str, quote: str | None = None, batch: str | None = None,
+                 reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Правило для навыка из уроков «Нет» (MOD-3, навык lessons): включится в «Ваши правила» после «Да».
+    Такое же правило уже есть — не предлагаем; такое же уже отклоняли — тоже (решение директора главнее модели)."""
+    from opsdash import skills
+
+    sk = skills.get(skill)
+    text = " ".join((text or "").split())
+    if not sk:
+        raise ProposalError(f"Нет навыка «{skill}» — список: ./ops skills list")
+    if not text:
+        raise ProposalError("Пустое правило")
+    if store.row("SELECT 1 FROM skill_rules WHERE skill=? AND lower(text)=lower(?) AND enabled=1", (skill, text)):
+        raise ProposalError("Такое правило уже действует — ./ops skills rules " + skill)
+    for p in store.rows("SELECT payload FROM proposals WHERE kind='skill.rule' AND status='rejected'"):
+        pl = store.loads(p["payload"], {})
+        if pl.get("skill") == skill and (pl.get("text") or "").lower() == text.lower():
+            raise ProposalError("Такое правило директор уже отклоняла — снова не предлагаем")
+    return _create("skill.rule", f"Правило для «{sk['title']}»: {text}", {"skill": skill, "text": text, "quote": quote},
+                   autonomy_key="skill_rule", reason=reason, source_ref=source_ref, batch=batch)
+
+
 # --- решение ----------------------------------------------------------------
 
 def reject(pid: int) -> dict:
@@ -598,6 +622,10 @@ def execute(p: dict) -> dict:
     if kind == "task.merge":
         records.merge_commitments(pl["commitment_id"], pl["into"], note=p.get("reason"))
         return {"commitment_id": pl["commitment_id"], "into": pl["into"]}
+    if kind == "skill.rule":
+        from opsdash import skills
+
+        return {"rule_id": skills.add_rule(pl["skill"], pl["text"], source="lesson", proposal_id=p["id"])}
     if kind == "task.done":
         c = store.row("SELECT status FROM commitments WHERE id=?", (pl["commitment_id"],))
         if not c:
@@ -777,6 +805,8 @@ def result_text(p: dict) -> str:
         return "✅ Дубль объединён с задачей"
     if p["status"] == "done" and p["kind"] == "task.meeting":
         return "✅ Встреча — на карточке задачи"
+    if p["status"] == "done" and p["kind"] == "skill.rule":
+        return "✅ Правило включено — Навыки → " + ((p.get("payload") or {}).get("skill") or "")
     if p["status"] == "done" and p["kind"] == "telegram.remind":
         return f"✅ Напоминание отправлено: {(p.get('payload') or {}).get('to') or ''}".rstrip(": ")
     if p["status"] == "done":

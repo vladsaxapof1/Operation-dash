@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Навыки{% endblock %}
+{#- Навыки (SK-1): что умеет помощник — карточками по разделам, поиск и фильтр (app.js, data-sk-*).
+    Тексты — opsdash/skills.yaml, состояние и правила — opsdash/skills.py #}
+{% macro sk_status(s) -%}
+{% set cls = {'ok': 'ok', 'warn': 'warn', 'need': 'warn'}.get(s.kind, '') %}
+{% set dot = {'ok': 'ok', 'warn': 'warn', 'need': 'warn', 'off': 'off', 'idle': 'off'}[s.kind] %}
+<span class="st small conn-st {{ cls }}"><span class="dot {{ dot }}"></span><span>{{ s.label }}{% if s.kind == 'ok' and s.last_run %} · {{ s.last_run | ago }}{% endif %}</span></span>
+{%- endmacro %}
+{% block content %}
+<div class="topline"><div><h1>Навыки</h1>
+  <p class="sub">Что умеет {{ ai_name or 'помощник' }} в PULSE — {{ cat.total }} {{ plural(cat.total, 'навык', 'навыка', 'навыков') }}. Системные обновляются
+    вместе с PULSE и не правятся; своё поведение задайте правилами обычными словами — на странице навыка.</p></div></div>
+
+{% if cat.modified %}
+<div class="alert warn">Изменены на этом компьютере: {% for sid, how in cat.modified.items() %}<a href="/skills/{{ sid }}">{{ cat.titles[sid] }}</a> — {{ how }}{{ ', ' if not loop.last }}{% endfor %}.
+  Такой навык может работать не так, как задумано, — на его странице есть «Вернуть заводской».</div>
+{% endif %}
+
+<div class="sk-tools">
+  <label class="sk-search">{{ icons.icon('search', 16) }}<input type="search" placeholder="Найти навык…" data-sk-search aria-label="Найти навык"></label>
+  <div class="seg" data-sk-areas><button type="button" class="active" data-area="">Все</button>{% for a in cat.areas %}<button type="button" data-area="{{ a.id }}">{{ a.title }}</button>{% endfor %}</div>
+  {% if cat.rules %}<span class="muted small">ваших правил: {{ cat.rules }}</span>{% endif %}
+</div>
+
+{% for a in cat.areas %}
+<section class="sk-area" data-sk-area="{{ a.id }}" aria-labelledby="ska-{{ a.id }}">
+  <h3 id="ska-{{ a.id }}">{{ a.title }}</h3>
+  <div class="conn-grid">
+    {% for s in a.skills %}
+    <a class="conn-card sk-card" href="/skills/{{ s.id }}" data-sk-text="{{ (s.title ~ ' ' ~ s.what ~ ' ' ~ s.when) | lower }}">
+      <div class="conn-card-h"><span class="sk-ico">{{ icons.icon(area_icons[s.area], 20) }}</span>
+        <div class="conn-card-t"><div class="conn-name">{{ s.title }}</div>{{ sk_status(s) }}</div></div>
+      <p class="conn-catch">{{ s.what }}</p>
+      <div class="sk-foot small muted"><span>{{ s.when }}</span>{% if s.rules %}<span class="chip acc">ваших правил: {{ s.rules }}</span>{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+<p class="muted small" data-sk-empty hidden>Ничего не нашлось.</p>
+{% endblock %}

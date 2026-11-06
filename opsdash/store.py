@@ -309,6 +309,16 @@ CREATE TABLE IF NOT EXISTS digests (        -- дайджесты для раз�
     created TEXT
 );
 
+CREATE TABLE IF NOT EXISTS skill_rules (      -- «Ваши правила» к навыку (opsdash.skills): подмешиваются в его запуск
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    skill TEXT NOT NULL,             -- имя навыка: triage, process-meeting…
+    text TEXT NOT NULL,              -- правило обычными словами: «в итогах встреч пиши короче»
+    enabled INTEGER DEFAULT 1,
+    source TEXT DEFAULT 'manual',    -- manual — написала сама; lesson — урок из её «Нет» (после «Да»)
+    proposal_id INTEGER,             -- предложение, из которого правило появилось (урок)
+    created TEXT, updated TEXT
+);
+
 CREATE TABLE IF NOT EXISTS claude_runs (      -- каждый запуск Claude: расход для «Настройки → Подключения → Claude» (opsdash.usage)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT,
@@ -488,6 +498,9 @@ MIGRATIONS = [
     ("commitments", "remind_off_due", "TEXT"),
     # «Мяч снова у вас»: коллега сделал свою часть — директор отвечает, что осталось ей (records.ball_back)
     ("commitments", "ball_back_at", "TEXT"),
+    # «Нет» с причиной (MOD-3): не задача / уже есть / не тому / не сейчас / другое — и пояснение словами
+    ("proposals", "reject_reason", "TEXT"),
+    ("proposals", "reject_note", "TEXT"),
 ]
 
 

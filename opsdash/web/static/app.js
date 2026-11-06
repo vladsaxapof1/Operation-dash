@@ -1115,6 +1115,59 @@
     if (anchor) anchor.scrollIntoView({ block: "start" });  // «Расход Claude» (#usage) — сразу к нему
   }
 
+  // --- «Нет» — почему? (MOD-3): причина кнопкой; «другое» — словами (Enter); ✕ — не отвечать ---
+  var whyBar = document.querySelector("[data-why]");
+  if (whyBar) {
+    var whySend = function (reason, note) {
+      var body = new FormData();
+      body.append("reason", reason);
+      body.append("note", note || "");
+      fetch("/why/" + whyBar.dataset.why, { method: "POST", body: body }).then(function () {
+        whyBar.innerHTML = "<span class=\"why-t\">Спасибо — учту. Повторяющиеся причины станут правилом после вашего «Да».</span>";
+        setTimeout(function () { whyBar.remove(); }, 2500);
+      });
+    };
+    var whyNote = whyBar.querySelector("[data-why-note]");
+    whyBar.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-why-reason]");
+      if (b) {
+        if (b.dataset.whyReason === "other" && whyNote.hidden) { whyNote.hidden = false; whyNote.focus(); return; }
+        whySend(b.dataset.whyReason, whyNote.value);
+      }
+      if (e.target.closest("[data-why-close]")) whyBar.remove();
+    });
+    whyNote.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); whySend("other", whyNote.value); } });
+    history.replaceState(null, "", location.href.replace(/([?&])why=\d+&?/, "$1").replace(/[?&]$/, ""));
+  }
+
+  // --- Навыки: поиск по названию и описанию, фильтр по разделам ---
+  var skSearch = document.querySelector("[data-sk-search]");
+  if (skSearch) {
+    var skArea = "";
+    var skApply = function () {
+      var q = skSearch.value.trim().toLowerCase(), shown = 0;
+      document.querySelectorAll("[data-sk-area]").forEach(function (sec) {
+        var n = 0;
+        sec.querySelectorAll("[data-sk-text]").forEach(function (card) {
+          var ok = (!skArea || sec.dataset.skArea === skArea) && (!q || card.dataset.skText.indexOf(q) >= 0);
+          card.hidden = !ok;
+          if (ok) n++;
+        });
+        sec.hidden = !n;
+        shown += n;
+      });
+      document.querySelector("[data-sk-empty]").hidden = shown > 0;
+    };
+    skSearch.addEventListener("input", skApply);
+    document.querySelectorAll("[data-sk-areas] [data-area]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        skArea = b.dataset.area;
+        document.querySelectorAll("[data-sk-areas] [data-area]").forEach(function (x) { x.classList.toggle("active", x === b); });
+        skApply();
+      });
+    });
+  }
+
   // --- мастер первого запуска: на узком экране главы — полосой; текущая — в зоне видимости ---
   var wizActive = document.querySelector(".wiz-nav .wiz-step.active");
   if (wizActive && wizActive.parentElement.scrollWidth > wizActive.parentElement.clientWidth) {
