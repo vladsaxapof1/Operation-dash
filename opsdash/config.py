@@ -134,6 +134,12 @@ DEFAULTS: dict = {
     },
     "ymessenger": {"enabled": False, "my_login": ""},
     "pachca": {"enabled": False},  # персональный токен — в secrets (PACHCA_TOKEN)
+    # Slack (opsdash.sources.slack): токен своего приложения — в secrets (SLACK_TOKEN); личные сообщения читаем все,
+    # каналы — отмеченные
+    "slack": {"enabled": False},
+    # свои подключения через MCP (opsdash.mcp): {id: {preset, title, enabled, transport, command, args, url, values,
+    # read_off, writes}}; ключи — в secrets (MCP_<ID>__<ИМЯ>)
+    "mcp": {"servers": {}},
     "mail": {
         "enabled": False,
         "email": "",
@@ -248,6 +254,7 @@ SOURCES = {
     "telegram": {"title": "Telegram", "every": "collect_minutes", "kind": "messages"},
     "ymessenger": {"title": "Я.Мессенджер", "every": "collect_minutes", "kind": "messages"},
     "pachca": {"title": "Пачка", "every": "collect_minutes", "kind": "messages"},
+    "slack": {"title": "Slack", "every": "collect_minutes", "kind": "messages"},
     "mail": {"title": "Почта", "every": "collect_minutes", "kind": "messages"},
     "gmail": {"title": "Gmail", "every": "collect_minutes", "kind": "messages"},
     "imap": {"title": "Почта по IMAP", "every": "collect_minutes", "kind": "messages"},

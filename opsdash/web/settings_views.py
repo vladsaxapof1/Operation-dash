@@ -6,7 +6,7 @@ import re
 import sys
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from opsdash import config, connectors, store
@@ -14,7 +14,7 @@ from opsdash import config, connectors, store
 # все вкладки настроек (?tab=…); источники с окном подключения открываются каталогом «Подключений» с их окном
 TABS = [
     ("general", "Основное"), ("updates", "Обновления"), ("connections", "Подключения"),
-    ("telegram", "Telegram"), ("bot", "Telegram-бот"), ("ymessenger", "Я.Мессенджер"), ("pachca", "Пачка"),
+    ("telegram", "Telegram"), ("bot", "Telegram-бот"), ("ymessenger", "Я.Мессенджер"), ("pachca", "Пачка"), ("slack", "Slack"),
     ("mail", "Яндекс Почта"), ("gmail", "Gmail"), ("calendar", "Яндекс Календарь"), ("google_calendar", "Google Календарь"),
     ("imap", "Другая почта"), ("caldav", "Другой календарь"), ("ics_calendar", "Календарь по ссылке"),
     ("kaiten", "Kaiten"), ("recordings", "Записи встреч"), ("knowledge", "Документы"), ("office", "Офис"),
@@ -130,6 +130,12 @@ def panel_context(tab: str, settings: dict, sort: str = "recent") -> dict:
     elif tab == "pachca":
         out["pachca_me"] = store.get_state("pachca_me")
         out.update(chat_list("pachca", sort))
+    elif tab == "slack":
+        from opsdash.sources import slack
+
+        out["slack_me"] = store.get_state("slack_me")
+        out["slack_manifest"] = slack.manifest_json()
+        out.update(chat_list("slack", sort))
     elif tab == "kaiten":
         out["boards"] = store.rows("SELECT * FROM kaiten_boards ORDER BY title")
         out["kaiten_me"] = store.get_state("kaiten_me")
@@ -176,6 +182,14 @@ def register(app: FastAPI, render, back) -> None:
         ctx = {"tab": tab, "menu_tab": "connections" if panel else tab, "secrets": {k: config.mask(v) for k, v in secrets.items()},
                "whisper_models": WHISPER_MODELS, "themes": THEMES, "catalog": catalog,
                "conn": next((c for g in catalog["groups"] for c in g["cards"] if c["id"] == panel), None)}
+        if tab == "mcp":  # окно MCP-подключения (opsdash.mcp): подключённый сервер (?id=) или витрина (?preset=)
+            from opsdash import brain, mcp
+
+            ctx["conn"] = mcp.conn(request.query_params.get("id", ""), request.query_params.get("preset", ""), settings)
+            ctx["menu_tab"] = "connections"
+            ctx["mcp_engine"] = brain.engine(settings)
+            if not ctx["conn"]:
+                ctx["tab"] = "connections"
         if tab == "archive":
             ctx["sections"] = archive_rows(settings)
         if tab == "data":
@@ -210,6 +224,10 @@ def register(app: FastAPI, render, back) -> None:
 
         checks = {"claude": brain.check, "chatgpt": codex.check, "bot": bot_check,
                   **{k: sources.checker(k) for k in config.SOURCES}}
+        if what.startswith("mcp-"):  # MCP-подключение: подключиться и запомнить инструменты
+            from opsdash import mcp
+
+            checks[what] = lambda: mcp.check(what[4:])
         if what not in checks:
             return JSONResponse({"ok": False, "message": "неизвестная проверка"})
         try:
@@ -479,6 +497,130 @@ def register(app: FastAPI, render, back) -> None:
         config.update_settings("ymessenger", {"enabled": checkbox(enabled), "my_login": my_login.strip()})
         collect_soon("ymessenger")
         return back(request, "Сохранено")
+
+    # --- свои подключения через MCP (opsdash.mcp, MORE-1) ---
+
+    def _mcp_page(sid: str = "", preset: str = "", msg: str = "", err: str = "") -> RedirectResponse:
+        from urllib.parse import quote
+
+        where = f"id={quote(sid)}" if sid else f"preset={quote(preset or 'custom')}"
+        tail = (f"&msg={quote(msg)}" if msg else "") + (f"&err={quote(err)}" if err else "")
+        return RedirectResponse(f"/settings?tab=mcp&{where}{tail}", status_code=303)
+
+    @app.post("/settings/mcp/save")
+    async def mcp_save(request: Request):
+        """Подключить сервер из витрины или свой; у подключённого — обновить ключи. Сразу проверяем: список
+        инструментов нужен, чтобы помощник знал, что ему можно."""
+        import shlex
+
+        from opsdash import mcp
+
+        form = await request.form()
+        sid, preset_id = (form.get("id") or "").strip(), (form.get("preset") or "").strip()
+        existing = mcp.server(sid) if sid else None
+        p = mcp.preset(preset_id or (existing or {}).get("preset") or "")
+        values = {k[2:]: v for k, v in form.items() if k.startswith("f:")}
+        custom_fields = None
+        try:
+            if not p:  # свой сервер: команда или адрес, переменные и заголовки строками «ИМЯ=значение» / «Имя: значение»
+                transport = form.get("transport") or "stdio"
+                command_line = (form.get("command") or "").strip()
+                parts = shlex.split(command_line, posix=sys.platform != "win32") if command_line else []
+                custom_fields = []
+                for line in lines(form.get("env") or ""):
+                    if "=" in line:
+                        k, _, v = line.partition("=")
+                        custom_fields.append({"name": k.strip(), "kind": "env", "secret": True, "label": k.strip()})
+                        values[k.strip()] = v.strip()
+                for line in lines(form.get("headers") or ""):
+                    if ":" in line:
+                        k, _, v = line.partition(":")
+                        custom_fields.append({"name": k.strip(), "kind": "header", "header": k.strip(), "format": "{}",
+                                              "secret": True, "label": k.strip()})
+                        values[k.strip()] = v.strip()
+                if existing and not custom_fields:
+                    custom_fields = None  # поля не трогали — оставляем прежние (значения секретов — в secrets)
+                sid = sid or mcp.new_id(form.get("title") or "", *(reversed(parts) if parts else ()),
+                                        form.get("url") or "")
+                mcp.save(sid, title=form.get("title") or "", transport=transport, command=parts[0] if parts else "",
+                         args=parts[1:] if parts else None, url=form.get("url") or "", values=values,
+                         custom_fields=custom_fields, enabled=checkbox(form.get("enabled")) or not existing)
+            else:
+                sid = sid or mcp.new_id(p["id"])
+                mcp.save(sid, preset_id=p["id"], title=form.get("title") or "", values=values,
+                         enabled=checkbox(form.get("enabled")) or not existing)
+        except mcp.MCPError as e:
+            return _mcp_page(sid if existing else "", preset_id, err=str(e))
+        st = mcp.status(sid)
+        if st["kind"] == "setup" and not st["label"].endswith("нужна проверка"):
+            return _mcp_page(sid, msg="Сохранено", err=st["label"][:1].upper() + st["label"][1:])
+        try:
+            found = await run_in_threadpool(mcp.check, sid)
+        except mcp.MCPError as e:
+            return _mcp_page(sid, err=f"Сохранено, но сервер не ответил: {e}")
+        return _mcp_page(sid, msg=f"Подключено — {found}. Отметьте, что помощнику можно читать")
+
+    @app.post("/settings/mcp/{sid}/tools")
+    async def mcp_tools(request: Request, sid: str):
+        from opsdash import mcp
+
+        form = await request.form()
+        if not mcp.server(sid):
+            return back(request, err="Нет такого подключения")
+        mcp.set_tools(sid, read_on=form.getlist("read"), writes=checkbox(form.get("writes")))
+        return _mcp_page(sid, msg="Сохранено — помощник учтёт со следующего запуска")
+
+    @app.post("/settings/mcp/{sid}/enabled")
+    def mcp_enabled(request: Request, sid: str, enabled: str = Form(None)):
+        from opsdash import mcp
+
+        s = mcp.server(sid)
+        if not s:
+            return back(request, err="Нет такого подключения")
+        mcp.save(sid, preset_id=s.get("preset") or "", enabled=checkbox(enabled))
+        return _mcp_page(sid, msg="Включено" if checkbox(enabled) else "Выключено — помощник не видит этот сервис")
+
+    @app.post("/settings/mcp/{sid}/remove")
+    def mcp_remove(request: Request, sid: str):
+        from opsdash import mcp
+
+        mcp.remove(sid)
+        return RedirectResponse("/settings?tab=connections&msg=" + __import__("urllib.parse").parse.quote(
+            "Подключение удалено вместе с ключами"), status_code=303)
+
+    # --- Slack ---
+
+    @app.post("/settings/slack")
+    async def slack_save(request: Request, token: str = Form(""), enabled: str = Form(None)):
+        from opsdash.sources import slack
+
+        token = token.strip()
+        if token and not token.startswith("xoxp-"):
+            return back(request, err="Нужен User OAuth Token — он начинается с xoxp-. Bot Token (xoxb-) не видит ваших "
+                                     "личных сообщений")
+        first = bool(token) and not config.get_secret("SLACK_TOKEN")  # первый токен — читать сразу
+        config.update_settings("slack", {"enabled": checkbox(enabled) or first})
+        msg = "Сохранено"
+        if token:
+            config.set_secret("SLACK_TOKEN", token)
+            try:  # сразу показать каналы для выбора
+                n = await run_in_threadpool(slack.refresh_chats)
+            except Exception as e:  # noqa: BLE001
+                return back(request, err=f"Токен сохранён, но список каналов не получен: {e}")
+            msg = (f"Сохранено{', чтение Slack включено' if first else ''}. Чатов в Slack: {n} — личные сообщения "
+                   "PULSE читает сам, отметьте, какие каналы читать")
+        collect_soon("slack")
+        return back(request, msg)
+
+    @app.post("/settings/slack/chats")
+    async def slack_chats(request: Request):
+        from opsdash.sources import slack
+
+        try:
+            n = await run_in_threadpool(slack.refresh_chats)
+        except Exception as e:  # noqa: BLE001
+            return back(request, err=f"Не получилось: {e}")
+        return back(request, f"Список чатов обновлён: {n}")
 
     # --- Пачка ---
 

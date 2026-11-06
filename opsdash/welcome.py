@@ -29,7 +29,7 @@ CHAPTERS = [
     {"id": "notifications", "title": "Уведомления", "connectors": ["bot"],
      "what": "Telegram-бот присылает дайджесты, итоги встреч и кнопки «Да / Нет» — подтверждать можно с телефона. "
              "Нет Telegram — пропустите: всё то же видно здесь, на Сводке."},
-    {"id": "messages", "title": "Переписка", "connectors": ["telegram", "gmail", "imap", "pachca", "mail", "ymessenger"],
+    {"id": "messages", "title": "Переписка", "connectors": ["telegram", "slack", "gmail", "imap", "pachca", "mail", "ymessenger"],
      "what": "Откуда PULSE берёт договорённости и просьбы: «пришлю до пятницы» в чате становится задачей со сроком, "
              "а письмо, где ждут вашего ответа, — строкой на Сводке с черновиком. Подключите хотя бы одно."},
     {"id": "calendar", "title": "Календарь", "connectors": ["google_calendar", "ics_calendar", "calendar", "caldav"],

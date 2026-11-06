@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS anthology (      -- решения, уроки, уд�
     happened TEXT,                   -- YYYY-MM-DD: когда решили / случилось
     project TEXT,                    -- тема или направление: «ОРК», «Автоворонка»
     people TEXT DEFAULT '[]',        -- JSON: кто участвовал
-    source_type TEXT,                -- meeting | document | telegram | ymessenger | pachca | mail | kaiten | manual
+    source_type TEXT,                -- meeting | document | telegram | ymessenger | pachca | slack | mail | kaiten | manual
     source_ref TEXT,
     quote TEXT,
     status TEXT DEFAULT 'accepted',  -- accepted | proposed (предложено Claude) | outdated | rejected
@@ -58,7 +58,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS anthology_fts USING fts5(
 );
 
 CREATE TABLE IF NOT EXISTS chats (
-    source TEXT NOT NULL,            -- telegram | ymessenger | pachca | mail
+    source TEXT NOT NULL,            -- telegram | ymessenger | pachca | slack | mail
     chat_id TEXT NOT NULL,
     title TEXT,
     kind TEXT,                       -- private | group | channel | mail
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS commitments (
     title TEXT,                      -- короткий заголовок для карточки (2–6 слов); пусто — сокращаем what
     due TEXT,                        -- YYYY-MM-DD
     status TEXT DEFAULT 'open',      -- open | done | cancelled
-    source_type TEXT,                -- meeting | telegram | ymessenger | pachca | mail | manual
+    source_type TEXT,                -- meeting | telegram | ymessenger | pachca | slack | mail | manual
     source_ref TEXT,
     quote TEXT,
     kaiten_card_id INTEGER,
@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS task_log (         -- ход задачи: комме
     kind TEXT DEFAULT 'update',      -- note — комментарий директора | update — что произошло | ask — спросили, ждём
                                      -- ответа | event — событие PULSE (срок, статус, «ждёт», Kaiten)
     text TEXT NOT NULL,
-    source_type TEXT,                -- telegram | ymessenger | pachca | mail | meeting | kaiten | manual
+    source_type TEXT,                -- telegram | ymessenger | pachca | slack | mail | meeting | kaiten | manual
     source_ref TEXT,
     quote TEXT,
     author TEXT,                     -- director | claude | pulse

@@ -36,7 +36,8 @@ def test_manifest_complete():
     from pathlib import Path
 
     tpl = Path(connectors.__file__).parent / "web" / "templates" / "connectors"
-    assert {p.stem for p in tpl.glob("*.html") if not p.stem.startswith("_")} == connectors.panel_ids()
+    # mcp.html — общее окно MCP-подключений (opsdash.mcp), у него нет записи в connectors.yaml
+    assert {p.stem for p in tpl.glob("*.html") if not p.stem.startswith("_")} - {"mcp"} == connectors.panel_ids()
 
 
 def test_card_states(settings_with):
@@ -77,11 +78,11 @@ def test_humanize_errors():
 def test_catalog_page_and_counts(client, settings_with):
     settings_with(kaiten={"enabled": True, "domain": "x.kaiten.ru"})
     page = client.get("/settings?tab=connections").text
-    assert "Подключено 1 из 12" in page and "2 требуют внимания" in page  # Kaiten без токена и выбранный Claude не найден
+    assert "Подключено 1 из 13" in page and "2 требуют внимания" in page  # Kaiten без токена и выбранный Claude не найден
     assert "нужна настройка: адрес и токен" in page
     assert 'href="/settings?tab=gmail"' in page and 'href="/settings?tab=claude"' in page  # окно или своя страница
     assert 'id="conn-dlg"' not in page  # на каталоге окно не открыто
-    assert '<span class="subnav-n warn-text">1 из 12</span>' in page  # подменю: оранжевым — есть что починить
+    assert '<span class="subnav-n warn-text">1 из 13</span>' in page  # подменю: оранжевым — есть что починить
     assert "Документы" not in page.split("conn-head")[1]  # раздел в архиве — карточки нет
 
 
@@ -161,7 +162,7 @@ def test_empty_blocks_suggest_connections(client, settings_with):
 def test_soon_cards_open_request(client, settings_with):
     settings_with(updates={"repo": "owner/pulse"})
     soon = {s["id"]: s for s in connectors.catalog()["soon"]}
-    assert soon["slack"]["request"].startswith("https://github.com/owner/pulse/issues/new?title=")
+    assert soon["outlook"]["request"].startswith("https://github.com/owner/pulse/issues/new?title=")
     page = client.get("/settings?tab=connections").text
     assert 'id="cg-soon">Скоро<' in page and "Нужно мне ↗" in page and "Outlook и Microsoft 365" in page
     settings_with(updates={"repo": ""})

@@ -5,7 +5,7 @@
 {% macro source(d, meetings) -%}
 {%- if d.source_type == 'meeting' and d.source_ref %}<a href="/meetings/{{ d.source_ref }}">встреча «{{ meetings.get(d.source_ref) or d.source_ref }}»</a>
 {%- elif d.source_type == 'document' and d.source_ref %}документ «{{ d.source_ref.split('/')[-1] }}»
-{%- elif d.source_type in ('telegram', 'pachca', 'ymessenger', 'mail') %}переписка
+{%- elif d.source_type in ('telegram', 'pachca', 'slack', 'ymessenger', 'mail') %}переписка
 {%- endif %}
 {%- endmacro %}
 

@@ -1,0 +1,106 @@
+# Витрина MCP-подключений (беклог MORE-1): сервисы, которые помощник читает через MCP — без нашей разработки под
+# каждый. Логика — opsdash/mcp.py, окно — templates/connectors/mcp.html.
+#
+# Поля:
+#   id        — имя сервера: в инструментах Claude — mcp__<id>__<инструмент>; латиница, цифры, «_»
+#   title, color, mono — карточка; vendor — official (официальный сервер сервиса) или community (сообщество)
+#   catches   — что даёт, одна строка; enables — 2–3 примера
+#   transport — http (адрес сервера) или stdio (программа на этом компьютере: command + args)
+#   needs     — что должно стоять на компьютере для stdio: node (npx) или uv (uvx)
+#   fields    — что спросить: name; kind env (переменная программы) или header (заголовок запроса, format — как
+#               подставить); secret — хранится в secrets/.env, а не в настройках; label, hint, placeholder
+#   env       — постоянные переменные программы
+#   minutes   — сколько займёт подключение
+
+servers:
+  - id: github
+    title: GitHub
+    vendor: official
+    color: "#24292F"
+    mono: GH
+    catches: Задачи, пул-реквесты и обсуждения ваших репозиториев
+    enables:
+      - «Что с пул-реквестом про оплату?» — статус, ревьюеры, комментарии
+      - Задачи из GitHub Issues — в ответах, брифах и ходе задачи
+    transport: http
+    url: https://api.githubcopilot.com/mcp/
+    minutes: 3
+    fields:
+      - {name: token, kind: header, header: Authorization, format: "Bearer {}", secret: true, label: "Токен доступа",
+         hint: "github.com → Settings → Developer settings → Fine-grained tokens → Generate. Доступ — к нужным репозиториям, права только на чтение (Contents, Issues, Pull requests: Read)."}
+
+  - id: linear
+    title: Linear
+    vendor: official
+    color: "#5E6AD2"
+    mono: L
+    catches: Задачи и проекты команды в Linear
+    enables:
+      - «Что у Петра в работе в Linear?» — задачи со статусами и сроками
+      - Ход задачи PULSE дополняется тем, что происходит в Linear
+    transport: http
+    url: https://mcp.linear.app/mcp
+    minutes: 3
+    fields:
+      - {name: token, kind: header, header: Authorization, format: "Bearer {}", secret: true, label: "API-ключ",
+         hint: "Linear → Settings → Account → Security & access → Personal API keys → New key. Можно выдать ключ только на чтение."}
+
+  - id: notion
+    title: Notion
+    vendor: official
+    color: "#2F3437"
+    mono: N
+    catches: Страницы и базы Notion, к которым вы дадите доступ
+    enables:
+      - «Найди в Notion регламент возвратов» — ответ со ссылкой на страницу
+      - Базы задач и заметки Notion — в брифах к встречам
+    transport: stdio
+    command: npx
+    args: ["-y", "@notionhq/notion-mcp-server"]
+    needs: node
+    minutes: 5
+    fields:
+      - {name: NOTION_TOKEN, kind: env, secret: true, label: "Токен интеграции",
+         hint: "notion.so/profile/integrations → New integration (Internal) → скопируйте Internal Integration Secret. Затем в Notion у нужных страниц: «⋯ → Connections» → добавьте эту интеграцию — PULSE увидит только их."}
+
+  - id: hubspot
+    title: HubSpot
+    vendor: official
+    color: "#FF7A59"
+    mono: HS
+    catches: Сделки, компании и контакты CRM
+    enables:
+      - «Что с клиентом «Северный ветер» в CRM?» — стадия сделки, сумма, последние касания
+      - Обещания клиентам из переписки — сверить со сделкой
+    transport: stdio
+    command: npx
+    args: ["-y", "@hubspot/mcp-server"]
+    needs: node
+    minutes: 5
+    note: Сервер HubSpot пока в бете
+    fields:
+      - {name: PRIVATE_APP_ACCESS_TOKEN, kind: env, secret: true, label: "Токен приватного приложения",
+         hint: "HubSpot → Settings → Integrations → Private Apps → Create a private app. Права — только чтение (crm.objects.*.read), затем Create app → скопируйте токен."}
+
+  - id: atlassian
+    title: Jira и Confluence
+    vendor: community
+    color: "#0052CC"
+    mono: J
+    catches: Задачи Jira и страницы Confluence
+    enables:
+      - «Какие задачи по складу открыты в Jira?» — со статусами и исполнителями
+      - Регламенты из Confluence — в ответах и брифах
+    transport: stdio
+    command: uvx
+    args: ["mcp-atlassian"]
+    needs: uv
+    minutes: 5
+    fields:
+      - {name: JIRA_URL, kind: env, label: "Адрес Jira", placeholder: "https://acme.atlassian.net"}
+      - {name: JIRA_USERNAME, kind: env, label: "Почта входа в Atlassian", placeholder: "you@acme.com"}
+      - {name: JIRA_API_TOKEN, kind: env, secret: true, label: "API-токен Atlassian",
+         hint: "id.atlassian.com → Security → API tokens → Create API token. Один токен подходит и Jira, и Confluence."}
+      - {name: CONFLUENCE_URL, kind: env, label: "Адрес Confluence (если нужен)", placeholder: "https://acme.atlassian.net/wiki"}
+    # Confluence входит тем же логином и токеном, что и Jira — если указан его адрес
+    derive: {CONFLUENCE_USERNAME: JIRA_USERNAME, CONFLUENCE_API_TOKEN: JIRA_API_TOKEN}

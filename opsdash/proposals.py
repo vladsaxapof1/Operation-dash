@@ -30,6 +30,7 @@ KINDS = {
     "attention.done": "Закрыть «нужен ответ» — директор ответила",
     "telegram.remind": "Напомнить коллеге в Telegram",
     "skill.rule": "Правило для навыка — урок из ваших «Нет»",
+    "mcp.call": "Действие в подключённом сервисе (MCP)",
 }
 
 # надпись на кнопке подтверждения — что произойдёт, а не просто «Да»
@@ -48,6 +49,7 @@ ACTIONS = {
     "attention.done": "Отметить отвеченным",
     "telegram.remind": "Напомнить",
     "skill.rule": "Включить правило",
+    "mcp.call": "Выполнить",
 }
 
 
@@ -482,6 +484,32 @@ def propose_rule(*, skill: str, text: str, quote: str | None = None, batch: str 
                    autonomy_key="skill_rule", reason=reason, source_ref=source_ref, batch=batch)
 
 
+def propose_mcp_call(*, server_id: str, tool: str, args: dict | None = None, title: str = "", batch: str | None = None,
+                     reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Изменение в подключённом через MCP сервисе (MORE-1): создать задачу в Linear, страницу в Notion… Помощник
+    сам такие инструменты не вызывает — PULSE выполнит после «Да». Инструменты чтения так не предлагаются."""
+    from opsdash import mcp
+
+    s = mcp.server(server_id)
+    if not s:
+        raise ProposalError(f"Нет подключения «{server_id}» — ./ops mcp list")
+    if not s.get("enabled") or mcp.status(server_id)["kind"] != "ok":
+        raise ProposalError(f"Подключение «{s.get('title') or server_id}» выключено или не настроено")
+    if not s.get("writes", True):
+        raise ProposalError(f"Изменения в «{s.get('title') or server_id}» директор не разрешила — только чтение")
+    known = {t["name"]: t for t in mcp.tools(server_id)}
+    if tool not in known:
+        raise ProposalError(f"У «{s.get('title') or server_id}» нет инструмента {tool} — ./ops mcp tools {server_id}")
+    if known[tool]["read"]:
+        raise ProposalError(f"{tool} только читает — вызывай его сам, предлагать не нужно")
+    if not isinstance(args, dict):
+        raise ProposalError("Параметры инструмента — JSON-объект: --args '{\"title\": \"…\"}'")
+    title = " ".join((title or "").split()) or f"{known[tool].get('title') or tool} в {s.get('title') or server_id}"
+    return _create("mcp.call", title, {"server": server_id, "server_title": s.get("title") or server_id, "tool": tool,
+                                       "args": args}, autonomy_key="mcp_call", reason=reason, source_ref=source_ref,
+                   batch=batch)
+
+
 # --- решение ----------------------------------------------------------------
 
 def reject(pid: int) -> dict:
@@ -519,6 +547,10 @@ def approve_batch(batch: str) -> list[dict]:
 
 def execute(p: dict) -> dict:
     kind, pl = p["kind"], p["payload"]
+    if kind == "mcp.call":
+        from opsdash import mcp
+
+        return {"text": mcp.call(pl["server"], pl["tool"], pl.get("args") or {})}
     if kind == "kaiten.create_card":
         kc = kaiten.client()
         desc = pl.get("description") or ""
@@ -648,7 +680,7 @@ def _source_text(source_ref: str | None) -> str:
     if kind == "meeting":
         m = store.row("SELECT title, started_at FROM meetings WHERE id=?", (ref,))
         return f"встреча «{m['title'] or ref}» {store.local(m['started_at'], '%d.%m')}" if m else f"встреча {ref}"
-    if kind in ("telegram", "ymessenger", "pachca", "mail") and ref.isdigit():
+    if kind in ("telegram", "ymessenger", "pachca", "slack", "mail") and ref.isdigit():
         msg = store.row("SELECT chat_title, topic, sender_name, ts FROM messages WHERE id=?", (int(ref),))
         from opsdash import overview
 
@@ -686,11 +718,12 @@ def links(p: dict) -> list[tuple[str, str]]:
             out.append(("Сессия агента", f"claude://code/continue?session={desktop}"))
     if kind == "meeting" and ref:
         out.append(("Встреча", f"/meetings/{ref}?tab=transcript" if p["kind"] == "task.done" else f"/meetings/{ref}"))
-    elif kind in ("telegram", "ymessenger", "pachca", "mail") and ref.isdigit():
+    elif kind in ("telegram", "ymessenger", "pachca", "slack", "mail") and ref.isdigit():
         msg = store.row("SELECT source, chat_id, msg_id, sender_id FROM messages WHERE id=?", (int(ref),))
         found = orig.original(msg["source"], msg["chat_id"], msg["msg_id"], msg["sender_id"]) if msg else None
         if found:
             out.append(("Сообщение в Telegram" if kind == "telegram" else "Сообщение в Пачке" if kind == "pachca"
+                        else "Сообщение в Slack" if kind == "slack"
                         else "Письмо" if kind == "mail" else "Сообщение",
                         found[0]))
     card_id = pl.get("card_id")
@@ -712,6 +745,17 @@ def describe(p: dict) -> str:
         if p.get("reason"):
             lines.append(f"Почему: {p['reason']}")
         lines.append(f"«{action(p)}» — сообщение уйдёт от вашего имени из вашего Telegram.")
+        return "\n".join(lines)
+    if p["kind"] == "mcp.call":
+        lines.append(f"Сервис: {pl.get('server_title') or pl.get('server')} · инструмент {pl.get('tool')}")
+        for k, v in list((pl.get("args") or {}).items())[:12]:
+            text = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+            lines.append(f"• {k}: {text[:300]}")
+        if p.get("reason"):
+            lines.append(f"Почему: {p['reason']}")
+        if p.get("source_ref"):
+            lines.append(f"Источник: {_source_text(p['source_ref'])}")
+        lines.append(f"«{action(p)}» — PULSE выполнит это в {pl.get('server_title') or pl.get('server')} от вашего имени.")
         return "\n".join(lines)
     if p["kind"] == "attention.done":
         if p.get("reason"):
@@ -807,6 +851,9 @@ def result_text(p: dict) -> str:
         return "✅ Встреча — на карточке задачи"
     if p["status"] == "done" and p["kind"] == "skill.rule":
         return "✅ Правило включено — Навыки → " + ((p.get("payload") or {}).get("skill") or "")
+    if p["status"] == "done" and p["kind"] == "mcp.call":
+        text = ((p.get("result") or {}) if isinstance(p.get("result"), dict) else {}).get("text") or ""
+        return "✅ Выполнено" + (f": {text[:300]}" if text else "")
     if p["status"] == "done" and p["kind"] == "telegram.remind":
         return f"✅ Напоминание отправлено: {(p.get('payload') or {}).get('to') or ''}".rstrip(": ")
     if p["status"] == "done":

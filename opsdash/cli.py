@@ -524,6 +524,31 @@ def cmd_kb(a) -> None:
         out(anthology.import_notes())
 
 
+def cmd_mcp(a) -> None:
+    """Свои подключения через MCP (MORE-1): что подключено, инструменты, проверка."""
+    from opsdash import mcp
+
+    try:
+        if a.action == "list":
+            lines = mcp.summary_lines()
+            out("\n".join(lines) if lines else "MCP-подключений нет — Настройки → Подключения → «Сервисы через MCP».")
+        elif a.action == "tools":
+            if not mcp.server(a.id):
+                fail(f"нет подключения {a.id} — ./ops mcp list")
+            ts = mcp.tools(a.id)
+            if a.json:
+                return as_json(ts)
+            for t in ts:
+                how = "читаешь сам" if t["on"] else ("чтение выключено директором" if t["read"] else "изменение — ./ops propose mcp")
+                out(f"{t['name']} — {how}" + (f" · {t['description']}" if t["description"] else ""))
+            if not ts:
+                out("Инструменты ещё не известны — ./ops mcp check " + a.id)
+        elif a.action == "check":
+            out(mcp.check(a.id))
+    except mcp.MCPError as e:
+        fail(str(e))
+
+
 def cmd_decisions(a) -> None:
     """Решения по темам (MEM-3): что действует, цепочки «меняет / уточняет / продолжает / отменяет», следующий шаг,
     «было → стало», задачи."""
@@ -1418,6 +1443,13 @@ def cmd_propose(a) -> None:
         elif a.kind == "rule":
             p = proposals.propose_rule(skill=a.skill, text=a.text, quote=a.quote, batch=a.batch, reason=a.reason,
                                        source_ref=source_ref)
+        elif a.kind == "mcp":
+            try:
+                args = json.loads(a.args or "{}")
+            except ValueError:
+                fail("--args — JSON-объект: '{\"title\": \"…\"}'")
+            p = proposals.propose_mcp_call(server_id=a.server, tool=a.tool, args=args, title=a.title or "",
+                                           batch=a.batch, reason=a.reason, source_ref=source_ref)
         else:
             fail("неизвестный тип")
     except proposals.ProposalError as e:
@@ -1599,7 +1631,7 @@ def build_parser() -> argparse.ArgumentParser:
     ms = s.add_subparsers(dest="action", required=True)
     x = ms.add_parser("pending", help="новые (неразобранные) сообщения")
     x.add_argument("--limit", type=int, default=200)
-    x.add_argument("--source", choices=["telegram", "ymessenger", "pachca", "mail"])
+    x.add_argument("--source", choices=["telegram", "ymessenger", "pachca", "slack", "mail"])
     x.add_argument("--context", type=int, default=3, help="сколько прежних сообщений чата показать для контекста")
     x = ms.add_parser("done", help="отметить разобранными")
     x.add_argument("--shown", action="store_true", help="все, что показала последняя команда pending")
@@ -1772,7 +1804,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--whom", help="кому обещано")
     x.add_argument("--due", help="YYYY-MM-DD")
     x.add_argument("--source",
-                   help="meeting:<id> | telegram:<message id> | ymessenger:<id> | pachca:<id> | mail:<id> | manual")
+                   help="meeting:<id> | telegram:<message id> | ymessenger:<id> | pachca:<id> | slack:<id> | mail:<id> | manual")
     x.add_argument("--quote", help="дословная цитата")
     x.add_argument("--card", type=int, help="карточка Kaiten")
     x.add_argument("--note")
@@ -1819,7 +1851,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--due", help="к какому сроку, YYYY-MM-DD — если прозвучал")
     x.add_argument("--part", type=int, help="его часть уже записана задачей с этим id (вместо --who/--what)")
     x.add_argument("--text", help="что произошло, для хода задачи: «05.11 отправил MR на ревью Петру»")
-    x.add_argument("--source", help="откуда: telegram:<id> | pachca:<id> | ymessenger:<id> | mail:<id> | meeting:<id>")
+    x.add_argument("--source", help="откуда: telegram:<id> | pachca:<id> | slack:<id> | ymessenger:<id> | mail:<id> | meeting:<id>")
     x.add_argument("--quote", help="дословная цитата")
     x = ms.add_parser("items", help="пункты внутри задачи (разделы, этапы, части): прогресс по частям")
     x.add_argument("id", type=int)
@@ -1987,6 +2019,12 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--skill", required=True, help="навык: ./ops skills list")
     x.add_argument("--text", required=True, help="правило обычными словами — как его прочтёт навык")
     x.add_argument("--quote", help="на чём основано: какие предложения и с какой причиной отклонены")
+    x = ps.add_parser("mcp", parents=[common],
+                      help="изменение в сервисе, подключённом через MCP (Linear, Notion…) — PULSE выполнит после «Да»")
+    x.add_argument("--server", required=True, help="подключение: ./ops mcp list")
+    x.add_argument("--tool", required=True, help="инструмент изменения: ./ops mcp tools <подключение>")
+    x.add_argument("--args", help="параметры инструмента — JSON-объект")
+    x.add_argument("--title", help="что сделать — по-человечески: «Создать задачу в Linear: Прогноз по клиентам»")
     x = ps.add_parser("remind", parents=[common], help="напомнить исполнителю задачи «мне должны» в Telegram (после «Да»)")
     x.add_argument("--commitment", type=int, required=True, help="id задачи «мне должны»")
     x.add_argument("--text", help="свой текст; без него — по шаблону из настроек")
@@ -2033,6 +2071,15 @@ def build_parser() -> argparse.ArgumentParser:
     x = ms.add_parser("rejected", help="отклонённые за последние дни — с причинами «Нет» (для уроков)")
     x.add_argument("--days", type=int, default=14)
     s.set_defaults(fn=cmd_proposals)
+
+    s = sub.add_parser("mcp", help="сервисы, подключённые через MCP: что подключено, инструменты чтения и изменения")
+    ms = s.add_subparsers(dest="action", required=True)
+    ms.add_parser("list", help="подключения и инструменты: что читаешь сам, что — через «Да»")
+    x = ms.add_parser("tools", help="инструменты подключения с описанием")
+    x.add_argument("id")
+    x = ms.add_parser("check", help="подключиться и обновить список инструментов")
+    x.add_argument("id")
+    s.set_defaults(fn=cmd_mcp)
 
     s = sub.add_parser("decisions", help="решения по темам: что действует, цепочки, следующий шаг")
     ms = s.add_subparsers(dest="action", required=True)

@@ -2065,3 +2065,21 @@ a.dec-stat:hover { text-decoration: none; border-color: var(--line-strong); }
   .dec-fields .span2 { grid-column: auto; }
   .dec-rename-b { right: auto; left: 0; width: min(380px, calc(100vw - 32px)); }
 }
+
+/* --- окно MCP-подключения (MORE-1) --- */
+.mcp-vendor { margin: 0 0 10px; }
+.mcp-form .seg.mcp-tr { display: flex; gap: 6px; margin: 6px 0 4px; flex-wrap: wrap; }
+.mcp-form .seg.mcp-tr label { display: inline-flex; gap: 6px; align-items: center; padding: 6px 12px; border: 1px solid var(--line-strong);
+  border-radius: 999px; font-size: 14px; cursor: pointer; margin: 0; }
+.mcp-form .seg.mcp-tr label:has(input:checked) { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.mcp-h { font-size: 14px; margin: 4px 0 6px; }
+.mcp-tools { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 4px; }
+.mcp-tools li { font-size: 14px; overflow-wrap: anywhere; }
+.mcp-tools code { font-size: 13px; }
+.mcp-writes { margin: 4px 0 12px; }
+.mcp-remove { margin: 4px 0 0; }
+/* --- окно Slack (MORE-6) --- */
+.slack-steps { margin: 0 0 14px; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+.slack-manifest { margin: 8px 0 4px; }
+.slack-manifest pre { max-height: 180px; overflow: auto; margin: 0 0 6px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: 12px; line-height: 1.4; }

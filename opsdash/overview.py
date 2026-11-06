@@ -12,6 +12,7 @@ SOURCE_TITLES = {
     "telegram": "Telegram",
     "ymessenger": "Я.Мессенджер",
     "pachca": "Пачка",
+    "slack": "Slack",
     "mail": "Почта",
     "gmail": "Gmail",
     "calendar": "Календарь",

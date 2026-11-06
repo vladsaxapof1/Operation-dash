@@ -250,7 +250,18 @@ def _command(settings: dict, claude: str, job: str, *, model: str | None, resume
         p = config.resolve_path(folder)
         if p.exists():
             cmd += ["--add-dir", str(p)]
-    cmd += ["--allowedTools", *ALLOWED_TOOLS, "--disallowedTools", *DISALLOWED_TOOLS]
+    mcp_tools: list[str] = []
+    try:  # свои подключения через MCP (opsdash.mcp, MORE-1): чтение — только отмеченные инструменты, изменения — через «Да»
+        from opsdash import mcp
+
+        if job in mcp.JOBS:
+            path = mcp.claude_config(settings)
+            if path:
+                mcp_tools = mcp.allowed_tools(settings)
+                cmd += ["--mcp-config", str(path), "--strict-mcp-config"]
+    except Exception as e:  # noqa: BLE001 — без MCP помощник всё равно работает
+        store.log(job, f"MCP-подключения не переданы: {e}", "warning")
+    cmd += ["--allowedTools", *ALLOWED_TOOLS, *mcp_tools, "--disallowedTools", *DISALLOWED_TOOLS]
     try:  # короткая память о компании — к инструкции каждого запуска (opsdash.context)
         from opsdash import context
 

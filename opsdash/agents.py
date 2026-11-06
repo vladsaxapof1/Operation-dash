@@ -442,7 +442,7 @@ def _source(c: dict) -> list[str]:
         if line:
             out.append(f"  В расшифровке похоже на это место: {line}")
         return out
-    if st in ("telegram", "ymessenger", "pachca", "mail", "gmail") and ref and ref.isdigit():
+    if st in ("telegram", "ymessenger", "pachca", "slack", "mail", "gmail") and ref and ref.isdigit():
         msg = store.row("SELECT * FROM messages WHERE id=?", (int(ref),))
         if msg:
             return [f"Откуда: сообщение [{msg['id']}] в чате «{msg['chat_title'] or msg['source']}» от {msg['sender_name'] or '?'} "

@@ -1,0 +1,81 @@
+{#- окно MCP-подключения (MORE-1): ключи сервиса или свой сервер, проверка, что помощнику можно читать, изменения через
+    «Да». Данные — opsdash.mcp.conn; маршруты — /settings/mcp/* (settings_views) #}
+{% from "_settings_macros.html" import check_btn with context %}
+{% set s = conn.server %}
+{% if conn.vendor or conn.note %}<p class="small muted mcp-vendor">{% if conn.vendor == 'community' %}Сервер сообщества — не от самого сервиса.{% elif conn.vendor %}Официальный сервер сервиса.{% endif %}{% if conn.note %} {{ conn.note }}.{% endif %}</p>{% endif %}
+{% if mcp_engine == 'chatgpt' %}<div class="alert warn">Сейчас в PULSE работает ChatGPT — он пока не пользуется MCP-подключениями. Подключение заработает, когда помощником будет Claude.</div>{% endif %}
+{% if conn.need %}<div class="alert warn">Для этого подключения на компьютере нужна программа <b>{{ conn.need.title }}</b> (команда <code>{{ conn.need.program }}</code>), а её не нашли.{% if conn.need.url %} Установите: <a href="{{ conn.need.url }}" target="_blank" rel="noopener">{{ conn.need.url }}</a> — и нажмите «Проверить подключение».{% endif %}</div>{% endif %}
+
+<section class="card"><div class="card-h"><h2>1. {{ 'Доступ' if conn.preset else 'Сервер' }}</h2></div><div class="card-b">
+  <form method="post" action="/settings/mcp/save" class="mcp-form">
+    <input type="hidden" name="id" value="{{ conn.server_id }}">
+    <input type="hidden" name="preset" value="{{ conn.preset_id if conn.preset else '' }}">
+    {% if s %}<label class="check"><input type="checkbox" name="enabled" {{ 'checked' if s.enabled }}> Помощник пользуется этим сервисом</label>{% endif %}
+    {% if not conn.preset %}
+    <label>Название</label><input type="text" name="title" value="{{ (s.title if s else '') }}" placeholder="Например: Airtable команды">
+    {% set tr = (s.transport if s else 'stdio') %}
+    <div class="seg mcp-tr" role="radiogroup" aria-label="Как запускается сервер">
+      <label><input type="radio" name="transport" value="stdio" {{ 'checked' if tr == 'stdio' }} data-mcp-tr> Программа на этом компьютере</label>
+      <label><input type="radio" name="transport" value="http" {{ 'checked' if tr == 'http' }} data-mcp-tr> Адрес в интернете</label>
+    </div>
+    <div data-mcp-show="stdio">
+      <label>Команда запуска</label><input type="text" name="command" value="{{ conn.command_line }}" placeholder="npx -y airtable-mcp-server">
+      <label>Переменные — по одной в строке</label><textarea name="env" rows="2" placeholder="AIRTABLE_API_KEY=…"></textarea>
+    </div>
+    <div data-mcp-show="http">
+      <label>Адрес сервера</label><input type="url" name="url" value="{{ s.url if s and s.transport == 'http' else '' }}" placeholder="https://mcp.example.com/mcp">
+      <label>Заголовки — по одному в строке</label><textarea name="headers" rows="2" placeholder="Authorization: Bearer …"></textarea>
+    </div>
+    <div class="hint">Команду и адрес даёт сам сервис или страница сервера в реестре MCP. Переменные и заголовки — ключи
+      доступа: хранятся только на этом компьютере (secrets/.env) и в текст для модели не попадают.{% if s and s.fields %}
+      Уже сохранены: {{ s.fields | map(attribute='name') | join(', ') }} — оставьте поля пустыми, чтобы не менять.{% endif %}</div>
+    {% else %}
+    {% for f in conn.fields %}
+    <label>{{ f.label }}</label>
+    {% if f.secret %}
+    {% set key = 'MCP_' ~ (conn.server_id | upper) ~ '__' ~ (f.name | upper) %}
+    <input type="password" name="f:{{ f.name }}" autocomplete="off" placeholder="{{ ('сохранён: ' ~ secrets[key]) if s and secrets.get(key) else (f.placeholder or '') }}">
+    {% else %}
+    <input type="text" name="f:{{ f.name }}" value="{{ conn.field_values.get(f.name, '') }}" placeholder="{{ f.placeholder or '' }}">
+    {% endif %}
+    {% if f.hint %}<div class="hint">{{ f.hint }}</div>{% endif %}
+    {% endfor %}
+    <div class="hint">Ключи хранятся только на этом компьютере (secrets/.env) и в текст для модели не попадают.{% if s %} Оставьте поле пустым, чтобы не менять.{% endif %}</div>
+    {% endif %}
+    <div class="form-actions"><button class="btn primary">{{ 'Сохранить' if s else 'Подключить' }}</button>{% if s %} {{ check_btn('mcp-' ~ conn.server_id) }}{% endif %}</div>
+  </form>
+</div></section>
+
+{% if s %}
+<section class="card"><div class="card-h"><h2>2. Что помощнику можно</h2>{% if conn.checked %}<span class="muted small">проверено {{ conn.checked | ago }}</span>{% endif %}</div><div class="card-b">
+  {% if conn.error %}<div class="alert bad">Сервер не ответил: {{ conn.error[:300] }}</div>{% endif %}
+  {% if conn.tools %}
+  {% set reads = conn.tools | selectattr('read') | list %}
+  {% set writes = conn.tools | rejectattr('read') | list %}
+  <form method="post" action="/settings/mcp/{{ conn.server_id }}/tools">
+    <h3 class="mcp-h">Читать — помощник делает сам <span class="muted small">{{ reads | length }}</span></h3>
+    {% if reads %}
+    <ul class="mcp-tools">
+      {% for t in reads %}<li><label class="check"><input type="checkbox" name="read" value="{{ t.name }}" {{ 'checked' if t.on }}> <code>{{ t.name }}</code>{% if t.description %}<span class="muted small"> — {{ t.description }}</span>{% endif %}</label></li>{% endfor %}
+    </ul>
+    {% else %}<p class="muted small">Инструментов чтения у сервера нет.</p>{% endif %}
+    <h3 class="mcp-h">Изменять — только после вашего «Да» <span class="muted small">{{ writes | length }}</span></h3>
+    {% if writes %}
+    <label class="check"><input type="checkbox" name="writes" {{ 'checked' if s.writes is not defined or s.writes }}> Помощник может предлагать изменения — вы подтверждаете каждое кнопкой «Да»</label>
+    <details class="mcp-writes"><summary class="small">Какие изменения возможны ({{ writes | length }})</summary>
+      <ul class="mcp-tools">{% for t in writes %}<li><code>{{ t.name }}</code>{% if t.description %}<span class="muted small"> — {{ t.description }}</span>{% endif %}</li>{% endfor %}</ul>
+    </details>
+    {% else %}<p class="muted small">Изменять у сервера нечего — только чтение.</p><input type="hidden" name="writes" value="1">{% endif %}
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+  <p class="hint">Чтение или изменение PULSE определяет по описанию инструмента от самого сервера, а если его нет — по
+    названию. Сомнительное считается изменением: помощник его сам не вызовет.</p>
+  {% else %}
+  <p class="muted">Список инструментов появится после проверки подключения.</p>
+  {% endif %}
+</div></section>
+
+<form method="post" action="/settings/mcp/{{ conn.server_id }}/remove" data-confirm="Удалить подключение {{ conn.title }}? Ключи доступа удалятся с этого компьютера." class="mcp-remove">
+  <button class="btn ghost danger sm">Удалить подключение</button>
+</form>
+{% endif %}

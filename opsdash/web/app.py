@@ -701,7 +701,7 @@ def chats_page(request: Request, chat: str = "", q: str = "", n: int = CHAT_PAGE
         c["att"] = by_chat.get(c["key"], [])
         c["urgent"] = any(a["priority"] == "high" for a in c["att"])
     groups: dict[str, list] = {}
-    order = {"telegram": 0, "mail": 1, "gmail": 2, "pachca": 3, "ymessenger": 4}
+    order = {"telegram": 0, "slack": 1, "mail": 2, "gmail": 3, "pachca": 4, "ymessenger": 5}
     for c in sorted(chats, key=lambda c: order.get(c["source"], 9)):
         groups.setdefault(c["source"], []).append(c)
     if not chat and chats:  # по умолчанию — чат, где ждут ответа, иначе самый свежий
@@ -732,7 +732,7 @@ def chats_page(request: Request, chat: str = "", q: str = "", n: int = CHAT_PAGE
     if q.strip():
         results = store.rows("SELECT * FROM messages WHERE text LIKE ? ORDER BY ts DESC LIMIT 60", (f"%{q.strip()}%",))
     closed = store.rows("SELECT * FROM attention WHERE status!='open' ORDER BY updated DESC LIMIT 15")
-    off = [overview.SOURCE_TITLES.get(k, k) for k in ("telegram", "pachca", "ymessenger") if not settings[k].get("enabled")]
+    off = [overview.SOURCE_TITLES.get(k, k) for k in ("telegram", "slack", "pachca", "ymessenger") if not settings[k].get("enabled")]
     off += ["почта"] if not (settings["mail"].get("enabled") or settings["gmail"].get("enabled")) else []
     last = store.row("SELECT ts, message FROM log WHERE job='triage' AND (message LIKE 'ок:%' OR level='error') "
                      "ORDER BY id DESC LIMIT 1")

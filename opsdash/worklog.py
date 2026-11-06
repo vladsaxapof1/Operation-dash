@@ -22,10 +22,10 @@ from datetime import datetime, timedelta, timezone
 from opsdash import config, store
 
 KINDS = ("note", "update", "ask", "event")
-MESSAGE_SOURCES = ("telegram", "ymessenger", "pachca", "mail")
+MESSAGE_SOURCES = ("telegram", "ymessenger", "pachca", "slack", "mail")
 SOURCES = (*MESSAGE_SOURCES, "meeting", "kaiten", "agent", "manual")
 TEXT_MAX = 1500
-SOURCE_NAMES = {"telegram": "Telegram", "ymessenger": "Я.Мессенджер", "pachca": "Пачка", "mail": "Почта",
+SOURCE_NAMES = {"telegram": "Telegram", "ymessenger": "Я.Мессенджер", "pachca": "Пачка", "slack": "Slack", "mail": "Почта",
                 "kaiten": "Kaiten", "agent": "сессия агента"}
 KIND_FOR_CLAUDE = {"note": "комментарий директора", "update": "", "ask": "спросили, ждём ответа", "event": "событие"}
 

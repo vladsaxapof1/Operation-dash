@@ -29,6 +29,8 @@ def original(source: str | None, chat_id, msg_id=None, sender_id: str | None = N
         return _mail(str(chat_id), msg_id, sender_id)
     if source == "pachca":
         return _pachca(str(chat_id), msg_id, saved)
+    if source == "slack":
+        return _slack(str(chat_id), msg_id, saved)
     return None
 
 
@@ -71,3 +73,15 @@ def _pachca(chat_id: str, msg_id, saved=_ASK) -> tuple[str, str]:
                                  (chat_id, str(msg_id)))
         return saved or f"https://app.pachca.com/chats/{chat_id}?message={msg_id}", "К сообщению"
     return f"https://app.pachca.com/chats/{chat_id}", "Открыть в Пачке"
+
+
+def _slack(chat_id: str, msg_id, saved=_ASK) -> tuple[str, str] | None:
+    # ссылку на сообщение Slack PULSE сохраняет при сборе (у ответа в треде — с тредом); без неё — канал
+    if msg_id:
+        if saved is _ASK:
+            saved = store.scalar("SELECT link FROM messages WHERE source='slack' AND chat_id=? AND msg_id=?",
+                                 (chat_id, str(msg_id)))
+        if saved:
+            return saved, "К сообщению"
+    team = ((store.get_state("slack_me") or {}).get("url") or "").rstrip("/")
+    return (f"{team}/archives/{chat_id}", "Открыть в Slack") if team else None

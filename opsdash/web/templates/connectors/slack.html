@@ -1,0 +1,37 @@
+{#- окно подключения: slack (каталог «Подключения», _connections.html). Сбор — opsdash.sources.slack #}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+<div class="alert info">PULSE читает Slack токеном вашего собственного приложения: видит то же, что вы, — <b>все ваши личные
+  сообщения</b>, <b>отмеченные каналы</b> и упоминания вас в остальных. Ничего не пишет и не отправляет от вашего имени.</div>
+
+<section class="card"><div class="card-h"><h2>1. Приложение и токен</h2></div><div class="card-b">
+  {% if slack_me %}<p>✅ Токен принят: <b>{{ slack_me.name or slack_me.id }}</b>{% if slack_me.team %} · {{ slack_me.team }}{% endif %}</p>{% endif %}
+  <ol class="slack-steps">
+    <li>Откройте <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a> →
+      <b>Create New App</b> → <b>From a manifest</b> → выберите своё рабочее пространство.</li>
+    <li>Вставьте манифест ниже целиком (вкладка JSON) → <b>Next</b> → <b>Create</b>.
+      <div class="slack-manifest" data-copy-scope>
+        <textarea hidden data-copy>{{ slack_manifest }}</textarea>
+        <pre>{{ slack_manifest }}</pre>
+        <button type="button" class="btn sm" data-copy-btn>Скопировать манифест</button>
+      </div></li>
+    <li><b>Install to Workspace</b> → <b>Allow</b>. Если приложения в вашем Slack ставит администратор, он получит запрос
+      и одобрит установку.</li>
+    <li><b>OAuth &amp; Permissions</b> → скопируйте <b>User OAuth Token</b> (начинается с <code>xoxp-</code>) и вставьте сюда.</li>
+  </ol>
+  <form method="post" action="/settings/slack">
+    {{ enabled_box('slack', 'Читать Slack') }}
+    <label>User OAuth Token</label>{{ secret_input('token', 'SLACK_TOKEN', 'xoxp-…') }}
+    <div class="hint">Приложение — только ваше и только на чтение: в манифесте нет прав писать сообщения. Право
+      <code class="nowrap">search:read</code> нужно, чтобы видеть упоминания вас в каналах, которые PULSE целиком не читает.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button> {{ check_btn('slack') }}</div>
+  </form>
+</div></section>
+
+<section class="card"><div class="card-h"><h2>2. Какие каналы читать</h2>
+  <form class="inline" method="post" action="/settings/slack/chats"><button class="btn sm" {{ 'disabled' if not secrets.get('SLACK_TOKEN') }}>↻ Обновить список</button></form></div>
+<div class="card-b">
+  <p class="hint" style="margin-top:0">Личные сообщения и личные группы PULSE читает сам — новые включаются автоматически, ненужный разговор можно
+    выключить. Каналы — только отмеченные.</p>
+  {% if chats %}{{ chat_picker('slack') }}
+  {% else %}<p class="muted">Список появится после сохранения токена.</p>{% endif %}
+</div></section>

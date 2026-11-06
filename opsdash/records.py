@@ -949,7 +949,7 @@ def add_links(items: list[dict]) -> list[dict]:
     for c in items:
         c["link"] = c["link_label"] = None
         msg = None
-        if (c.get("source_type") in ("telegram", "mail", "ymessenger", "pachca")
+        if (c.get("source_type") in ("telegram", "mail", "ymessenger", "pachca", "slack")
                 and str(c.get("source_ref") or "").isdigit()):
             msg = store.row("SELECT source, chat_id, msg_id, sender_id FROM messages WHERE id=?", (int(c["source_ref"]),))
         found = links.original(msg["source"], msg["chat_id"], msg["msg_id"], msg["sender_id"]) if msg else None
@@ -961,7 +961,8 @@ def add_links(items: list[dict]) -> list[dict]:
         if found:
             c["link"], c["link_title"] = found
             c["link_label"] = ("Telegram" if "t.me/" in found[0] or "telegram.org" in found[0]
-                               else "Пачка" if "pachca.com" in found[0] else "Почта")
+                               else "Пачка" if "pachca.com" in found[0]
+                               else "Slack" if "slack.com" in found[0] else "Почта")
     worklog.add_links(items)  # ход задачи: у записей из переписки — ссылка на сообщение
     return with_reminders(items, people)
 

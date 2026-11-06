@@ -55,6 +55,8 @@ CHECKS = {
     "telegram_chats": lambda s, sec: bool(s["telegram"].get("include_all_private")) or _chats_on("telegram"),
     "pachca_token": lambda s, sec: bool(sec.get("PACHCA_TOKEN")),
     "pachca_chats": lambda s, sec: _chats_on("pachca"),
+    "slack_token": lambda s, sec: bool(sec.get("SLACK_TOKEN")),
+    "slack_chats": lambda s, sec: _chats_on("slack"),
     "ymessenger_token": lambda s, sec: bool(sec.get("YM_BOT_TOKEN")),
     "ymessenger_chats": lambda s, sec: _chats_on("ymessenger"),
     "mail_password": lambda s, sec: bool(s["mail"].get("email") and sec.get("MAIL_APP_PASSWORD")),
@@ -183,7 +185,14 @@ def catalog(settings: dict | None = None) -> dict:
                           "panel": not c.get("page")})
         if cards:
             groups.append({**g, "cards": cards})
-    cards = [card for g in groups for card in g["cards"]]
+    from opsdash import mcp
+
+    # сервисы через MCP (MORE-1): подключённые, витрина и «Свой сервер» — после источников, перед помощником;
+    # в «подключено N из M» не входят (это не источники сбора)
+    mcp_group = {"id": "mcp", "title": "Сервисы через MCP", "cards": mcp.cards(settings), "mcp": True}
+    ai_at = next((i for i, g in enumerate(groups) if g["id"] == "ai"), len(groups))
+    groups.insert(ai_at, mcp_group)
+    cards = [card for g in groups for card in g["cards"] if not g.get("mcp")]
     sources = [card for card in cards if card.get("section")]
     on = sum(card["kind"] not in ("off", "paused") for card in sources)
     # выбранный помощник не работает — PULSE стоит целиком: это тоже «требует внимания»

@@ -51,6 +51,28 @@ connectors:
       - {title: "Вход в аккаунт", check: telegram_login}
       - {title: "Какие чаты читать", check: telegram_chats}
 
+  - id: slack
+    title: Slack
+    group: messengers
+    color: "#4A154B"
+    mono: S
+    catches: Личные сообщения, упоминания и рабочие каналы Slack
+    enables:
+      - «Send it by Friday» в личке — задача со сроком и ссылкой на сообщение
+      - Где ждут вашего ответа — с черновиком, отправляете вы
+      - Упоминания вас в каналах, которые PULSE целиком не читает
+    reads: Все ваши личные сообщения и группы, отмеченные каналы, упоминания вас
+    skips: Остальные каналы рабочего пространства
+    never: Не пишет и не отправляет от вашего имени
+    how: Своё приложение Slack по готовому манифесту и его токен
+    minutes: 5
+    section: slack
+    health: slack
+    help: slack
+    steps:
+      - {title: "Приложение и токен", check: slack_token}
+      - {title: "Какие каналы читать", check: slack_chats}
+
   - id: pachca
     title: Пачка
     group: messengers
@@ -354,11 +376,7 @@ connectors:
 # «Скоро» (CON-8): что подключаем следующим. Серые карточки внизу каталога, кнопка «Нужно мне» открывает задачу
 # разработчику на GitHub (репозиторий обновлений) — телеметрии нет, спрос узнаём только так
 soon:
-  - {id: slack, title: Slack, color: "#4A154B", mono: S, catches: "Личные сообщения, упоминания и выбранные каналы"}
   - {id: outlook, title: Outlook и Microsoft 365, color: "#0078D4", mono: O, catches: "Почта и календарь через вход Microsoft"}
   - {id: whatsapp, title: WhatsApp, color: "#25D366", mono: W, catches: "Переписка с клиентами и партнёрами"}
   - {id: teams, title: Microsoft Teams, color: "#5059C9", mono: T, catches: "Чаты и встречи Teams"}
   - {id: zoom, title: Записи Zoom и Google Meet, color: "#0B5CFF", mono: Z, catches: "Облачные записи и расшифровки — без папки"}
-  - {id: notion, title: Notion, color: "#2F3437", mono: N, catches: "Задачи и заметки — вместо Kaiten"}
-  - {id: linear, title: Linear и Jira, color: "#5E6AD2", mono: L, catches: "Задачи команды — вместо Kaiten"}
-  - {id: hubspot, title: HubSpot и Pipedrive, color: "#FF7A59", mono: H, catches: "Что обещали клиентам — из CRM"}

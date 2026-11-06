@@ -47,12 +47,17 @@
       Переключить можно в любой момент: начатое доделает прежний, следующее возьмёт выбранный, а разговоры в «Спросить»
       продолжатся с пересказом начала.</p>
   </details>
+  {% elif g.mcp %}
+  <div class="conn-group-h"><h3 id="cg-{{ g.id }}">{{ g.title }}</h3></div>
+  <p class="conn-soon-note small">Сервисы, которые помощник читает сам по протоколу MCP: Linear, Notion, GitHub, CRM. Что ему
+    можно читать, решаете вы в окне подключения; изменения в сервисе — только предложением, после вашего «Да».{% if catalog.engine_key == 'chatgpt' %}
+    <span class="warn-text">ChatGPT пока не пользуется MCP-подключениями — они работают с Claude.</span>{% endif %}</p>
   {% else %}
   <h3 id="cg-{{ g.id }}">{{ g.title }}</h3>
   {% endif %}
   <div class="conn-grid">
     {% for c in g.cards %}
-    <a class="conn-card{{ ' is-off' if c.kind == 'off' }}{{ ' is-active' if c.active }}" href="{{ ('/settings?tab=' ~ c.id) if c.panel else c.page }}">
+    <a class="conn-card{{ ' is-off' if c.kind == 'off' }}{{ ' is-active' if c.active }}" href="{{ c.href or (('/settings?tab=' ~ c.id) if c.panel else c.page) }}">
       <div class="conn-card-h">{{ logo(c) }}<div class="conn-card-t"><div class="conn-name">{{ c.title_now }}</div>{{ status(c) }}</div></div>
       <p class="conn-catch">{{ c.catches }}</p>
       <div class="conn-card-f"><span class="btn sm">{{ action(c) }}</span>{% if c.minutes and c.kind == 'off' %}<span class="muted small">около {{ c.minutes }} мин</span>{% endif %}</div>

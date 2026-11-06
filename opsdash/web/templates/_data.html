@@ -44,9 +44,9 @@
   <div class="table-wrap"><table class="t data-conn">
     <thead><tr><th>Подключение</th><th>Читает</th><th>Не читает</th><th>Никогда</th></tr></thead>
     <tbody>
-      {% for g in catalog.groups %}{% for c in g.cards %}
+      {% for g in catalog.groups %}{% for c in g.cards if not g.mcp or c.id.startswith('mcp:') %}
       <tr>
-        <td class="nowrap"><a href="/settings?tab={{ c.id }}">{{ c.title_now }}</a><div class="small muted">{{ c.label }}</div></td>
+        <td class="nowrap"><a href="{{ c.href or ('/settings?tab=' ~ c.id) }}">{{ c.title_now }}</a><div class="small muted">{{ c.label }}</div></td>
         <td class="small">{{ c.reads }}</td><td class="small">{{ c.skips }}</td><td class="small">{{ c.never }}</td>
       </tr>
       {% endfor %}{% endfor %}

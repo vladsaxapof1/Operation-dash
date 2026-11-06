@@ -84,7 +84,7 @@ def test_add_validation_and_meeting_time():
     with pytest.raises(ValueError, match="Нет задачи"):
         worklog.add(999, "что-то")
     with pytest.raises(ValueError, match="Источник"):
-        worklog.add(cid, "что-то", source="slack:1")
+        worklog.add(cid, "что-то", source="whatsapp:1")  # такого источника нет
     store.execute("INSERT INTO meetings(id, title, started_at, status) VALUES('m1', 'Трекинг МСБ', "
                   "'2026-11-04T08:00:00+00:00', 'processed')")
     worklog.add(cid, "По встрече: решили менять поставщика", source="meeting:m1", quote="[00:12:30] меняем поставщика")

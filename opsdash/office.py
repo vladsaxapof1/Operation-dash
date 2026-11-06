@@ -203,7 +203,7 @@ def _off(key: str, settings: dict) -> str:
         return "Брифы выключены"
     if key == "kb" and not config.section_on("kb", settings):
         return "В архиве вместе с разделом «База знаний»"
-    if key == "triage" and not any(settings[s].get("enabled") for s in ("telegram", "ymessenger", "pachca", "mail", "gmail")):
+    if key == "triage" and not any(settings[s].get("enabled") for s in ("telegram", "ymessenger", "pachca", "slack", "mail", "gmail", "imap")):
         return "Не подключены ни мессенджеры, ни почта"
     return ""
 

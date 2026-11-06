@@ -472,6 +472,14 @@
     if (pane) { pane.hidden = false; pane.closest(".frow").scrollIntoView({ block: "center" }); }
   }
 
+  // свой MCP-сервер: «Программа на этом компьютере» или «Адрес в интернете» — показываем только нужные поля
+  var mcpTr = document.querySelectorAll("[data-mcp-tr]");
+  function mcpShow() {
+    var on = document.querySelector("[data-mcp-tr]:checked");
+    document.querySelectorAll("[data-mcp-show]").forEach(function (box) { box.hidden = !on || box.dataset.mcpShow !== on.value; });
+  }
+  if (mcpTr.length) { mcpTr.forEach(function (r) { r.addEventListener("change", mcpShow); }); mcpShow(); }
+
   // «Решения»: ссылка на решение (#d<id>) или вопрос (#q<id>) — раскрываем вопрос и показываем это решение
   if (/^#[dq]\d+$/.test(location.hash)) {
     var dmark = document.getElementById(location.hash.slice(1));
