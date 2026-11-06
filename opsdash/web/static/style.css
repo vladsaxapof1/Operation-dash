@@ -1839,3 +1839,52 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .conn-card.is-soon { background: var(--panel-2); border-style: dashed; }
 .conn-card.is-soon .conn-logo { filter: grayscale(.85); opacity: .75; }
 .conn-card.is-soon:hover { box-shadow: none; border-color: var(--line); }
+
+/* --- Мастер первого запуска (ONB-2): главы слева, глава справа --- */
+.wiz { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 28px; align-items: start; }
+.wiz-nav { display: grid; gap: 2px; position: sticky; top: 20px; }
+.wiz-step { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--text); font-size: 15px; }
+.wiz-step:hover { background: var(--panel); text-decoration: none; }
+.wiz-step.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.wiz-n { width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--line-strong); background: var(--panel); color: var(--muted); }
+.wiz-step.is-done .wiz-n { background: var(--ok-soft); color: var(--ok-text); border-color: transparent; }
+.wiz-step.active .wiz-n { background: var(--accent); color: #fff; border-color: transparent; }
+.wiz-t { display: grid; line-height: 1.25; }
+.wiz-skip { font-size: 12px; color: var(--muted); font-weight: 400; }
+.wiz-body { margin: 0; }
+.wiz-body > .card-b { padding: 22px 26px 22px; display: grid; gap: 14px; }
+.wiz-h h2 { font-size: 22px; margin: 2px 0 6px; }
+.wiz-what { margin: 0; color: var(--muted); max-width: 680px; }
+.wiz-foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+.wiz-foot form { margin: 0; }
+.wiz-cards .conn-card.is-picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.wiz-form { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 18px 6px; display: grid; gap: 10px; }
+.wiz-form-h { display: flex; gap: 12px; align-items: center; }
+.wiz-main { padding: 0; }
+.wiz-assist { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.wiz-assist-c { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 10px; align-content: start; }
+.wiz-assist-c.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.wiz-assist-c form { margin: 0; }
+.wiz-assist-c p { margin: 0; }
+.wiz-health { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.wiz-first { padding: 14px 16px; border-radius: 10px; background: var(--accent-soft); display: grid; gap: 10px; }
+.wiz-first p { margin: 0; }
+.wiz-first form { margin: 0; }
+@media (max-width: 860px) {
+  .wiz { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .wiz-nav { position: static; display: flex; overflow-x: auto; gap: 4px; }
+  .wiz-step { flex: none; }
+  .wiz-body > .card-b { padding: 16px; }
+}
+
+/* «Первые находки» (ONB-3): полоса, пока идёт разбор, и окно с находками */
+.first-run { display: flex; gap: 12px; align-items: flex-start; }
+.spin { width: 16px; height: 16px; flex: none; margin-top: 3px; border-radius: 50%; border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+.dlg-finds { width: min(680px, calc(100vw - 32px)); }
+.finds { display: grid; gap: 12px; }
+.finds section h3 { margin: 4px 0 6px; }
+.find { margin: 0 0 4px; font-size: 15px; overflow-wrap: anywhere; }

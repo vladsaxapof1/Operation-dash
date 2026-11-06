@@ -20,7 +20,8 @@
       <a href="#" class="active" data-kind="">Все типы</a>{% for k, title, n in chat_kinds %}<a href="#" data-kind="{{ k }}">{{ title }} <span class="muted" data-kind-count="{{ k }}">{{ n }}</span></a>{% endfor %}
     </div>
     <div class="seg">
-      <a href="?tab={{ source }}&sort=recent" class="{{ 'active' if sort == 'recent' }}">Свежие сверху</a><a href="?tab={{ source }}&sort=title" class="{{ 'active' if sort == 'title' }}">По алфавиту</a>
+      {%- set base = ('?step=' ~ ch.id ~ '&open=' ~ source) if ch is defined and ch else ('?tab=' ~ source) %}{#- в мастере — остаться в нём #}
+      <a href="{{ base }}&sort=recent" class="{{ 'active' if sort == 'recent' }}">Свежие сверху</a><a href="{{ base }}&sort=title" class="{{ 'active' if sort == 'title' }}">По алфавиту</a>
     </div>
     <span class="muted small" data-chat-saved></span>
   </div>

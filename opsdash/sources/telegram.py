@@ -143,7 +143,7 @@ async def _collect(settings: dict) -> str:
         dialogs = await _refresh_dialogs(client)
         chats = {r["chat_id"]: r["enabled"] for r in store.rows("SELECT chat_id, enabled FROM chats WHERE source=?", (SOURCE,))}
         include_private = bool(settings["telegram"].get("include_all_private"))
-        backfill = datetime.now(timezone.utc) - timedelta(days=int(settings["telegram"].get("backfill_days") or 3))
+        backfill = datetime.now(timezone.utc) - timedelta(days=int(settings["telegram"].get("backfill_days") or 5))
         new_total, read_chats = 0, 0
         for item in dialogs:
             d = item["dialog"]

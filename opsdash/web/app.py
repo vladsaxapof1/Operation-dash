@@ -30,7 +30,7 @@ from starlette.concurrency import run_in_threadpool
 
 from opsdash import __version__, briefs, config, digests, overview, proposals, records, store, worklog
 from opsdash import day as day_mod
-from opsdash.web import agent_views, settings_views
+from opsdash.web import agent_views, settings_views, welcome_views
 
 HERE = Path(__file__).parent
 app = FastAPI(title="PULSE", docs_url=None, redoc_url=None, openapi_url=None)
@@ -329,7 +329,16 @@ def _voice_tip(request: Request) -> dict | None:
 
 
 def back(request: Request, msg: str = "", err: str = "", to: str | None = None) -> RedirectResponse:
-    target = to or request.headers.get("referer") or "/"
+    referer = request.headers.get("referer") or ""
+    # формы источников, отправленные из мастера первого запуска (/welcome), возвращают в мастер — на ту же главу
+    # с открытой формой; нужное из адреса «куда» (need=password у входа в Telegram) переносится, вкладка — нет
+    if referer and urlparse(referer).path == "/welcome" and (not to or to.startswith("/settings")):
+        extra = [p for p in (urlparse(to).query.split("&") if to else []) if p and not p.startswith(("tab=", "msg=", "err="))]
+        keys = {p.split("=")[0] for p in extra}
+        kept = [p for p in urlparse(referer).query.split("&")
+                if p and not p.startswith(("msg=", "err=")) and p.split("=")[0] not in keys]
+        to = "/welcome" + ("?" + "&".join(kept + extra) if kept + extra else "")
+    target = to or referer or "/"
     parsed = urlparse(target)
     path = parsed.path or "/"
     query = "&".join(p for p in (parsed.query or "").split("&") if p and not p.startswith(("msg=", "err=")))
@@ -567,9 +576,11 @@ def _next_collect(settings: dict) -> datetime | None:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    from opsdash import notices, task_meetings
+    from opsdash import notices, task_meetings, welcome
 
     settings = config.load_settings()
+    if welcome.should_open(settings):  # чистая установка: сначала мастер первого запуска (ONB-2)
+        return RedirectResponse("/welcome", status_code=303)
     snap = overview.snapshot()
     feed = needs_from_you(snap, due=True)
     no_due = next((i["tasks"] for i in feed["items"] if i["kind"] == "due"), [])
@@ -593,6 +604,7 @@ def home(request: Request):
     work_left = int((now.replace(hour=end_h, minute=end_m, second=0, microsecond=0) - now).total_seconds() // 60)
     before_start = now.hour * 60 + now.minute < start_h * 60 + start_m
     return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings, no_due=no_due,
+                  first_finds=welcome.finds_for_home(), first_days=welcome.FIRST_DAYS,
                   meeting_titles={k: m["title"] for k, m in meetings.items()}, due_choices=due_choices(),
                   dp=dp, next_label=day_mod.next_label(now.date(), settings), meet_n=len(timed),
                   describe=proposals.describe, day=day, busy_min=busy_min, left=left, work_left=work_left,
@@ -2442,6 +2454,7 @@ def help_page(request: Request, slug: str = "", example: str = ""):
 # --- настройки -------------------------------------------------------------------
 
 settings_views.register(app, render, back)
+welcome_views.register(app, render, back)
 agent_views.register(app, render, templates, back)
 
 

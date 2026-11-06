@@ -1,24 +1,11 @@
 {#- Настройки → Подключения: каталог карточками по группам (CON-2) и окно источника поверх него (CON-3).
     Тексты — opsdash/connectors.yaml, состояние — opsdash/connectors.py, формы источников — connectors/<id>.html #}
-{% macro logo(c, size=40) -%}
-<span class="conn-logo" style="--logo: {{ c.color }}; --size: {{ size }}px" aria-hidden="true">
-  {%- if c.logo %}<img src="/static/logos/{{ c.logo }}" alt="">{% else %}<span class="conn-mono{{ ' long' if c.mono | length > 1 }}">{{ c.mono }}</span>{% endif -%}
-</span>
-{%- endmacro %}
-{% macro status(c) -%}
-{% set cls = {'ok': 'ok', 'pending': 'warn', 'setup': 'warn', 'error': 'bad'}.get(c.kind, '') %}
-{% set dot = {'ok': 'ok', 'pending': 'warn', 'setup': 'warn', 'error': 'bad', 'paused': 'off', 'off': 'off', 'standby': 'off'}.get(c.kind, '') %}
-<span class="st small conn-st {{ cls }}">{% if dot %}<span class="dot {{ dot }}"></span>{% endif %}<span>{{ c.label }}{% if c.kind == 'ok' and c.last_ok %} · обновлено {{ c.last_ok | ago }}{% endif %}</span></span>
-{%- endmacro %}
-{% macro action(c) -%}
-{%- if c.assistant %}{{ 'Установить' if c.kind == 'off' else ('Войти' if c.label.endswith('нужен вход') else 'Настроить') }}
-{%- else %}{{ {'off': 'Подключить', 'error': 'Починить', 'setup': 'Продолжить', 'paused': 'Включить'}.get(c.kind, 'Настроить') }}{% endif %}
-{%- endmacro %}
+{% from "_conn_macros.html" import logo, status, action %}
 
 <div class="conn-head">
   <div>
     <h2>Подключения</h2>
-    <p class="muted small">Подключено {{ catalog.on }} из {{ catalog.total }}{% if catalog.problems %} · <span class="warn-text">{{ catalog.problems }} {{ 'требует' if catalog.problems == 1 else 'требуют' }} внимания</span>{% endif %}</p>
+    <p class="muted small">Подключено {{ catalog.on }} из {{ catalog.total }}{% if catalog.problems %} · <span class="warn-text">{{ catalog.problems }} {{ 'требует' if catalog.problems == 1 else 'требуют' }} внимания</span>{% endif %} · <a href="/welcome">Мастер первого запуска</a></p>
   </div>
   <p class="conn-private small">Всё хранится на этом компьютере: пароли и ключи — в папке <code>secrets</code>, письма и сообщения — в <code>data</code>. Наружу уходит только текст для разбора — в {{ catalog.engine }} по вашей подписке. <a href="/settings?tab=data">Что PULSE делает с данными →</a></p>
 </div>

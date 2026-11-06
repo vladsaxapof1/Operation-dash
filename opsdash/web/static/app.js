@@ -1115,6 +1115,40 @@
     if (anchor) anchor.scrollIntoView({ block: "start" });  // «Расход Claude» (#usage) — сразу к нему
   }
 
+  // --- мастер первого запуска: на узком экране главы — полосой; текущая — в зоне видимости ---
+  var wizActive = document.querySelector(".wiz-nav .wiz-step.active");
+  if (wizActive && wizActive.parentElement.scrollWidth > wizActive.parentElement.clientWidth) {
+    wizActive.parentElement.scrollLeft = wizActive.offsetLeft - 16;
+  }
+
+  // --- мастер первого запуска: часовой пояс — из браузера, пока имя не указано (свежая установка) ---
+  var tzInput = document.querySelector("[data-tz-guess]");
+  if (tzInput) {
+    var guess = "";
+    try { guess = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { guess = ""; }
+    var nameInput = tzInput.form.querySelector("[name=name]");
+    if (guess && guess !== tzInput.value) {
+      if (nameInput && !nameInput.value) tzInput.value = guess;
+      else {
+        var hint = tzInput.form.querySelector("[data-tz-hint]");
+        if (hint) hint.textContent = "На этом компьютере: " + guess;
+      }
+    }
+  }
+
+  // идёт первый разбор после мастера — раз в 5 секунд: готово (или не получилось) — обновить Сводку
+  if (document.querySelector("[data-first-run]")) {
+    var firstTimer = setInterval(function () {
+      fetch("/welcome/status").then(function (r) { return r.json(); }).then(function (res) {
+        if (res.status !== "queued" && res.status !== "running") { clearInterval(firstTimer); location.reload(); }
+      }).catch(function () { /* PULSE перезапускается — спросим в следующий раз */ });
+    }, 5000);
+  }
+
+  // «Что PULSE уже нашёл» на Сводке: закрыли — больше не показываем (ONB-3)
+  var finds = document.querySelector("dialog[data-first-finds]");
+  if (finds) finds.addEventListener("close", function () { fetch("/welcome/seen", { method: "POST" }); }, { once: true });
+
   // --- вход в Telegram по QR: меняем картинку при смене токена, после сканирования завершаем вход ---
   var qrBox = document.querySelector("[data-tg-qr]");
   if (qrBox) {
@@ -1131,7 +1165,8 @@
         }
         clearInterval(qrTimer);
         if (res.state === "ok") document.getElementById("tg-qr-done").submit();
-        else if (res.state === "password") window.location.href = "/settings?tab=telegram&need=password";
+        else if (res.state === "password") window.location.href = location.pathname === "/welcome"
+          ? "/welcome?step=messages&open=telegram&need=password" : "/settings?tab=telegram&need=password";
         else if (res.state !== qrBox.dataset.tgQr) window.location.reload();
       });
     }, 2000);

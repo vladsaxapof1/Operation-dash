@@ -19,7 +19,7 @@ LIMIT = 20
 QUIET = {"housekeeping", "docs-index", "agents-index", "agents-watch", "ask", "voice", "recordings", "update-check"}
 # «Сейчас» в углу: что делает Claude или расшифровка; сбор и обслуживание — секунды, о них не пишем
 BUSY = {"triage", "process-meeting", "transcribe", "digest", "weekly", "groups", "briefs", "followup", "anthology",
-        "company-context", "chat", "update", "projects", "agent-brief", "task-log"}
+        "company-context", "chat", "update", "projects", "agent-brief", "task-log", "first-finds"}
 
 
 def add(kind: str, title: str, text: str = "", link: str | None = None, level: str = "info",
@@ -122,6 +122,8 @@ def summary(name: str, args: dict, result: str, error: str | None) -> dict | Non
     if error:
         return done(f"Не получилось: {jobs.TITLES.get(name, name)}", error.splitlines()[0][:300], "/journal", "bad")
     mid = args.get("meeting_id")
+    if name == "first-finds":
+        return done("Первые находки готовы", result, "/")
     if name == "triage":
         if result.startswith("разобрано"):
             return done("Разобрал новые сообщения", result, _triage_link(result))

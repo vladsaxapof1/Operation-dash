@@ -148,6 +148,7 @@ def test_data_page(client, settings_with):
 
 
 def test_empty_blocks_suggest_connections(client, settings_with):
+    store.set_state("welcome", {"dismissed": True})  # чистая установка открыла бы мастер — его закрыли
     home = client.get("/").text
     assert "PULSE пока ничего не видит" in home and 'href="/settings?tab=connections">Открыть подключения' in home
     assert "Здесь появятся письма и сообщения" in home and "Переписка не подключена" in home

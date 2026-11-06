@@ -123,7 +123,7 @@ DEFAULTS: dict = {
         "api_id": "",
         "phone": "",
         "include_all_private": False,
-        "backfill_days": 3,
+        "backfill_days": 5,  # первый разбор — за 5 дней (решение 06.11.2026)
     },
     "telegram_bot": {
         "enabled": False,
@@ -138,7 +138,7 @@ DEFAULTS: dict = {
         "host": "imap.yandex.ru",
         "folders": ["INBOX"],
         "include_sent": True,
-        "backfill_days": 3,
+        "backfill_days": 5,  # первый разбор — за 5 дней (решение 06.11.2026)
         "ignore_senders": ["noreply", "no-reply", "mailer-daemon", "notifications"],
     },
     "google_calendar": {"enabled": False},  # только чтение; секретные адреса iCal — в secrets (GOOGLE_CALENDAR_ICAL)
@@ -149,7 +149,7 @@ DEFAULTS: dict = {
         "folders": ["INBOX"],
         "include_sent": True,
         "primary_only": True,
-        "backfill_days": 3,
+        "backfill_days": 5,  # первый разбор — за 5 дней (решение 06.11.2026)
     },
     "imap": {  # «другой сервер» (MORE-2): любая почта по IMAP — Fastmail, iCloud, Zoho, корпоративная; пароль — IMAP_PASSWORD
         "enabled": False,
@@ -159,7 +159,7 @@ DEFAULTS: dict = {
         "port": 993,
         "folders": ["INBOX"],
         "include_sent": True,
-        "backfill_days": 3,
+        "backfill_days": 5,  # первый разбор — за 5 дней (решение 06.11.2026)
     },
     "caldav": {  # «другой сервер»: любой календарь по CalDAV — только чтение; пароль — CALDAV_OTHER_PASSWORD
         "enabled": False,

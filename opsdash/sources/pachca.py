@@ -20,7 +20,7 @@ SOURCE = "pachca"
 API = "https://api.pachca.com/api/shared/v1"
 APP = "https://app.pachca.com"
 SCOPES = ("chats:read", "messages:read", "threads:read", "users:read")  # всё, что нужно PULSE, — только чтение
-BACKFILL_DAYS = 3  # при первом чтении чата — сообщения за последние дни
+BACKFILL_DAYS = 5  # при первом чтении чата — сообщения за последние дни
 PAGE = 50  # больше Пачка за раз не отдаёт
 MAX_PAGES = 10  # не больше 500 новых сообщений чата за проход (накопилось больше — старшие пропускаем)
 THREADS_OVERLAP = timedelta(minutes=10)  # треды берём с запасом: часы компьютера и сервера могут расходиться

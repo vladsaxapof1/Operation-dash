@@ -109,13 +109,63 @@ def chat_list(source: str, sort: str) -> dict:
     }
 
 
+def panel_context(tab: str, settings: dict, sort: str = "recent") -> dict:
+    """Что нужно форме источника (connectors/<tab>.html): окну в каталоге «Подключений» и главе мастера первого
+    запуска (opsdash.welcome) — вход в Telegram, списки чатов, пространства Kaiten, вход помощника, расход."""
+    from opsdash import bot, brain
+    from opsdash.sources import telegram
+
+    out: dict = {}
+    if tab == "telegram":
+        flow = telegram.login_flow
+        out["tg_login_state"] = ("qr" if flow.qr_state else "code" if flow.client and flow.phone_code_hash else "")
+        out["tg_qr"] = flow
+        out["tg_me"] = store.get_state("telegram_me")
+        out.update(chat_list("telegram", sort))
+    elif tab == "bot":
+        out["pair_code"] = bot.pair_code() if not settings["telegram_bot"].get("owner_chat_id") else ""
+        out["bot_username"] = store.get_state("bot_username")
+    elif tab == "ymessenger":
+        out["chats"] = store.rows("SELECT * FROM chats WHERE source='ymessenger' ORDER BY title")
+    elif tab == "pachca":
+        out["pachca_me"] = store.get_state("pachca_me")
+        out.update(chat_list("pachca", sort))
+    elif tab == "kaiten":
+        out["boards"] = store.rows("SELECT * FROM kaiten_boards ORDER BY title")
+        out["kaiten_me"] = store.get_state("kaiten_me")
+    elif tab in ("calendar", "google_calendar", "ics_calendar"):
+        from opsdash.sources import calendar
+
+        out["google_urls"] = len(calendar.google_urls())
+        out["ics_urls"] = len(calendar.ics_urls())
+        if tab == "calendar":
+            out["calendar_names"] = calendar.write_calendar_names(settings)[0]
+    elif tab in ("claude", "chatgpt"):
+        from opsdash import codex
+
+        out["claude_path"] = brain.find_claude(settings)
+        out["claude_login"] = brain.login_status(out["claude_path"], settings) if out["claude_path"] else None
+        out["engine"], out["engines"], out["engine_busy"] = brain.engine(settings), brain.ENGINES, brain.busy()
+        out["codex_path"] = codex.find(settings)
+        out["codex_login"] = codex.login_status(out["codex_path"], settings) if out["codex_path"] else None
+        out["codex_models"] = codex.models()
+        from opsdash import usage
+
+        out["usage"], out["limits"] = usage.summary(), usage.limits()
+    elif tab == "recordings":
+        from opsdash import recordings
+
+        from opsdash import voice
+
+        out["existing"] = [str(p) for p in recordings.watch_folders(settings)]
+        out["voice_samples"] = len(voice.samples())
+    return out
+
+
 def register(app: FastAPI, render, back) -> None:
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, tab: str = "general", sort: str = "recent"):
-        from opsdash import bot, brain
-        from opsdash.sources import telegram
-
         settings = config.load_settings()
         secrets = config.load_secrets()
         tab = {"connection": "connections"}.get(tab, tab)
@@ -144,49 +194,7 @@ def register(app: FastAPI, render, back) -> None:
 
             ctx["upd"], ctx["installed"] = updates.last_check(), updates.installed()
             ctx["updating"] = bool(request.query_params.get("updating"))
-        if tab == "telegram":
-            flow = telegram.login_flow
-            ctx["tg_login_state"] = ("qr" if flow.qr_state else "code" if flow.client and flow.phone_code_hash else "")
-            ctx["tg_qr"] = flow
-            ctx["tg_me"] = store.get_state("telegram_me")
-            ctx.update(chat_list("telegram", sort))
-        elif tab == "bot":
-            ctx["pair_code"] = bot.pair_code() if not settings["telegram_bot"].get("owner_chat_id") else ""
-            ctx["bot_username"] = store.get_state("bot_username")
-        elif tab == "ymessenger":
-            ctx["chats"] = store.rows("SELECT * FROM chats WHERE source='ymessenger' ORDER BY title")
-        elif tab == "pachca":
-            ctx["pachca_me"] = store.get_state("pachca_me")
-            ctx.update(chat_list("pachca", sort))
-        elif tab == "kaiten":
-            ctx["boards"] = store.rows("SELECT * FROM kaiten_boards ORDER BY title")
-            ctx["kaiten_me"] = store.get_state("kaiten_me")
-        elif tab in ("calendar", "google_calendar", "ics_calendar"):
-            from opsdash.sources import calendar
-
-            ctx["google_urls"] = len(calendar.google_urls())
-            ctx["ics_urls"] = len(calendar.ics_urls())
-            if tab == "calendar":
-                ctx["calendar_names"] = calendar.write_calendar_names(settings)[0]
-        elif tab in ("claude", "chatgpt"):
-            from opsdash import codex
-
-            ctx["claude_path"] = brain.find_claude(settings)
-            ctx["claude_login"] = brain.login_status(ctx["claude_path"], settings) if ctx["claude_path"] else None
-            ctx["engine"], ctx["engines"], ctx["engine_busy"] = brain.engine(settings), brain.ENGINES, brain.busy()
-            ctx["codex_path"] = codex.find(settings)
-            ctx["codex_login"] = codex.login_status(ctx["codex_path"], settings) if ctx["codex_path"] else None
-            ctx["codex_models"] = codex.models()
-            from opsdash import usage
-
-            ctx["usage"], ctx["limits"] = usage.summary(), usage.limits()
-        elif tab == "recordings":
-            from opsdash import recordings
-
-            from opsdash import voice
-
-            ctx["existing"] = [str(p) for p in recordings.watch_folders(settings)]
-            ctx["voice_samples"] = len(voice.samples())
+        ctx.update(panel_context(tab, settings, sort))
         return render(request, "settings.html", nav="settings", **ctx)
 
     # --- проверки подключений ---
@@ -394,7 +402,7 @@ def register(app: FastAPI, render, back) -> None:
 
     @app.post("/settings/telegram/options")
     def tg_options(request: Request, enabled: str = Form(None), include_all_private: str = Form(None),
-                   backfill_days: int = Form(3)):
+                   backfill_days: int = Form(5)):
         config.update_settings("telegram", {"enabled": checkbox(enabled), "include_all_private": checkbox(include_all_private),
                                             "backfill_days": int(backfill_days)})
         collect_soon("telegram")
@@ -507,7 +515,7 @@ def register(app: FastAPI, render, back) -> None:
 
     @app.post("/settings/mail")
     def mail_save(request: Request, email: str = Form(""), password: str = Form(""), enabled: str = Form(None),
-                  folders: str = Form("INBOX"), include_sent: str = Form(None), backfill_days: int = Form(3),
+                  folders: str = Form("INBOX"), include_sent: str = Form(None), backfill_days: int = Form(5),
                   ignore_senders: str = Form(""), host: str = Form("imap.yandex.ru")):
         if password.strip():
             config.set_secret("MAIL_APP_PASSWORD", password.strip().replace(" ", ""))
@@ -522,7 +530,7 @@ def register(app: FastAPI, render, back) -> None:
     @app.post("/settings/gmail")
     def gmail_save(request: Request, email: str = Form(""), password: str = Form(""), enabled: str = Form(None),
                    folders: str = Form("INBOX"), include_sent: str = Form(None), primary_only: str = Form(None),
-                   backfill_days: int = Form(3)):
+                   backfill_days: int = Form(5)):
         if password.strip():
             config.set_secret("GMAIL_APP_PASSWORD", password.strip().replace(" ", ""))  # Google показывает его с пробелами
         config.update_settings("gmail", {
@@ -566,7 +574,7 @@ def register(app: FastAPI, render, back) -> None:
     @app.post("/settings/imap")
     def imap_save(request: Request, email: str = Form(""), login: str = Form(""), host: str = Form(""),
                   port: int = Form(993), password: str = Form(""), enabled: str = Form(None),
-                  folders: str = Form("INBOX"), include_sent: str = Form(None), backfill_days: int = Form(3)):
+                  folders: str = Form("INBOX"), include_sent: str = Form(None), backfill_days: int = Form(5)):
         host = host.strip().removeprefix("imaps://").removeprefix("imap://").strip("/")
         if password.strip():
             config.set_secret("IMAP_PASSWORD", password.strip())

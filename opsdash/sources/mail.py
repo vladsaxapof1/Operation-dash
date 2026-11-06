@@ -236,7 +236,7 @@ def collect(settings: dict | None = None, account: str = "mail") -> str:
             sent = next((name for flags, name in _folders(imap) if "\\Sent" in flags), None)
             if sent:
                 targets.append((sent, "SENT"))
-        since = datetime.now() - timedelta(days=int(ms.get("backfill_days") or 3))
+        since = datetime.now() - timedelta(days=int(ms.get("backfill_days") or 5))
         months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         backfill = f"{since.day:02d}-{months[since.month - 1]}-{since.year}"  # IMAP не понимает локализованные месяцы
         for folder, key in targets:

@@ -61,7 +61,7 @@ telegram:
   api_id: ''
   phone: ''
   include_all_private: false
-  backfill_days: 3
+  backfill_days: 5
 telegram_bot:
   enabled: false
   owner_chat_id: ''
@@ -80,7 +80,7 @@ mail:
   folders:
   - INBOX
   include_sent: true
-  backfill_days: 3
+  backfill_days: 5
   ignore_senders:
   - noreply
   - no-reply

@@ -133,9 +133,42 @@
 {#- ONB-4: пока ничего не подключено — что появится и куда нажать; каждый источник — окно в каталоге #}
 <div class="alert info alert-x-wrap setup-alert" data-dismiss="hide_setup"><b>PULSE пока ничего не видит</b> — подключите переписку и календарь,
   и здесь появятся сообщения, где ждут вашего ответа, договорённости со сроками и встречи дня. Каждый источник — 3–5 минут.
-  <div class="setup-alert-act"><a class="btn sm primary" href="/settings?tab=connections">Открыть подключения</a>
+  <div class="setup-alert-act"><a class="btn sm primary" href="/welcome">Пройти мастер первого запуска</a> <a class="btn sm" href="/settings?tab=connections">Открыть подключения</a>
     <span class="small">или сразу: <a href="/settings?tab=bot">Telegram-бот</a> · <a href="/settings?tab=telegram">Telegram</a> · <a href="/settings?tab=gmail">Gmail</a> · <a href="/settings?tab=calendar">календарь</a></span></div>
   <button type="button" class="alert-x" data-dismiss-btn aria-label="Скрыть" title="Скрыть">{{ icons.icon('close', 16) }}</button></div>
+{% endif %}
+
+{% if first_finds and first_finds.status in ('queued', 'running') %}
+{#- ONB-3: идёт первый разбор после мастера — что происходит; страница обновится, когда закончит (app.js, data-wait-job) #}
+<div class="alert info first-run" data-first-run><span class="spin" aria-hidden="true"></span>
+  <span><b>PULSE читает вашу переписку за {{ first_days }} дней.</b> Первые находки появятся здесь через 5–15 минут —
+  страница обновится сама. Пока можно подключить что-то ещё в <a href="/settings?tab=connections">Подключениях</a>.</span></div>
+{% elif first_finds and first_finds.status == 'done' %}
+{% set f = first_finds.found %}
+{#- ONB-3: «Что PULSE уже нашёл» — один раз после первого разбора; закрыли — больше не показываем (/welcome/seen) #}
+<dialog class="dlg dlg-finds" data-first-finds data-open-on-load aria-labelledby="finds-title">
+  <div class="dlg-box">
+    <div class="dlg-head"><h2 class="dlg-title" id="finds-title">Что PULSE уже нашёл</h2><button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">✕</button></div>
+    {% if not f.messages %}
+    <p>Переписка пока не подключена, поэтому находок нет. Подключите <a href="/settings?tab=telegram">Telegram</a>,
+      <a href="/settings?tab=gmail">Gmail</a> или <a href="/settings?tab=imap">другую почту</a> — PULSE разберёт её за {{ first_days }} дней.</p>
+    {% else %}
+    <p class="muted" style="margin:0">Переписка и почта за {{ first_days }} дней — вот что в ней для вас.</p>
+    <div class="finds">
+      <section><h3>Ждут вашего ответа · {{ f.attention }}</h3>
+        {% for a in f.attention_top %}<p class="find"><b>{{ a.sender or a.chat }}</b> — {{ a.summary }}</p>{% else %}<p class="muted small">Никто — всё отвечено.</p>{% endfor %}</section>
+      <section><h3>Ваши задачи · {{ f.mine }}</h3>
+        {% for c in f.mine_top %}<p class="find">{{ c.title }}{% if c.whom %} <span class="muted">· для {{ c.whom }}</span>{% endif %}{% if c.due %} <span class="muted">· до {{ c.due | date }}</span>{% endif %}</p>{% else %}<p class="muted small">Новых обещаний не нашлось.</p>{% endfor %}</section>
+      <section><h3>Вам должны · {{ f.to_me }}</h3>
+        {% for c in f.to_me_top %}<p class="find">{{ c.title }}{% if c.who %} <span class="muted">· {{ c.who }}</span>{% endif %}{% if c.due %} <span class="muted">· до {{ c.due | date }}</span>{% endif %}</p>{% else %}<p class="muted small">Пока ничего.</p>{% endfor %}</section>
+      {% if f.events %}<section><h3>Ближайшие встречи</h3>
+        {% for e in f.events %}<p class="find">{{ e.start | local('%d.%m %H:%M') }} — {{ e.title }}</p>{% endfor %}</section>{% endif %}
+    </div>
+    <p class="small muted" style="margin:0">Первые подсказки могут промахиваться: «Нет» убирает подсказку, и она не вернётся.</p>
+    {% endif %}
+    <div class="dlg-actions"><button type="button" class="btn primary" data-dlg-close>К Сводке</button><a class="btn ghost" href="/commitments">Все задачи</a></div>
+  </div>
+</dialog>
 {% endif %}
 
 <div class="home">

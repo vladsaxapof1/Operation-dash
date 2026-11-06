@@ -461,6 +461,13 @@ def job_estimates(**_) -> str:
     return day.job_estimates()
 
 
+def _first_finds() -> str:
+    """«Первые находки» после мастера первого запуска (opsdash.welcome)."""
+    from opsdash import welcome
+
+    return welcome.job_first_finds()
+
+
 REGISTRY = {
     **{f"collect:{src}": (lambda src: lambda **kw: collect_source(src))(src) for src in config.SOURCES},
     "recordings": job_recordings,
@@ -488,6 +495,7 @@ REGISTRY = {
     "update-check": job_update_check,
     "update": job_update,
     "estimates": job_estimates,
+    "first-finds": lambda **kw: _first_finds(),
 }
 
 TITLES = {
@@ -519,6 +527,7 @@ TITLES = {
     "update-check": "Проверка обновлений PULSE",
     "update": "Обновление PULSE",
     "estimates": "Оценки времени у задач (Claude)",
+    "first-finds": "Первые находки: разбор переписки за 5 дней (Claude)",
 }
 
 
