@@ -349,8 +349,10 @@ def update_commitment(cid: int, **fields) -> None:
     _log_changes(cid, old, fields)
     if fields.get("status") in ("done", "cancelled"):
         _settle_done_proposals(cid, fields["status"])
+        store.execute("UPDATE commitments SET ball_back_at=NULL WHERE id=?", (cid,))
         if was == "open":
             _notify_unblocked(cid)
+            ball_back(cid)
 
 
 def _log_changes(cid: int, old: dict, fields: dict) -> None:
@@ -544,6 +546,80 @@ def _notify_unblocked(closed_id: int | None, *, task_id: int | None = None, even
             notices.add("tasks", f"Можно делать: «{headline(t)}»", why.replace("Я:", "Вы:", 1),
                         link=f"/commitments?task={tid}")
             worklog.event(tid, "Можно делать — " + why.replace("Я:", "Вы:", 1))
+
+
+# --- мяч на чужой стороне -----------------------------------------------------------------
+# Своя часть задачи готова, дальше — коллега (MR на ревью, документ на согласование, запрос данных): его часть —
+# подзадача «мне должны», а задача директора уходит из плана, пока часть не готова (day._blocked). Готово —
+# «мяч снова у вас»: директор отвечает, что осталось ей (оценка) или что задача готова.
+
+def hand_off(cid: int, *, who: str = "", what: str = "", due: str | None = None, part: int | None = None,
+             text: str | None = None, source: str | None = None, quote: str | None = None,
+             by: str | None = None) -> int:
+    """«Моя часть готова — жду…»: who — кто дальше, what — что он должен сделать (станет его задачей «мне должны»
+    и подзадачей этой); part — его уже записанная задача (тогда who и what не нужны). В ход задачи — «ждём»: пока
+    часть не готова, задача не в плане. text — что произошло, своими словами (по умолчанию — «Ваша часть готова…»).
+    Вернуть id части коллеги."""
+    c = store.row("SELECT * FROM commitments WHERE id=?", (cid,))
+    if not c:
+        raise ValueError(f"Нет задачи [{cid}]")
+    if c["status"] != "open":
+        raise ValueError("Задача уже закрыта")
+    if c["direction"] != "mine":
+        raise ValueError("«Моя часть готова» — для ваших задач; здесь задачу делает " + (c["who"] or "другой человек"))
+    st, ref = worklog.parse_source(source)
+    if part:
+        k = store.row("SELECT * FROM commitments WHERE id=?", (part,))
+        if not k:
+            raise ValueError(f"Нет задачи [{part}]")
+        if k["direction"] == "mine":
+            raise ValueError("Часть коллеги — задача «мне должны» или «между коллегами», а не ваша")
+        set_parent(part, cid)
+        if k["status"] != "open":
+            update_commitment(part, status="open")
+        kid, who, what = part, k["who"] or "?", headline(k)
+    else:
+        who, what = (who or "").strip(), " ".join((what or "").split())
+        if not who:
+            raise ValueError("Кто дальше? Укажите, у кого теперь мяч")
+        if not what:
+            raise ValueError("Что он должен сделать? Например, «Ревью и мерж»")
+        if due and not _as_date(due):
+            raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
+        kid = add_commitment(direction="to_me", who=who, title=what[:120], what=what, due=due or None,
+                             source_type=st or "manual", source_ref=ref, quote=quote, parent_id=cid)
+    store.execute("UPDATE commitments SET ball_back_at=NULL, updated=? WHERE id=?", (store.utcnow(), cid))
+    worklog.add(cid, (text or "").strip() or f"Ваша часть готова — дальше {who}: «{what}»", kind="ask",
+                source=source, quote=quote, by=by)
+    return kid
+
+
+def ball_back(closed_id: int) -> bool:
+    """Часть коллеги закрыта (готово или отменена), и больше задача директора ничего не ждёт — «мяч снова у вас»:
+    отметка ball_back_at (в окне задачи — «что осталось вам?»), запись в ход задачи и уведомление в углу экрана."""
+    from opsdash import notices
+
+    k = store.row("SELECT * FROM commitments WHERE id=?", (closed_id,))
+    if not k or not k["parent_id"] or k["direction"] == "mine" or k["status"] == "open":
+        return False
+    p = store.row("SELECT * FROM commitments WHERE id=? AND direction='mine' AND status='open' AND archived_at IS NULL",
+                  (k["parent_id"],))
+    if not p or _open_waits(p["id"]) or store.scalar(
+            "SELECT 1 FROM commitments WHERE parent_id=? AND status='open' AND archived_at IS NULL", (p["id"],)):
+        return False
+    now = store.utcnow()
+    store.execute("UPDATE commitments SET ball_back_at=?, updated=? WHERE id=?", (now, now, p["id"]))
+    text = (f"{k['who'] or 'Коллега'}: «{headline(k)}» — " + ("готово" if k["status"] == "done" else "отменено")
+            + ", мяч снова у вас")
+    worklog.add(p["id"], text, kind="update", by="pulse", at=now)
+    notices.add("tasks", f"Мяч снова у вас: «{headline(p)}»", text + ". Что осталось сделать вам?",
+                link=f"/commitments?task={p['id']}")
+    return True
+
+
+def keep_ball(cid: int) -> None:
+    """«Мяч снова у вас» прочитано: оценка остаётся как была (или директор её уже поменяла)."""
+    store.execute("UPDATE commitments SET ball_back_at=NULL WHERE id=?", (cid,))
 
 
 def unblocked(days: int = 2) -> list[dict]:

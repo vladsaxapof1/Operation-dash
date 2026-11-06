@@ -604,6 +604,8 @@ def _commitment_line(c: dict) -> str:
         line += f" · {c['status']}"
     if c.get("in_work"):
         line += " · в работе"
+    if c.get("ball_back_at") and c["status"] == "open":
+        line += " · мяч снова у директора: часть коллеги готова"
     if c.get("estimate_min"):
         line += f" · ≈{c['estimate_min']} мин" + (" (оценка директора)" if c.get("estimate_by") == "user" else "")
     if c.get("agent_hint"):
@@ -710,6 +712,16 @@ def cmd_commitments(a) -> None:
         out(f"Задача [{a.id}] ждёт: " + "; ".join(
             (f"[{w['task']['id']}] «{w['task']['headline']}»" if w["task"] else f"событие «{w['event']}»")
             + (" — готово" if w["done"] else "") for w in c["waits"]))
+    elif a.action == "handoff":
+        try:
+            kid = records.hand_off(a.id, who=a.who or "", what=a.what or "", due=a.due, part=a.part, text=a.text,
+                                   source=a.source, quote=a.quote)
+        except ValueError as e:
+            fail(str(e))
+        k = records.get_commitment(kid)
+        out(f"Мяч у коллеги: [{kid}] «{records.headline(k)}» ({records.route(k)}) — "
+            f"часть задачи [{a.id}]. Задача [{a.id}] не в плане, пока эта часть не готова; готово — "
+            f"./ops propose done --commitment {kid} …")
     elif a.action == "items":
         if not records.get_commitment(a.id):
             fail(f"нет задачи [{a.id}]")
@@ -1627,6 +1639,16 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--source", help="откуда известно: meeting:<id> | telegram:<id> | pachca:<id> | …")
     x.add_argument("--remove", action="store_true", help="убрать связь")
     x.add_argument("--happened", action="store_true", help="событие случилось — задача его больше не ждёт")
+    x = ms.add_parser("handoff", help="своя часть задачи готова, дальше — коллега (MR на ревью, документ на "
+                                      "согласование): его часть — задача «мне должны», эта уходит из плана до её готовности")
+    x.add_argument("id", type=int, help="задача директора")
+    x.add_argument("--who", help="кто дальше (у кого теперь мяч)")
+    x.add_argument("--what", help="что он должен сделать, результатом: «Ревью и мерж MR по признаку клиента»")
+    x.add_argument("--due", help="к какому сроку, YYYY-MM-DD — если прозвучал")
+    x.add_argument("--part", type=int, help="его часть уже записана задачей с этим id (вместо --who/--what)")
+    x.add_argument("--text", help="что произошло, для хода задачи: «05.11 отправил MR на ревью Петру»")
+    x.add_argument("--source", help="откуда: telegram:<id> | pachca:<id> | ymessenger:<id> | mail:<id> | meeting:<id>")
+    x.add_argument("--quote", help="дословная цитата")
     x = ms.add_parser("items", help="пункты внутри задачи (разделы, этапы, части): прогресс по частям")
     x.add_argument("id", type=int)
     x.add_argument("--add", action="append", help="добавить пункт (можно несколько раз или через «;»)")

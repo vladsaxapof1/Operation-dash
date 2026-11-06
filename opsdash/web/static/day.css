@@ -112,3 +112,34 @@
 .cal-legend i { display: inline-block; width: 18px; height: 10px; margin-right: 4px; vertical-align: -1px; border-radius: 3px;
   border: 1.5px dashed var(--faint); background: var(--panel-2); }
 .cal-legend i.work { border-color: var(--ok); background: var(--ok-soft); }
+/* мяч у коллеги: задача не сделана, но времени не занимает — плашка «ждёт» в строке «весь день» в день срока */
+.ev-wait { position: static; display: flex; align-items: center; gap: 4px; margin: 0 2px; padding: 1px 6px; overflow: hidden;
+  border: 1.5px dashed var(--faint); border-radius: 6px; background: var(--panel-2); color: var(--muted); font-size: 12px;
+  white-space: nowrap; }
+.ev-wait:hover { text-decoration: none; color: var(--text); }
+.ev-wait svg { flex: none; }
+.ev-wait-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.ev-wait-w { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.ev-wait.late { border-color: var(--warn); background: var(--warn-soft); color: var(--warn-text); }
+.ev-wait.late .ev-wait-t { color: inherit; }
+.ev-waits { position: relative; min-width: 0; }
+.ev-waits > summary { list-style: none; cursor: pointer; }
+.ev-waits > summary::-webkit-details-marker { display: none; }
+.ev-waits-list { position: absolute; z-index: 5; top: calc(100% + 4px); left: 2px; width: max(100%, 280px); display: grid; gap: 4px;
+  padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); }
+.ev-waits-list .ev-wait { margin: 0; }
+.ev-waits.end .ev-waits-list { left: auto; right: 2px; }  /* у правых дней недели — к правому краю, чтобы не обрезалось */
+
+/* мелочи подряд — одним блоком: «Мелочи ×2: название · название», переносом на столько строк, сколько влезает */
+.pb.batch .pb-list { display: -webkit-box; -webkit-box-orient: vertical; white-space: normal; overflow: hidden; }
+.pb.batch.tiny { padding-top: 1px; }
+/* нижний край блока — потянуть, чтобы поменять «сколько займёт» */
+.pb-rs { position: absolute; left: 0; right: 0; bottom: -2px; height: 7px; cursor: ns-resize; }
+/* меню блока по щелчку — в окошке карточки встречи */
+.pbm { display: grid; gap: 8px; }
+.pbm .ev-detail-h a { color: inherit; }
+.pbm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.pbm-list { margin: 0; padding-left: 16px; display: grid; gap: 4px; font-size: 13px; }
+.pbm .day-pass { padding: 0; }
+.pbm .day-pass[hidden] { display: none; }
+.pbm .muted.small { margin: 0; }

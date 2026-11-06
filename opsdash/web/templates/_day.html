@@ -72,16 +72,64 @@
 
 {% macro task_block(b, drag=None, gap=4) %}
 {#- плановая задача на часовой сетке — одна легенда на Сводке и в Календаре: «в работе» — зелёная, остальные —
-    серые, обе пунктиром; закреплённая директором — сплошной рамкой; сделанная — галочкой. Клик — окно задачи.
-    drag — сетка Сводки (минута верхнего края и высота часа): блок можно перетащить на другое время #}
-{% set it = b.item %}
-<a class="pb{{ ' work' if b.work }}{{ ' pinned' if b.pinned }}{{ ' done' if b.done }}{{ ' late' if b.late }}{{ ' tiny' if b.height < 30 }}" {% if it.id %}href="/commitments?task={{ it.id }}"{% else %}href="#" data-feed-jump="answer"{% endif %}
-   {%- if drag and it.id and not b.done %} data-drag="{{ it.id }}" data-s="{{ b.start }}" data-from="{{ drag.plan_from }}" data-px="{{ drag.hour_px }}"{% endif %}
+    серые, обе пунктиром; закреплённая директором — сплошной рамкой; сделанная — галочкой; мелочи подряд — одним
+    блоком «Мелочи ×N». Щелчок — меню блока (task_menu), без скриптов — окно задачи. drag — сетка (минута верхнего
+    края и высота часа): блок можно перетащить на другое время и другой день, нижний край — поменять оценку #}
+{% set it = b.item %}{% set batch = it.members %}{% set first = it.id or (batch[0].id if batch else None) %}
+{% set movable = drag and first and not b.done %}
+<a class="pb{{ ' batch' if batch }}{{ ' work' if b.work }}{{ ' pinned' if b.pinned }}{{ ' done' if b.done }}{{ ' late' if b.late }}{{ ' tiny' if b.height < 30 }}" {% if first %}href="/commitments?task={{ first }}" data-pb="{{ b.key }}"{% else %}href="#" data-feed-jump="answer"{% endif %}
+   {%- if movable %} data-drag="{{ it.id or it.ids }}" data-s="{{ b.start }}" data-from="{{ drag.plan_from }}" data-px="{{ drag.hour_px }}" data-day="{{ b.day or '' }}"{% endif %}
    style="top: {{ b.top }}px; height: {{ b.height }}px; left: calc({{ '%.4f' % (b.left * 100) }}% + {{ gap }}px); width: calc({{ '%.4f' % (b.width * 100) }}% - {{ gap * 2 }}px)"
-   title="{{ it.title }} · {{ b.time }} · {{ 'сделано' if b.done else '≈' ~ (it.est | dur) }}{{ ' · в работе' if b.work }}{{ ' · после срока' if b.late }}{{ ' · вы поставили сюда' if b.pinned }}{{ ' · перетащите, чтобы поставить на другое время' if drag and it.id and not b.done }}">
-  <span class="pb-t">{{ '✓ ' if b.done }}{{ it.title }}</span><span class="pb-m">{{ b.time }}{% if not b.done %} · ≈{{ it.est | dur }}{% endif %}</span>
+   title="{% if batch %}Мелочи: {% for m in batch %}{{ m.title }} (≈{{ m.est | dur }}){{ '; ' if not loop.last }}{% endfor %} · {{ b.time }}{% else %}{{ it.title }} · {{ b.time }} · {{ 'сделано' if b.done else '≈' ~ (it.est | dur) }}{% endif %}{{ ' · в работе' if b.work }}{{ ' · после срока' if b.late }}{{ ' · вы поставили сюда' if b.pinned }}{{ ' · перетащите на другое время или день, нижний край — сколько займёт' if movable }}">
+  {%- if batch %}<span class="pb-t pb-list" style="-webkit-line-clamp: {{ b.lines }}">{{ it.title }}: {% for m in batch %}{{ m.title }}{{ ' · ' if not loop.last }}{% endfor %}</span>
+  {%- else %}<span class="pb-t">{{ '✓ ' if b.done }}{{ it.title }}</span><span class="pb-m">{{ b.time }}{% if not b.done %} · ≈{{ it.est | dur }}{% endif %}</span>{% endif %}
+  {%- if movable and it.id %}<span class="pb-rs" data-resize aria-hidden="true"></span>{% endif -%}
 </a>
+{%- if first and not b.done %}<template id="pbm-{{ b.key }}">{{ task_menu(b) }}</template>{% endif %}
 {% endmacro %}
+
+{% macro task_menu(b) %}
+{#- меню блока задачи по щелчку (в окне встречи [data-ev-pop]): готово, «моя часть готова — жду…», не в этот день,
+    отменить своё решение, сколько займёт; у пачки мелочей — список с «готово» у каждой #}
+{% set it = b.item %}{% set batch = it.members %}
+<div class="pbm">
+  <div class="ev-detail-h">{% if batch %}Мелочи ×{{ batch | length }}{% else %}<a href="/commitments?task={{ it.id }}">{{ it.title }}</a>{% endif %}</div>
+  <div class="muted small">{% if b.day %}{{ b.day | day_text }} · {% endif %}{{ b.time }} · ≈{{ it.est | dur }}{{ ' · в работе' if b.work }}{{ ' · вы поставили сюда' if b.pinned }}{% if b.late %} · <span class="warn-text">после срока</span>{% endif %}</div>
+  {% if batch %}
+  <ul class="pbm-list">{% for m in batch %}
+    <li><a href="/commitments?task={{ m.id }}">{{ m.title }}</a> <span class="muted small">≈{{ m.est | dur }}</span>
+      <form class="inline" method="post" action="/commitments/{{ m.id }}"><input type="hidden" name="status" value="done"><button class="linkish small" title="Задача выполнена">✓ готово</button></form></li>
+  {% endfor %}</ul>
+  <form class="pbm-row" method="post" action="/day/act"><input type="hidden" name="cid" value="{{ batch[0].id }}"><input type="hidden" name="cids" value="{{ it.ids }}"><input type="hidden" name="day" value="{{ b.day or '' }}">
+    <button class="btn sm ghost" name="act" value="skip" title="В этот день PULSE их не ставит — встанут в следующее окно">Не в этот день</button></form>
+  <p class="muted small">Перетащите блок — переедут все разом. Каждую задачу отдельно — в её окне.</p>
+  {% else %}
+  <div class="pbm-row">
+    <form class="inline" method="post" action="/commitments/{{ it.id }}"><input type="hidden" name="status" value="done"><button class="btn sm primary">✓ Готово</button></form>
+    <button type="button" class="btn sm" data-reveal="pbh-{{ b.key }}" title="Ваша часть сделана, дальше — коллега: задача уйдёт из плана и вернётся, когда он сделает своё">Моя часть готова…</button>
+  </div>
+  <form class="day-pass" id="pbh-{{ b.key }}" method="post" action="/commitments/{{ it.id }}/handoff" hidden>
+    <input type="hidden" name="stay" value="1">
+    <div class="day-pass-f">
+      <input type="text" name="who" list="day-people" required placeholder="Кто дальше" aria-label="Кто дальше">
+      <input type="text" name="what" required placeholder="Что он должен сделать: «Ревью и мерж»" aria-label="Что он должен сделать">
+      <button class="btn sm primary">Жду</button>
+    </div>
+  </form>
+  <form class="pbm-row" method="post" action="/day/act"><input type="hidden" name="cid" value="{{ it.id }}"><input type="hidden" name="day" value="{{ b.day or '' }}">
+    <button class="btn sm ghost" name="act" value="skip" title="В этот день PULSE её не ставит — встанет в следующее окно">Не в этот день</button>
+    {% if b.pinned %}<button class="btn sm ghost" name="act" value="unplan" title="PULSE снова расставит задачу сам">Отменить ваше решение</button>{% endif %}
+  </form>
+  <div class="pbm-row"><span class="muted small">Займёт</span>{{ est_chips(it.est if not it.est_default else None, '/day/act', it.id, True) }}</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro wait_title(x) -%}
+{#- подсказка к задаче, у которой мяч не у директора (day.plan_range → waiting): что ждёт и почему не в плане #}
+«{{ x.item.title }}» — {{ x.why }}{% if x.what and x.who %} («{{ x.what }}»){% elif x.what %}: {{ x.what }}{% endif %}.
+{%- if x.late %} Срок {{ x.item.due.strftime('%d.%m') }} прошёл.{% endif %} Мяч не у вас — в план не ставится, вернётся, когда будет готово.
+{%- endmacro %}
 
 {% macro layer(day) %}
 {#- на сетке дня: плановые блоки задач (пунктир; клик — окно задачи, перетащить — поставить на другое время),

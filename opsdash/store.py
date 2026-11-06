@@ -486,6 +486,8 @@ MIGRATIONS = [
     ("commitments", "no_due_at", "TEXT"),
     ("commitments", "remind_paused_until", "TEXT"),  # «Не напоминать 3 дня» и «Больше не напоминать» на Сводке
     ("commitments", "remind_off_due", "TEXT"),
+    # «Мяч снова у вас»: коллега сделал свою часть — директор отвечает, что осталось ей (records.ball_back)
+    ("commitments", "ball_back_at", "TEXT"),
 ]
 
 

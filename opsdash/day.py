@@ -261,18 +261,36 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     return one if k % 10 == 1 else few if 2 <= k % 10 <= 4 else many
 
 
-def _blocked() -> dict[int, str]:
-    """Задачи, которые сами чего-то ждут: связь «ждёт» (не готово) или открытая подзадача — часть работы передана.
-    id → что ждёт, словами («ждёт «…»», «передано: Пётр»)."""
-    blocked: dict[int, str] = {}
+def _blocked() -> dict[int, dict]:
+    """Задачи, которые сами чего-то ждут — мяч не у директора: связь «ждёт» (не готово), открытая подзадача (часть
+    работы передана: «моя часть готова — дальше Пётр») или последняя запись хода — «спросили, ждём ответа».
+    id → {why: что ждёт, словами («ждёт «…»», «передано: Пётр», «ответа нет 2 дня»), who: у кого мяч (или None),
+    what: подробность для подсказки, theirs: мяч у других (не ждёт другую задачу или часть самого директора)}."""
+    blocked: dict[int, dict] = {}
     for r in store.rows(
             "SELECT l.task_id, l.event, w.direction, w.who, w.title, w.what FROM task_links l "
             "LEFT JOIN commitments w ON w.id=l.waits_for "
             "WHERE (l.waits_for IS NOT NULL AND w.status='open') OR (l.waits_for IS NULL AND l.done_at IS NULL) ORDER BY l.id"):
-        blocked.setdefault(r["task_id"], f"ждёт «{records.headline(r)}»" if r["what"] or r["title"] else f"ждёт: {r['event']}")
-    for r in store.rows("SELECT parent_id, direction, who FROM commitments WHERE parent_id IS NOT NULL AND status='open' "
-                        "AND archived_at IS NULL ORDER BY id"):
-        blocked.setdefault(r["parent_id"], "передано: " + ("ваша часть" if r["direction"] == "mine" else r["who"] or "?"))
+        task = bool(r["what"] or r["title"])
+        blocked.setdefault(r["task_id"], {
+            "why": f"ждёт «{records.headline(r)}»" if task else f"ждёт: {r['event']}",
+            "who": ("вы" if r["direction"] == "mine" else r["who"]) if task else None,
+            "what": records.headline(r) if task else r["event"], "theirs": not task or r["direction"] != "mine"})
+    for r in store.rows("SELECT parent_id, direction, who, title, what FROM commitments WHERE parent_id IS NOT NULL "
+                        "AND status='open' AND archived_at IS NULL ORDER BY id"):
+        who = "ваша часть" if r["direction"] == "mine" else r["who"] or "?"
+        blocked.setdefault(r["parent_id"], {"why": "передано: " + who, "who": None if r["direction"] == "mine" else who,
+                                            "what": records.headline(r), "theirs": r["direction"] != "mine"})
+    # последняя запись хода (не событие PULSE) — вопрос без ответа: ждём ответа, задачу пока не сделать
+    today = config.now().date()
+    for r in store.rows(
+            "SELECT task_id, at, text FROM (SELECT task_id, kind, at, text, ROW_NUMBER() OVER "
+            "(PARTITION BY task_id ORDER BY at DESC, id DESC) AS n FROM task_log WHERE kind != 'event') "
+            "WHERE n=1 AND kind='ask'"):
+        dt = store.parse_ts(r["at"])
+        days = (today - dt.astimezone(config.tz()).date()).days if dt else 0
+        why = "ждём ответа" if days <= 0 else f"ответа нет {days} {_plural(days, 'день', 'дня', 'дней')}"
+        blocked.setdefault(r["task_id"], {"why": why, "who": None, "what": r["text"], "theirs": True})
     return blocked
 
 
@@ -289,6 +307,10 @@ def demand(day: date | None = None, settings: dict | None = None, *, rows: list[
     rows = decisions(day) if rows is None else rows
     forced = {r["commitment_id"]: r for r in rows if r["source"] == "user" and r["status"] == "planned"}
     skipped = {r["commitment_id"] for r in rows if r["status"] in ("moved", "dropped")}
+    # директор поставила задачу на день позже — до него задача в план не идёт (перенесла с сетки Календаря)
+    skipped |= {r["commitment_id"] for r in store.rows(
+        "SELECT commitment_id FROM day_plan WHERE date > ? AND source='user' AND status='planned'", (iso,))
+        if r["commitment_id"] not in forced}
     tasks = store.rows("SELECT * FROM commitments WHERE direction='mine' AND status='open' AND archived_at IS NULL")
     holders: dict[int, list[dict]] = {}
     for r in store.rows(
@@ -309,7 +331,7 @@ def demand(day: date | None = None, settings: dict | None = None, *, rows: list[
         if not want or c["id"] in skipped:
             continue
         if c["id"] in blocked and c["id"] not in forced:
-            waiting.append({**c, "why": blocked[c["id"]]})
+            waiting.append({**c, "why": blocked[c["id"]]["why"]})
             continue
         p = projects.get(c.get("project_id"))
         at_risk = bool(p and p["status"] != "done" and p["due"] and p["due"] <= risk_until)
@@ -327,6 +349,8 @@ def demand(day: date | None = None, settings: dict | None = None, *, rows: list[
                            + (f" и ещё {len(names) - 3}" if len(names) > 3 else ""))
         if c["in_work_at"]:
             reasons.append("в работе")
+        if c.get("ball_back_at"):
+            reasons.append("мяч снова у вас")
         if at_risk:
             reasons.append(f"проект «{p['title']}» до {date.fromisoformat(p['due']):%d.%m}")
         if due and due > iso:
@@ -379,8 +403,8 @@ def verdict(cap: int, need: int, settings: dict | None = None, *, off: str | Non
 
 def place(wins: list[dict], items: list[dict], pins: list[dict] = ()) -> dict:
     """Жадная расстановка без ИИ: закреплённое директором — на своё время; остальное по приоритету — в первое окно,
-    где хватает места; фокус-блоки — первыми, дальше окна по времени. Не поместилось — «не влезает сегодня»;
-    больше самого длинного окна — отдельно («разбить или передать»)."""
+    где хватает места; фокус-блоки — первыми, дальше окна по времени. Мелочи (до SHORT минут) — пачкой подряд
+    (_groups). Не поместилось — «не влезает сегодня»; больше самого длинного окна — отдельно («разбить или передать»)."""
     usable = [w for w in wins if not w["short"]]
     free = {id(w): [(w["s"], w["e"])] for w in usable}
     blocks = []
@@ -392,24 +416,60 @@ def place(wins: list[dict], items: list[dict], pins: list[dict] = ()) -> dict:
     order = sorted(usable, key=lambda w: (w["focus"] is None, w["s"]))
     overflow, too_big = [], []
     pinned = {p["item"]["id"] for p in pins if p["item"].get("id")}
-    for it in items:
-        if it.get("id") in pinned:
-            continue
-        spot = None
-        for w in order:
-            if (s := _fit(w, free[id(w)], it["est"])) is not None:
-                spot = (w, s)
-                break
-        if not spot:
-            (too_big if it["est"] > longest else overflow).append(it)
-            continue
-        w, s = spot
-        free[id(w)] = subtract(free[id(w)], [(s, s + it["est"])])
-        blocks.append({"item": it, "s": s, "e": s + it["est"], "source": "auto", "focus": w["focus"]})
+    placed, left = _greedy(order, free, [it for it in items if it.get("id") not in pinned])
+    blocks += placed
+    for it in left:
+        (too_big if it["est"] > longest else overflow).append(it)
     blocks.sort(key=lambda b: b["s"])
     for b in blocks:
         b["item"]["slot"] = f"{hm(b['s'])}–{hm(b['e'])}"
     return {"blocks": blocks, "overflow": overflow, "too_big": too_big, "longest": longest}
+
+
+SHORT = 15  # задача до 15 минут — «мелочь»: такие ставятся подряд пачкой, а на сетке рисуются одним блоком
+BATCH = 60  # пачка мелочей — не длиннее часа
+
+
+def _groups(items: list[dict]) -> list[list[dict]]:
+    """Порядок расстановки группами: мелочи собираются в пачки до BATCH минут, пачка встаёт на место первой из них
+    (мелочи удобнее сделать разом, чем рассыпать по дню); остальное — по одной."""
+    out: list[list[dict]] = []
+    batch: list[dict] | None = None
+    for it in items:
+        if it.get("id") and it["est"] <= SHORT:
+            if batch is not None and sum(x["est"] for x in batch) + it["est"] <= BATCH:
+                batch.append(it)
+                continue
+            batch = [it]
+            out.append(batch)
+        else:
+            out.append([it])
+    return out
+
+
+def _greedy(order: list[dict], free: dict, items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Каждую группу (_groups) — в первое окно из order, где хватает места на неё целиком; пачке мелочей места нет —
+    по одной. free — свободные отрезки окон (меняется). Вернуть (блоки, что не поместилось)."""
+    blocks, left = [], []
+    queue = _groups(items)
+    i = 0
+    while i < len(queue):
+        group = queue[i]
+        i += 1
+        est = sum(x["est"] for x in group)
+        spot = next(((w, s) for w in order if (s := _fit(w, free[id(w)], est)) is not None), None)
+        if not spot:
+            if len(group) > 1:
+                queue[i:i] = [[x] for x in group]
+            else:
+                left.append(group[0])
+            continue
+        w, s = spot
+        free[id(w)] = subtract(free[id(w)], [(s, s + est)])
+        for x in group:
+            blocks.append({"item": x, "s": s, "e": s + x["est"], "source": "auto", "focus": w["focus"]})
+            s += x["est"]
+    return blocks, left
 
 
 def _fit(w: dict, free: list[tuple[int, int]], est: int) -> int | None:
@@ -461,6 +521,7 @@ def plan(day: date | None = None, settings: dict | None = None, now: datetime | 
     out["summary"] = _summary(out)
     out["digest"] = digest_line(out, settings)
     saved = decisions(day) if save else rows
+    out["rows"] = saved
     out["progress"] = progress(day, rows=saved)
     # сделанное из плана — на сетке галочкой на своём (уже прошедшем) месте
     m = now.hour * 60 + now.minute if today else 24 * 60
@@ -521,7 +582,9 @@ def _now_window(p: dict, now: datetime) -> tuple[dict | None, dict | None]:
     if pick:
         left = pick["e"] - max(pick["s"], m)
         fit = next((b["item"] for b in p["blocks"] if pick["s"] <= b["s"] < pick["e"]), None)
-        fit = fit or next((i for i in p["items"] if i["est"] <= left), None)
+        # в окне задач по плану нет — подойдёт то, что сегодня не встало (поставленное на другое время не предлагаем)
+        placed = {b["item"].get("id") for b in p["blocks"]}
+        fit = fit or next((i for i in p["items"] if i["est"] <= left and (not i["id"] or i["id"] not in placed)), None)
         pick = {**pick, "left": left, "fit": fit}
     return (pick, None) if cur else (None, pick)
 
@@ -571,18 +634,71 @@ def _box(s: int, e: int, top: int, px: float, bottom: int, **kw) -> dict | None:
     return {"top": round((s - top) * px), "height": max(round((e - s) * px) - 2, 4), "len": e - s, **kw}
 
 
-def _task_blocks(blocks: list[dict], col_events: list[dict], top: int, px: float, bottom: int) -> list[dict]:
-    """Блоки задач одного дня на сетке. Событие, которое задача перекрывает (фокус-блок, встреча, от которой
-    отказались), — узкой полосой слева, задача — справа."""
+LINE_PX = 19  # блок задачи не ниже одной строки (шрифт 12px и рамки): короче названия не видно вовсе
+BATCH_PX = 34  # пачка мелочей — не ниже двух строк: «Мелочи ×2: …» и продолжение названий
+
+
+def _batches(blocks: list[dict]) -> list[dict]:
+    """Мелочи подряд (каждая до SHORT минут, вплотную одна к другой) — одним блоком «Мелочи ×N» со списком внутри:
+    по отдельности 15-минутные задачи на сетке — полоски без названия."""
+    out: list[dict] = []
+    run: list[dict] = []
+
+    def flush() -> None:
+        if len(run) > 1:
+            items = [b["item"] for b in run]
+            out.append({"item": {"id": None, "members": items, "ids": ",".join(str(i["id"]) for i in items),
+                                 "title": f"Мелочи ×{len(items)}", "est": run[-1]["e"] - run[0]["s"],
+                                 "in_work": any(i.get("in_work") for i in items)},
+                        "s": run[0]["s"], "e": run[-1]["e"], "late": any(b.get("late") for b in run),
+                        "source": "user" if all(b.get("source") == "user" for b in run) else "auto"})
+        else:
+            out.extend(run)
+        run.clear()
+
+    for b in sorted(blocks, key=lambda b: b["s"]):
+        short = bool(b["item"].get("id")) and b.get("source") != "done" and b["e"] - b["s"] <= SHORT
+        if not (short and run and b["s"] == run[-1]["e"]):
+            flush()
+        (run if short else out).append(b)
+    flush()
+    return out
+
+
+def _lift(layer: list[dict], events: list[dict]) -> None:
+    """Короткие блоки задач — не ниже строки (пачка мелочей — двух): тянем вниз, а если снизу встреча или другая
+    задача — вверх, в свободное место; совсем некуда — сколько поместится. Время блока при этом то же (в подписи)."""
+    for b in sorted(layer, key=lambda b: b["top"]):
+        need = BATCH_PX if b["item"].get("members") else LINE_PX
+        if b["height"] >= need:
+            continue
+        s, e = b["start"], b["start"] + b["len"]
+        obst = [(g["top"], g["top"] + g["height"]) for g in events if not (g["s"] < e and g["e"] > s)]
+        obst += [(o["top"], o["top"] + o["height"]) for o in layer if o is not b]
+        above = max([bt for t, bt in obst if t < b["top"] and bt <= b["top"] + 2] + [0])
+        below = min([t for t, bt in obst if t >= b["top"]] + [10 ** 6])
+        top = b["top"]
+        if top + need > below - 2:
+            top = max(above + 2, below - 2 - need, 0)
+        b["top"], b["height"] = top, max(b["height"], min(need, below - 2 - top))
+        b["lines"] = max(1, (b["height"] - 3) // 15)
+
+
+def _task_blocks(blocks: list[dict], col_events: list[dict], top: int, px: float, bottom: int,
+                 on: date | None = None) -> list[dict]:
+    """Блоки задач одного дня on на сетке. Событие, которое задача перекрывает (фокус-блок, встреча, от которой
+    отказались), — узкой полосой слева, задача — справа. Мелочи подряд — одним блоком (_batches), короткие блоки —
+    не ниже строки (_lift). key — для меню блока по щелчку."""
     layer, narrow = [], []
-    for blk in blocks:
+    for blk in _batches(blocks):
         it = blk["item"]
         b = _box(blk["s"], blk["e"], top, px, bottom, kind="plan", item=it, time=f"{hm(blk['s'])}–{hm(blk['e'])}",
                  pinned=blk.get("source") == "user", done=blk.get("source") == "done", start=blk["s"],
                  work=bool(it.get("in_work")) and blk.get("source") != "done", late=bool(blk.get("late")),
-                 left=0.0, width=1.0)
+                 left=0.0, width=1.0, day=on, key=f"{on or ''}-{blk['s']}-{it.get('id') or it.get('ids', '')}")
         if not b:
             continue
+        b["lines"] = max(1, (b["height"] - 3) // 15)
         layer.append(b)
         for g in col_events:
             if g["s"] < blk["e"] and g["e"] > blk["s"]:
@@ -590,6 +706,7 @@ def _task_blocks(blocks: list[dict], col_events: list[dict], top: int, px: float
                 b["left"], b["width"] = NARROW, 1 - NARROW
     for g in narrow:
         g["left"], g["width"] = 0.0, NARROW
+    _lift(layer, col_events)
     return layer
 
 
@@ -617,25 +734,45 @@ def decorate(grid: dict, p: dict) -> None:
         if w["short"] and (b := _box(w["s"], w["e"], top, px, bottom, kind="short",
                                      title=f"окно {w['len']} мин — короткое")):
             layer.append(b)
-    layer += _task_blocks(p["blocks"] + _done_blocks(p), grid["days"][0]["events"], top, px, bottom)
+    layer += _task_blocks(p["blocks"] + _done_blocks(p), grid["days"][0]["events"], top, px, bottom,
+                          grid["days"][0].get("date"))
     grid["plan_layer"] = layer
     grid["plan_from"] = top  # для перетаскивания: минута верхнего края сетки
 
 
 # --- расписание задач на несколько дней (Календарь) ---------------------------------------------------
 
+def _future_decisions(today: date) -> tuple[dict, dict, dict]:
+    """Решения директора на дни после today: pins {день: {задача: минута начала или None — «в план» без времени}},
+    not_before {задача: первый день, куда она её поставила — раньше не ставим}, skip {день: задачи «не в этот день»}."""
+    pins: dict[date, dict[int, int | None]] = {}
+    not_before: dict[int, date] = {}
+    skip: dict[date, set[int]] = {}
+    for r in store.rows("SELECT * FROM day_plan WHERE date > ? AND source='user' AND status != 'done'",
+                        (today.isoformat(),)):
+        d, cid = date.fromisoformat(r["date"]), r["commitment_id"]
+        if r["status"] == "planned":
+            pins.setdefault(d, {})[cid] = minutes(r["start"])
+            not_before[cid] = min(not_before.get(cid, d), d)
+        else:  # moved, dropped
+            skip.setdefault(d, set()).add(cid)
+    return pins, not_before, skip
+
+
 def plan_range(start: date, days: int, settings: dict | None = None, now: datetime | None = None) -> dict:
     """Задачи директора по свободным окнам дней start … start+days-1 — тот же детерминированный алгоритм, без ИИ.
     Сегодня — ровно план Сводки (те же day_plan и решения директора). Дальше по рабочим дням: что не поместилось
     сегодня, затем «в работе» и задачи со сроком — «в работе» первыми, остальные по сроку, каждая не позже своего
     срока; задачи без срока и не «в работе» по будущим дням не раскладываются. Не успела к сроку — плашка «не влезает
-    до срока» в день срока, а сама задача встаёт в первое окно после него. Прошедшие дни — пустые.
-    Вернуть {день: {"blocks", "late", "count", "minutes", "work"}}; хранится только план на сегодня."""
+    до срока» в день срока, а сама задача встаёт в первое окно после него. Задачи, у которых мяч не у директора
+    (ждут коллегу, подзадачу или ответ — _blocked), времени не занимают: плашка «ждёт» в день срока, просроченные и
+    «в работе» без срока — сегодня. Прошедшие дни — пустые.
+    Вернуть {день: {"blocks", "late", "waiting", "count", "minutes", "work"}}; хранится только план на сегодня."""
     settings = settings or config.load_settings()
     now = now if now is not None else config.now(settings)
     today = now.date()
     end = start + timedelta(days=days - 1)
-    out = {start + timedelta(days=i): {"blocks": [], "late": []} for i in range(days)}
+    out = {start + timedelta(days=i): {"blocks": [], "late": [], "waiting": []} for i in range(days)}
     if end >= today:
         p = plan(today, settings, now)
         if today in out:
@@ -644,15 +781,25 @@ def plan_range(start: date, days: int, settings: dict | None = None, now: dateti
         late: dict[int, dict] = {}  # задачи, не успевшие к сроку: id → плашка (в день срока)
         queue = []
         blocked = _blocked()
-        for c in store.rows("SELECT * FROM commitments WHERE direction='mine' AND status='open' AND archived_at IS NULL "
-                            "AND (due IS NOT NULL OR in_work_at IS NOT NULL)"):
-            if c["id"] in taken or c["id"] in blocked:
+        pins, not_before, skip = _future_decisions(today)
+        dropped = {r["commitment_id"] for r in p["rows"] if r["status"] == "dropped"}  # «не сегодня» — решение директора
+        for c in store.rows("SELECT * FROM commitments WHERE direction='mine' AND status='open' AND archived_at IS NULL"):
+            if c["id"] in taken or not (c["due"] or c["in_work_at"] or c["id"] in not_before):
                 continue
             due = records._as_date(c["due"])
             item = {"id": c["id"], "title": records.headline(c), "est": c.get("estimate_min") or DEFAULT_ESTIMATE,
-                    "in_work": bool(c["in_work_at"]), "due": due}
-            if due and due <= today:  # срок сегодня или прошёл, а в сегодняшний план не попала
-                late[c["id"]] = {"item": item, "day": today, "why": "не влезает до срока"}
+                    "est_default": not c.get("estimate_min"), "in_work": bool(c["in_work_at"]), "due": due}
+            if c["id"] in blocked and c["id"] not in not_before:
+                # мяч у коллеги: времени не занимает — плашка «ждёт» в день срока (просрочено — сегодня);
+                # ждёт другую задачу самого директора — плашка не нужна, та задача в плане
+                d = max(due or today, today)
+                if d in out and blocked[c["id"]]["theirs"]:
+                    out[d]["waiting"].append({"item": item, "day": d, "late": bool(due and due < today),
+                                              **blocked[c["id"]]})
+                continue
+            if due and due <= today and c["id"] not in not_before:  # срок сегодня или прошёл, а в план не попала
+                late[c["id"]] = {"item": item, "day": today, "why": f"вы убрали из плана — срок {due:%d.%m}"
+                                 if c["id"] in dropped else "не влезает до срока"}
             queue.append(item)
         queue.sort(key=lambda i: (not i["in_work"], i["due"] or date.max, i["id"]))
         if end > today:
@@ -660,30 +807,41 @@ def plan_range(start: date, days: int, settings: dict | None = None, now: dateti
             longest = 0
             d = today + timedelta(days=1)
             while d <= end and queue:
-                if work_window(d, settings):
-                    for it in queue:  # срок вчера и раньше, а задача так и не встала — плашка в день срока
-                        if it["due"] and it["due"] < d and it["id"] not in late:
-                            late[it["id"]] = {"item": it, "day": it["due"], "why": "не влезает до срока"}
+                day_pins = pins.get(d, {})
+                work = work_window(d, settings)
+                if work or any(it["id"] in day_pins for it in queue):
+                    if work:
+                        for it in queue:  # срок вчера и раньше, а задача так и не встала — плашка в день срока
+                            if it["due"] and it["due"] < d and it["id"] not in late and it["id"] not in not_before:
+                                late[it["id"]] = {"item": it, "day": it["due"], "why": "не влезает до срока"}
                     lay = layout(d, events, settings, briefs=ready)
-                    usable = [w for w in lay["windows"] if not w["short"]]
+                    usable = [w for w in lay["windows"] if not w["short"]] if work else []
                     longest = max([longest] + [w["len"] for w in usable])
                     free = {id(w): [(w["s"], w["e"])] for w in usable}
                     order = sorted(usable, key=lambda w: (w["focus"] is None, w["s"]))
-                    forced = {r["commitment_id"] for r in decisions(d) if r["source"] == "user" and r["status"] == "planned"}
-                    placed = []
-                    for it in sorted(queue, key=lambda i: i["id"] not in forced):
-                        for w in order:
-                            if (s := _fit(w, free[id(w)], it["est"])) is not None:
+                    blocks = []
+                    for it in queue:  # директор поставила на время (перетащила) — ровно туда, в любой день
+                        if day_pins.get(it["id"]) is not None:
+                            s = day_pins[it["id"]]
+                            blocks.append({"item": it, "s": s, "e": s + it["est"], "source": "user"})
+                            for w in usable:
                                 free[id(w)] = subtract(free[id(w)], [(s, s + it["est"])])
-                                if d in out:
-                                    out[d]["blocks"].append({"item": it, "s": s, "e": s + it["est"], "source": "auto",
-                                                             "late": it["id"] in late})
-                                placed.append(it["id"])
-                                break
-                    queue = [it for it in queue if it["id"] not in placed]
+                    pinned = {b["item"]["id"] for b in blocks}
+                    rest = [it for it in queue if it["id"] not in pinned and it["id"] not in skip.get(d, ())
+                            and not_before.get(it["id"], d) <= d]
+                    rest.sort(key=lambda i: i["id"] not in day_pins)  # «в план на этот день» без времени — первыми
+                    placed, _ = _greedy(order, free, rest) if work else ([], [])
+                    for b in blocks + placed:
+                        b["late"] = bool(b["item"]["due"] and b["item"]["due"] < d)
+                        if b["item"]["id"] in day_pins:
+                            b["source"] = "user"
+                    if d in out:
+                        out[d]["blocks"] += blocks + placed
+                    done = {b["item"]["id"] for b in blocks + placed}
+                    queue = [it for it in queue if it["id"] not in done]
                 d += timedelta(days=1)
             for it in queue:  # срок в этом диапазоне, а окон до него так и не нашлось
-                if it["due"] and it["due"] <= end and it["id"] not in late:
+                if it["due"] and it["due"] <= end and it["id"] not in late and it["id"] not in not_before:
                     late[it["id"]] = {"item": it, "day": it["due"],
                                       "why": "длиннее любого окна" if it["est"] > longest else "не влезает до срока"}
         for x in late.values():
@@ -691,7 +849,7 @@ def plan_range(start: date, days: int, settings: dict | None = None, now: dateti
                 out[x["day"]]["late"].append(x)
     for d, v in out.items():
         if d < today:
-            v["blocks"], v["late"] = [], []
+            v["blocks"], v["late"], v["waiting"] = [], [], []
         v["blocks"].sort(key=lambda b: b["s"])
         tasks = [b for b in v["blocks"] if b["item"].get("id") and b.get("source") != "done"]
         v["count"], v["minutes"] = len(tasks), sum(b["e"] - b["s"] for b in tasks)
@@ -699,17 +857,28 @@ def plan_range(start: date, days: int, settings: dict | None = None, now: dateti
     return out
 
 
+WAITS_SHOWN = 2  # плашек «ждёт» в день Календаря по одной; больше — одной общей «Ждут других: N»
+
+
 def calendar_layer(grid: dict, pr: dict) -> None:
-    """Задачи на недельной сетке Календаря (overview.week_grid): блоки в колонках дней и плашки «не влезает до срока»
-    в строке «весь день» под встречами на весь день."""
+    """Задачи на недельной сетке Календаря (overview.week_grid): блоки в колонках дней, а в строке «весь день» под
+    встречами на весь день — плашки «не влезает до срока» (kind=late) и «ждёт: Пётр» (kind=wait — мяч у коллеги)."""
     top = grid["hour_from"] * 60
     px = grid["hour_px"] / 60
     bottom = top + len(grid["hours"]) * 60
     late = []
+    today = config.now().date()
+    grid["plan_from"] = top  # для перетаскивания и оценки краем: минута верхнего края сетки
     for col, d in enumerate(grid["days"]):
-        v = pr.get(d["date"]) or {"blocks": [], "late": []}
-        d["tasks"] = _task_blocks(v["blocks"], d["events"], top, px, bottom)
-        late += [{**x, "col": col} for x in v["late"]]
+        v = pr.get(d["date"]) or {"blocks": [], "late": [], "waiting": []}
+        d["past"] = d["date"] < today  # в прошедший день задачи не переносим
+        d["tasks"] = _task_blocks(v["blocks"], d["events"], top, px, bottom, d["date"])
+        late += [{**x, "col": col, "kind": "late"} for x in v["late"]]
+        waits = v.get("waiting") or []
+        if len(waits) > WAITS_SHOWN:  # много — одной плашкой «Ждут других: N», список по нажатию
+            late.append({"col": col, "kind": "waits", "items": waits, "late": any(x["late"] for x in waits)})
+        else:
+            late += [{**x, "col": col, "kind": "wait"} for x in waits]
     rows: dict[int, int] = {}
     for x in late:
         x["row"] = grid["allday_rows"] + rows.get(x["col"], 0)
@@ -730,6 +899,8 @@ def set_estimate(cid: int, value: int | None, *, by: str = "user") -> bool:
         return False
     store.execute("UPDATE commitments SET estimate_min=?, estimate_by=? WHERE id=?",
                   (int(value) if value else None, by if value else None, cid))
+    if by == "user":  # «мяч снова у вас — что осталось?»: директор ответила оценкой
+        store.execute("UPDATE commitments SET ball_back_at=NULL WHERE id=?", (cid,))
     return True
 
 
@@ -777,7 +948,8 @@ def job_estimates(**_) -> str:
 def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due: str = "", who: str = "",
            what: str = "", settings: dict | None = None) -> str:
     """Решение по задаче из «Разобрать день» и с сетки дня: plan — в план (start «ЧЧ:ММ» или пусто — «авто»; в
-    занятое директором окно — после её задач), move — блок перетащили на сетке (ровно на start), unplan — отменить
+    занятое директором окно — после её задач), move — блок перетащили на сетке (ровно на start дня day — и в
+    Календаре на другой день: прежнее закрепление снимается), skip — «не в этот день», unplan — отменить
     своё решение, tomorrow — на следующий рабочий день, due — свой срок, nodue — снять срок, delegate — передать
     часть коллеге (подзадача: «Я + Пётр → Тимур», who — кому, what — что). Вернуть текст для уведомления."""
     settings = settings or config.load_settings()
@@ -799,10 +971,12 @@ def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due:
             raise ValueError("Время — в виде ЧЧ:ММ")
         est = c.get("estimate_min") or DEFAULT_ESTIMATE
         s = minutes(start) if start else None
-        if act == "move":
+        if act == "move":  # перетащили на сетке — ровно на это время этого дня; прежнее место (другой день) снимается
             s = max(0, min(s, 24 * 60 - est))
+            store.execute("DELETE FROM day_plan WHERE commitment_id=? AND source='user' AND status='planned' "
+                          "AND date >= ? AND date != ?", (cid, config.now(settings).date().isoformat(), iso))
             mark("planned", hm(s), hm(s + est))
-            return f"В плане на {hm(s)}"
+            return f"В плане на {hm(s)}" + ("" if day == config.now(settings).date() else f", {day:%d.%m}")
         if s is not None:  # в выбранном окне — после задач, которые директор уже поставила туда сама
             taken = sorted((minutes(r["start"]), minutes(r["end"])) for r in decisions(day)
                            if r["source"] == "user" and r["status"] == "planned" and r["start"] and r["end"]
@@ -815,6 +989,9 @@ def decide(cid: int, act: str, *, day: date | None = None, start: str = "", due:
     if act == "unplan":  # отменить своё решение: PULSE расставит задачу сам, если она нужна сегодня
         mark("")
         return "Решение отменено — PULSE расставит сам"
+    if act == "skip":  # «Не в этот день»: в этот день PULSE задачу не ставит — встанет в следующее окно
+        mark("dropped")
+        return "Не " + ("сегодня" if day == config.now(settings).date() else f"{day:%d.%m}") + " — PULSE поставит дальше"
     if act == "tomorrow" and c["due"] and c["due"] > next_workday(day, settings).isoformat():
         # срок и так позже — переносим только решение «в план»: завтра задача будет в плане сама
         nxt = next_workday(day, settings).isoformat()

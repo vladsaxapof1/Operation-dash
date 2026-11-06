@@ -977,18 +977,36 @@ def day_review(after: int = 0):
 
 @app.post("/day/act")
 def day_act(request: Request, cid: int = Form(...), act: str = Form(...), start: str = Form(""), due: str = Form(""),
-            minutes: int = Form(0), who: str = Form(""), what: str = Form("")):
-    """Решение из «Разобрать день» и с сетки дня: в план (окно или «авто»), перетащили блок, на следующий рабочий
-    день, свой срок, снять срок, передать коллеге, оценка. Окно ждёт JSON с новым телом; без скриптов — возврат."""
+            minutes: int = Form(0), who: str = Form(""), what: str = Form(""), day: str = Form(""),
+            cids: str = Form("")):
+    """Решение из «Разобрать день», с сетки дня и из Календаря: в план (окно или «авто»), перетащили блок (day — на
+    другой день; cids — пачку мелочей: подряд с start), «не в этот день», на следующий рабочий день, свой срок, снять
+    срок, передать коллеге, оценка. Окно ждёт JSON с новым телом; без скриптов — возврат на страницу."""
     as_json = "application/json" in request.headers.get("accept", "")
     try:
+        on = date.fromisoformat(day) if day.strip() else None
+        if on and on < config.now().date() and act in ("plan", "move", "skip"):
+            raise ValueError("Этот день уже прошёл")
         if act == "estimate":
             day_mod.set_estimate(cid, minutes or None, by="user")
             msg = f"Оценка — {day_mod.est_text(minutes)}" if minutes else "Оценка убрана"
+        elif act == "skip" and cids.strip():  # пачка мелочей — «не в этот день» все разом
+            ids = [int(x) for x in cids.split(",") if x.strip().isdigit()]
+            for i in ids:
+                msg = day_mod.decide(i, "skip", day=on)
+        elif act == "move" and cids.strip():  # пачка мелочей — все подряд, с того же времени
+            ids = [int(x) for x in cids.split(",") if x.strip().isdigit()]
+            at = day_mod.minutes(start.strip())
+            if at is None:
+                raise ValueError("Время — в виде ЧЧ:ММ")
+            for i in ids:
+                msg = day_mod.decide(i, "move", day=on, start=day_mod.hm(at))
+                at += (records.get_commitment(i) or {}).get("estimate_min") or day_mod.DEFAULT_ESTIMATE
+            msg = f"Мелочи ({len(ids)}) — с {start.strip()}" + (f", {on:%d.%m}" if on and on != config.now().date() else "")
         else:
             if act == "due" and not due.strip():
                 raise ValueError("Выберите срок")
-            msg = day_mod.decide(cid, act, start=start.strip(), due=due.strip(), who=who, what=what)
+            msg = day_mod.decide(cid, act, day=on, start=start.strip(), due=due.strip(), who=who, what=what)
     except ValueError as e:
         if as_json:
             return JSONResponse({"ok": False, "err": str(e)}, status_code=400)
@@ -1187,6 +1205,27 @@ def commitment_wait(request: Request, cid: int, target: str = Form(""), until: s
     except ValueError as e:
         return _back_task(request, cid, err=str(e))
     return _back_task(request, cid, "Связь добавлена: задача ждёт" + (" другую" if m else " событие"))
+
+
+@app.post("/commitments/{cid}/handoff")
+def commitment_handoff(request: Request, cid: int, who: str = Form(""), what: str = Form(""), due: str = Form(""),
+                       stay: str = Form("")):
+    """«Моя часть готова — жду…»: дальше коллега. Его часть — задача «мне должны» и подзадача этой; задача уходит
+    из плана и вернётся («мяч снова у вас»), когда часть будет готова. stay — из меню блока на сетке: вернуться на
+    ту же страницу, а не в окно задачи."""
+    try:
+        records.hand_off(cid, who=who, what=what, due=due.strip() or None, by="director")
+    except ValueError as e:
+        return back(request, err=str(e)) if stay else _back_task(request, cid, err=str(e))
+    msg = f"Мяч у коллеги ({who.strip()}): задача ушла из плана и вернётся, когда часть будет готова"
+    return back(request, msg) if stay else _back_task(request, cid, msg)
+
+
+@app.post("/commitments/{cid}/ball")
+def commitment_ball(request: Request, cid: int):
+    """«Мяч снова у вас»: оценка остаётся как была — вопрос «что осталось?» больше не показываем."""
+    records.keep_ball(cid)
+    return _back_task(request, cid, "Оценка осталась прежней")
 
 
 @app.post("/commitments/{cid}/wait/{link_id}/remove")

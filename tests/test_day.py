@@ -364,7 +364,7 @@ def test_history_progress_and_no_duplicate_rows(settings_with):
     grid = {"hour_from": 9, "hour_px": 36, "hours": list(range(9, 20)), "events": [], "days": [{"events": []}]}
     day.decorate(grid, p)
     blocks = [b for b in grid["plan_layer"] if b["kind"] == "plan"]
-    assert [(b["item"]["title"], b["done"]) for b in blocks] == [("Игрек", False), ("Икс", True)]
+    assert [(b["item"]["title"], b["done"]) for b in blocks] == [("Икс", True), ("Игрек", False)]  # по времени
 
 
 def test_evening_carry_over(settings_with, monkeypatch):
@@ -581,7 +581,7 @@ def test_plan_range_deadlines_work_first_and_late(settings_with):
     _task("Без срока — по дням не раскладываем")
     day.set_estimate(_task("Сегодняшняя", DAY.isoformat()), 30)
     pr = day.plan_range(DAY - timedelta(days=1), 5, settings, _at(8))
-    assert pr[DAY - timedelta(days=1)] == {"blocks": [], "late": [], "count": 0, "minutes": 0, "work": False}  # прошлое
+    assert pr[DAY - timedelta(days=1)] == {"blocks": [], "late": [], "waiting": [], "count": 0, "minutes": 0, "work": False}  # прошлое
     assert [x["item"]["title"] for x in pr[DAY]["late"]] == ["Сегодняшняя"]  # сегодня окон нет — к сроку не успела
     assert _slots(pr[wed]) == [("В работе без срока", "09:00", False)]  # «в работе» — первой
     assert [x["item"]["title"] for x in pr[wed]["late"]] == ["К среде, большая"]  # плашка в день срока
@@ -629,3 +629,265 @@ def test_calendar_views_show_tasks_and_toggle(settings_with, monkeypatch):
     assert 'class="pb work' in client.get("/calendar?view=week&tasks=1").text
     home = client.get("/").text  # на Сводке — та же легенда
     assert re.search(rf'class="pb work[^"]*" href="/commitments\?task={work}"', home)
+
+
+# --- мяч на чужой стороне: своя часть готова, дальше коллега; «ждём ответа»; «мяч снова у вас» ------------------
+
+def test_handoff_takes_task_out_of_plan_and_ball_comes_back(settings_with, monkeypatch):
+    from opsdash import notices, worklog
+
+    settings = settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(9))
+    cid = _task("Признак нового клиента", DAY.isoformat())
+    records.set_in_work(cid, True)
+    day.set_estimate(cid, 60)
+    assert cid in [i["id"] for i in day.demand(DAY)["items"]]
+    with pytest.raises(ValueError, match="Кто дальше"):
+        records.hand_off(cid, what="Ревью и мерж")
+    with pytest.raises(ValueError, match="Что он должен сделать"):
+        records.hand_off(cid, who="Пётр Иванов")
+    kid = records.hand_off(cid, who="Пётр Иванов", what="Ревью и мерж", due="2026-11-04")
+    k = records.get_commitment(kid)
+    assert (k["direction"], k["who"], k["parent_id"], k["due"], records.headline(k)) == \
+        ("to_me", "Пётр Иванов", cid, "2026-11-04", "Ревью и мерж")
+    dem = day.demand(DAY)
+    assert cid not in [i["id"] for i in dem["items"]]  # мяч у коллеги — в план не идёт, хоть и «в работе»
+    assert dem["waiting"] == [{"id": cid, "title": "Признак нового клиента", "why": "передано: Пётр Иванов"}]
+    now = worklog.current(worklog.entries([cid])[cid])
+    assert now["kind"] == "ask" and now["text"] == "Ваша часть готова — дальше Пётр Иванов: «Ревью и мерж»"
+    # в Календаре — плашка «ждёт» в день срока, времени не занимает
+    pr = day.plan_range(DAY, 3, settings, _at(9))
+    assert not pr[DAY]["blocks"]
+    assert [(x["item"]["id"], x["who"], x["what"], x["late"]) for x in pr[DAY]["waiting"]] == \
+        [(cid, "Пётр Иванов", "Ревью и мерж", False)]
+    # коллега сделал своё — мяч снова у директора: отметка, запись в ход, уведомление; задача снова в плане
+    records.update_commitment(kid, status="done")
+    c = records.get_commitment(cid)
+    assert c["ball_back_at"] and c["now"]["text"] == "Пётр Иванов: «Ревью и мерж» — готово, мяч снова у вас"
+    assert c["now"]["author"] == "pulse" and not c["now"]["waiting"]
+    assert any(n["title"] == "Мяч снова у вас: «Признак нового клиента»" for n in notices.recent())
+    it = next(i for i in day.demand(DAY)["items"] if i["id"] == cid)
+    assert "мяч снова у вас" in it["reasons"]
+    day.set_estimate(cid, 15)  # «что осталось?» — 15 минут
+    c = records.get_commitment(cid)
+    assert not c["ball_back_at"] and c["estimate_min"] == 15
+
+
+def test_ball_back_only_when_nothing_else_is_pending():
+    cid = _task("Отчёт по возвратам", DAY.isoformat())
+    a = records.hand_off(cid, who="Пётр Иванов", what="Выгрузка")
+    b = records.hand_off(cid, who="Олег Смирнов", what="Цены поставщика")
+    assert a != b
+    records.update_commitment(a, status="done")
+    assert not records.get_commitment(cid)["ball_back_at"]  # Олег ещё не сделал
+    assert day.demand(DAY)["waiting"][0]["why"] == "передано: Олег Смирнов"
+    records.update_commitment(b, status="cancelled")
+    c = records.get_commitment(cid)
+    assert c["ball_back_at"] and c["now"]["text"] == "Олег Смирнов: «Цены поставщика» — отменено, мяч снова у вас"
+    records.keep_ball(cid)
+    assert not records.get_commitment(cid)["ball_back_at"]
+    # закрыли саму задачу — отметка не остаётся
+    c2 = _task("Договор поставки", DAY.isoformat())
+    k = records.hand_off(c2, who="Пётр Иванов", what="Подписать договор")
+    records.update_commitment(k, status="done")
+    records.update_commitment(c2, status="done")
+    assert not records.get_commitment(c2)["ball_back_at"]
+
+
+def test_handoff_part_and_guards():
+    cid = _task("Презентация для совета", DAY.isoformat())
+    other = _task("Чужая", direction="to_me", who="Пётр Иванов")
+    assert records.hand_off(cid, part=other) == other
+    assert records.get_commitment(other)["parent_id"] == cid
+    with pytest.raises(ValueError, match="для ваших задач"):
+        records.hand_off(other, who="Олег", what="Что-то")
+    mine = _task("Моя другая", DAY.isoformat())
+    with pytest.raises(ValueError, match="не ваша"):
+        records.hand_off(cid, part=mine)
+    records.update_commitment(mine, status="done")
+    with pytest.raises(ValueError, match="уже закрыта"):
+        records.hand_off(mine, who="Олег", what="Что-то")
+
+
+def test_question_without_answer_keeps_task_out_of_plan(monkeypatch):
+    from opsdash import worklog
+
+    cid = _task("Цены поставщика", DAY.isoformat())
+    monkeypatch.setattr(config, "now", lambda s=None: _at(15))
+    worklog.add(cid, "Спросили Петра, когда будут цены", kind="ask",
+                at=store.to_utc_iso(_at(10) - timedelta(days=2)))
+    dem = day.demand(DAY)
+    assert cid not in [i["id"] for i in dem["items"]]
+    assert dem["waiting"] == [{"id": cid, "title": "Цены поставщика", "why": "ответа нет 2 дня"}]
+    worklog.event(cid, "Срок — 03.11")  # события PULSE ответа не означают
+    assert cid not in [i["id"] for i in day.demand(DAY)["items"]]
+    worklog.add(cid, "Пётр: цены будут в четверг", at=store.to_utc_iso(_at(11)))  # ответили — снова в плане
+    assert cid in [i["id"] for i in day.demand(DAY)["items"]]
+
+
+def test_cli_handoff(capsys):
+    from opsdash import cli
+
+    cid = _task("Признак клиента", DAY.isoformat())
+    cli.main(["commitments", "handoff", str(cid), "--who", "Пётр Иванов", "--what", "Ревью и мерж",
+              "--text", "Отправил MR на ревью Петру"])
+    out = capsys.readouterr().out
+    assert "Мяч у коллеги" in out and f"часть задачи [{cid}]" in out
+    c = records.get_commitment(cid)
+    assert c["now"]["text"] == "Отправил MR на ревью Петру" and c["now"]["kind"] == "ask"
+    with pytest.raises(SystemExit):
+        cli.main(["commitments", "handoff", str(cid), "--what", "Без исполнителя"])
+    cli.main(["commitments", "list"])
+    k = c["children"][0]
+    records.update_commitment(k["id"], status="done")
+    cli.main(["commitments", "list"])
+    assert "мяч снова у директора" in capsys.readouterr().out
+
+
+def test_web_handoff_ball_and_calendar_chip(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(9))
+    records.upsert_person("Пётр Иванов")
+    cid = _task("Признак нового клиента", "2026-11-02")  # срок вчера
+    client = TestClient(app, base_url="http://localhost:8765")
+    page = client.get(f"/commitments?task={cid}").text
+    assert f'data-reveal="handoff-{cid}"' in page and f'action="/commitments/{cid}/handoff"' in page
+    r = client.post(f"/commitments/{cid}/handoff", data={"who": "Пётр Иванов", "what": "Ревью и мерж", "due": ""},
+                    headers={"Referer": "http://localhost:8765/commitments"})
+    assert r.status_code in (200, 303)
+    kid = records.get_commitment(cid)["children"][0]["id"]
+    week = client.get("/calendar?view=week").text
+    chip = re.search(rf'<a class="ev-wait late" href="/commitments\?task={cid}"[^>]*title="([^"]*)"', week)
+    assert chip and "передано: Пётр Иванов («Ревью и мерж»)" in chip.group(1) and "Срок 02.11 прошёл" in chip.group(1)
+    assert 'class="pb' not in week  # времени не занимает
+    month = client.get("/calendar?view=month").text
+    assert "· ждут 1" in month
+    assert "передано: Пётр Иванов («Ревью и мерж»)" in client.get("/calendar?view=list").text
+    records.update_commitment(kid, status="done")
+    page = client.get(f"/commitments?task={cid}").text
+    assert "Мяч снова у вас." in page and "Пётр Иванов: «Ревью и мерж» — готово." in page
+    client.post(f"/commitments/{cid}/ball", headers={"Referer": "http://localhost:8765/commitments"})
+    assert "Мяч снова у вас." not in client.get(f"/commitments?task={cid}").text
+
+
+def test_calendar_collapses_many_waiting_and_skips_own_waits(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings = settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(9))
+    first = _task("Своя первая", DAY.isoformat())
+    second = _task("Ждёт мою первую", DAY.isoformat())
+    records.add_wait(second, waits_for=first)
+    pr = day.plan_range(DAY, 1, settings, _at(9))
+    assert not pr[DAY]["waiting"]  # ждёт вашу же задачу — та в плане, плашка не нужна
+    assert second in [c["id"] for c in day.demand(DAY)["waiting"]]
+    for n in range(3):
+        records.hand_off(_task(f"Задача {n}", DAY.isoformat()), who="Пётр Иванов", what=f"Часть {n}")
+    week = TestClient(app, base_url="http://localhost:8765").get("/calendar?view=week").text
+    assert "Ждут других: 3" in week
+    assert len(re.findall(r'class="ev-wait(?: late)?"', week)) == 4  # общая плашка и три строки списка
+
+
+# --- мелочи пачкой, короткие блоки, перенос между днями, меню блока -----------------------------------------------
+
+def test_short_tasks_are_placed_together_and_drawn_as_one_block(settings_with):
+    settings = settings_with(calendar={"enabled": True})
+    smalls = [_task(f"Мелочь {n}", DAY.isoformat()) for n in range(4)]
+    big = _task("Большая", DAY.isoformat())  # по приоритету — между четвёртой и пятой мелочью
+    smalls.append(_task("Мелочь 4", DAY.isoformat()))
+    for cid in smalls:
+        day.set_estimate(cid, 15)
+    day.set_estimate(big, 60)
+    p = day.plan(DAY, settings, _at(9))
+    slots = {b["item"]["title"]: b["item"]["slot"] for b in p["blocks"]}
+    # первые четыре мелочи — пачкой подряд (не больше часа), пятая — следующей пачкой после «Большой»
+    assert [slots[f"Мелочь {n}"] for n in range(4)] == ["09:00–09:15", "09:15–09:30", "09:30–09:45", "09:45–10:00"]
+    assert slots["Большая"] == "10:00–11:00" and slots["Мелочь 4"] == "11:00–11:15"
+    grid = {"hour_from": 9, "hour_px": 36, "hours": list(range(9, 20)), "events": [],
+            "days": [{"events": [], "date": DAY}]}
+    day.decorate(grid, p)
+    blocks = [b for b in grid["plan_layer"] if b["kind"] == "plan"]
+    batch = blocks[0]
+    assert batch["item"]["title"] == "Мелочи ×4" and batch["time"] == "09:00–10:00"
+    assert batch["item"]["ids"] == ",".join(str(i) for i in smalls[:4])
+    single = next(b for b in blocks if b["item"].get("id") == smalls[4])  # одна мелочь — не пачка
+    assert single["height"] >= day.LINE_PX  # 15 минут на 36 px/ч — 9 px; рисуем не ниже строки
+    big_box = next(b for b in blocks if b["item"].get("id") == big)
+    assert single["top"] >= big_box["top"] + big_box["height"]  # и не залезая на соседний блок
+
+
+def test_lift_goes_up_when_next_block_is_right_below():
+    a = {"top": 30, "height": 7, "start": 600, "len": 15, "item": {"id": 1}}
+    b = {"top": 39, "height": 70, "start": 615, "len": 120, "item": {"id": 2}}
+    day._lift([a, b], [])
+    assert a["top"] + a["height"] <= b["top"] and a["height"] == day.LINE_PX  # поднялся, а не налез
+
+
+def test_move_to_another_day_weekend_and_skip_day(settings_with, monkeypatch):
+    settings = settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(9))
+    wed, sat = DAY + timedelta(days=1), DAY + timedelta(days=4)
+    a = _task("Отчёт", DAY.isoformat())
+    b = _task("Договор", DAY.isoformat())
+    assert day.decide(a, "move", day=wed, start="15:00") == "В плане на 15:00, 04.11"
+    assert a not in [i["id"] for i in day.demand(DAY)["items"]]  # перенесли на среду — сегодня не ставим
+    pr = day.plan_range(DAY, 5, settings, _at(9))
+    assert a not in {x["item"]["id"] for x in pr[DAY]["blocks"]}
+    moved = next(x for x in pr[wed]["blocks"] if x["item"]["id"] == a)
+    assert (moved["s"], moved["source"], moved["late"]) == (15 * 60, "user", True)  # после срока — вы решили
+    assert not pr[DAY]["late"]  # плашки «не влезает» нет — это решение директора
+    # перенесли ещё раз — прежнее место снимается; в субботу (не рабочий день) — тоже ровно туда
+    day.decide(a, "move", day=sat, start="11:00")
+    pr = day.plan_range(DAY, 5, settings, _at(9))
+    assert a not in {x["item"]["id"] for x in pr[wed]["blocks"]}
+    assert [(x["item"]["id"], x["s"]) for x in pr[sat]["blocks"]] == [(a, 11 * 60)]
+    # «не в этот день» — встанет на следующий рабочий
+    assert b in {x["item"]["id"] for x in pr[DAY]["blocks"]}
+    day.decide(b, "skip", day=DAY)
+    pr = day.plan_range(DAY, 5, settings, _at(9))
+    assert b not in {x["item"]["id"] for x in pr[DAY]["blocks"]} and b in {x["item"]["id"] for x in pr[wed]["blocks"]}
+    day.decide(b, "skip", day=wed)
+    pr = day.plan_range(DAY, 5, settings, _at(9))
+    thu = DAY + timedelta(days=2)
+    assert b in {x["item"]["id"] for x in pr[thu]["blocks"]} and b not in {x["item"]["id"] for x in pr[wed]["blocks"]}
+    # сегодня убрали задачу со сроком сегодня — плашка говорит, что это вы
+    c = _task("Сводка", DAY.isoformat())
+    day.decide(c, "skip", day=DAY)
+    pr = day.plan_range(DAY, 5, settings, _at(9))
+    assert [x["why"] for x in pr[DAY]["late"] if x["item"]["id"] == c] == ["вы убрали из плана — срок 03.11"]
+
+
+def test_web_calendar_drag_batch_menu_and_past_day(settings_with, monkeypatch):
+    from opsdash.web.app import app
+
+    settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(9))
+    x, y = _task("Мелочь раз", DAY.isoformat()), _task("Мелочь два", DAY.isoformat())
+    day.set_estimate(x, 15)
+    day.set_estimate(y, 15)
+    big = _task("Регламент", DAY.isoformat())
+    client = TestClient(app, base_url="http://localhost:8765")
+    week = client.get("/calendar?view=week").text
+    assert f'data-drag="{x},{y}"' in week and "Мелочи ×2: Мелочь раз · Мелочь два" in week
+    assert f'data-drag="{big}"' in week and 'data-day="2026-11-03"' in week and "data-resize" in week
+    assert 'data-day="2026-11-02" data-past' in week  # в прошедший день не тащим
+    assert f'<template id="pbm-2026-11-03-' in week and "Моя часть готова…" in week and "Не в этот день" in week
+    # пачку перетащили на четверг 16:00 — обе подряд
+    thu = (DAY + timedelta(days=2)).isoformat()
+    res = client.post("/day/act", data={"cid": x, "cids": f"{x},{y}", "act": "move", "start": "16:00", "day": thu},
+                      headers={"Accept": "application/json"}).json()
+    assert res["ok"] and res["msg"] == "Мелочи (2) — с 16:00, 05.11"
+    rows = {r["commitment_id"]: (r["date"], r["start"]) for r in store.rows(
+        "SELECT * FROM day_plan WHERE source='user' AND status='planned'")}
+    assert rows == {x: (thu, "16:00"), y: (thu, "16:15")}
+    bad = client.post("/day/act", data={"cid": big, "act": "move", "start": "10:00", "day": "2026-11-02"},
+                      headers={"Accept": "application/json"})
+    assert bad.status_code == 400 and bad.json()["err"] == "Этот день уже прошёл"
+    client.post("/day/act", data={"cid": big, "act": "estimate", "minutes": 45}, headers={"Accept": "application/json"})
+    assert records.get_commitment(big)["estimate_min"] == 45
+    # «Моя часть готова» из меню блока — назад на ту же страницу, а не в окно задачи
+    r = client.post(f"/commitments/{big}/handoff", data={"who": "Пётр Иванов", "what": "Согласовать", "stay": "1"},
+                    headers={"Referer": "http://localhost:8765/calendar?view=week"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/calendar?view=week") and "task=" not in r.headers["location"]

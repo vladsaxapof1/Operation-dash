@@ -582,6 +582,17 @@
         </div>
       </div>
       {% endif %}
+      {% if c.ball_back_at and c.status == 'open' %}
+      {#- коллега сделал свою часть (records.ball_back): что осталось директору — оценка, «как было» или «готово» #}
+      <div class="dlg-hint" data-ball>
+        <div><b>Мяч снова у вас.</b> {% if c.now %}{{ c.now.text | replace(', мяч снова у вас', '') }}. {% endif %}Что осталось сделать вам?</div>
+        <div class="actions">
+          {{ dayui.est_chips(None, '/commitments/' ~ c.id ~ '/estimate') }}
+          <form class="inline" method="post" action="/commitments/{{ c.id }}/ball"><button class="btn sm ghost" title="Оценка не меняется">Как было{% if c.estimate_min %} · ≈{{ c.estimate_min | dur }}{% endif %}</button></form>
+          <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn sm primary">Ничего — задача готова</button></form>
+        </div>
+      </div>
+      {% endif %}
       {% if c.merge_hint %}{% set h = c.merge_hint %}
       <div class="dlg-hint">
         <div><b>Похоже, это дубль задачи</b> {% if h.into_task %}{{ task_ref(h.into_task) }} <span class="muted small">· {{ h.into_task.route }}</span>{% endif %}. {{ h.reason }}</div>
@@ -666,10 +677,23 @@
       </div>
       {{ task_items(c) }}
       {{ agent_block(c) }}
+      {% if c.status == 'open' and c.direction == 'mine' and not c.archived %}
+      {#- «Моя часть готова — жду…»: мяч у коллеги (records.hand_off) — его часть становится задачей «вам должны» #}
+      <form class="dlg-pane day-pass" id="handoff-{{ c.id }}" method="post" action="/commitments/{{ c.id }}/handoff" hidden>
+        <div class="day-pass-f">
+          <input type="text" name="who" list="people-list" required placeholder="Кто дальше — например, Пётр Иванов" aria-label="Кто дальше">
+          <input type="text" name="what" required placeholder="Что он должен сделать: «Ревью и мерж»" aria-label="Что он должен сделать">
+          <input type="date" name="due" aria-label="К какому сроку" title="К какому сроку — необязательно">
+          <button class="btn sm primary">Жду</button>
+        </div>
+        <p class="muted small">Его часть станет задачей «вам должны» с напоминаниями. Эта задача уйдёт из плана дня и вернётся, когда часть будет готова.</p>
+      </form>
+      {% endif %}
       <div class="dlg-actions">
         {% if c.status == 'open' %}
         <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="done"><button class="btn primary">{{ icons.icon('check', 16) }} Готово</button></form>
         {% if not c.archived %}<form class="inline" method="post" action="/commitments/{{ c.id }}/work"><input type="hidden" name="on" value="{{ 0 if c.in_work else 1 }}"><button class="btn" aria-pressed="{{ 'true' if c.in_work else 'false' }}">{{ 'Снять «в работе»' if c.in_work else 'В работе' }}</button></form>{% endif %}
+        {% if c.direction == 'mine' and not c.archived %}<button type="button" class="btn" data-reveal="handoff-{{ c.id }}" title="Ваша часть сделана, дальше — коллега (MR на ревью, документ на согласование, запрос данных): задача уйдёт из плана и вернётся, когда он сделает своё">Моя часть готова…</button>{% endif %}
         {% else %}
         <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn">Вернуть в работу</button></form>
         {% endif %}
