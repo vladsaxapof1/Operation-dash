@@ -251,7 +251,8 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["calendars_on"] = config.any_enabled(settings, "calendar")  # подключён хоть один календарь
     from opsdash import decisions
 
-    ctx["decisions_orphans"] = decisions.summary()["orphans"]  # меню «Решения»: сколько без исполнения
+    # меню «Решения»: ждут решения, а следующего шага нет
+    ctx["decisions_attention"] = decisions.summary()["attention"]
     ctx["messages_on"] = config.any_enabled(settings, "messages")  # хоть один мессенджер или почта
     ctx["voice_tip"] = None if ctx["nav"] == "meetings" else _voice_tip(request)
     ctx["build"] = build()
@@ -1953,6 +1954,10 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
     related = proposals.list_proposals("all", batch=f"meeting:{mid}")
     commitments_ = records.meeting_commitments(mid)
     summary = records.link_summary(summary, commitments_)  # строки задач в разборе — со ссылками на задачи PULSE
+    from opsdash import decisions
+
+    decisions_ = sorted(decisions.items(meeting=mid, current=False), key=lambda r: r["id"])
+    summary = decisions.link_summary(summary, decisions_)  # пункты «Решений» — со ссылками на решения в их темах
     followup, followup_auto = records.followup_text(mid)
     meta_path = records.meeting_dir(mid) / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
@@ -1963,7 +1968,7 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
         s["name"] = (meta.get("speaker_names") or {}).get(s["label"]) or (voice.display_name(s["who"]) if s["who"] else "")
     guesses = {k: g for k, g in voice.guesses(mid, meta).items() if k not in who} if speakers else {}
     return render(request, "meeting.html", nav="meetings", m=m, summary=summary, transcript=transcript, tab=tab,
-                  queue_note=recordings.queue_notes().get(mid) if m["status"] == "new" else None, related=related, commitments=commitments_, folder=str(records.meeting_dir(mid)),
+                  queue_note=recordings.queue_notes().get(mid) if m["status"] == "new" else None, related=related, commitments=commitments_, decisions=decisions_, decision_ref=decisions.ref, folder=str(records.meeting_dir(mid)),
                   folder_rel=os.path.relpath(records.meeting_dir(mid), config.DATA_DIR.parent).replace(os.sep, "/"),
                   followup=followup, followup_auto=followup_auto,
                   # обрывки (меньше 10 с речи) сворачиваем, только когда спикеров много

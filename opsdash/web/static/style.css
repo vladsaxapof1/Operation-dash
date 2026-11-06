@@ -1949,52 +1949,107 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .why-bar .alert-x { position: static; margin-left: auto; }
 @media (max-width: 760px) { .why-bar { bottom: 76px; } }
 
-/* --- Реестр решений (MEM-3) --- */
+/* --- Решения по темам и цепочки (MEM-3, 2.0.21) --- */
 .dec-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 0 12px; }
 .dec-stat { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 14px; }
-.dec-stat:hover { text-decoration: none; border-color: var(--line-strong); }
+a.dec-stat:hover { text-decoration: none; border-color: var(--line-strong); }
+.dec-stat.flat { border-color: transparent; background: transparent; padding-left: 4px; padding-right: 4px; }
 .dec-stat b { font-variant-numeric: tabular-nums; margin-right: 2px; }
 .dec-stat.active { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
 .dec-stat.warn { color: var(--warn-text); }
 .dec-stat.warn.active { background: var(--warn-soft); }
 .dec-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
-.dec-filters select { width: auto; }
+/* список тем */
+.dec-topic { display: grid; grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.6fr) auto; gap: 4px 18px; align-items: center;
+  padding: 12px 20px; border-top: 1px solid var(--line); }
+.dec-topics .dec-topic:first-child { border-top: 0; }
+.dec-topic-name { font-weight: 600; font-size: 15px; }
+.dec-topic-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dec-topic-last span { font-variant-numeric: tabular-nums; margin-right: 4px; }
+.dec-topic-n { display: flex; gap: 6px 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; font-size: 14px; white-space: nowrap; }
+.dec-topic-n b { font-variant-numeric: tabular-nums; }
+.dec-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12.5px;
+  background: var(--panel-2); color: var(--muted); white-space: nowrap; }
+.dec-chip.chain { background: var(--accent-soft); color: var(--accent); }
+.dec-chip.open { background: var(--accent-soft); color: var(--accent); }
+.dec-chip.warn { background: var(--warn-soft); color: var(--warn-text); }
+.dec-chip.gone { margin-top: 6px; }
+/* строка решения */
 .dec-group .card-h { padding-bottom: 6px; }
-.dec-row { display: grid; grid-template-columns: minmax(0, 1.6fr) 150px minmax(0, 1.2fr) 230px; gap: 8px 18px; align-items: start;
-  padding: 14px 20px; border-top: 1px solid var(--line); }
-.dec-row.is-orphan { box-shadow: inset 3px 0 0 var(--warn-fill); }
+.dec-row, .dec-node { display: grid; grid-template-columns: minmax(0, 1fr) 160px auto; gap: 8px 18px; align-items: start; }
+.dec-row { padding: 14px 20px; border-top: 1px solid var(--line); }
+.dec-row.is-att { box-shadow: inset 3px 0 0 var(--warn-fill); }
 .dec-title { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .dec-meta { margin-top: 2px; }
+.dec-prevline { margin: 0 0 3px; color: var(--muted); overflow-wrap: anywhere; }
+.dec-rel { font-weight: 600; text-transform: lowercase; }
+.dec-rel.rel-changes { color: var(--warn-text); }
+.dec-rel.rel-cancels { color: var(--bad-text); }
+.dec-rel.rel-refines, .dec-rel.rel-follows { color: var(--accent); }
 .dec-metric { margin-top: 6px; font-size: 14px; font-variant-numeric: tabular-nums; }
-.dec-wait { margin-top: 4px; color: var(--warn-text); display: flex; align-items: center; gap: 4px; }
-.dec-stage { margin: 0; }
-.dec-stage select { width: 100%; height: 32px; font-size: 14px; }
-.dec-stage select.st-implemented { color: var(--ok-text); }
-.dec-stage select.st-waiting { color: var(--warn-text); }
-.dec-stage select.st-discussing { color: var(--accent); }
-.dec-tasks { display: grid; gap: 4px; font-size: 14px; min-width: 0; }
-.dec-task { overflow-wrap: anywhere; }
-.dec-task > span:first-child { display: inline-block; width: 14px; color: var(--muted); }
-.dec-task.done > span:first-child { color: var(--ok-text); }
-.dec-task.done a { color: var(--muted); }
-.dec-edit { grid-column: 1 / -1; }
+.dec-wait { margin-top: 4px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.dec-wait.is-warn { color: var(--warn-text); }
+.dec-tasks { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.dec-task.done, .dec-task.done a { color: var(--muted); }
+.dec-ctl { display: grid; gap: 6px; }
+.dec-ctl form { margin: 0; }
+.dec-ctl select { width: 100%; height: 32px; font-size: 14px; }
+.dec-ctl select.st-discussing { color: var(--accent); }
+.dec-go { align-self: center; white-space: nowrap; }
+.is-gone .dec-title { color: var(--muted); font-weight: 500; text-decoration: line-through; text-decoration-color: var(--line-strong); }
+/* «Изменить» — кнопка в правой колонке, открытая панель — на всю ширину */
+.dec-edit { grid-column: 3; grid-row: 1; }
+.dec-edit[open] { grid-column: 1 / -1; grid-row: auto; }
 .dec-edit > summary { list-style: none; width: fit-content; display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
-.dec-edit:not([open]) { display: flex; justify-content: flex-end; }  /* кнопка — у правого края, колонки выровнены */
 .dec-edit > summary::-webkit-details-marker { display: none; }
-.dec-row:not(:has(.dec-edit[open])) .dec-edit { grid-column: auto; grid-row: 1; grid-column-start: 4; }
 .dec-edit-b { margin-top: 10px; padding: 14px 16px; border-radius: 10px; background: var(--panel-2); display: grid; gap: 10px; }
 .dec-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; margin: 0; }
 .dec-fields label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); margin: 0; }
 .dec-fields .wide { grid-column: 1 / -1; }
 .dec-fields .form-actions { margin: 0; }
+.dec-fields input, .dec-fields select { width: 100%; max-width: none; }
+.dec-prevpick { display: flex; gap: 8px; }
+.dec-prevpick select[name=relation] { width: 150px; flex: none; }
+.dec-prevpick select[name=prev] { flex: 1; min-width: 0; }
 .dec-inline { display: flex; gap: 8px; flex-wrap: wrap; margin: 0; }
 .dec-inline input[type=text] { flex: 1 1 260px; }
 .dec-inline .dec-who { flex: 0 1 180px; }
 .dec-inline input[type=date] { width: auto; }
 .dec-details p { margin: 0 0 6px; white-space: pre-wrap; }
 .dec-edit-b form[data-confirm] { margin: 0; }
+/* страница темы */
+.dec-actions { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+.dec-rename { position: relative; }
+.dec-rename > summary { list-style: none; display: inline-flex; gap: 6px; align-items: center; }
+.dec-rename > summary::-webkit-details-marker { display: none; }
+.dec-rename-b { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 340px; display: grid; gap: 8px; margin: 0;
+  padding: 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-pop); }
+.dec-rename-b label { display: grid; gap: 6px; margin: 0; }
+.dec-sec-h { margin: 22px 0 10px; }
+.dec-sec-h h2 { margin: 0 0 2px; font-size: 18px; }
+.dec-sec-h p { margin: 0; }
+.dec-chain .card-h { align-items: baseline; gap: 12px; }
+.dec-chain-h { font-size: 15px; overflow-wrap: anywhere; }
+/* цепочка — вертикальная линия с точками: точка цвета связи с прежним */
+.dec-timeline { list-style: none; margin: 0; padding: 4px 20px 10px 20px; position: relative; }
+.dec-node { position: relative; padding: 10px 0 12px 26px; grid-template-columns: minmax(0, 1fr) 160px auto; }
+.dec-node::before { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: var(--line); }
+.dec-node:first-child::before { top: 18px; }
+.dec-node:last-child::before { bottom: calc(100% - 18px); }
+.dec-dot { position: absolute; left: 1px; top: 13px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel);
+  border: 2px solid var(--accent); }
+.dec-dot.rel-changes { border-color: var(--warn-fill); }
+.dec-dot.rel-cancels { border-color: var(--bad-text); }
+.is-gone .dec-dot { border-color: var(--line-strong); background: var(--panel-2); }
+.dec-node:not(.is-gone) .dec-dot { background: var(--accent); border-color: var(--accent); }
+.dec-node.is-att .dec-node-b { box-shadow: inset 3px 0 0 var(--warn-fill); padding-left: 10px; margin-left: -10px; }
+.dec-node-b { min-width: 0; }
 @media (max-width: 960px) {
-  .dec-row { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
-  .dec-row:not(:has(.dec-edit[open])) .dec-edit { grid-row: auto; grid-column: auto; }
+  .dec-topic { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
+  .dec-topic-n { justify-content: flex-start; }
+  .dec-row, .dec-node { grid-template-columns: minmax(0, 1fr); }
+  .dec-row { padding: 12px 16px; }
+  .dec-edit, .dec-edit[open] { grid-column: auto; grid-row: auto; }
   .dec-fields { grid-template-columns: minmax(0, 1fr); }
+  .dec-rename-b { right: auto; left: 0; width: min(340px, calc(100vw - 32px)); }
 }

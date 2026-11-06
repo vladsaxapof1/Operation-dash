@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% import "_decisions.html" as dm %}
+{% block title %}{{ topic }} · Решения{% endblock %}
+{#- Тема решений (2.0.21): ждут решения → цепочки «как к этому пришли» (какое решение какое поменяло, уточнило,
+    продолжило или отменило) → отдельные решения. «Скопировать таблицей» — формат директора для Таблиц и Excel #}
+{% set c = v.counts %}
+{% set opts = dict(options=options, relations=relations, topic_names=summary.topic_names) %}
+{% block content %}
+<p class="crumbs small"><a href="/decisions">← Решения</a></p>
+<div class="topline"><div><h1>{{ topic }}</h1>
+  <p class="sub">{{ c.current }} {{ plural(c.current, 'решение действует', 'решения действуют', 'решений действуют') }}
+    {%- if c.total > c.current %} · {{ c.total - c.current }} {{ plural(c.total - c.current, 'заменено или отменено', 'заменены или отменены', 'заменены или отменены') }}{% endif %}
+    {%- if v.chains %} · {{ v.chains | length }} {{ plural(v.chains | length, 'цепочка', 'цепочки', 'цепочек') }}{% endif %}
+    {%- if c.open %} · {{ c.open }} {{ plural(c.open, 'ждёт решения', 'ждут решения', 'ждут решения') }}{% endif %}
+    {%- if v.subtopics %}<br><span class="muted">Подтемы: {{ v.subtopics | join(' · ') }}</span>{% endif %}</p></div>
+  <div class="dec-actions" data-copy-scope>
+    <textarea hidden data-copy>{{ tsv }}</textarea>
+    <button type="button" class="btn" data-copy-btn title="Действующие решения темы: метрика, решение, было, стало, статус, следующий шаг, что поменяло — вставляется в Таблицы и Excel по колонкам">Скопировать таблицей</button>
+    <details class="dec-rename"><summary class="btn ghost">{{ icons.icon('edit', 15) }}<span>Тема</span></summary>
+      <form method="post" action="/decisions/topic-rename" class="dec-rename-b">
+        <input type="hidden" name="old" value="{{ topic }}">
+        <label class="small muted">Переименовать или влить в другую тему — подтемы сохранятся
+          <input type="text" name="new" value="{{ topic }}" list="dec-topics" required></label>
+        <button class="btn sm primary">Сохранить</button>
+      </form>
+    </details>
+  </div>
+</div>
+
+{{ ui.task_datalist() }}
+<datalist id="dec-topics">{% for t in summary.topic_names %}<option value="{{ t }}">{% endfor %}</datalist>
+
+{% set open = v.now | selectattr('stage', 'equalto', 'discussing') | list %}
+{% set chained = [] %}{% for ch in v.chains %}{% for r in ch %}{% set _ = chained.append(r.id) %}{% endfor %}{% endfor %}
+{% if open %}
+<section class="card dec-group">
+  <div class="card-h"><h2>Ждут решения</h2><span class="muted small">{{ open | length }}</span></div>
+  <ul class="list dec-list">
+    {% for d in open %}{{ dm.row(d, stages, meetings, anchor=d.id not in chained, **opts) }}{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="dec-chains">
+  <div class="dec-sec-h"><h2>Как к этому пришли</h2>
+    <p class="muted small">Решения по одному вопросу — по датам: какое решение какое поменяло, уточнило, продолжило или отменило. Прежние, которые заменили, — серым.</p></div>
+  {% for ch in v.chains %}
+  {% set live = ch | selectattr('current') | list %}
+  <section class="card dec-chain">
+    <div class="card-h"><h2 class="dec-chain-h">{{ (live[-1] if live else ch[-1]).title | truncate(90) }}</h2>
+      <span class="muted small">{{ ch | length }} {{ plural(ch | length, 'решение', 'решения', 'решений') }} · {{ ch[0].when | date }} → {{ ch[-1].when | date }}</span></div>
+    <ol class="dec-timeline">
+      {% for d in ch %}{{ dm.node(d, ch[loop.index0 - 1] if not loop.first else none, topic, stages, meetings, options, relations, summary.topic_names) }}{% endfor %}
+    </ol>
+  </section>
+  {% else %}
+  <section class="card"><p class="empty">Цепочек пока нет. {{ ai_name or 'Помощник' }} свяжет решения, которые меняют или уточняют друг друга, — кнопкой «Собрать цепочки» в разделе «Решения» или по понедельникам. Связать вручную — «Изменить» у решения → «Прежнее решение».</p></section>
+  {% endfor %}
+</section>
+
+{% if single %}
+<section class="card dec-group">
+  <div class="card-h"><h2>Отдельные решения</h2><span class="muted small">{{ single | length }} · пока ни с чем не связаны</span></div>
+  <ul class="list dec-list">
+    {% for d in single %}{{ dm.row(d, stages, meetings, **opts) }}{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

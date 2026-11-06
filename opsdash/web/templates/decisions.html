@@ -1,92 +1,61 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
 {% import "_icons.html" as icons %}
+{% import "_decisions.html" as dm %}
 {% block title %}Решения{% endblock %}
-{#- Реестр решений (MEM-3): по направлениям — что решили, метрика «было → стало», стадия, чем исполняется, чего
-    ждём. «Без исполнения» — принято больше недели назад, а задач нет. Логика — opsdash.decisions #}
+{#- Решения по темам (MEM-3, 2.0.21): темы — сколько действует, ждёт решения, цепочки;
+    поиск и «без следующего шага» — списком по темам. Страница темы — decision_topic.html. Логика — opsdash.decisions #}
 {% set sum = summary %}
 {% block content %}
 <div class="topline"><div><h1>Решения</h1>
-  <p class="sub">Что решили на встречах и в документах — и что с каждым решением сейчас: обсуждается, принято, ждёт
-    или уже внедрено, и какие задачи его исполняют.</p></div>
-  <form method="post" action="/decisions-run"><button class="btn lg">{{ icons.icon('ask', 16) }}Связать с задачами с {{ ai_name or 'помощником' }}</button></form>
+  <p class="sub">Что решили на встречах и в документах — по темам. В каждой теме видно, что действует сейчас и как к
+    этому пришли: какое решение какое поменяло, уточнило или отменило.</p></div>
+  <form method="post" action="/decisions-run"><button class="btn lg">{{ icons.icon('ask', 16) }}Собрать цепочки с {{ ai_name or 'помощником' }}</button></form>
 </div>
 
 <div class="dec-stats">
-  <a class="dec-stat{{ ' active' if not f_stage and not f_orphan }}" href="/decisions"><b>{{ sum.total }}</b> всего</a>
-  {% for key, t in stages.items() %}<a class="dec-stat st-{{ key }}{{ ' active' if f_stage == key }}" href="?stage={{ key }}"><b>{{ sum.stages[key] }}</b> {{ t }}</a>{% endfor %}
-  <a class="dec-stat warn{{ ' active' if f_orphan }}" href="?orphan=1" title="Принято больше {{ orphan_days }} дней назад, а ни одной задачи под решение нет"><b>{{ sum.orphans }}</b> без исполнения</a>
-  {% if sum.all_done %}<span class="muted small">· у {{ sum.all_done }} все задачи закрыты — можно отметить «внедрено»</span>{% endif %}
+  <a class="dec-stat{{ ' active' if mode == 'topics' }}" href="/decisions"><b>{{ sum.topics }}</b> {{ plural(sum.topics, 'тема', 'темы', 'тем') }}</a>
+  <span class="dec-stat flat"><b>{{ sum.current }}</b> действует</span>
+  {% if sum.open %}<span class="dec-stat flat"><b>{{ sum.open }}</b> ждут решения</span>{% endif %}
+  {% if sum.total > sum.current %}<span class="dec-stat flat"><b>{{ sum.total - sum.current }}</b> заменено или отменено</span>{% endif %}
+  {% if sum.attention or f == 'attention' %}<a class="dec-stat warn{{ ' active' if f == 'attention' }}" href="?f=attention" title="Ждут решения, а следующего шага нет — кто и что делает дальше"><b>{{ sum.attention }}</b> без следующего шага</a>{% endif %}
 </div>
 
 <form class="dec-filters" method="get">
-  {% if f_stage %}<input type="hidden" name="stage" value="{{ f_stage }}">{% endif %}
-  {% if f_orphan %}<input type="hidden" name="orphan" value="1">{% endif %}
   <label class="sk-search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Найти решение…" aria-label="Найти решение"></label>
-  <select name="project" data-autosubmit class="{{ 'on' if f_project }}"><option value="">Все направления</option>{% for p in sum.projects %}<option {{ 'selected' if p == f_project }}>{{ p }}</option>{% endfor %}</select>
-  {% if q or f_project or f_stage or f_orphan %}<a class="small" href="/decisions">× сбросить</a>{% endif %}
+  {% if q or f %}<a class="small" href="/decisions">× к темам</a>{% endif %}
 </form>
 
-{{ ui.task_datalist() }}
-{% for group, rows in groups.items() %}
-<section class="card dec-group">
-  <div class="card-h"><h2>{{ group }}</h2><span class="muted small">{{ rows | length }}</span></div>
-  <ul class="list dec-list">
-    {% for d in rows %}
-    <li class="dec-row{{ ' is-orphan' if d.orphan }}" id="d{{ d.id }}">
-      <div class="dec-main">
-        <div class="dec-title">{{ d.title }}</div>
-        <div class="dec-meta small muted">{{ d.when | date if d.when else '' }}
-          {%- if d.source_type == 'meeting' and d.source_ref %} · <a href="/meetings/{{ d.source_ref }}">встреча «{{ meetings.get(d.source_ref) or d.source_ref }}»</a>
-          {%- elif d.source_type == 'document' and d.source_ref %} · документ «{{ d.source_ref.split('/')[-1] }}»
-          {%- endif %}{% if d.people %} · {{ d.people | join(', ') }}{% endif %}</div>
-        {% if d.metric or d.before_value or d.after_value %}
-        <div class="dec-metric">{% if d.metric %}<span class="muted">{{ d.metric }}:</span> {% endif %}<b>{{ d.before_value or '—' }}</b> → <b>{{ d.after_value or '—' }}</b></div>
-        {% endif %}
-        {% if d.waiting_for %}<div class="dec-wait small">{{ icons.icon('hourglass', 14) }} Ждём: {{ d.waiting_for }}</div>{% endif %}
+{% if mode == 'topics' %}
+<section class="card">
+  {% if topics %}
+  <ul class="list dec-topics">
+    {% for t in topics %}
+    <li class="dec-topic">
+      <a class="dec-topic-name" href="/decisions?topic={{ t.name | urlencode }}">{{ t.name }}</a>
+      <div class="dec-topic-last small muted"><span>{{ t.last.when | date }}</span> {{ t.last.title }}</div>
+      <div class="dec-topic-n">
+        <span><b>{{ t.current }}</b> действует</span>
+        {% if t.chains %}<span class="dec-chip chain">{{ icons.icon('link', 13) }}{{ t.chains }} {{ plural(t.chains, 'цепочка', 'цепочки', 'цепочек') }}</span>{% endif %}
+        {% if t.open %}<span class="dec-chip open">{{ t.open }} ждут решения</span>{% endif %}
+        {% if t.no_step %}<span class="dec-chip warn">{{ t.no_step }} без шага</span>{% endif %}
       </div>
-      <form class="dec-stage" method="post" action="/decisions/{{ d.id }}">
-        <select name="stage" data-autosubmit class="st-{{ d.stage }}" aria-label="Стадия решения">{% for key, t in stages.items() %}<option value="{{ key }}" {{ 'selected' if d.stage == key }}>{{ t }}</option>{% endfor %}</select>
-        {% if d.all_done %}<div class="small ok-text">задачи закрыты — внедрено?</div>{% endif %}
-      </form>
-      <div class="dec-tasks">
-        {% for t in d.tasks %}
-        <div class="dec-task{{ ' done' if t.status == 'done' }}"><span>{{ '✓' if t.status == 'done' else '•' }}</span>
-          <a href="/commitments?task={{ t.id }}">{{ t.title }}</a>{% if t.who %} <span class="muted small">· {{ t.who }}</span>{% endif %}{% if t.due and t.status != 'done' %} <span class="muted small">· до {{ t.due | date }}</span>{% endif %}</div>
-        {% else %}
-        <div class="small {{ 'warn-text' if d.orphan else 'muted' }}">{{ 'Нет задач — решение не исполняется' if d.orphan else ('нет задач' if d.stage == 'decided' else '—') }}</div>
-        {% endfor %}
-      </div>
-      <details class="dec-edit">
-        <summary class="btn sm ghost">{{ icons.icon('edit', 14) }}<span>{{ 'Связать или создать задачу' if d.orphan else 'Изменить' }}</span></summary>
-        <div class="dec-edit-b">
-          <form method="post" action="/decisions/{{ d.id }}" class="dec-fields">
-            <label>Метрика<input type="text" name="metric" value="{{ d.metric or '' }}" placeholder="средний чек апсейла"></label>
-            <label>Было<input type="text" name="before" value="{{ d.before_value or '' }}" placeholder="12 тыс."></label>
-            <label>Стало / цель<input type="text" name="after" value="{{ d.after_value or '' }}" placeholder="15 тыс."></label>
-            <label class="wide">Чего ждём<input type="text" name="waiting" value="{{ d.waiting_for or '' }}" placeholder="согласования собственника до 15.11"></label>
-            <div class="form-actions wide"><button class="btn sm primary">Сохранить</button></div>
-          </form>
-          <form method="post" action="/decisions/{{ d.id }}/link" class="dec-inline">
-            <input type="text" name="task" list="task-options" placeholder="Связать с задачей: начните вводить название" aria-label="Задача, которая исполняет решение">
-            <button class="btn sm">Связать</button>
-          </form>
-          <form method="post" action="/decisions/{{ d.id }}/task" class="dec-inline">
-            <input type="text" name="what" placeholder="Создать задачу: что сделать" aria-label="Новая задача">
-            <input type="text" name="who" placeholder="кто (пусто — вы)" class="dec-who" aria-label="Кто делает">
-            <input type="date" name="due" aria-label="Срок">
-            <button class="btn sm">Создать</button>
-          </form>
-          {% if d.tasks %}<div class="dec-unlinks small muted">Убрать связь: {% for t in d.tasks %}<form class="inline" method="post" action="/decisions/unlink/{{ t.id }}"><button class="linkish">{{ t.title[:40] }} ✕</button></form>{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
-          {% if d.details or d.quote %}<div class="dec-details small">{% if d.details %}<p>{{ d.details }}</p>{% endif %}{% if d.quote %}<p class="muted">«{{ d.quote }}»</p>{% endif %}</div>{% endif %}
-          <form method="post" action="/decisions/{{ d.id }}/outdated" data-confirm="Отметить решение устаревшим? Из реестра оно уйдёт, в базе знаний останется."><button class="btn sm ghost danger">Устарело</button></form>
-        </div>
-      </details>
     </li>
     {% endfor %}
   </ul>
+  {% else %}
+  <p class="empty">Решений пока нет. Они появятся из разборов встреч: всё, что «решили» на встрече, PULSE записывает сюда — по темам.</p>
+  {% endif %}
 </section>
 {% else %}
-<section class="card"><p class="empty">{% if q or f_project or f_stage or f_orphan %}Ничего не нашлось.{% else %}Решений пока нет. Они появятся из разборов встреч: всё, что «решили» на встрече, PULSE записывает сюда.{% endif %}</p></section>
+{% for group, rows in groups.items() %}
+<section class="card dec-group">
+  <div class="card-h"><h2><a href="/decisions?topic={{ group | urlencode }}">{{ group }}</a></h2><span class="muted small">{{ rows | length }}</span></div>
+  <ul class="list dec-list">
+    {% for d in rows %}{{ dm.row(d, stages, meetings, link_topic=True) }}{% endfor %}
+  </ul>
+</section>
+{% else %}
+<section class="card"><p class="empty">{% if q %}Ничего не нашлось.{% else %}Всё в порядке: у каждого открытого вопроса есть следующий шаг.{% endif %}</p></section>
 {% endfor %}
+{% endif %}
 {% endblock %}

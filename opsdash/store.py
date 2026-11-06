@@ -501,14 +501,19 @@ MIGRATIONS = [
     # «Нет» с причиной (MOD-3): не задача / уже есть / не тому / не сейчас / другое — и пояснение словами
     ("proposals", "reject_reason", "TEXT"),
     ("proposals", "reject_note", "TEXT"),
-    # реестр решений (MEM-3, opsdash.decisions): стадия, метрика «было → стало», чего ждём; задача исполняет решение
-    ("anthology", "stage", "TEXT"),          # discussing | decided | waiting | implemented; пусто — принято
+    # решения (MEM-3, opsdash.decisions): статус, метрика «было → стало», следующий шаг; задача исполняет решение
+    ("anthology", "stage", "TEXT"),          # discussing (ждёт решения) | decided; пусто — принято
     ("anthology", "stage_at", "TEXT"),
     ("anthology", "metric", "TEXT"),         # что меняем: «средний чек апсейла ОРК»
     ("anthology", "before_value", "TEXT"),   # было: «12 тыс.»
     ("anthology", "after_value", "TEXT"),    # стало / цель: «15 тыс.»
     ("anthology", "waiting_for", "TEXT"),    # чего ждём: «согласования собственника до 15.11»
     ("commitments", "decision_id", "INTEGER"),
+    # цепочка решений по теме (2.0.21): решение ссылается на прежнее, которое меняет, уточняет, продолжает или отменяет
+    # стадии 2.0.20 «ждёт» и «внедрено» — это «принято» (со следующим шагом в «чего ждём»)
+    ("anthology", "prev_id", "INTEGER",
+     "UPDATE anthology SET stage='decided' WHERE stage IN ('implemented', 'waiting')"),
+    ("anthology", "relation", "TEXT"),       # changes | refines | follows | cancels
 ]
 
 

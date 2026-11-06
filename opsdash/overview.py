@@ -377,8 +377,10 @@ def overview_markdown(settings: dict | None = None) -> str:
     out += [f"- [proposal {p['id']}] {p['title']}" for p in s["proposals"]] or ["- нет"]
     from opsdash import decisions
 
-    out.append(f"\n## Решения без исполнения (приняты больше {decisions.ORPHAN_DAYS} дн. назад, задач нет)")
-    out += [f"- {line}" for line in decisions.orphan_lines()] or ["- нет"]
+    out.append(f"\n## Решения: поменяли или отменили за {decisions.CHANGED_DAYS} дн.")
+    out += [f"- {line}" for line in decisions.changed_lines()] or ["- нет"]
+    out.append("\n## Решения: ждут решения, а следующего шага нет")
+    out += [f"- {line}" for line in decisions.attention_lines()] or ["- нет"]
     out.append("\n## Последние встречи")
     out += [f"- {m['id']}: {m['title'] or ''} · {m['status']}" for m in s["meetings"]] or ["- нет"]
     out.append(f"\nНеразобранных сообщений: {s['unprocessed']}")

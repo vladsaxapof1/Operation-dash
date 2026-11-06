@@ -483,12 +483,13 @@ def cmd_kb(a) -> None:
                 author="claude" if os.environ.get("OPSDASH_AGENT") else "director")
         except anthology.AnthologyError as e:
             fail(str(e))
-        if a.kind == "decision" and any(v for v in (a.stage, a.metric, a.before, a.after, a.waiting, a.tasks)):
+        if a.kind == "decision" and any(v for v in (a.stage, a.metric, a.before, a.after, a.waiting, a.tasks, a.prev)):
             from opsdash import decisions
 
             try:
                 decisions.update(item_id, stage=a.stage, metric=a.metric, before=a.before, after=a.after,
-                                 waiting=a.waiting)
+                                 waiting=a.waiting, prev=a.prev,
+                                 relation=a.relation if a.prev else None)
                 for tid in _ids(a.tasks):
                     decisions.link(item_id, tid)
             except decisions.DecisionError as e:
@@ -499,10 +500,16 @@ def cmd_kb(a) -> None:
                                 q=getattr(a, "query", None), limit=a.limit)
         if a.json:
             return as_json(items)
+        from opsdash import decisions
+
+        gone = decisions.superseded() if any(r["kind"] == "decision" for r in items) else {}
         for r in items:
             meta = " · ".join(x for x in (r["happened"], r["project"], r["status_title"] if r["status"] != "accepted" else "") if x)
             src = f" · источник {r['source_type']}:{r['source_ref'] or ''}" if r["source_type"] != "manual" else ""
-            out(f"[{r['id']}] {r['kind_title']}: {r['title']} ({meta}){src}")
+            by = gone.get(r["id"])
+            later = (f" · НЕ ДЕЙСТВУЕТ: {decisions.RELATIONS_PAST[by['relation']]} решением [{by['id']}] от {by['when']}"
+                     if by else "")
+            out(f"[{r['id']}] {r['kind_title']}: {r['title']} ({meta}){src}{later}")
             if r["details"] and a.details:
                 out("    " + short(r["details"].replace("\n", " "), 500))
         if not items:
@@ -517,46 +524,72 @@ def cmd_kb(a) -> None:
 
 
 def cmd_decisions(a) -> None:
-    """Реестр решений (MEM-3): стадия, метрика «было → стало», чего ждём, задачи-исполнители."""
+    """Решения по темам (MEM-3): что действует, цепочки «меняет / уточняет / продолжает / отменяет», следующий шаг,
+    «было → стало», задачи."""
     from opsdash import decisions
+
+    def line(r: dict) -> str:
+        metric = (f" · {r['metric'] or 'метрика'}: {r['before_value'] or '—'} → {r['after_value'] or '—'}"
+                  if r["metric"] or r["before_value"] or r["after_value"] else "")
+        step = f" · следующий шаг: {r['waiting_for']}" if r["waiting_for"] else ""
+        prev = f" · {r['relation_title']} [decision {r['prev']['id']}]" if r["prev"] else ""
+        gone = (f" · НЕ ДЕЙСТВУЕТ ({r['state_title']}, [decision {r['superseded_by']['id']}])"
+                if r["superseded_by"] else "")
+        tasks = ", ".join(f"[commitment {t['id']}]{' ✓' if t['status'] == 'done' else ''}" for t in r["tasks"])
+        sub = f" / {r['subtopic']}" if r["subtopic"] else ""
+        return (f"[decision {r['id']}] {r['when']} · {r['topic']}{sub} · {r['stage_title']} · {r['title']}"
+                f"{metric}{step}{prev}{gone}" + (f" · задачи: {tasks}" if tasks else ""))
 
     try:
         if a.action == "list":
-            rows = decisions.items(stage=a.stage, project=a.project, orphan=a.orphan, q=a.search, limit=a.limit)
+            rows = decisions.items(stage=a.stage, topic=a.topic, project=a.project, q=a.search, meeting=a.meeting,
+                                   attention=a.attention, current=not a.all, limit=a.limit)
             if a.json:
                 return as_json(rows)
             for r in rows:
-                metric = (f" · {r['metric'] or 'метрика'}: {r['before_value'] or '—'} → {r['after_value'] or '—'}"
-                          if r["metric"] or r["before_value"] or r["after_value"] else "")
-                tasks = (", ".join(f"[commitment {t['id']}]{' ✓' if t['status'] == 'done' else ''}" for t in r["tasks"])
-                         or ("НЕТ ЗАДАЧ — без исполнения" if r["orphan"] else "задач нет"))
-                out(f"[decision {r['id']}] {r['when']} · {r.get('project') or 'без направления'} · {r['stage_title']} · "
-                    f"{r['title']}{metric}" + (f" · ждём: {r['waiting_for']}" if r["waiting_for"] else "")
-                    + f" · исполняют: {tasks}")
+                out(line(r))
             if not rows:
                 out("Решений нет.")
+        elif a.action == "topics":
+            ts = decisions.topics()
+            if a.json:
+                return as_json(ts)
+            for t in ts:
+                extra = ", ".join(x for x in (
+                    f"ждут решения {t['open']}" if t["open"] else "",
+                    f"цепочек {t['chains']}" if t["chains"] else "") if x)
+                subs = f" · подтемы: {', '.join(t['subtopics'])}" if t["subtopics"] else ""
+                out(f"{t['name']} — действует {t['current']} из {t['total']}" + (f" · {extra}" if extra else "")
+                    + f" · последнее {t['last']['when']}{subs}")
+            if not ts:
+                out("Решений нет.")
+        elif a.action == "topic":
+            out(decisions.topic_text(a.name))
         elif a.action == "show":
             r = decisions.get(a.id)
             if not r:
                 fail(f"нет решения {a.id}")
             if a.json:
                 return as_json(r)
-            out(f"[decision {r['id']}] {r['title']}\nСтадия: {r['stage_title']} · {r['when']} · {r.get('project') or ''}")
-            if r["metric"] or r["before_value"] or r["after_value"]:
-                out(f"Метрика: {r['metric'] or ''}: было {r['before_value'] or '—'} → стало {r['after_value'] or '—'}")
-            if r["waiting_for"]:
-                out(f"Ждём: {r['waiting_for']}")
+            out(line(r))
             if r["details"]:
                 out(r["details"])
             if r["source_type"] and r["source_type"] != "manual":
                 out(f"Источник: {r['source_type']}:{r['source_ref'] or ''}" + (f" — «{r['quote']}»" if r["quote"] else ""))
+            if r["prev"]:
+                out(f"Прежнее: {r['relation_title']} [decision {r['prev']['id']}] {r['prev']['when']} · {r['prev']['title']}")
+            for n in r["next"]:
+                out(f"Дальше: [decision {n['id']}] {n['when']} {n['relation_title']} это решение · {n['title']}")
             for t in r["tasks"]:
                 out(f"- [commitment {t['id']}] {t['status']} · {t['title']}" + (f" · {t['who']}" if t["who"] else ""))
-            if not r["tasks"]:
-                out("Задач нет" + (" — решение без исполнения" if r["orphan"] else ""))
         elif a.action == "set":
-            decisions.update(a.id, stage=a.stage, metric=a.metric, before=a.before, after=a.after, waiting=a.waiting)
+            decisions.update(a.id, stage=a.stage, metric=a.metric, before=a.before, after=a.after,
+                             waiting=a.next if a.next is not None else a.waiting, project=a.topic,
+                             prev=a.prev, relation=a.relation)
             out("Сохранено")
+        elif a.action == "rename-topic":
+            n = decisions.rename_topic(a.name, a.to)
+            out(f"Тема «{a.name}» → «{a.to}»: решений перенесено {n}")
         elif a.action == "link":
             for tid in _ids(a.task):
                 decisions.link(a.id, tid)
@@ -1640,13 +1673,16 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--source", help="meeting:<id> | document:<путь> | telegram:<id сообщения> | kaiten:<id карточки>")
     x.add_argument("--quote", help="«[чч:мм:сс] дословно» — откуда это известно")
     x.add_argument("--proposed", action="store_true", help="только предложить: директор примет или отклонит")
-    # реестр решений (только для --kind decision)
+    # решения по темам (только для --kind decision)
     x.add_argument("--stage", choices=["discussing", "decided", "waiting"],
-                   help="решение: обсуждается | принято (по умолчанию) | ждёт (чего — в --waiting)")
+                   help="решение: discussing — ждёт решения (открытый вопрос) | decided — принято (по умолчанию)")
+    x.add_argument("--prev", type=int, help="решение: id прежнего решения по тому же вопросу (./ops decisions topic)")
+    x.add_argument("--relation", choices=["changes", "refines", "follows", "cancels"], default="refines",
+                   help="как новое связано с прежним: меняет | уточняет (по умолчанию) | продолжает | отменяет")
     x.add_argument("--metric", help="решение: что меняем — «средний чек апсейла ОРК»")
     x.add_argument("--before", help="решение: было — «12 тыс.»")
     x.add_argument("--after", help="решение: стало или цель — «15 тыс.»")
-    x.add_argument("--waiting", help="решение: чего ждём — «согласования собственника до 15.11»")
+    x.add_argument("--waiting", help="решение: следующий шаг или чего ждём — «Олег обсудит с собственником до 15.11»")
     x.add_argument("--tasks", help="решение: id задач, которые его исполняют, через запятую")
     for name in ("list", "search"):
         x = ms.add_parser(name, help="записи" if name == "list" else "найти по словам")
@@ -1991,23 +2027,38 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--days", type=int, default=14)
     s.set_defaults(fn=cmd_proposals)
 
-    s = sub.add_parser("decisions", help="реестр решений: стадия, метрика «было → стало», чего ждём, задачи")
+    s = sub.add_parser("decisions", help="решения по темам: что действует, цепочки, следующий шаг")
     ms = s.add_subparsers(dest="action", required=True)
-    x = ms.add_parser("list", help="актуальные решения, новые сверху")
-    x.add_argument("--stage", choices=["discussing", "decided", "waiting", "implemented"])
-    x.add_argument("--project", help="направление")
-    x.add_argument("--orphan", action="store_true", help="только без исполнения: приняты больше недели назад, задач нет")
+    x = ms.add_parser("list", help="действующие решения, новые сверху")
+    x.add_argument("--topic", help="тема — как в ./ops decisions topics")
+    x.add_argument("--project", help="точное направление с подтемой: «Логистика / Склад»")
+    x.add_argument("--stage", choices=["discussing", "decided"], help="ждёт решения | принято")
+    x.add_argument("--meeting", help="решения одной встречи — id встречи")
+    x.add_argument("--attention", action="store_true", help="только ждут решения, а следующего шага нет")
+    x.add_argument("--all", action="store_true", help="и заменённые, отменённые — вся история")
     x.add_argument("--search", help="найти по словам")
-    x.add_argument("--limit", type=int, default=100)
+    x.add_argument("--limit", type=int, default=200)
+    ms.add_parser("topics", help="темы: сколько действует, ждёт решения, цепочки")
+    x = ms.add_parser("topic", help="тема: что сейчас действует и как к этому пришли (цепочки)")
+    x.add_argument("name")
     x = ms.add_parser("show")
     x.add_argument("id", type=int)
-    x = ms.add_parser("set", help="стадия и поля реестра; пустая строка — очистить поле")
+    x = ms.add_parser("set", help="поля решения; пустая строка — очистить поле, --prev 0 — убрать связь с прежним")
     x.add_argument("id", type=int)
-    x.add_argument("--stage", choices=["discussing", "decided", "waiting", "implemented"])
+    x.add_argument("--stage", choices=["discussing", "decided", "waiting", "implemented"],
+                   help="ждёт решения | принято")
+    x.add_argument("--prev", type=int, help="id прежнего решения по тому же вопросу; 0 — убрать связь")
+    x.add_argument("--relation", choices=["changes", "refines", "follows", "cancels"],
+                   help="меняет | уточняет | продолжает | отменяет прежнее")
+    x.add_argument("--topic", help="тема (с подтемой через « / »): перенести решение")
     x.add_argument("--metric")
     x.add_argument("--before")
     x.add_argument("--after")
-    x.add_argument("--waiting")
+    x.add_argument("--next", help="следующий шаг или чего ждём")
+    x.add_argument("--waiting", help=argparse.SUPPRESS)
+    x = ms.add_parser("rename-topic", help="переименовать тему или влить в другую — подтемы сохранятся")
+    x.add_argument("name")
+    x.add_argument("--to", required=True)
     x = ms.add_parser("link", help="задача исполняет решение")
     x.add_argument("id", type=int, help="id решения")
     x.add_argument("--task", required=True, help="id задач через запятую")

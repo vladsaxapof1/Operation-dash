@@ -1,0 +1,97 @@
+{% import "_icons.html" as icons %}
+{#- Решения (2.0.21): строка решения, узел цепочки и окно «Изменить». Логика — opsdash.decisions #}
+
+{% macro source(d, meetings) -%}
+{%- if d.source_type == 'meeting' and d.source_ref %}<a href="/meetings/{{ d.source_ref }}">встреча «{{ meetings.get(d.source_ref) or d.source_ref }}»</a>
+{%- elif d.source_type == 'document' and d.source_ref %}документ «{{ d.source_ref.split('/')[-1] }}»
+{%- elif d.source_type in ('telegram', 'pachca', 'ymessenger', 'mail') %}переписка
+{%- endif %}
+{%- endmacro %}
+
+{% macro body(d, meetings, show_topic=False, show_prev=True) %}
+<div class="dec-title">{{ d.title }}</div>
+<div class="dec-meta small muted">
+  {{- d.when | date if d.when else '' }}
+  {%- set src = source(d, meetings) %}{% if src | trim %} · {{ src }}{% endif %}
+  {%- if show_topic %} · <a href="/decisions?topic={{ d.topic | urlencode }}#d{{ d.id }}">{{ d.topic }}</a>{% endif %}
+  {%- if d.subtopic %} · {{ d.subtopic }}{% endif %}
+  {%- if d.people %} · {{ d.people | join(', ') }}{% endif %}</div>
+{% if show_prev and d.prev %}<div class="dec-prevline small"><span class="dec-rel rel-{{ d.relation }}">{{ d.relation_title }}</span> решение от {{ d.prev.when | date }} — <a href="/decisions?topic={{ d.prev.topic | urlencode }}#d{{ d.prev.id }}">{{ d.prev.title | truncate(80) }}</a></div>{% endif %}
+{% if d.metric or d.before_value or d.after_value %}
+<div class="dec-metric">{% if d.metric %}<span class="muted">{{ d.metric }}:</span> {% endif %}<b>{{ d.before_value or '—' }}</b> → <b>{{ d.after_value or '—' }}</b></div>
+{% endif %}
+{% if d.waiting_for %}<div class="dec-wait small">{{ icons.icon('hourglass', 14) }} Следующий шаг: {{ d.waiting_for }}</div>
+{% elif d.no_step %}<div class="dec-wait small is-warn">{{ icons.icon('hourglass', 14) }} Следующего шага нет — кто и что делает дальше?</div>{% endif %}
+{% if d.tasks %}<div class="dec-tasks small">{% for t in d.tasks %}<span class="dec-task{{ ' done' if t.status == 'done' }}">{{ '✓' if t.status == 'done' else '•' }} <a href="/commitments?task={{ t.id }}">{{ t.title }}</a>{% if t.who %} <span class="muted">· {{ t.who }}</span>{% endif %}</span>{% endfor %}</div>{% endif %}
+{% endmacro %}
+
+{% macro controls(d, stages) %}
+<div class="dec-ctl">
+  <form method="post" action="/decisions/{{ d.id }}">
+    <select name="stage" data-autosubmit class="st-{{ d.stage }}" aria-label="Статус решения">{% for key, t in stages.items() %}<option value="{{ key }}" {{ 'selected' if d.stage == key }}>{{ t }}</option>{% endfor %}</select>
+  </form>
+</div>
+{% endmacro %}
+
+{% macro edit(d, options, relations, topic_names, meetings) %}
+<details class="dec-edit">
+  <summary class="btn sm ghost">{{ icons.icon('edit', 14) }}<span>Изменить</span></summary>
+  <div class="dec-edit-b">
+    <form method="post" action="/decisions/{{ d.id }}" class="dec-fields">
+      <label class="wide">Прежнее решение по этому вопросу
+        <span class="dec-prevpick">
+          <select name="relation" aria-label="Как связано с прежним">{% for key, t in relations.items() %}<option value="{{ key }}" {{ 'selected' if (d.relation or 'refines') == key }}>{{ t }}</option>{% endfor %}</select>
+          <select name="prev" aria-label="Прежнее решение">
+            <option value="0">— не связано —</option>
+            {% set ids = options | map(attribute='id') | list %}
+            {% if d.prev and d.prev.id not in ids %}<option value="{{ d.prev.id }}" selected>{{ d.prev.when | date }} · {{ d.prev.title | truncate(90) }}</option>{% endif %}
+            {% for o in options if o.id != d.id and o.when <= d.when %}<option value="{{ o.id }}" {{ 'selected' if d.prev and d.prev.id == o.id }}>{{ o.when | date }} · {{ o.title | truncate(90) }}</option>{% endfor %}
+          </select>
+        </span></label>
+      <label>Метрика<input type="text" name="metric" value="{{ d.metric or '' }}" placeholder="средний чек апсейла"></label>
+      <label>Было<input type="text" name="before" value="{{ d.before_value or '' }}" placeholder="12 тыс."></label>
+      <label>Стало / цель<input type="text" name="after" value="{{ d.after_value or '' }}" placeholder="15 тыс."></label>
+      <label class="wide">Следующий шаг / чего ждём<input type="text" name="waiting" value="{{ d.waiting_for or '' }}" placeholder="Олег обсудит с собственником до 15.11"></label>
+      <label class="wide">Тема<input type="text" name="project" value="{{ d.project or '' }}" list="dec-topics" placeholder="KPI / Розница"></label>
+      <div class="form-actions wide"><button class="btn sm primary">Сохранить</button></div>
+    </form>
+    <form method="post" action="/decisions/{{ d.id }}/link" class="dec-inline">
+      <input type="text" name="task" list="task-options" placeholder="Связать с задачей: начните вводить название" aria-label="Задача, которая исполняет решение">
+      <button class="btn sm">Связать</button>
+    </form>
+    <form method="post" action="/decisions/{{ d.id }}/task" class="dec-inline">
+      <input type="text" name="what" placeholder="Создать задачу: что сделать, чтобы решение заработало" aria-label="Новая задача">
+      <input type="text" name="who" placeholder="кто (пусто — вы)" class="dec-who" aria-label="Кто делает">
+      <input type="date" name="due" aria-label="Срок">
+      <button class="btn sm">Создать</button>
+    </form>
+    {% if d.tasks %}<div class="dec-unlinks small muted">Убрать связь с задачей: {% for t in d.tasks %}<form class="inline" method="post" action="/decisions/unlink/{{ t.id }}"><button class="linkish">{{ t.title[:40] }} ✕</button></form>{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
+    {% if d.details or d.quote %}<div class="dec-details small">{% if d.details %}<p>{{ d.details }}</p>{% endif %}{% if d.quote %}<p class="muted">«{{ d.quote }}»</p>{% endif %}</div>{% endif %}
+    <form method="post" action="/decisions/{{ d.id }}/outdated" data-confirm="Отметить решение устаревшим? Из раздела оно уйдёт, в базе знаний останется. Если его заменило другое решение — лучше свяжите их: «меняет» или «отменяет»."><button class="btn sm ghost danger">Устарело</button></form>
+  </div>
+</details>
+{% endmacro %}
+
+{% macro row(d, stages, meetings, link_topic=False, anchor=True, options=None, relations=None, topic_names=None) %}
+<li class="dec-row{{ ' is-att' if d.attention }}{{ ' is-gone' if not d.current }}"{% if anchor %} id="d{{ d.id }}"{% endif %}>
+  <div class="dec-main">{{ body(d, meetings, show_topic=link_topic) }}
+    {% if not d.current %}<span class="dec-chip gone">{{ d.state_title }}</span>{% endif %}</div>
+  {% if d.current %}{{ controls(d, stages) }}{% else %}<div></div>{% endif %}
+  {% if options is not none %}{{ edit(d, options, relations, topic_names, meetings) }}
+  {% elif link_topic %}<a class="dec-go small" href="/decisions?topic={{ d.topic | urlencode }}#d{{ d.id }}">в теме →</a>{% endif %}
+</li>
+{% endmacro %}
+
+{% macro node(d, prev_in_chain, topic, stages, meetings, options, relations, topic_names) %}
+{#- узел цепочки: дата слева, связь с прежним («меняет решение от 27.10»), суть; не действующее — приглушено #}
+<li class="dec-node{{ ' is-gone' if not d.current }}{{ ' is-att' if d.attention }}" id="d{{ d.id }}">
+  <div class="dec-dot rel-{{ d.relation or 'start' }}" aria-hidden="true"></div>
+  <div class="dec-node-b">
+    {% if d.prev %}<div class="dec-prevline small"><span class="dec-rel rel-{{ d.relation }}">{{ d.relation_title }}</span>{% if not prev_in_chain or prev_in_chain.id != d.prev.id %} решение от {{ d.prev.when | date }} «{{ d.prev.title | truncate(60) }}»{% endif %}</div>{% endif %}
+    {{ body(d, meetings, show_topic=d.topic != topic, show_prev=False) }}
+    {% if not d.current %}<span class="dec-chip gone">{{ d.state_title }}</span>{% endif %}
+  </div>
+  {% if d.current %}{{ controls(d, stages) }}{% else %}<div></div>{% endif %}
+  {% if d.topic == topic %}{{ edit(d, options, relations, topic_names, meetings) }}{% endif %}
+</li>
+{% endmacro %}
