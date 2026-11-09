@@ -18,7 +18,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from opsdash import config, priorities, records, store, worklog
+from opsdash import chat_tasks, config, priorities, records, store, worklog
 
 
 def out(text: str = "") -> None:
@@ -250,6 +250,23 @@ def _msg_line(m: dict, mark: str = "", limit: int = 1500) -> str:
     return f"[{m['id']}]{mark} {store.local(m['ts'])} {who}{topic}{reply}: {short(m['text'], limit)}"
 
 
+def _chat_tasks(found: list[dict], shown: set[int]) -> None:
+    """Под чатом в «новых сообщениях» — открытые задачи, к которым переписка вероятнее всего относится
+    (opsdash.chat_tasks): Claude сверяет сообщения с ними, а не ищет задачу наугад в длинном списке."""
+    if not found:
+        return
+    out("→ Открытые задачи, к которым может относиться этот чат (выполнена — propose done, продвинулась — log):")
+    for f in found[:chat_tasks.PER_CHAT]:
+        c = f["task"]
+        if c["id"] in shown:
+            out(f"  [{c['id']}] «{records.headline(c)}» — выше ({f['why']})")
+            continue
+        shown.add(c["id"])
+        out(f"  {_commitment_brief(c, now=140)} — {f['why']}")
+    if len(found) > chat_tasks.PER_CHAT:
+        out(f"  …и ещё {len(found) - chat_tasks.PER_CHAT}: ./ops commitments list --brief --person \"<имя>\"")
+
+
 def cmd_messages(a) -> None:
     if a.action == "pending":
         sql = "SELECT * FROM messages WHERE processed=0"
@@ -270,6 +287,8 @@ def cmd_messages(a) -> None:
         chats: dict[tuple, list] = {}
         for m in items:
             chats.setdefault((m["source"], m["chat_id"], m["chat_title"]), []).append(m)
+        related = chat_tasks.for_pending(chats)
+        shown: set[int] = set()
         for (source, chat_id, title), msgs in chats.items():
             kind = store.scalar("SELECT kind FROM chats WHERE source=? AND chat_id=?", (source, chat_id)) or ""
             out(f"\n## {source} · «{title}» ({kind}, chat_id={chat_id}) — новых: {len(msgs)}")
@@ -282,6 +301,7 @@ def cmd_messages(a) -> None:
                     out(_msg_line(m, " (контекст)"))
             for m in msgs:
                 out(_msg_line(m))
+            _chat_tasks(related.get((source, chat_id, title)) or [], shown)
     elif a.action == "done":
         ids = []
         if a.shown:
@@ -738,6 +758,25 @@ def cmd_people(a) -> None:
 
 # --- обещания ------------------------------------------------------------------
 
+def _commitment_brief(c: dict, now: int = 0) -> str:
+    """Задача одной короткой строкой — чтобы весь список открытых задач помещался в выдачу целиком (полный —
+    десятки КБ: фоновый Claude видит из него только начало). now — сколько знаков «сейчас: …» добавить."""
+    line = f"[{c['id']}] {records.route(c)}: «{records.headline(c)}»"
+    if c["due"]:
+        line += f" · до {c['due']}" + (" (ПРОСРОЧЕНО)" if c.get("overdue") else "")
+    if c["status"] != "open":
+        line += f" · {c['status']}"
+    if c.get("parent"):
+        line += f" · часть [{c['parent']['id']}]"
+    if c.get("checklist"):
+        line += f" · пункты {c['items_done']}/{c['items_total']}"
+    if c.get("done_hint"):
+        line += " · предложено закрыть, ждёт директора"
+    if now and c.get("now"):
+        line += f" · {worklog.now_text(c, now)}"
+    return line
+
+
 def _commitment_line(c: dict) -> str:
     d = {"mine": "я →", "to_me": "мне ←", "other": "между"}[c["direction"]]
     title = f"«{c['title']}» " if c.get("title") else ""
@@ -811,11 +850,11 @@ def _commitment_line(c: dict) -> str:
 def cmd_commitments(a) -> None:
     if a.action == "list":
         items = records.list_commitments(status=a.status, direction=a.direction, person=a.person, overdue=a.overdue,
-                                         sort=a.sort, quiet=a.quiet)
+                                         sort=a.sort, quiet=a.quiet, q=a.search)
         if a.json:
             return as_json(items)
         for c in items:
-            out(_commitment_line(c))
+            out(_commitment_brief(c) if a.brief else _commitment_line(c))
         if not items:
             out("Обещаний нет.")
     elif a.action == "add":
@@ -1856,6 +1895,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "due — по сроку; created — новые сверху")
     x.add_argument("--quiet", action="store_true",
                    help="только без движения: по задаче давно ничего не происходит (порог — Настройки → День)")
+    x.add_argument("--search", help="найти по словам в заголовке, сути, цитате и именах")
+    x.add_argument("--brief", action="store_true",
+                   help="коротко, одной строкой: кто → кому, заголовок, срок; подробности — ./ops commitments show <id>")
     x = ms.add_parser("add")
     x.add_argument("--direction", required=True, choices=["mine", "to_me", "other"],
                    help="mine — обещала директор; to_me — обещали директору; other — между коллегами")

@@ -17,7 +17,7 @@
 | Встречи: расшифровка, разбор, метаданные | `data/meetings/<id>/transcript.md`, `summary.md`, `meta.json` | Read; `./ops meetings list`, `./ops meetings search "<слово>"` |
 | Сообщения (Telegram, Slack, Я.Мессенджер, Пачка, почта) | база `data/ops.db` | `./ops messages pending / search / show / chat` |
 | Сервисы через MCP (Linear, Notion, GitHub, Jira, CRM…) — если подключены | инструменты `mcp__<подключение>__…` | `./ops mcp list` — что подключено, что читаешь сам, что только через «Да»; `./ops mcp tools <подключение>` |
-| Обещания и договорённости | база | `./ops commitments list` (у каждой «сейчас: …» — последнее по ней) |
+| Обещания и договорённости | база | `./ops commitments list` (у каждой «сейчас: …» — последнее по ней); все разом — `--brief` (полный список длинный: в выдаче останется только начало), найти — `--search "<слово>"`, `--person "<имя>"` |
 | Ход задачи: вопросы, ответы, договорённости, переносы — по датам | база | `./ops commitments show <id>`, записать — `./ops commitments log <id> …` |
 | Приоритет задачи: Срочно / Высокий / Обычный / Низкий и почему | база | строка «приоритет …» в `./ops commitments list / show`; важность без оценки — `./ops commitments importance` |
 | Проекты: задачи с общим результатом, прогресс, на ком стоит | база | `./ops projects list`, `./ops projects show <id>` |
