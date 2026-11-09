@@ -6,7 +6,8 @@
 {% block content %}
 {% set keep = '&person=' ~ (person | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&created=' ~ created ~ '&created_from=' ~ created_from
    ~ '&created_to=' ~ created_to ~ '&due=' ~ due ~ '&due_from=' ~ due_from ~ '&due_to=' ~ due_to
-   ~ ('&archived=1' if show_archived else '') ~ ('&project=' ~ project if project else '') ~ ('&new=1' if new else '') %}
+   ~ ('&archived=1' if show_archived else '') ~ ('&project=' ~ project if project else '') ~ ('&new=1' if new else '')
+   ~ ('&updated=' ~ updated if updated else '') ~ ('&quiet=1' if quiet_on else '') %}
 {% set open_cards = (board.mine + board.to_me + board.other) if board else (items or []) | selectattr('status', 'equalto', 'open') | list %}
 {% set n_late = open_cards | selectattr('overdue') | list | length %}
 {#- дальние сроки: задачи со сроком больше чем через две недели — в конце колонки доски (группы списка, Ганта)
@@ -41,6 +42,9 @@
       {% if due == 'none' or no_due_count %}<a class="fchip sm{{ ' on' if due == 'none' }}" href="{{ toggles.no_due }}&view={{ view }}" aria-pressed="{{ 'true' if due == 'none' else 'false' }}"
          title="{{ 'Показать все задачи' if due == 'none' else 'Только открытые задачи без срока — чтобы назначить сроки' }}">Без срока{% if no_due_count %}<span class="badge">{{ no_due_count }}</span>{% endif %}</a>{% endif %}
       {% if no_due %}<button type="button" class="linkish small" data-dlg-open="due-dlg" title="Задачи без срока по одной: быстрый срок, своя дата или «оставить без срока»">Разобрать сроки по одной →</button>{% endif %}
+      {% if quiet_on or quiet_tasks %}<a class="fchip sm{{ ' on' if quiet_on }}" href="{{ toggles.quiet }}&view={{ view }}" aria-pressed="{{ 'true' if quiet_on else 'false' }}"
+         title="{{ 'Показать все задачи' if quiet_on else 'Ваши задачи и что вам должны, по которым давно ничего не происходит: ни записи в ходе, ни движения. Срок при этом может быть ещё впереди' }}">Без движения{% if quiet_tasks %}<span class="badge">{{ quiet_tasks | length }}</span>{% endif %}</a>{% endif %}
+      {% if quiet_on and quiet_tasks %}<button type="button" class="linkish small" data-dlg-open="quiet-dlg" title="По одной: записать, что сейчас, собрать ход с Claude, напомнить, новый срок, не трогать неделю">Разобрать по одной →</button>{% endif %}
       <span class="tgl-show">
         <span class="tgl-label">Показать</span>
         <a class="fchip sm{{ ' on' if others_pref }}" href="{{ toggles.others }}&view={{ view }}" aria-pressed="{{ 'true' if others_pref else 'false' }}"
@@ -59,6 +63,8 @@
     <form method="get" class="toolbar" id="task-filters">
       <input type="hidden" name="view" value="{{ view }}">{% if view == 'gantt' %}<input type="hidden" name="scale" value="{{ scale }}">{% endif %}
       {% if new %}<input type="hidden" name="new" value="1">{% endif %}
+      {% if updated %}<input type="hidden" name="updated" value="{{ updated }}">{% endif %}
+      {% if quiet_on %}<input type="hidden" name="quiet" value="1">{% endif %}
       {% if view == 'gantt' %}
       <div class="seg" aria-label="Масштаб">{% for key, title in [('day', 'День'), ('week', 'Неделя'), ('month', 'Месяц')] %}<a href="?view=gantt&scale={{ key }}{{ keep }}" class="{{ 'active' if scale == key }}">{{ title }}</a>{% endfor %}</div>
       <button type="button" class="btn" data-gantt-today>Сегодня</button>
@@ -281,6 +287,7 @@
       {%- elif open_waits %}{% set w = open_waits[0] %}<div class="sub2">ждёт {% if w.task %}«{{ w.task.headline | truncate(40, True, '…') }}» — {{ 'вы' if w.task.direction == 'mine' else w.task.doer }}{% else %}{{ w.event }}{% endif %}{% if w.late %} <span class="bad-text">(просрочено)</span>{% endif %}{% if open_waits | length > 1 %} и ещё {{ open_waits | length - 1 }}{% endif %}</div>
       {%- elif c.holds and c.status == 'open' %}<div class="sub2">её ждёт «{{ c.holds[0].task.headline | truncate(40, True, '…') }}»</div>
       {%- elif c.items_total %}<div class="sub2">{{ c.items_done }} из {{ c.items_total }} {{ plural(c.items_total, 'пункта', 'пунктов', 'пунктов') }}</div>{% endif %}
+      {%- if c.quiet %}<div class="sub2">{{ ui.quiet_mark(c) }}</div>{% endif %}
       {%- if c.now %}<div class="sub2 sub-now" title="Последнее по задаче — {{ c.now.day }}, {{ c.now.src }}: {{ c.now.text }}">{{ c.now.day }} · {{ c.now.text | truncate(90, True, '…') }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</div>{% endif %}
       {{ ui.task_dialog(c, meetings) }}</td>
     <td>{{ c.route }}</td>
@@ -301,7 +308,7 @@
 <section class="card tlist">
   <div class="table-wrap">
   <table class="t">
-    <thead><tr><th class="c-what">Задача</th><th>Кто → кому</th><th>Срок{% if sort == 'due' %} ↑{% endif %}</th><th>Источник</th><th>Статус</th></tr></thead>
+    <thead><tr><th class="c-what">Задача</th><th>Кто → кому</th><th>Срок{% if sort != 'created' %} ↑{% endif %}</th><th>Источник</th><th>Статус</th></tr></thead>
     {% for title, rows in groups if rows or group == 'dir' %}
     <tbody>
       {% if title %}<tr class="grp"><th scope="rowgroup" colspan="5">{{ title }} · {{ rows | length }}</th></tr>{% endif %}
@@ -318,6 +325,7 @@
 {#- ?task=<id>: окно задачи открывается само (app.js); если фильтры её прячут — окно отдельно #}
 {% if extra %}{{ ui.task_dialog(extra, meetings) }}{% endif %}
 {% if no_due %}{{ ui.due_dialog(no_due, due_choices, meetings) }}{% endif %}
+{% if quiet_on and quiet_tasks %}{{ ui.quiet_dialog(quiet_tasks) }}{% endif %}
 {% if focus %}<span hidden data-focus-task="{{ focus }}"></span>{% endif %}
 {{ ui.task_datalist() }}
 {{ ui.event_datalist() }}

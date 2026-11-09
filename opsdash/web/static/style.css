@@ -462,6 +462,23 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .due-own input { width: auto; height: 36px; font-size: 14px; }
 .due-own.on input { border-color: var(--accent); background: var(--accent-soft); }
 .due-end p { margin: 0; }
+/* «Без движения» (opsdash.quiet): метка на карточке и в списке, подсказка в окне задачи, окно «Разобрать по одной» */
+.quiet-mark { color: var(--warn-text); white-space: nowrap; }
+.due-what a { color: inherit; text-decoration: none; }
+.due-what a:hover { text-decoration: underline; }
+.quiet-last { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.quiet-last b { color: var(--warn-text); font-weight: 600; }
+.quiet-note { display: grid; gap: 6px; margin: 0; }
+.quiet-note label { margin: 0; font-size: 13px; color: var(--muted); }
+.quiet-row { display: flex; gap: 8px; }
+.quiet-row input { flex: 1; min-width: 0; height: 36px; font-size: 14px; }
+.quiet-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.quiet-acts form { margin: 0; }
+.quiet-due { display: inline-flex; gap: 6px; align-items: center; }
+.quiet-due input { width: auto; height: 36px; font-size: 14px; }
+.quiet-remind { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.quiet-remind .remind { margin: 0; }
+@media (max-width: 560px) { .quiet-row { flex-direction: column; } .quiet-due { flex-wrap: wrap; } }
 /* переход по ссылке на задачу — карточка ненадолго подсвечивается */
 .flash { animation: flash 1.8s ease-out 1; }
 @keyframes flash { 0%, 45% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent); } }

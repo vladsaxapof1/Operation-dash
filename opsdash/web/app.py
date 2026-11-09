@@ -551,8 +551,10 @@ MONTHS_GEN = ("января", "февраля", "марта", "апреля", "�
 
 def needs_from_you(snap: dict | None = None, *, due: bool = False) -> dict:
     """«Нужно от вас» (5.1): всё, что ждёт директора, одной лентой — подтвердить, ответить, напомнить. Срочное и
-    просроченное сверху, потом подтверждения, ответы, напоминания, карточки Kaiten без движения. due — ещё строка
-    «Уточнить срок» (задачи без срока) в самом низу: только в ленте на Сводке, в счётчик меню она не входит."""
+    просроченное сверху, потом подтверждения, ответы, напоминания, карточки Kaiten без движения. due — ещё строки
+    «Без движения» (задачи, по которым давно ничего не происходит, opsdash.quiet) и «Уточнить срок» (задачи без срока)
+    в самом низу: только в ленте на Сводке, в счётчик меню они не входят."""
+    from opsdash import quiet
     from opsdash.sources import kaiten
 
     settings = config.load_settings()
@@ -576,12 +578,16 @@ def needs_from_you(snap: dict | None = None, *, due: bool = False) -> dict:
             items.append({"kind": "confirm", "p": group[0], "urgent": False, "order": 1})
     for k in stale:
         items.append({"kind": "remind", "kaiten": k, "urgent": False, "order": 5})
+    still = quiet.queue() if due else []
+    if still:
+        items.append({"kind": "quiet", "tasks": still, "urgent": False, "order": 6})
     no_due = records.due_queue() if due else []
     if no_due:
-        items.append({"kind": "due", "tasks": no_due, "urgent": False, "order": 6})
+        items.append({"kind": "due", "tasks": no_due, "urgent": False, "order": 7})
     items.sort(key=lambda i: i["order"])
-    counts = {"confirm": len(props), "answer": len(attention), "remind": len(reminders) + len(stale), "due": len(no_due)}
-    return {"items": items, "counts": counts, "total": sum(counts.values()) - counts["due"],
+    counts = {"confirm": len(props), "answer": len(attention), "remind": len(reminders) + len(stale), "quiet": len(still),
+              "due": len(no_due)}
+    return {"items": items, "counts": counts, "total": sum(counts.values()) - counts["due"] - counts["quiet"],
             "urgent": any(i["urgent"] for i in items)}
 
 
@@ -616,6 +622,7 @@ def home(request: Request):
     snap = overview.snapshot()
     feed = needs_from_you(snap, due=True)
     no_due = next((i["tasks"] for i in feed["items"] if i["kind"] == "due"), [])
+    still = next((i["tasks"] for i in feed["items"] if i["kind"] == "quiet"), [])
     meeting_ids = {i["batch"][8:] for i in feed["items"] if i.get("batch", "").startswith("meeting:")}
     meeting_ids |= {c["source_ref"] for c in no_due if c["source_type"] == "meeting" and c["source_ref"]}
     meetings = {m["id"]: m for m in store.rows(
@@ -635,7 +642,7 @@ def home(request: Request):
     start_h, start_m = (int(x) for x in (settings["owner"]["work_hours"].get("start") or "09:00").split(":"))
     work_left = int((now.replace(hour=end_h, minute=end_m, second=0, microsecond=0) - now).total_seconds() // 60)
     before_start = now.hour * 60 + now.minute < start_h * 60 + start_m
-    return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings, no_due=no_due,
+    return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings, no_due=no_due, still=still,
                   first_finds=welcome.finds_for_home(), first_days=welcome.FIRST_DAYS,
                   meeting_titles={k: m["title"] for k, m in meetings.items()}, due_choices=due_choices(),
                   dp=dp, next_label=day_mod.next_label(now.date(), settings), meet_n=len(timed),
@@ -806,6 +813,7 @@ def task_prefs(request: Request, query: bool = True) -> dict[str, str]:
 
 
 LIST_GROUPS = {"dir": "кто кому", "project": "по проекту", "person": "по человеку", "none": "без групп"}  # вид «Список»
+SORT_COOKIE = "task_order"  # порядок «Задач», который выбрали сами (records.SORTS)
 FOCUS_DAYS = 14  # задачи со сроком дальше — в конце колонки под пунктирной плашкой «Ещё N со сроком после …»
 KAITEN_PARAMS = ("who", "space", "q", "mine", "only", "created", "created_from", "created_to", "due", "due_from", "due_to",
                  "kview")
@@ -816,8 +824,9 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
                 due: str = "", due_from: str = "", due_to: str = "", scale: str = "week", sort: str = "",
                 new: str = "", task: int = 0, parent: int = 0, archived: str = "", project: str = "",
-                done_projects: str = "", group: str = ""):
+                done_projects: str = "", group: str = "", updated: str = "", quiet: str = ""):
     from opsdash import gantt, projects
+    from opsdash import quiet as quiet_mod
 
     if view == "kaiten":  # Kaiten — вкладка «Задач» (5.7)
         return tasks(request, **{k: v for k, v in request.query_params.items() if k in KAITEN_PARAMS})
@@ -827,23 +836,29 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     show_archived = archived == "1" or status == "archived"  # status=archived — ссылки из прошлой версии
     status = "all" if status == "archived" else status
     person, q = person.strip(), q.strip()
-    # сортировку запоминаем в cookie: по умолчанию — по приоритету, ещё — по сроку и «сначала новые»
-    sort = sort if sort in records.SORTS else request.cookies.get("task_sort", "priority")
+    # ?updated=12,15,40 — из уведомления «Обновил ход задач: N»: на доске только они, подробно — видно новое «Сейчас»
+    upd = list(dict.fromkeys(int(x) for x in updated.split(",") if x.strip().isdigit()))[:100]
+    still = quiet == "1"  # «Без движения»: только задачи, по которым давно ничего не происходит (opsdash.quiet)
+    # сортировку запоминаем в cookie: по умолчанию — по приоритету (закреплённые, срок, уровень), ещё — «сначала
+    # новые». С 2.0.26 cookie другое (SORT_COOKIE): выбор, запомненный раньше, сбросился на «по приоритету»
+    sort = sort if sort in records.SORTS else request.cookies.get(SORT_COOKIE, "priority")
     sort = sort if sort in records.SORTS else "priority"
     dates = {"created": records.period(created, created_from, created_to) if created else None,
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
              "no_due": due == "none", "unseen": new == "1"}
     board = (records.commitments_board(person=person or None, q=q or None, sort=sort, archived=show_archived,
-                                       project=project or None, **dates) if view in ("board", "gantt") else None)
+                                       project=project or None, ids=upd or None, quiet=still, **dates)
+             if view in ("board", "gantt") else None)
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
-                                      sort=sort, archived=show_archived, project=project or None, **dates)
+                                      sort=sort, archived=show_archived, project=project or None, ids=upd or None,
+                                      quiet=still, **dates)
              if view == "list" else None)
     # «Между коллегами» по умолчанию скрыты: договорённости собираются и закрываются сами, но директор их не ведёт —
     # не видно ни колонки, ни их в «Готово», ни в счётчиках. Ищете сами (поиск, человек, проект, в «Списке» —
     # «между коллегами» в «Чьих задачах») — показываем и их, колонку — если нашлись
     prefs = task_prefs(request)
     others_pref, show_done = prefs["others"] == "1", prefs["done"] == "1"
-    explicit = bool(q or person or project) or (view == "list" and direction == "other")
+    explicit = bool(q or person or project or upd) or (view == "list" and direction == "other")
     if board is not None:
         others_n = len(board["other"])
         if not (others_pref or explicit):
@@ -869,7 +884,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     # (группы списка, Ганта) под пунктирной плашкой, по щелчку раскрываются. «В работе» не прячем; при фильтре
     # по сроку и поиске показываем всё — их просили явно
     horizon = records.today_local() + timedelta(days=FOCUS_DAYS)
-    fold = not q and not (due and due != "none")
+    fold = not q and not upd and not still and not (due and due != "none")
     for c in shown:
         c["later"] = bool(fold and c["status"] == "open" and not c["archived"] and not c["in_work"]
                           and c["due"] and c["due"] > horizon.isoformat())
@@ -905,6 +920,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
         ({"done": "выполненные", "all": "все статусы"}.get(status, status), ("status",), view == "list" and status != "open"),
         ("с архивными", ("archived",), show_archived),
         (f"поиск «{q}»", ("q",), bool(q)),
+        (f"обновился ход: {len(upd)} {f_plural(len(upd), 'задача', 'задачи', 'задач')}", ("updated",), bool(upd)),
     ) if on]
     # «Без срока»: кнопка «Разобрать по одной» — окно «Уточнить срок» с показанными открытыми задачами без срока,
     # ваши и что вам должны: сроки договорённостей между коллегами директор не разбирает
@@ -913,7 +929,10 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
               ] if due == "none" else []
     # переключатели «Новые» и «Без срока» под заголовком (вместо «× снять» у этих двух фильтров): второй щелчок снимает
     toggles = {key: (without(*keys) + ("" if on else add)).replace("?&", "?", 1) for key, keys, on, add in (
-        ("new", ("new",), new == "1", "&new=1"), ("no_due", ("due", "due_from", "due_to"), due == "none", "&due=none"))}
+        ("new", ("new",), new == "1", "&new=1"), ("no_due", ("due", "due_from", "due_to"), due == "none", "&due=none"),
+        ("quiet", ("quiet",), still, "&quiet=1"))}
+    # «Без движения»: счётчик на кнопке и окно «Разобрать по одной» — ваши задачи и «мне должны», без других фильтров
+    quiet_tasks = quiet_mod.queue()
     # «Показать: Между коллегами, Готово» и «Кратко / Подробно» — щелчок переключает и запоминает (TASK_PREFS)
     toggles |= {key: (without(key) + f"&{key}={value}").replace("?&", "?", 1) for key, value in (
         ("others", "0" if others_pref else "1"), ("done", "0" if show_done else "1"))}
@@ -926,21 +945,25 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       due_periods=records.DUE_PERIODS, gantt=timeline, scale=timeline["scale"] if timeline else scale,
                       gantt_w=min(max(gantt_w, 200), 720), sort=sort, sorts=records.SORTS, new=new == "1",
                       focus=task, extra=extra, parent_task=parent_task, show_archived=show_archived,
+                      updated=",".join(map(str, upd)),
                       archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0,
                       project=project, project_options=projects.options(),
                       projects=projects.list_projects("all" if done_projects else "active") if view == "projects" else [],
-                      done_projects=bool(done_projects), show_done=show_done, others_pref=others_pref,
-                      others_col=others_col, others_n=others_n, cards_full=prefs["cards"] == "full",
+                      done_projects=bool(done_projects), others_pref=others_pref,
+                      show_done=show_done or bool(upd and board and board["done"]),  # обновили ход у закрытой
+                      others_col=others_col, others_n=others_n, cards_full=prefs["cards"] == "full" or bool((upd or still) and "cards" not in request.query_params),
                       tasks_all=records.active_count(),
                       group=group if group in LIST_GROUPS else "dir", list_groups=LIST_GROUPS,
                       filter_chips=chips, filter_count=sum(1 for c in chips if not c[0].startswith("поиск")),
                       no_due_count=records.no_due_count(others_pref), no_due=no_due, due_choices=due_choices() if no_due else [],
-                      toggles=toggles, later_after=horizon,
+                      toggles=toggles, later_after=horizon, quiet_on=still, quiet_tasks=quiet_tasks,
                       in_projects=store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL "
                                                "AND project_id IS NOT NULL") or 0,
                       done_projects_count=store.scalar("SELECT COUNT(*) FROM projects WHERE status='done'") or 0)
     if request.query_params.get("sort") in records.SORTS:
-        response.set_cookie("task_sort", sort, max_age=31536000, samesite="lax")
+        response.set_cookie(SORT_COOKIE, sort, max_age=31536000, samesite="lax")
+    if "task_sort" in request.cookies:  # до 2.0.26
+        response.delete_cookie("task_sort")
     for key, (cookie, allowed, _) in TASK_PREFS.items():
         if request.query_params.get(key) in allowed:
             response.set_cookie(cookie, prefs[key], max_age=31536000, samesite="lax")
@@ -992,6 +1015,39 @@ def commitment_due(request: Request, cid: int, due: str = Form(""), act: str = F
     if err:
         return back(request, err=err)
     return back(request, "Оставлена без срока" if act == "skip" else f"Срок — {f_date(due.strip())}")
+
+
+@app.post("/commitments/{cid}/quiet")
+def commitment_quiet(request: Request, cid: int, act: str = Form("snooze"), due: str = Form(""), at: str = Form("")):
+    """Окно «Без движения» (opsdash.quiet): act=snooze — «Не трогать неделю»; due — новый срок (и неделю не
+    отмечать: решение принято); done — «Уже сделано». Окно ждёт JSON, без скриптов — возврат на страницу."""
+    from opsdash import quiet
+
+    as_json = "application/json" in request.headers.get("accept", "")
+    err, msg = ("" if records.get_commitment(cid) else "Такой задачи нет"), ""
+    try:
+        if err:
+            pass
+        elif act == "due":
+            if not due.strip():
+                err = "Выберите новый срок"
+            else:
+                records.set_due(cid, due.strip())
+                quiet.snooze(cid, log=False)
+                msg = f"Срок — {f_date(due.strip())}"
+        elif act == "done":
+            records.update_commitment(cid, status="done")
+            msg = "Задача закрыта"
+        else:
+            until = quiet.snooze(cid)
+            msg = f"Не отмечаем до {f_date(until)}"
+    except ValueError as e:
+        err = str(e)
+    if as_json:
+        return JSONResponse({"ok": not err, "err": err}, status_code=400 if err else 200)
+    if at == "dlg":  # из окна задачи — окно остаётся открытым
+        return _back_task(request, cid, msg, err)
+    return back(request, err=err) if err else back(request, msg)
 
 
 # --- реальность дня (opsdash.day) ---------------------------------------------------------------

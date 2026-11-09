@@ -528,6 +528,8 @@ MIGRATIONS = [
     ("commitments", "importance_why", "TEXT"),    # почему: «обещано собственнику», «сказали „горит“»
     ("commitments", "priority_user", "TEXT"),     # urgent | high | normal | low; пусто — по расчёту («Авто»)
     ("commitments", "priority_user_at", "TEXT"),
+    # «без движения» (opsdash.quiet): «Не трогать неделю» — до этой даты задача не отмечается
+    ("commitments", "quiet_until", "TEXT"),
 ]
 
 

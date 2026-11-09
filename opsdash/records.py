@@ -829,10 +829,14 @@ Period = tuple[date | None, date | None]
 
 
 def _filters(person: str | None, q: str | None, created: Period | None, due: Period | None,
-             no_due: bool, unseen: bool = False, project: int | str | None = None) -> tuple[str, list]:
+             no_due: bool, unseen: bool = False, project: int | str | None = None,
+             ids: list[int] | None = None) -> tuple[str, list]:
     """Общие условия списка и доски: человек, поиск, дата создания, срок, только новые (директор их не видела),
-    проект (id; "none" — задачи вне проектов)."""
+    проект (id; "none" — задачи вне проектов), только эти задачи (ids — у них обновился ход, уведомление в углу)."""
     sql, params = "", []
+    if ids:
+        sql += f" AND id IN ({','.join('?' * len(ids))})"
+        params += list(ids)
     if project == "none":
         sql += " AND project_id IS NULL"
     elif project:
@@ -1161,18 +1165,22 @@ def _person_by_name(name: str, people: list[dict]) -> dict | None:
     return hits[0] if len(hits) == 1 else None
 
 
-SORTS = {"priority": "по приоритету", "due": "по сроку", "created": "сначала новые"}
+# порядок, который выбирают на доске и в списке; «по сроку» (due) с 2.0.26 — часть «по приоритету»: срок → уровень.
+# due остаётся порядком по умолчанию для выборок самого PULSE (дайджест, день, сводка)
+SORTS = {"priority": "по приоритету", "created": "сначала новые"}
 
 
 def list_commitments(*, status: str | None = "open", direction: str | None = None, person: str | None = None,
                      overdue: bool = False, q: str | None = None, limit: int = 500, created: Period | None = None,
                      due: Period | None = None, no_due: bool = False, unseen: bool = False,
-                     sort: str = "due", archived: bool = False, project: int | str | None = None) -> list[dict]:
-    """sort: priority — Срочно → Высокий → Обычный → Низкий, внутри — по сроку (opsdash.priorities.sort_key);
-    due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху. По сроку и по новым
-    задачи «в работе» — всегда первыми, по приоритету — первыми среди равных. Архивные — только с archived=True (галочка «Показать архивные»),
-    в конце; status="archived" — только архив, любой статус (./ops commitments list)."""
-    where, params = _filters(person, q, created, due, no_due, unseen, project)
+                     sort: str = "due", archived: bool = False, project: int | str | None = None,
+                     ids: list[int] | None = None, quiet: bool = False) -> list[dict]:
+    """sort: priority — «в работе» сверху (между собой — Срочно → Низкий), остальные по сроку, в один день — по
+    уровню (opsdash.priorities.sort_key); due — ближайший срок сверху, без срока в конце; created — последние
+    добавленные сверху. При любом порядке задачи «в работе» — первыми. Архивные — только с archived=True (галочка
+    «Показать архивные»), в конце; status="archived" — только архив, любой статус (./ops commitments list).
+    ids — только эти задачи; quiet — только без движения (opsdash.quiet)."""
+    where, params = _filters(person, q, created, due, no_due, unseen, project, ids)
     sql = "SELECT * FROM commitments WHERE 1=1" + where
     if status == "archived":
         sql += " AND archived_at IS NOT NULL"
@@ -1197,6 +1205,8 @@ def list_commitments(*, status: str | None = "open", direction: str | None = Non
         sql += f" ORDER BY {first}, CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
     params.append(limit)
     items = _mark(store.rows(sql, params))
+    if quiet:
+        items = [c for c in items if c.get("quiet")]
     if sort == "priority" and status != "archived":
         from opsdash import priorities
 
@@ -1282,11 +1292,12 @@ def _relations(items: list[dict]) -> None:
         c["late_vs_parent"] = bool(c["parent"] and c["status"] == "open" and c["due"] and c["parent"]["due"]
                                    and c["due"] > c["parent"]["due"])
         c["done_hint"] = hints.get(c["id"]) if c["status"] == "open" else None
-    from opsdash import priorities, task_meetings
+    from opsdash import priorities, quiet, task_meetings
 
     task_meetings.decorate(items)
     worklog.decorate(items)
     priorities.decorate(items)  # после связей, встречи и хода: приоритет учитывает их все
+    quiet.decorate(items)  # без движения: по ходу и связям
 
 
 def _waits(items: list[dict]) -> None:
@@ -1367,15 +1378,19 @@ def _wait_risk(c: dict, pending: list[dict], today: date) -> str | None:
 def commitments_board(*, person: str | None = None, q: str | None = None, done_days: int = 14,
                       created: Period | None = None, due: Period | None = None,
                       no_due: bool = False, unseen: bool = False, sort: str = "due",
-                      archived: bool = False, project: int | str | None = None) -> dict[str, list[dict]]:
+                      archived: bool = False, project: int | str | None = None,
+                      ids: list[int] | None = None, quiet: bool = False) -> dict[str, list[dict]]:
     """Доска задач и договорённостей: открытые — по направлению, «Готово» — закрытые за done_days дней
     (последние закрытые сверху при любой сортировке). archived — добавить архивные в конец колонок:
     открытые — в свою, выполненные и отменённые — в «Готово», за любой срок."""
     board = {d: list_commitments(status="open", direction=d, person=person, q=q, created=created, due=due,
-                                 no_due=no_due, unseen=unseen, sort=sort, archived=archived, project=project)
+                                 no_due=no_due, unseen=unseen, sort=sort, archived=archived, project=project, ids=ids,
+                                 quiet=quiet)
              for d in DIRECTIONS}
+    if quiet:  # без движения бывают только открытые
+        return {**board, "done": []}
     since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=done_days))
-    where, params = _filters(person, q, created, due, no_due, unseen, project)
+    where, params = _filters(person, q, created, due, no_due, unseen, project, ids)
     sql = ("SELECT * FROM commitments WHERE status='done' AND archived_at IS NULL "
            "AND COALESCE(closed_at, updated) >= ?" + where)
     board["done"] = _mark(store.rows(sql + " ORDER BY COALESCE(closed_at, updated) DESC LIMIT 300", [since, *params]))

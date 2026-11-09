@@ -755,6 +755,10 @@ def _commitment_line(c: dict) -> str:
             + (f": {c['importance_why']}" if c.get("importance_why") else "")
     if c.get("in_work"):
         line += " · в работе"
+    if c.get("quiet"):
+        from opsdash import quiet
+
+        line += f" · {quiet.line(c)}"
     if c.get("ball_back_at") and c["status"] == "open":
         line += " · мяч снова у директора: часть коллеги готова"
     if c.get("estimate_min"):
@@ -807,7 +811,7 @@ def _commitment_line(c: dict) -> str:
 def cmd_commitments(a) -> None:
     if a.action == "list":
         items = records.list_commitments(status=a.status, direction=a.direction, person=a.person, overdue=a.overdue,
-                                         sort=a.sort)
+                                         sort=a.sort, quiet=a.quiet)
         if a.json:
             return as_json(items)
         for c in items:
@@ -1847,8 +1851,11 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--direction", choices=["mine", "to_me", "other"])
     x.add_argument("--person")
     x.add_argument("--overdue", action="store_true")
-    x.add_argument("--sort", default="due", choices=list(records.SORTS),
-                   help="priority — Срочно → Низкий (внутри по сроку); due — по сроку; created — новые сверху")
+    x.add_argument("--sort", default="priority", choices=[*records.SORTS, "due"],
+                   help="priority — «в работе» сверху, дальше по сроку, в один день — Срочно → Низкий (как на доске); "
+                        "due — по сроку; created — новые сверху")
+    x.add_argument("--quiet", action="store_true",
+                   help="только без движения: по задаче давно ничего не происходит (порог — Настройки → День)")
     x = ms.add_parser("add")
     x.add_argument("--direction", required=True, choices=["mine", "to_me", "other"],
                    help="mine — обещала директор; to_me — обещали директору; other — между коллегами")

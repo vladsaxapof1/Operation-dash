@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 from datetime import date, datetime, time, timedelta, timezone
 
-from opsdash import config, projects, proposals, records, store, worklog
+from opsdash import config, projects, proposals, quiet, records, store, worklog
 from opsdash.sources import kaiten
 
 SOURCE_TITLES = {
@@ -265,6 +265,8 @@ def snapshot(settings: dict | None = None) -> dict:
         "to_me": [c for c in commitments if c["direction"] == "to_me"],
         "other": [c for c in commitments if c["direction"] == "other"],
         "stale": kaiten.stale_cards(settings),
+        # задачи без движения (opsdash.quiet): дольше всех стоящие — сверху
+        "quiet": sorted([c for c in commitments if c.get("quiet")], key=lambda c: -c["quiet"]["days"]),
         "events": events_today(settings),
         "meetings": records.list_meetings(limit=8),
         "health": sources_health(settings),
@@ -319,6 +321,11 @@ def today_text(settings: dict | None = None, snap: dict | None = None) -> str:
         lines.append(f"\n<b>🔓 Можно делать: {len(s['unblocked'])}</b> — то, чего ждали, готово")
         for c in s["unblocked"][:5]:
             lines.append(f"• {_e(records.headline(c))}{_e(' → ' + c['whom'] if c['direction'] == 'mine' and c['whom'] else '')}")
+    if s["quiet"]:
+        lines.append(f"\n<b>🐢 Без движения: {len(s['quiet'])}</b> — давно ничего не происходит")
+        for c in s["quiet"][:5]:
+            who = "ваша" if c["direction"] == "mine" else c.get("who") or "?"
+            lines.append(f"• {_e(records.headline(c))} — {_e(who)}, {c['quiet']['days']} дн.")
     if s["stale"]:
         lines.append(f"\n<b>🐌 Без движения в Kaiten: {len(s['stale'])}</b>")
         for c in s["stale"][:5]:
@@ -354,6 +361,7 @@ def overview_markdown(settings: dict | None = None) -> str:
                 f"{' · срок под угрозой: ' + c['wait_risk'] if c.get('wait_risk') else ''}"
                 f"{_remind_note(c)}"
                 f"{' · предложено закрыть' if c.get('done_hint') else ''}"
+                f"{' · ' + quiet.line(c) if c.get('quiet') else ''}"
                 f"{' · ' + worklog.now_text(c, 160) if c.get('now') else ''}" for c in s[key]] or ["- нет"]
     out.append("\n## Проекты")
     for p in s["projects"]:
@@ -371,6 +379,9 @@ def overview_markdown(settings: dict | None = None) -> str:
     out += [f"- [commitment {c['id']}] {c['who'] or ''} → {c['whom'] or ''}: {records.headline(c)} — дождалась "
             + (f"[commitment {c['freed_by']['task']['id']}] «{c['freed_by']['task']['headline']}»" if c["freed_by"]["task"]
                else f"события «{c['freed_by']['event']}»") for c in s["unblocked"]] or ["- нет"]
+    out.append("\n## Без движения: по задаче давно ничего не происходит (срок может быть ещё впереди)")
+    out += [f"- [commitment {c['id']}] {records.headline(c)} · {records.doer(c)} · {quiet.line(c)}"
+            for c in s["quiet"]] or ["- нет"]
     out.append("\n## Kaiten: без движения")
     out += [f"- #{c['id']} {c['title']} · {c['responsible_name'] or 'без исполнителя'} · {c['column_title']} · "
             f"{c['idle_days']} дн. · {c['url']}" for c in s["stale"]] or ["- нет"]

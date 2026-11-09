@@ -123,19 +123,35 @@ def test_manual_level_sticks_and_auto_returns(tuesday):
 
 
 def test_priority_sort(tuesday):
+    """«В работе» — сверху, между собой по уровню; остальные — по сроку, в один день — по уровню; без срока — в конце."""
     far = task("Через месяц", due="2026-12-10")
+    no_due = task("Без срока, срочная")
+    priorities.set_level(no_due, "urgent")
+    tomorrow = task("Завтра обычная", due="2026-11-11")
+    tomorrow_high = task("Завтра важная", due="2026-11-11", importance="high")  # скоро × важная — Высокий
+    tomorrow_urgent = task("Завтра срочная", due="2026-11-11")
+    priorities.set_level(tomorrow_urgent, "urgent")
     low = task("Неважная сегодня", due="2026-11-10", importance="low")
     urgent = task("Горит", due="2026-11-10", importance="high")
     late = task("Просрочена", due="2026-11-05")
     today = task("Сегодня", due="2026-11-10")
-    work = task("В работе через месяц", due="2026-12-10")
-    records.set_in_work(work, True)
+    work_far = task("В работе, срочная через месяц", due="2026-12-10")
+    priorities.set_level(work_far, "urgent")
+    work_today = task("В работе, сегодня неважная", due="2026-11-10", importance="low")
+    for cid in (work_today, work_far):
+        records.set_in_work(cid, True)
     order = [c["id"] for c in records.list_commitments(direction="mine", sort="priority")]
-    # Срочно → Высокий (раньше срок — выше) → Обычный: неважная, но горит; среди равных по сроку «в работе» — выше
-    assert order == [urgent, late, today, low, work, far]
-    # «по сроку» — как раньше: «в работе» всегда первыми
-    assert records.list_commitments(direction="mine", sort="due")[0]["id"] == work
-    assert "priority" in records.SORTS and list(records.SORTS)[0] == "priority"
+    assert order == [work_far, work_today,  # закреплённые: Срочно выше Обычного, хоть срок и позже
+                     late,  # просрочена — раньше всех по сроку
+                     urgent, today, low,  # сегодня: Срочно → Высокий → Обычный
+                     tomorrow_urgent, tomorrow_high, tomorrow,  # завтра: так же
+                     far, no_due]  # дальше по сроку, без срока — в конце
+    # закрытые — после открытых
+    records.update_commitment(late, status="done")
+    assert [c["id"] for c in records.list_commitments(status="all", direction="mine", sort="priority")][-1] == late
+    # «по сроку» осталось для выборок самого PULSE: «в работе» первыми
+    assert records.list_commitments(direction="mine", sort="due")[0]["id"] in (work_far, work_today)
+    assert list(records.SORTS) == ["priority", "created"]
 
 
 def test_board_chip_menu_and_dialog_row(client, tuesday):
@@ -161,10 +177,21 @@ def test_board_chip_menu_and_dialog_row(client, tuesday):
                     headers={"referer": "http://localhost:8765/commitments"}, follow_redirects=False)
     assert "err=" in r.headers["location"]
     # список: чип только у необычных; выбранный порядок запоминается
-    listing = client.get("/commitments?view=list&sort=due").text
+    listing = client.get("/commitments?view=list").text
     assert 'class="prio p-urgent"' in listing and 'class="prio p-normal"' not in listing
-    assert client.cookies.get("task_sort") == "due"
-    assert client.get("/commitments").text.index("Обычная задача") > 0
+    client.get("/commitments?sort=created")
+    assert client.cookies.get("task_order") == "created"
+    assert '<option value="created" selected>' in client.get("/commitments").text  # запомнилось
+
+
+def test_old_remembered_sort_resets_to_priority(client, tuesday):
+    """Порядок, запомненный до 2.0.26 («сначала новые»), не действует: по умолчанию — по приоритету."""
+    urgent = task("Горящий отчёт", due="2026-11-10", importance="high")
+    task("Обычная задача", due="2026-12-10")
+    client.cookies.set("task_sort", "created")
+    r = client.get("/commitments")
+    assert r.text.index("Горящий отчёт") < r.text.index("Обычная задача")
+    assert 'task_sort=""' in r.headers.get("set-cookie", "") and urgent
 
 
 def test_cli_importance_priority_and_list(capsys, tuesday):

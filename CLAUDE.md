@@ -157,7 +157,10 @@
 - «Сделай … срочной», «это не горит», «верни приоритет как было» → `./ops commitments set <id> --priority
   urgent|high|normal|low|auto` (просьба директора — без предложения; уровень закрепится, `auto` — снова по расчёту).
   Сама `--priority` не ставь — только `--importance`. «Что мне делать сначала?», «что самое срочное?» →
-  `./ops commitments list --direction mine --sort priority` (сверху — Срочно, у каждой — почему).
+  `./ops commitments list --direction mine --sort priority` (сверху — «в работе», дальше по сроку, в один день —
+  Срочно выше; у каждой — почему).
+- «Что застряло?», «что я забыла?», «что давно не двигается?» → `./ops commitments list --quiet` (без движения: по задаче
+  давно ничего не происходит, хотя срок может быть впереди — это не просрочка; у каждой — когда и что было последним).
 - «Как там проект …?», «на ком стоит …?» → `./ops projects list`, `./ops projects show <id>`; «заведи проект …» →
   `./ops projects add --title "…" --goal "…" --tasks <id,id>`, «добавь задачу в проект» → `commitments set <id> --project <id>`.
 - «Я отправила MR Петру, жду», «моя часть готова, дальше Олег» → `./ops commitments handoff <id> --who "…" --what "…"`

@@ -240,7 +240,7 @@ def test_messages_chat_finds_latin_title(capsys):
     assert cli._latin("Пётр Иванов") == "Petr Ivanov"
 
 
-def test_triage_announces_task_log(monkeypatch):
+def test_triage_announces_task_log(monkeypatch, client):
     """Разбор сообщений дописал ход задач — в углу экрана «Обновил ход задачи», в итоге разбора — «ход задач: +N»."""
     from opsdash import brain, notices
 
@@ -263,15 +263,25 @@ def test_triage_announces_task_log(monkeypatch):
     assert n["title"] == "Обновил ход задачи «Договор с поставщиком упаковки»"
     assert n["text"] == "Олег вернётся в среду 11.11" and n["link"] == f"/commitments?task={cid}"
 
-    # две задачи — список и ссылка на доску
+    # две задачи — список и ссылка на доску, где только они
     since = worklog.last_id()
     worklog.add(other, "Олег прислал прайс", by="claude")
     worklog.add(cid, "Пётр: договор на подписи", by="claude")
     assert worklog.announce(since, "process-meeting", "— встреча «Закупки»") == 2
     n = store.row("SELECT * FROM notices ORDER BY id DESC")
-    assert n["title"] == "Обновил ход задач: 2 — встреча «Закупки»" and n["link"] == "/commitments"
+    assert n["title"] == "Обновил ход задач: 2 — встреча «Закупки»" and n["link"] == f"/commitments?updated={cid},{other}"
     assert "«Договор с поставщиком упаковки» — Пётр: договор на подписи" in n["text"]
     assert worklog.announce(worklog.last_id(), "triage") == 0
+
+    # по ссылке: только эти задачи, подробные карточки с новым «Сейчас», «× снять» возвращает все
+    stray = records.add_commitment(direction="mine", whom="Тимур", title="Посторонняя задача", what="Посторонняя задача")
+    page = client.get(n["link"]).text
+    assert f'data-task="{cid}"' in page and f'data-task="{other}"' in page and f'data-task="{stray}"' not in page
+    assert '<span>Олег прислал прайс <span class="muted">' in page and 'class="task full' in page  # новое «Сейчас»
+    assert "обновился ход: 2 задачи" in page and f'name="updated" value="{cid},{other}"' in page
+    assert f'data-task="{stray}"' in client.get("/commitments").text
+    listing = client.get(f"/commitments?view=list&updated={other}").text
+    assert f'<tr data-task="{other}"' in listing and f'<tr data-task="{cid}"' not in listing
 
 
 def test_collect_progress_edit_and_corner(client, monkeypatch):

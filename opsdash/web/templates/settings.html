@@ -198,6 +198,21 @@
     <div class="form-actions"><button class="btn primary">Сохранить</button></div>
   </form>
 </div></section>
+{#- «Без движения» (opsdash.quiet): через сколько рабочих дней без хода задача отмечается #}
+{% set t = settings.tasks %}
+<section class="card"><div class="card-h"><h2>Задачи без движения</h2></div><div class="card-b">
+  <p class="muted">Задача отмечается «без движения», если по ней столько рабочих дней ничего не происходило: ни записи в ходе,
+    ни «в работе», ни готового пункта, ни напоминания. Перенос срока движением не считается. Срок при этом может быть ещё
+    впереди — это не просрочка. Договорённости между коллегами и задачи, которые ждут другую задачу или ответа, не отмечаются.</p>
+  <form method="post" action="/settings/quiet">
+    <div class="form-row">
+      <div><label>Ваши задачи — рабочих дней</label><input type="number" name="quiet_mine" value="{{ t.quiet_mine }}" min="0" max="60"></div>
+      <div><label>Вам должны — рабочих дней</label><input type="number" name="quiet_to_me" value="{{ t.quiet_to_me }}" min="0" max="60"></div>
+    </div>
+    <div class="hint">0 — не отмечать. Где видно: метка на карточке, кнопка «Без движения» в «Задачах», строка на Сводке и в утреннем дайджесте.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
 
 {% elif menu_tab == 'connections' %}
 {% include "_connections.html" %}

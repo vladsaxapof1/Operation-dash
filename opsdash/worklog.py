@@ -198,7 +198,8 @@ def last_id() -> int:
 
 def announce(since: int, kind: str, where: str = "") -> int:
     """После разбора сообщений или встречи — уведомление в углу экрана «Обновил ход задачи»: какие задачи
-    сдвинулись и что по ним теперь (последняя новая запись). Одна задача — ссылка на неё, несколько — на доску.
+    сдвинулись и что по ним теперь (последняя новая запись). Одна задача — ссылка на её окно, несколько — на доску,
+    где только они (?updated=…), подробно: на каждой карточке видно новое «Сейчас».
     Объявляем только записи Claude (не события PULSE и не то, что директор попросила записать сама).
     Вернуть, сколько новых записей."""
     from opsdash import notices, records
@@ -221,7 +222,7 @@ def announce(since: int, kind: str, where: str = "") -> int:
         title = f"Обновил ход задач: {len(tasks)}"
         text = "; ".join(f"«{records.headline(t)}» — {short(t['text'])}" for t in tasks[:3])
         text += f"; и ещё {len(tasks) - 3}" if len(tasks) > 3 else ""
-        link = "/commitments"
+        link = "/commitments?updated=" + ",".join(str(t["task_id"]) for t in tasks)
     notices.add(kind, title + (f" {where}" if where else ""), text, link)
     return len(rows)
 

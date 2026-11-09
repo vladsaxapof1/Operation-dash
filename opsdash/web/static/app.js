@@ -595,6 +595,63 @@
     dueDlg.addEventListener("close", function () { if (dueDlg.dataset.changed) location.reload(); });
   }
 
+  // «Без движения»: задачи, по которым давно ничего не происходит, по одной (opsdash.quiet). Каждое действие —
+  // своя форма: записать в ход, собрать ход с Claude, новый срок, не трогать неделю, уже сделано. Сохраняем без
+  // перезагрузки и показываем следующую; «Напомнить» — обычная форма напоминания (уйдёт со страницы, как на Сводке).
+  // Закрыли окно после изменений — страница обновляется
+  var qDlg = document.querySelector("dialog[data-quiet]");
+  if (qDlg) {
+    var qCards = Array.prototype.slice.call(qDlg.querySelectorAll("[data-quiet-card]"));
+    var qAt = 0, qDone = { note: 0, collect: 0, due: 0, snooze: 0, done: 0, later: 0 };
+    var qShow = function (i) {
+      qAt = i;
+      qCards.forEach(function (c, n) { c.hidden = n !== i; });
+      var end = i >= qCards.length;
+      qDlg.querySelector("[data-quiet-step]").textContent = end ? "" : (i + 1) + " из " + qCards.length;
+      qDlg.querySelector("[data-quiet-end]").hidden = !end;
+      if (end) {
+        var parts = [];
+        if (qDone.note) parts.push("записано в ход: " + qDone.note);
+        if (qDone.collect) parts.push("Claude собирает ход: " + qDone.collect + " — появится уведомление");
+        if (qDone.due) parts.push("новый срок: " + qDone.due);
+        if (qDone.snooze) parts.push("отложено на неделю: " + qDone.snooze);
+        if (qDone.done) parts.push("закрыто: " + qDone.done);
+        if (qDone.later) parts.push("на потом: " + qDone.later);
+        qDlg.querySelector("[data-quiet-sum]").textContent = "Готово" + (parts.length ? " · " + parts.join(" · ") : "") + ".";
+        qDlg.querySelector("[data-quiet-end] [data-dlg-close]").focus();
+      } else {
+        var first = qCards[i].querySelector("input[name=text]");
+        if (first) first.focus();
+      }
+    };
+    qCards.forEach(function (card) {
+      var err = card.querySelector("[data-quiet-err]");
+      card.querySelectorAll("form[data-quiet-form]").forEach(function (form) {
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          var act = form.dataset.quietForm, buttons = card.querySelectorAll("button");
+          buttons.forEach(function (b) { b.disabled = true; });
+          err.hidden = true;
+          fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } })
+            .then(function (r) { return r.json().catch(function () { return { ok: r.ok, err: "" }; }); })
+            .then(function (res) {
+              if (!res.ok) throw new Error(res.err || "");
+              qDone[act]++;
+              qDlg.dataset.changed = "1";
+              qShow(qAt + 1);
+            })
+            .catch(function (x) {
+              err.textContent = (x.name === "Error" && x.message) || "Не получилось сохранить — попробуйте ещё раз";
+              err.hidden = false;
+            })
+            .finally(function () { buttons.forEach(function (b) { b.disabled = false; }); });
+        });
+      });
+      card.querySelector("[data-quiet-next]").addEventListener("click", function () { qDone.later++; qShow(qAt + 1); });
+    });
+    qDlg.addEventListener("close", function () { if (qDlg.dataset.changed) location.reload(); });
+  }
+
   // закрываемые подсказки: «×» прячет и запоминает (cookie на год)
   document.querySelectorAll("[data-dismiss-btn]").forEach(function (b) {
     b.addEventListener("click", function () {

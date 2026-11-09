@@ -275,6 +275,14 @@ def register(app: FastAPI, render, back) -> None:
         config.save_settings(settings)  # целиком: список фокус-блоков заменяется, а не дополняется
         return back(request, "Сохранено", to="/settings?tab=day")
 
+    @app.post("/settings/quiet")
+    def save_quiet(request: Request, quiet_mine: int = Form(5), quiet_to_me: int = Form(3)):
+        """«Задачи без движения» (opsdash.quiet): через сколько рабочих дней без хода задача отмечается; 0 — не отмечать."""
+        if not (0 <= quiet_mine <= 60 and 0 <= quiet_to_me <= 60):
+            return back(request, err="Рабочих дней — от 0 до 60", to="/settings?tab=day")
+        config.update_settings("tasks", {"quiet_mine": quiet_mine, "quiet_to_me": quiet_to_me})
+        return back(request, "Сохранено", to="/settings?tab=day")
+
     @app.post("/settings/sections/{name}")
     def save_section(request: Request, name: str, on: str = Form("")):
         """Включить архивный раздел или вернуть его в архив. Данные в data/ при этом не трогаются."""

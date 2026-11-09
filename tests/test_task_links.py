@@ -165,7 +165,7 @@ def test_web_focus_seen_subtask_and_meeting_links(client):
     assert 'data-new="%d"' % parent not in client.get("/commitments").text
 
     created_first = client.get("/commitments?sort=created")
-    assert created_first.cookies.get("task_sort") == "created"
+    assert created_first.cookies.get("task_order") == "created"
     meeting = client.get("/meetings/m1").text
     assert f'href="/commitments?task={parent}"' in meeting and "Отчёт по продажам" in meeting
 

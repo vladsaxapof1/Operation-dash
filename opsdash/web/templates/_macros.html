@@ -413,6 +413,7 @@
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}
     {%- if c.now and c.now.waiting and not full %} · <span class="warn-text" title="{{ c.now.text }}">{{ c.now.waiting_short }}</span>{% endif -%}
+    {%- if c.quiet %} · {{ quiet_mark(c) }}{% endif -%}
     {%- if c.archived %} · архив{% endif -%}
     {%- set agent = agent_chip(c) | trim %}{% if agent %} · {{ agent }}{% endif -%}
     {%- if open_waits and not full %} · <span class="task-wait" title="Ждёт: {% for w in open_waits %}{{ ('«' ~ w.task.headline ~ '» (' ~ w.task.doer ~ ')') if w.task else w.event }}{{ '; ' if not loop.last }}{% endfor %}">{{ icons.icon('hourglass', 13) }}ждёт</span>{% endif -%}
@@ -450,6 +451,71 @@
   </div>
   {{ task_dialog(c, meetings) }}
 </div>
+{% endmacro %}
+
+{% macro quiet_last(q) -%}
+{#- последнее движение по задаче без движения (opsdash.quiet): «последнее 31.10 · Пачка · Пётр: «…»» -#}
+{%- if q.origin %}появилась {{ q.since | date }}, хода не было{% else %}последнее {{ q.since | date }}{% if q.src %} · {{ q.src }}{% endif %}: «{{ q.text | truncate(200, True, '…') }}»{% endif -%}
+{%- endmacro %}
+
+{% macro quiet_mark(c) -%}
+{#- метка «без движения 9 дн.» на карточке и в списке: по задаче давно ничего не происходит (opsdash.quiet) -#}
+<span class="quiet-mark" title="Без движения {{ c.quiet.days }} {{ plural(c.quiet.days, 'день', 'дня', 'дней') }}: {{ quiet_last(c.quiet) }}">без движения {{ c.quiet.days }} дн.</span>
+{%- endmacro %}
+
+{% macro quiet_hint(c) %}
+{#- окно задачи: по ней давно ничего не происходит — записать, что сейчас, собрать ход с Claude или отложить на неделю #}
+<div class="dlg-hint quiet-hint">
+  <div><b>Без движения {{ c.quiet.days }} {{ plural(c.quiet.days, 'день', 'дня', 'дней') }}</b> — {{ quiet_last(c.quiet) }}.
+    Запишите в ход, что сейчас, или «Собрать с Claude» — вдруг движение было в переписке.</div>
+  <div class="actions">
+    <form class="inline" method="post" action="/commitments/{{ c.id }}/quiet"><input type="hidden" name="act" value="snooze"><input type="hidden" name="at" value="dlg">
+      <button class="btn sm ghost" title="Неделю задача не будет отмечаться; потом — снова, если ничего не случится">Не трогать неделю</button></form>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro quiet_dialog(tasks) %}
+{#- «Без движения» (Сводка, «Задачи» → «Без движения»): задачи, по которым давно ничего не происходит, по одной.
+    Записать, что сейчас (в ход), собрать ход с Claude, напомнить исполнителю, новый срок, не трогать неделю, уже
+    сделано; «Не сейчас» — к следующей. Сохраняет app.js без перезагрузки, после закрытия окна страница обновляется #}
+<dialog class="dlg dlg-due dlg-quiet" id="quiet-dlg" aria-labelledby="quiet-title" data-quiet>
+  <div class="dlg-box" tabindex="-1">
+    <div class="dlg-head">
+      <h2 class="dlg-title" id="quiet-title">Без движения</h2>
+      <span class="due-step" data-quiet-step>1 из {{ tasks | length }}</span>
+      <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>
+    </div>
+    {% for c in tasks %}{% set q = c.quiet %}
+    <div class="due-card" data-quiet-card{% if not loop.first %} hidden{% endif %}>
+      <div class="due-kind">{{ {'mine': 'Ваша задача', 'to_me': 'Вам должны'}.get(c.direction, '') }}{% if c.prio %} · {{ c.prio.title }}{% endif %}</div>
+      <h3 class="due-what"><a href="/commitments?task={{ c.id }}">{{ c | headline }}</a></h3>
+      <div class="dlg-meta">{{ task_people(c) }} · {{ due_text(c, both=True) or 'без срока' }}{% if c.in_work %} · <span class="ok-text">в работе</span>{% endif %}</div>
+      <p class="quiet-last"><b>Без движения {{ q.days }} {{ plural(q.days, 'день', 'дня', 'дней') }}</b> — {{ quiet_last(q) }}</p>
+      <form class="quiet-note" method="post" action="/commitments/{{ c.id }}/log" data-quiet-form="note">
+        <label for="qn-{{ c.id }}">Что сейчас по задаче — запишется в ход</label>
+        <div class="quiet-row"><input type="text" id="qn-{{ c.id }}" name="text" required placeholder="Например: Олег вернётся 16.11, тогда подпишем">
+          <button class="btn primary">Записать</button></div>
+      </form>
+      <div class="quiet-acts">
+        <form class="inline" method="post" action="/commitments/{{ c.id }}/log/collect" data-quiet-form="collect"><button class="btn" title="Claude поищет по задаче в переписке, встречах и Kaiten и допишет ход — в фоне">Собрать ход с Claude</button></form>
+        {% if c.remind %}<button type="button" class="btn" data-reveal="qrem-{{ c.id }}" title="Напомнить: {{ c.who }}">Напомнить</button>{% endif %}
+        <form class="inline quiet-due" method="post" action="/commitments/{{ c.id }}/quiet" data-quiet-form="due"><input type="hidden" name="act" value="due">
+          <input type="date" name="due" required aria-label="Новый срок"><button class="btn" title="Перенести срок — и неделю не отмечать">Новый срок</button></form>
+        <form class="inline" method="post" action="/commitments/{{ c.id }}/quiet" data-quiet-form="snooze"><input type="hidden" name="act" value="snooze"><button class="btn" title="Неделю задача не будет отмечаться; потом — снова, если ничего не случится">Не трогать неделю</button></form>
+        <form class="inline" method="post" action="/commitments/{{ c.id }}/quiet" data-quiet-form="done"><input type="hidden" name="act" value="done"><button class="btn ok">{{ icons.icon('check', 14) }} Уже сделано</button></form>
+      </div>
+      {% if c.remind %}<div class="quiet-remind" id="qrem-{{ c.id }}" hidden>{{ remind_form(c, compact=True) }}</div>{% endif %}
+      <p class="bad-text small" data-quiet-err hidden></p>
+      <div class="dlg-actions"><span class="grow"></span><button type="button" class="btn ghost" data-quiet-next title="Решить потом: задача останется в разборе">Не сейчас</button></div>
+    </div>
+    {% endfor %}
+    <div class="due-end" data-quiet-end hidden>
+      <p data-quiet-sum></p>
+      <div class="dlg-actions"><button type="button" class="btn primary" data-dlg-close>Закрыть</button></div>
+    </div>
+  </div>
+</dialog>
 {% endmacro %}
 
 {% macro due_dialog(tasks, choices, meetings={}) %}
@@ -609,6 +675,7 @@
         {%- if c.archived %} · в архиве{% endif %}
       </div>
       {{ task_now(c) }}
+      {% if c.quiet %}{{ quiet_hint(c) }}{% endif %}
       {{ prio_row(c) }}
       {{ dayui.estimate_row(c) }}
       {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
