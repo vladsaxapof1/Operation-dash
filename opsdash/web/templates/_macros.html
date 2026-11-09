@@ -349,6 +349,46 @@
 {%- if c.direction == 'mine' %}{{ c.whom or '' }}{% elif c.direction == 'to_me' %}{{ c.who or '' }}{% else %}{{ c.who or '?' }} → {{ c.whom or '—' }}{% endif -%}
 {%- endmacro %}
 
+{% macro prio_tip(p) -%}
+{{ p.title }} — {% if p.manual %}поставили вы{% if p.set_at %} {{ p.set_at | local('%d.%m') }}{% endif %}; авто — {{ p.auto_title | lower }}{% else %}авто{% endif %}{% if p.why %}: {{ p.why }}{% endif %}
+{%- endmacro %}
+
+{% macro prio_chip(c, menu=True) %}
+{#- приоритет (opsdash.priorities): чип справа на карточке — «Срочно» красный, «Высокий» оранжевый, «Обычный» бледный
+    пунктир, «Низкий» серый; поставили сами — с булавкой. Щелчок — меню: «Авто · …» с причиной и четыре уровня.
+    menu=False — просто чип (строка списка: там правка — в окне задачи) #}
+{%- set p = c.prio -%}
+{%- if p and menu %}
+<details class="menu prio-menu">
+  <summary class="prio p-{{ p.key }}{{ ' manual' if p.manual }}" title="{{ prio_tip(p) }}. Щёлкните, чтобы изменить"
+           aria-label="Приоритет: {{ p.title }}{{ ', поставили вы' if p.manual }}. Изменить">{{ p.title }}{% if p.manual %}{{ icons.icon('pin', 11) }}{% endif %}</summary>
+  <div class="menu-pop prio-pop">
+    <form method="post" action="/commitments/{{ c.id }}/priority">
+      <button class="menu-i{{ ' on' if not p.manual }}" name="level" value="auto" title="Считать самому: важность × срок">Авто · {{ p.auto_title }}{% if not p.manual %}{{ icons.icon('check', 14) }}{% endif %}</button>
+      {% if p.why %}<div class="menu-note prio-why" title="{{ p.why }}">{{ p.why }}</div>{% endif %}
+      <div class="menu-sep"></div>
+      {% for key, t in PRIORITY_LEVELS.items() %}<button class="menu-i pm-{{ key }}{{ ' on' if p.manual and p.key == key }}" name="level" value="{{ key }}" title="Закрепить — расчёт его не изменит">{{ t }}{% if p.manual and p.key == key %}{{ icons.icon('check', 14) }}{% endif %}</button>{% endfor %}
+    </form>
+  </div>
+</details>
+{%- elif p and (p.manual or p.key != 'normal') %}<span class="prio p-{{ p.key }}{{ ' manual' if p.manual }}" title="{{ prio_tip(p) }}">{{ p.title }}{% if p.manual %}{{ icons.icon('pin', 11) }}{% endif %}</span>
+{%- endif %}
+{% endmacro %}
+
+{% macro prio_row(c) %}
+{#- в окне задачи: «Авто · …» и четыре уровня; щелчок закрепляет уровень, окно остаётся открытым #}
+{% set p = c.prio %}
+{% if p %}
+<div class="est-row prio-row"><span class="est-l">Приоритет</span>
+  <form class="est" method="post" action="/commitments/{{ c.id }}/priority" aria-label="Приоритет"><input type="hidden" name="at" value="dlg">
+    <button class="est-c" name="level" value="auto" aria-pressed="{{ 'false' if p.manual else 'true' }}" title="Считать самому: важность × срок">Авто · {{ p.auto_title }}</button>
+    {%- for key, t in PRIORITY_LEVELS.items() %}<button class="est-c pc-{{ key }}" name="level" value="{{ key }}" aria-pressed="{{ 'true' if p.manual and p.key == key else 'false' }}" title="Закрепить — расчёт его не изменит">{{ t }}</button>{% endfor -%}
+  </form>
+  <span class="muted small">{% if p.manual %}поставили вы{% if p.set_at %} {{ p.set_at | local('%d.%m') }}{% endif %}{% if p.why %} · авто: {{ p.why }}{% endif %}{% else %}{{ p.why or 'ничего не торопит' }}{% endif %}</span>
+</div>
+{% endif %}
+{% endmacro %}
+
 {% macro task_card(c, meetings={}, show_project=True, full=False) %}
 {#- карточка на доске (3.5): ровно две строки — название и «человек · срок». Клик раскрывает её на месте: зависимости,
     кнопки «готово / в работе / напомнить» и «открыть» (окно задачи). Второй клик сворачивает (app.js).
@@ -362,6 +402,7 @@
 {% set person = card_person(c) | trim %}
 <div class="task{{ ' full' if full }}{{ ' overdue' if c.overdue }}{{ ' inwork' if c.in_work and c.status == 'open' }}{{ ' done' if c.status != 'open' }}{{ ' archived' if c.archived }}" data-task="{{ c.id }}" data-expand
      role="button" tabindex="0" aria-expanded="false"{% if c.status == 'open' and not c.seen_at %} data-new="{{ c.id }}"{% endif %}{% if rel %} data-rel="{{ rel | join(' ') }}"{% endif %}>
+  {{ prio_chip(c) }}
   <div class="task-what" title="{{ c.what }}">{{ c | headline }}</div>
   <div class="task-meta">
     {%- if person %}{{ person }} · {% endif -%}
@@ -568,6 +609,7 @@
         {%- if c.archived %} · в архиве{% endif %}
       </div>
       {{ task_now(c) }}
+      {{ prio_row(c) }}
       {{ dayui.estimate_row(c) }}
       {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
       {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}

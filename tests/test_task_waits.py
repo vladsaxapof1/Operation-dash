@@ -2,6 +2,7 @@
 похожие задачи при добавлении. Пример — запуск склада: схемы Дмитрия → ответы на вопросы → описание
 подрядчику → схемы в карточку проекта, а «Процессы по карте склада» — дубль схем."""
 
+from datetime import timedelta
 from urllib.parse import unquote
 
 import pytest
@@ -67,8 +68,9 @@ def test_waits_blocked_holds_and_no_loops():
 def test_wait_risk_and_events():
     schemes, _, answers, contractor, archive = _warehouse()
     records.add_wait(archive, waits_for=contractor)
-    store.execute("UPDATE commitments SET due='2026-11-05' WHERE id=?", (archive,))
-    store.execute("UPDATE commitments SET due='2026-11-07' WHERE id=?", (contractor,))
+    soon = lambda days: (records.today_local() + timedelta(days=days)).isoformat()  # noqa: E731 — сроки впереди
+    store.execute("UPDATE commitments SET due=? WHERE id=?", (soon(3), archive))
+    store.execute("UPDATE commitments SET due=? WHERE id=?", (soon(5), contractor))
     assert "позже срока" in records.get_commitment(archive)["wait_risk"]
     store.execute("UPDATE commitments SET due='2020-01-01' WHERE id=?", (contractor,))
     risk = records.get_commitment(archive)["wait_risk"]

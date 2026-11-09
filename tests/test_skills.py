@@ -39,7 +39,7 @@ def test_manifest_covers_every_skill_folder():
 
 def test_catalog_statuses(settings_with):
     cat = skills.catalog()
-    assert cat["total"] == len(skills.all_skills()) == 15
+    assert cat["total"] == len(skills.all_skills()) == 16
     assert find(cat, "triage")["kind"] == "need" and "переписка" in find(cat, "triage")["label"]
     assert find(cat, "anthology")["kind"] == "off"  # «База знаний» в архиве
     assert find(cat, "digest")["kind"] == "idle"

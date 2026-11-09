@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from opsdash import __version__, briefs, config, digests, overview, proposals, records, store, worklog
+from opsdash import __version__, briefs, config, digests, overview, priorities, proposals, records, store, worklog
 from opsdash import day as day_mod
 from opsdash.web import agent_views, decisions_views, settings_views, skills_views, welcome_views
 
@@ -226,6 +226,7 @@ templates.env.filters.update(dur=day_mod.dur, hm=day_mod.hm, est=day_mod.est_tex
 from opsdash import brain as _brain  # noqa: E402
 
 templates.env.globals.update(assistant=_brain.name)  # «Claude» или «ChatGPT» — для макросов (ход задачи)
+templates.env.globals.update(PRIORITY_LEVELS=priorities.LEVELS)  # Срочно / Высокий / Обычный / Низкий
 templates.env.globals.update(DAY_CHIPS=day_mod.CHIPS, SPLIT_HINT=day_mod.SPLIT_HINT,
                              day_people=lambda: [p["name"] for p in records.list_people()])  # «Передать» — кому
 
@@ -826,9 +827,9 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     show_archived = archived == "1" or status == "archived"  # status=archived — ссылки из прошлой версии
     status = "all" if status == "archived" else status
     person, q = person.strip(), q.strip()
-    # сортировку запоминаем в cookie: по умолчанию — по сроку, «сначала новые» — по дате появления
-    sort = sort if sort in records.SORTS else request.cookies.get("task_sort", "due")
-    sort = sort if sort in records.SORTS else "due"
+    # сортировку запоминаем в cookie: по умолчанию — по приоритету, ещё — по сроку и «сначала новые»
+    sort = sort if sort in records.SORTS else request.cookies.get("task_sort", "priority")
+    sort = sort if sort in records.SORTS else "priority"
     dates = {"created": records.period(created, created_from, created_to) if created else None,
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
              "no_due": due == "none", "unseen": new == "1"}
@@ -1085,6 +1086,19 @@ def commitment_state(request: Request, cid: int, state: str = Form("")):
     if state == "wait" and not records.get_commitment(cid)["blocked"]:
         return _back_task(request, cid, err="Укажите, чего ждёт задача: «+ связь» в окне задачи")
     return _back_task(request, cid, {"new": "Задача — новая", "work": "Задача в работе", "wait": "Задача ждёт"}[state])
+
+
+@app.post("/commitments/{cid}/priority")
+def commitment_priority(request: Request, cid: int, level: str = Form(""), at: str = Form("")):
+    """Приоритет вручную: меню у чипа на карточке и строка «Приоритет» в окне задачи (at=dlg — окно остаётся открытым).
+    Уровень закрепляется — расчёт его не меняет; auto — снова по расчёту."""
+    try:
+        key = priorities.parse_level(level)
+        priorities.set_level(cid, key)
+    except ValueError as e:
+        return back(request, err=str(e))
+    msg = f"Приоритет — {priorities.LEVELS[key]}, закреплён" if key else "Приоритет снова считается сам"
+    return _back_task(request, cid, msg) if at == "dlg" else back(request, msg)
 
 
 @app.post("/commitments/{cid}/work")

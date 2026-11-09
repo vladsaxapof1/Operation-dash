@@ -1100,6 +1100,30 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .task.open, .task.open:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow-raised); cursor: default; }
 .task.rel-hl { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-card); }
 .task-what { font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+/* приоритет (opsdash.priorities): чип справа в строке названия; щелчок — меню «Авто · …» и четыре уровня.
+   «Срочно» — красный, «Высокий» — оранжевый, «Обычный» — бледный пунктир, «Низкий» — серый; поставили сами — булавка */
+.prio-menu { float: right; margin: 0 -4px 2px 8px; }
+.prio { display: inline-flex; align-items: center; gap: 3px; padding: 0 8px; border: 1px solid transparent; border-radius: 999px;
+  font-size: 12px; line-height: 19px; white-space: nowrap; cursor: pointer; user-select: none; }
+.prio .ico { margin-right: -2px; }
+.prio.p-urgent { background: var(--bad-soft); color: var(--bad-text); font-weight: 600; }
+.prio.p-high { background: var(--warn-soft); color: var(--warn-text); }
+.prio.p-normal { color: var(--faint); border-style: dashed; border-color: var(--line-strong); }
+.prio.p-low { background: var(--sunken); color: var(--muted); }
+.prio-menu > summary.prio:hover { box-shadow: 0 0 0 1px var(--line-strong); }
+.prio-menu[open] > summary.prio { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.prio-menu[open] > summary.p-normal { background: var(--panel); color: var(--muted); }
+.prio-pop { min-width: 240px; cursor: default; }
+.prio-pop .menu-i { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prio-pop .menu-i.on { color: var(--accent); font-weight: 600; }
+.prio-pop .menu-i.pm-urgent { color: var(--bad-text); }
+.prio-pop .menu-i.pm-high { color: var(--warn-text); }
+.prio-pop .menu-i.pm-low { color: var(--muted); }
+.prio-why { white-space: normal; max-width: 260px; padding-top: 0; }
+.c-what > .prio { margin-left: 8px; vertical-align: 1px; cursor: default; }
+.prio-row .est-c.pc-urgent[aria-pressed="true"] { border-color: var(--bad-text); background: var(--bad-soft); color: var(--bad-text); }
+.prio-row .est-c.pc-high[aria-pressed="true"] { border-color: var(--warn-text); background: var(--warn-soft); color: var(--warn-text); }
+.prio-row .est-c.pc-low[aria-pressed="true"] { border-color: var(--muted); background: var(--panel-2); color: var(--muted); }
 .task-meta { margin-top: 3px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .task-wait { display: inline-flex; align-items: center; gap: 3px; vertical-align: bottom; }
 /* новая задача (добавил Claude, вы её ещё не видели) — синяя точка перед названием; исчезает, когда курсор

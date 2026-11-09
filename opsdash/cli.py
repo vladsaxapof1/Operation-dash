@@ -18,7 +18,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from opsdash import config, records, store, worklog
+from opsdash import config, priorities, records, store, worklog
 
 
 def out(text: str = "") -> None:
@@ -746,6 +746,13 @@ def _commitment_line(c: dict) -> str:
         line += f" · до {c['due']}" + (" (ПРОСРОЧЕНО)" if c.get("overdue") else "")
     if c["status"] != "open":
         line += f" · {c['status']}"
+    if p := c.get("prio"):
+        line += f" · приоритет {p['title']}" + (" (поставила директор)" if p["manual"] else "") \
+            + (f" — {p['why']}" if p["why"] and not p["manual"] else "")
+    # важность — если её нет в «почему» приоритета: обычная (оценена) или уровень поставила директор
+    if c.get("importance") and c["status"] == "open" and (c["importance"] == "normal" or (p and p["manual"])):
+        line += f" · важность {priorities.IMPORTANCE[c['importance']]}" \
+            + (f": {c['importance_why']}" if c.get("importance_why") else "")
     if c.get("in_work"):
         line += " · в работе"
     if c.get("ball_back_at") and c["status"] == "open":
@@ -799,7 +806,8 @@ def _commitment_line(c: dict) -> str:
 
 def cmd_commitments(a) -> None:
     if a.action == "list":
-        items = records.list_commitments(status=a.status, direction=a.direction, person=a.person, overdue=a.overdue)
+        items = records.list_commitments(status=a.status, direction=a.direction, person=a.person, overdue=a.overdue,
+                                         sort=a.sort)
         if a.json:
             return as_json(items)
         for c in items:
@@ -817,6 +825,8 @@ def cmd_commitments(a) -> None:
         except ValueError as e:
             fail(str(e))
         out(f"Обещание [{cid}] сохранено" + (f" как часть задачи [{a.parent}]" if a.parent else ""))
+        if a.importance:
+            _importance(cid, a.importance, a.importance_why)
         if a.estimate:
             _estimate(cid, a.estimate)
         if a.direction == "mine" and a.due:
@@ -957,10 +967,52 @@ def cmd_commitments(a) -> None:
             except ValueError as e:
                 fail(str(e))
         out("Сохранено")
+        if a.importance:
+            _importance(a.id, a.importance, a.importance_why)
+        if a.priority:
+            try:
+                level = priorities.parse_level(a.priority)
+                priorities.set_level(a.id, level)
+            except ValueError as e:
+                fail(str(e))
+            out(f"Приоритет: {priorities.LEVELS[level]} — закреплён, расчёт его не меняет" if level
+                else "Приоритет снова считается сам")
         if a.estimate:
             _estimate(a.id, a.estimate)
         if a.agent is not None:
             _agent_hint(a.id, a.agent)
+    elif a.action == "importance":
+        if a.set:
+            try:
+                batch = priorities.parse_batch(a.set)
+                for cid, value, why in batch:
+                    priorities.set_importance(cid, value, why)
+            except ValueError as e:
+                fail(str(e))
+            out(f"Важность сохранена: {len(batch)}")
+            return
+        items = priorities.unassessed()
+        if a.json:
+            return as_json(items)
+        for c in items:
+            d = {"mine": "задача директора", "to_me": f"должен директору: {c['who'] or '?'}"}[c["direction"]]
+            out(f"[{c['id']}] «{records.headline(c)}» ({d} → {c['whom'] or '?'}): {short(c['what'], 300)}"
+                + (f" · до {c['due']}" if c["due"] else "") + (f" · цитата: «{short(c['quote'], 200)}»" if c["quote"] else "")
+                + (f" · источник {c['source_type']}" if c["source_type"] else ""))
+        if not items:
+            out("У всех открытых задач директора и «мне должны» важность оценена.")
+
+
+def _importance(cid: int, value: str, why: str | None) -> None:
+    """--importance: оценка важности (Claude). Срок PULSE учитывает сам; уровень директора она не меняет."""
+    try:
+        priorities.set_importance(cid, value, why)
+    except ValueError as e:
+        fail(str(e))
+    c = records.get_commitment(cid)
+    p = c.get("prio") if c else None
+    out(f"Важность: {priorities.IMPORTANCE[value]}" + (f" · приоритет сейчас: {p['title']}" if p else "")
+        + (" (директор поставила сама — не меняется)" if p and p["manual"] else ""))
 
 
 def _agent_hint(cid: int, why: str) -> None:
@@ -1795,6 +1847,8 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--direction", choices=["mine", "to_me", "other"])
     x.add_argument("--person")
     x.add_argument("--overdue", action="store_true")
+    x.add_argument("--sort", default="due", choices=list(records.SORTS),
+                   help="priority — Срочно → Низкий (внутри по сроку); due — по сроку; created — новые сверху")
     x = ms.add_parser("add")
     x.add_argument("--direction", required=True, choices=["mine", "to_me", "other"],
                    help="mine — обещала директор; to_me — обещали директору; other — между коллегами")
@@ -1814,6 +1868,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--project", type=int, help="в проект с этим id (./ops projects list)")
     x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин: 15, 30, 60, 120, 240 (полдня)")
     x.add_argument("--agent", help="можно поручить агенту: что он сделает («собрать сводку из выгрузки CRM»)")
+    x.add_argument("--importance", choices=list(priorities.IMPORTANCE),
+                   help="важность без учёта срока: high — руководителю, клиенту, деньги, «срочно»; low — «когда будет время»")
+    x.add_argument("--importance-why", help="почему, 2–6 слов: «обещано собственнику»")
     x = ms.add_parser("set")
     x.add_argument("id", type=int)
     x.add_argument("--status", choices=["open", "done", "cancelled"])
@@ -1833,6 +1890,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "YYYY-MM-DD — не напоминать до этой даты; off — больше не напоминать (до нового срока); on — снова")
     x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин (оценку директора Claude не меняет)")
     x.add_argument("--agent", help="можно поручить агенту: что он сделает; \"\" — снять пометку")
+    x.add_argument("--priority", metavar="urgent|high|normal|low|auto",
+                   help="приоритет, который поставила директор (только по её просьбе): закреплён, расчёт его не меняет; "
+                        "auto — снова по расчёту")
+    x.add_argument("--importance", choices=list(priorities.IMPORTANCE),
+                   help="оценка важности Claude: high | normal | low (срок PULSE учтёт сам)")
+    x.add_argument("--importance-why", help="почему, 2–6 слов")
+    x = ms.add_parser("importance", help="задачи без оценки важности; --set — сохранить оценки пачкой")
+    x.add_argument("--set", metavar="\"<id>=<high|normal|low>:<почему>; …\"",
+                   help="«12=high:обещано собственнику; 15=low:заявка в HR»")
     x = ms.add_parser("wait", help="задача ждёт другую задачу или событие: без него её не закончить")
     x.add_argument("id", type=int, help="задача, которая ждёт")
     x.add_argument("--for", dest="waits_for", type=int, help="id задачи, которую она ждёт")

@@ -523,6 +523,11 @@ MIGRATIONS = [
     # вопрос (2–4 слова: «Розница: веса тимлида») и что по нему решено после этого решения — коротко (2.0.22)
     ("anthology", "question", "TEXT"),
     ("anthology", "answer", "TEXT"),
+    # приоритет задачи (opsdash.priorities): важность — оценка Claude; уровень, который директор поставила сама
+    ("commitments", "importance", "TEXT"),        # high | normal | low; пусто — не оценена (считаем обычной)
+    ("commitments", "importance_why", "TEXT"),    # почему: «обещано собственнику», «сказали „горит“»
+    ("commitments", "priority_user", "TEXT"),     # urgent | high | normal | low; пусто — по расчёту («Авто»)
+    ("commitments", "priority_user_at", "TEXT"),
 ]
 
 

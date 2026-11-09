@@ -507,6 +507,13 @@ def job_estimates(**_) -> str:
     return day.job_estimates()
 
 
+def job_importance(**_) -> str:
+    """Важность у задач без оценки — из неё и срока считается приоритет (opsdash.priorities, навык priorities)."""
+    from opsdash import priorities
+
+    return priorities.job_importance()
+
+
 def _first_finds() -> str:
     """«Первые находки» после мастера первого запуска (opsdash.welcome)."""
     from opsdash import welcome
@@ -542,6 +549,7 @@ REGISTRY = {
     "update": job_update,
     "restart": job_restart,
     "estimates": job_estimates,
+    "importance": job_importance,
     "first-finds": lambda **kw: _first_finds(),
     "lessons": job_lessons,
     "decisions": job_decisions,
@@ -577,6 +585,7 @@ TITLES = {
     "update": "Обновление PULSE",
     "restart": "Перезапуск PULSE",
     "estimates": "Оценки времени у задач (Claude)",
+    "importance": "Важность задач (Claude)",
     "first-finds": "Первые находки: разбор переписки за 5 дней (Claude)",
     "lessons": "Уроки из ваших «Нет» (Claude)",
     "decisions": "Решения: цепочки по темам (Claude)",
@@ -761,6 +770,7 @@ def _weekly(key: str, weekday: int, at: str, settings: dict) -> str | None:
 
 
 TRIAGE_GAP = 10  # минут
+IMPORTANCE_GAP = 120  # минут: оценка важности новых задач (opsdash.priorities)
 
 
 def tick(settings: dict | None = None) -> list[str]:
@@ -845,6 +855,12 @@ def tick(settings: dict | None = None) -> list[str]:
             go("estimates", "heavy")
         else:
             store.set_state(day.BACKFILL, config.now(settings).date().isoformat())
+    # приоритет: важность у задач, где её ещё нет (появились до приоритетов, добавлены вручную или навык при записи
+    # не увидел ничего особенного) — лёгкая модель пачкой, в рабочее время, не чаще раза в IMPORTANCE_GAP минут
+    from opsdash import priorities
+
+    if in_work_hours(settings) and _due("importance", IMPORTANCE_GAP) and priorities.unassessed(limit=1):
+        go("importance", "heavy")
     return started
 
 

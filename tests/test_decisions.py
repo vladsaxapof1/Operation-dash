@@ -1,12 +1,12 @@
 """Решения по темам (MEM-3; 2.0.21 — цепочки, 2.0.22 — вопросы): темы и «о чём», вопросы и что решено сейчас,
 история «меняет / уточняет / продолжает / отменяет», следующий шаг, сигналы для дайджеста, решения встречи, задачи."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from starlette.testclient import TestClient
 
-from opsdash import anthology, decisions, jobs, records, store
+from opsdash import anthology, config, decisions, jobs, records, store
 
 REF = "http://localhost:8765"
 
@@ -274,6 +274,8 @@ def test_one_time_chains_backfill_after_update(monkeypatch):
     started = []
     monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: started.append(name) or True)
     monkeypatch.setattr(jobs, "in_work_hours", lambda *a, **k: True)
+    # вторник: в понедельник «decisions» запускается ещё и по расписанию — тест не должен зависеть от дня недели
+    monkeypatch.setattr(config, "now", lambda s=None: datetime(2026, 11, 10, 12, 0, tzinfo=config.tz(s)))
     jobs.tick()
     jobs.tick()
     assert started.count("decisions") == 1  # один раз — дальше по понедельникам и по кнопке

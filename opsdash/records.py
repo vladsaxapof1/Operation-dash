@@ -1161,15 +1161,16 @@ def _person_by_name(name: str, people: list[dict]) -> dict | None:
     return hits[0] if len(hits) == 1 else None
 
 
-SORTS = {"due": "по сроку", "created": "сначала новые"}
+SORTS = {"priority": "по приоритету", "due": "по сроку", "created": "сначала новые"}
 
 
 def list_commitments(*, status: str | None = "open", direction: str | None = None, person: str | None = None,
                      overdue: bool = False, q: str | None = None, limit: int = 500, created: Period | None = None,
                      due: Period | None = None, no_due: bool = False, unseen: bool = False,
                      sort: str = "due", archived: bool = False, project: int | str | None = None) -> list[dict]:
-    """sort: due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху.
-    Задачи «в работе» — всегда первыми. Архивные — только с archived=True (галочка «Показать архивные»),
+    """sort: priority — Срочно → Высокий → Обычный → Низкий, внутри — по сроку (opsdash.priorities.sort_key);
+    due — ближайший срок сверху, без срока в конце; created — последние добавленные сверху. По сроку и по новым
+    задачи «в работе» — всегда первыми, по приоритету — первыми среди равных. Архивные — только с archived=True (галочка «Показать архивные»),
     в конце; status="archived" — только архив, любой статус (./ops commitments list)."""
     where, params = _filters(person, q, created, due, no_due, unseen, project)
     sql = "SELECT * FROM commitments WHERE 1=1" + where
@@ -1195,7 +1196,13 @@ def list_commitments(*, status: str | None = "open", direction: str | None = Non
     else:
         sql += f" ORDER BY {first}, CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, created DESC LIMIT ?"
     params.append(limit)
-    return _mark(store.rows(sql, params))
+    items = _mark(store.rows(sql, params))
+    if sort == "priority" and status != "archived":
+        from opsdash import priorities
+
+        items.sort(key=lambda c: c.get("created") or "", reverse=True)  # равные по приоритету — новые сверху
+        items.sort(key=priorities.sort_key)
+    return items
 
 
 def get_commitment(cid: int) -> dict | None:
@@ -1231,7 +1238,8 @@ def _relations(items: list[dict]) -> None:
     ids = [c["id"] for c in items]
     parents = list({c["parent_id"] for c in items if c.get("parent_id")})
     related = store.rows(
-        "SELECT id, direction, who, whom, title, what, due, status, parent_id FROM commitments WHERE status != 'cancelled' "
+        "SELECT id, direction, who, whom, title, what, due, status, parent_id, archived_at, importance, priority_user "
+        "FROM commitments WHERE status != 'cancelled' "
         f"AND (parent_id IN ({','.join('?' * len(ids))}) OR id IN ({','.join('?' * len(parents)) or 'NULL'}))",
         [*ids, *parents])
     by_id = {r["id"]: r for r in related}
@@ -1260,7 +1268,7 @@ def _relations(items: list[dict]) -> None:
     _items(items)
     pids = list({c["project_id"] for c in items if c.get("project_id")})
     titles = {r["id"]: r for r in store.rows(
-        f"SELECT id, title, status FROM projects WHERE id IN ({','.join('?' * len(pids)) or 'NULL'})", pids)}
+        f"SELECT id, title, status, due FROM projects WHERE id IN ({','.join('?' * len(pids)) or 'NULL'})", pids)}
     for c in items:
         c["project"] = titles.get(c.get("project_id"))
         c["merge_hint"] = merge_hints.get(c["id"]) if c["status"] == "open" else None
@@ -1274,10 +1282,11 @@ def _relations(items: list[dict]) -> None:
         c["late_vs_parent"] = bool(c["parent"] and c["status"] == "open" and c["due"] and c["parent"]["due"]
                                    and c["due"] > c["parent"]["due"])
         c["done_hint"] = hints.get(c["id"]) if c["status"] == "open" else None
-    from opsdash import task_meetings
+    from opsdash import priorities, task_meetings
 
     task_meetings.decorate(items)
     worklog.decorate(items)
+    priorities.decorate(items)  # после связей, встречи и хода: приоритет учитывает их все
 
 
 def _waits(items: list[dict]) -> None:
@@ -1292,7 +1301,8 @@ def _waits(items: list[dict]) -> None:
     want = {l["waits_for"] for l in links if l["waits_for"]} | {l["task_id"] for l in links} | {
         c["duplicate_of"] for c in items if c.get("duplicate_of")}
     tasks = {r["id"]: r for r in store.rows(
-        "SELECT id, direction, who, whom, title, what, due, status, closed_at, archived_at, kaiten_card_id "
+        "SELECT id, direction, who, whom, title, what, due, status, closed_at, archived_at, kaiten_card_id, importance, "
+        "priority_user "
         f"FROM commitments WHERE id IN ({','.join('?' * len(want)) or 'NULL'})", list(want))}
     # блокировки в Kaiten у карточек этих задач: есть ли там уже то, что задача ждёт (kaiten.sync_blockers)
     cards = [c["kaiten_card_id"] for c in items if c.get("kaiten_card_id")]
