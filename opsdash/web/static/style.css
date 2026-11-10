@@ -1511,6 +1511,9 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .doc.summary li { margin: 3px 0; }
 .doc.summary strong { font-weight: 600; }
 .doc.summary a.task-ref { background: none; padding: 0; font-size: 13px; font-weight: 400; }
+/* «Сделать задачей» у пункта «Открытых вопросов» (records.link_questions): тихая ссылка, ярче — при наведении на пункт */
+.doc.summary a.q-task { margin-left: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.doc.summary li:hover a.q-task, .doc.summary a.q-task:focus-visible { color: var(--accent); }
 @media (max-width: 1000px) { .mpage-side { max-width: none; } }
 .doc .tc { font-size: 13px; color: var(--muted); }
 .side-t.linkish { text-align: left; }

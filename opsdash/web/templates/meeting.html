@@ -126,6 +126,9 @@
     <section class="card"><div class="card-b" style="padding-top:18px">
       {% if summary %}<div class="doc summary">{{ summary | md | timecodes }}</div>{% else %}<div class="muted">Разбора ещё нет{% if transcript %} — <a href="?tab=transcript">расшифровка готова</a>{% endif %}.</div>{% endif %}
     </div></section>
+    {#- «Сделать задачей» у пунктов «Открытых вопросов» (records.link_questions) — окна вне разбора #}
+    {% for q in questions %}{{ ui.question_task_dialog(m, q, due_choices) }}{% endfor %}
+    {% if questions %}<datalist id="q-people">{% for p in people %}<option value="{{ p.name }}">{% endfor %}</datalist>{% endif %}
     {% endif %}
     <p class="muted small">Файлы встречи: {{ folder_rel }}{% if m.updated and m.status == 'processed' %} · разбор сделан {{ m.updated | local('%d.%m в %H:%M') }}{% endif %}</p>
   </div>

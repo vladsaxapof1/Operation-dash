@@ -74,6 +74,8 @@ def f_md(text: str, breaks: bool = True) -> str:
     out = re.sub(r"<code[^>]*>.*?</code>", lambda m: m.group(0).replace("&amp;lt;", "&lt;"), out, flags=re.S)
     # ссылки на задачи PULSE из разбора встречи (records.link_summary) — значком, а не обычной ссылкой
     out = out.replace('<a href="/commitments?task=', '<a class="task-ref" href="/commitments?task=')
+    # «Сделать задачей» у пункта «Открытых вопросов» (records.link_questions) — открывает окно на странице встречи
+    out = re.sub(rf'<a href="#({records.QUESTION_DLG}\d+)">', r'<a class="q-task" href="#\1" data-dlg-open="\1">', out)
     return UNSAFE_URL.sub(r'\1="#"', out)
 
 
@@ -2076,6 +2078,10 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
 
     decisions_ = sorted(decisions.items(meeting=mid, current=False), key=lambda r: r["id"])
     summary = decisions.link_summary(summary, decisions_)  # пункты «Решений» — со ссылками на решения в их темах
+    # «Открытые вопросы»: ставший задачей пункт — ссылкой на неё, остальные — «Сделать задачей» (окна — questions)
+    summary, questions = records.link_questions(summary, commitments_)
+    for q in questions:  # в окне — что сказали в записи у отметки пункта
+        q["quote"] = records.transcript_quote(mid, q["tc"])
     followup, followup_auto = records.followup_text(mid)
     meta_path = records.meeting_dir(mid) / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
@@ -2093,7 +2099,30 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
                   describe=proposals.describe, speakers=[s for s in speakers if len(speakers) <= 4 or not s["short"] or s["who"]],
                   short_speakers=[s for s in speakers if len(speakers) > 4 and s["short"] and not s["who"]], guesses=guesses,
                   people=records.list_people(), can_tidy=len(speakers) > 1 and not (records.meeting_dir(mid) / voice.PRINTS_FILE).exists(),
-                  recording=recording, memory=recordings.memory(mid))
+                  recording=recording, memory=recordings.memory(mid), questions=questions,
+                  due_choices=due_choices() if questions else [])
+
+
+@app.post("/meetings/{mid}/question-task")
+def meeting_question_task(request: Request, mid: str, title: str = Form(""), what: str = Form(""),
+                          direction: str = Form("mine"), who: str = Form(""), whom: str = Form(""), due: str = Form(""),
+                          tc: str = Form("")):
+    """«Сделать задачей» у пункта «Открытых вопросов» в разборе встречи: это не вопрос, а работа — задача на доске,
+    источник — встреча, цитата — реплика расшифровки с отметкой пункта."""
+    try:
+        cid = records.question_to_task(mid, title=title, what=what, direction=direction, who=who, whom=whom,
+                                       due=due or None, tc=tc)
+    except ValueError as e:
+        return back(request, err=str(e), to=f"/meetings/{mid}")
+    c = store.row("SELECT * FROM commitments WHERE id=?", (cid,))
+    column = dict(BOARD_TITLES).get(c["direction"], "Задачи")
+    similar = [s for s in records.similar_open(direction=c["direction"], who=c["who"] or "", whom=c["whom"] or "",
+                                               title=c["title"] or "", what=c["what"], exclude=cid)
+               if s["similarity"] >= 0.5]
+    if similar:
+        return back(request, f"Задача «{records.headline(c)}» — в «{column}». Похожая уже есть: «{similar[0]['headline']}» "
+                             "— если это одно и то же, откройте новую и выберите «Это дубль задачи…»", to=f"/meetings/{mid}")
+    return back(request, f"Задача «{records.headline(c)}» — в «{column}»", to=f"/meetings/{mid}")
 
 
 @app.post("/meetings/{mid}/speaker")

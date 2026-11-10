@@ -19,6 +19,39 @@
 </li>
 {% endmacro %}
 
+{% macro question_task_dialog(m, q, choices=[]) %}
+{#- «Сделать задачей» у пункта «Открытых вопросов» в разборе встречи (records.link_questions): у вопроса есть
+    исполнитель и результат — это работа. Окно заполнено по пункту: заголовок — коротко, подробности — пункт целиком.
+    Источник задачи — встреча, цитата — реплика расшифровки с отметкой пункта. Срок — плитки или своя дата (app.js) #}
+{% set short = q.title %}
+<dialog class="dlg dlg-att-task" id="q-task-{{ q.n }}" aria-labelledby="q-task-title-{{ q.n }}">
+  <form class="dlg-box dlg-form" method="post" action="/meetings/{{ m.id }}/question-task" tabindex="-1">
+    <input type="hidden" name="tc" value="{{ q.tc }}">
+    <div class="dlg-head"><h2 class="dlg-title" id="q-task-title-{{ q.n }}">Сделать задачей</h2>
+      <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    <div class="dlg-meta">Открытый вопрос встречи «{{ m.title or m.id }}»{% if m.started_at %} · {{ m.started_at | local('%d.%m') }}{% endif %}</div>
+    {% if q.quote %}<blockquote class="dlg-quote att-task-quote">{{ q.quote }}</blockquote>{% endif %}
+    <label for="q-task-t-{{ q.n }}">Задача</label>
+    <input type="text" id="q-task-t-{{ q.n }}" name="title" required maxlength="120" value="{{ short }}" placeholder="Коротко, например: дашборд воронки">
+    <label for="q-task-w-{{ q.n }}">Подробности</label>
+    <textarea id="q-task-w-{{ q.n }}" name="what" rows="3" placeholder="Что именно сделать, в каком виде, кому прислать">{{ q.text if q.text != short else '' }}</textarea>
+    <label for="q-task-d-{{ q.n }}">Тип</label>
+    <select id="q-task-d-{{ q.n }}" name="direction">{% for key, title in [('mine', 'Моя задача'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}<option value="{{ key }}">{{ title }}</option>{% endfor %}</select>
+    <div class="form-row">
+      <div><label>Кто делает</label><input type="text" name="who" list="q-people" placeholder="пусто — вы"></div>
+      <div><label>Кому</label><input type="text" name="whom" list="q-people" placeholder="кому сказали, для кого результат"></div>
+    </div>
+    <label>Срок</label>
+    <div class="due-pick" role="group" aria-label="Срок" data-date-pick>
+      {% for ch in choices[:4] %}<button type="button" class="due-q" data-date="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
+    </div>
+    <label class="due-own">или своя дата <input type="date" name="due"></label>
+    <div class="dlg-actions"><button class="btn primary">Создать задачу</button><button type="button" class="btn ghost" data-dlg-close>Отмена</button>
+      <span class="muted small">Задача запомнит встречу{% if q.quote %} и реплику из записи{% endif %}</span></div>
+  </form>
+</dialog>
+{% endmacro %}
+
 {% macro att_task_dialog(a, choices=[]) %}
 {#- «Сделать задачей» у строки «Ответить» (Сводка): одного ответа мало — по сообщению нужна работа. Окно уже заполнено:
     заголовок — коротко из сути, подробности — суть целиком, «кому» — отправитель. Сообщение станет источником задачи

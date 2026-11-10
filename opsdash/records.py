@@ -1725,3 +1725,84 @@ def _table_header(lines: list[str], n: int) -> list[str]:
     while i > 0 and lines[i - 1].strip().startswith("|"):
         i -= 1
     return [x.lower() for x in _cells(lines[i].strip())]
+
+
+# --- «Открытые вопросы» разбора встречи: «Сделать задачей» ------------------------------------
+
+QUESTION_DLG = "q-task-"  # ссылка «Сделать задачей» у пункта ведёт на окно #q-task-<n> на странице встречи
+_TC = re.compile(r"\[(\d{1,2}:\d{2}:\d{2})\]")
+
+
+def link_questions(text: str, tasks: list[dict]) -> tuple[str, list[dict]]:
+    """«Открытые вопросы» разбора встречи. Пункт, который уже стал задачей, — со ссылкой на неё («задача →»), остальные —
+    с «Сделать задачей»: директор видит, что это не вопрос, а работа, и заводит задачу одним окном. Задачи, у которых
+    ссылка в разборе уже стоит (строка «Задач», «Договорённостей»), второй раз не ставим. Пункт и задачу сопоставляем
+    по смыслу, как в records.link_summary, — так задача, заведённая этой кнопкой, в следующий раз встанет ссылкой.
+    Второе значение — пункты без задачи для окон: {"n", "text", "title", "tc"} (title — название будущей задачи
+    из первой фразы пункта, tc — первая отметка времени пункта)."""
+    if not text:
+        return text, []
+    lines, section, items = text.split("\n"), "", []
+    for n, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            section = stripped.lstrip("#").strip().lower()
+        elif section.startswith("открыт") and re.match(r"([-*]|\d+\.)\s", line):  # пункты первого уровня
+            items.append(n)
+    if not items:
+        return text, []
+    used = {int(x) for x in re.findall(r"/commitments\?task=(\d+)", text)}
+    free = [c for c in tasks if c["id"] not in used]
+    for c in free:
+        c["_stems"] = _stems(f"{c.get('title') or ''} {c.get('what') or ''}")
+    linked = _match([(n, _stems(_question_text(lines[n])), set()) for n in items], free)
+    questions = []
+    for n in items:
+        if n in linked:
+            lines[n] = f"{lines[n].rstrip()} {_task_ref(linked[n])}"
+            continue
+        tc, said = _TC.search(lines[n]), _question_text(lines[n])
+        first = re.split(r"[.!?]\s+(?=[А-ЯЁA-Z«])", said, maxsplit=1)[0].rstrip(".")  # название — из первой фразы
+        questions.append({"n": n, "text": said, "title": headline({"what": first}), "tc": tc.group(1) if tc else ""})
+        lines[n] = f"{lines[n].rstrip()} [Сделать задачей](#{QUESTION_DLG}{n})"
+    return "\n".join(lines), questions
+
+
+def _question_text(line: str) -> str:
+    """Пункт «Открытых вопросов» простым текстом — суть будущей задачи: без маркера, отметок времени, выделения и ссылок."""
+    return _plain(re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", line))
+
+
+def transcript_quote(meeting_id: str, tc: str) -> str | None:
+    """Реплика расшифровки с отметкой «[чч:мм:сс]» — цитата для задачи: «[00:33:00] Соберу дашборд…» (без имени
+    говорящего, как в цитатах разбора). Нет такой отметки — None."""
+    if not tc:
+        return None
+    for line in read_meeting_file(meeting_id, "transcript.md").splitlines():
+        if line.startswith(f"[{tc}]"):
+            said = re.sub(r"^\[[^\]]+\]\s*(?:[^:\[\]]{1,60}:\s+)?", "", line).strip()
+            if said:
+                if len(said) > ATTENTION_QUOTE_MAX:
+                    said = said[:ATTENTION_QUOTE_MAX].rsplit(" ", 1)[0] + "…"
+                return f"[{tc}] {said}"
+    return None
+
+
+def question_to_task(meeting_id: str, *, title: str = "", what: str = "", direction: str = "mine",
+                     who: str | None = None, whom: str | None = None, due: str | None = None, tc: str = "") -> int:
+    """«Сделать задачей» у пункта «Открытых вопросов» на странице встречи: у вопроса есть исполнитель и результат — это
+    работа. Источник задачи — встреча, цитата — реплика расшифровки с отметкой пункта. Директор задачу уже видела —
+    без отметки «новая»; срок и важность, если не указала, PULSE спросит и оценит, как у остальных."""
+    if not get_meeting(meeting_id):
+        raise ValueError("Встреча не найдена")
+    title, what = " ".join((title or "").split()), (what or "").strip()
+    if not (title or what):
+        raise ValueError("Напишите, что сделать")
+    last = store.scalar("SELECT MAX(id) FROM commitments") or 0
+    cid = add_commitment(direction=direction, title=title or None, what=what or title, who=(who or "").strip() or None,
+                         whom=(whom or "").strip() or None, due=due or None, source_type="meeting",
+                         source_ref=meeting_id, quote=transcript_quote(meeting_id, tc))
+    if cid > last:  # новая, а не та же задача второй раз
+        worklog.event(cid, "Сделали задачей из «Открытых вопросов» встречи")
+    store.execute("UPDATE commitments SET seen_at=COALESCE(seen_at, ?) WHERE id=?", (store.utcnow(), cid))
+    return cid
