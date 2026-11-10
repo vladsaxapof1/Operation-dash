@@ -325,3 +325,27 @@ def test_collect_progress_edit_and_corner(client, monkeypatch):
     assert r.status_code == 400
     r = client.post(f"/commitments/{cid}/log/999/edit", data={"text": "x"}, headers={"Accept": "application/json"})
     assert r.status_code == 400
+
+
+def test_no_due_hint_for_director_task(capsys):
+    """Пётр просит подтвердить смету, директор отвечает «вечером с Олегом встреча, посмотрим»: задача без
+    срока не попадёт в план дня — add и log напоминают поставить срок; со сроком и у чужих задач — молчат."""
+    ask = _msg("telegram", "55", "1", "нужно подтверждение по смете", "2026-11-09T12:44:00+00:00", sender="Пётр")
+    ans = _msg("telegram", "55", "2", "Ладно, вечером с Олегом встреча, посмотрим", "2026-11-09T13:02:00+00:00",
+               sender="Пётр", outgoing=True)
+    cli.main(["commitments", "add", "--direction", "mine", "--whom", "Пётр", "--title", "Подтвердить смету",
+              "--what", "Подтвердить смету склада", "--source", f"telegram:{ask}"])
+    assert "нет срока" in capsys.readouterr().out
+    cid = store.scalar("SELECT MAX(id) FROM commitments")
+    cli.main(["commitments", "log", str(cid), "--text", "Обсудит вечером с Олегом", "--source", f"telegram:{ans}"])
+    assert f"commitments set {cid} --due" in capsys.readouterr().out
+    cli.main(["commitments", "set", str(cid), "--due", "2026-11-09"])
+    capsys.readouterr()
+    cli.main(["commitments", "log", str(cid), "--text", "Олег прокомментировал смету", "--kind", "note"])
+    assert "нет срока" not in capsys.readouterr().out
+
+    other, m = _phones()
+    cli.main(["commitments", "set", str(other), "--due", ""])
+    capsys.readouterr()
+    cli.main(["commitments", "log", str(other), "--text", "Олег вернётся в среду", "--source", f"telegram:{m['oleg']}"])
+    assert "нет срока" not in capsys.readouterr().out

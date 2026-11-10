@@ -874,6 +874,7 @@ def cmd_commitments(a) -> None:
             _estimate(cid, a.estimate)
         if a.direction == "mine" and a.due:
             _due_check(cid)
+        _no_due_hint(cid)
         if a.agent:
             _agent_hint(cid, a.agent)
         similar = records.similar_open(direction=a.direction, who=a.who, whom=a.whom, title=a.title, what=a.what,
@@ -981,6 +982,7 @@ def cmd_commitments(a) -> None:
             f"запись {lid}")
         if c["status"] != "open":
             out("Задача уже закрыта — если работа продолжается, скажи директору (вернуть — её решение)")
+        _no_due_hint(a.id)
     elif a.action == "merge":
         drop = records.get_commitment(a.id)
         if not drop:
@@ -1076,6 +1078,18 @@ def _due_check(cid: int) -> None:
             + (f" Реальнее {res['realistic']:%d.%m} — директору это предложит «Уточнить срок»; в разборе встречи "
                f"пометь у задачи: «срок под угрозой с самого начала — реальнее {res['realistic']:%d.%m}»"
                if res["realistic"] else ""))
+
+
+def _no_due_hint(cid: int) -> None:
+    """Задача директора без срока не попадает в план дня и легко теряется. Если в переписке или на встрече она сама
+    сказала, когда займётся («вечером посмотрю», «завтра гляну»), — это и есть срок: напомнить поставить его."""
+    c = store.row("SELECT direction, status, due, no_due_at, in_work_at FROM commitments WHERE id=?", (cid,))
+    if not c or c["direction"] != "mine" or c["status"] != "open" or c["due"] or c["no_due_at"] or c["in_work_at"]:
+        return
+    out("У задачи директора нет срока — в план дня она не попадёт. Директор сама сказала, когда займётся («вечером "
+        "посмотрю», «завтра гляну», «обсудим на встрече в среду»), или срок назвал тот, кто просит, — поставь: "
+        f"./ops commitments set {cid} --due YYYY-MM-DD (день считай от даты сообщения или встречи). Не прозвучал — "
+        "оставь без срока.")
 
 
 def _estimate(cid: int, value: int) -> None:
