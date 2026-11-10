@@ -32,11 +32,13 @@
       {%- else %}{{ open_cards | length }} {{ plural(open_cards | length, 'активная', 'активных', 'активных') }}{% if n_late %} · {{ n_late }} {{ plural(n_late, 'просрочена', 'просрочены', 'просрочено') }}{% endif %}{% endif %}
       {%- for label, url in filter_chips %} · {{ label }} <a class="unfilter" href="{{ url }}&view={{ view }}" title="Снять фильтр">× снять</a>{% endfor %}
     </p>
-    {#- «Новые» — задачи, которые добавил Claude и вы ещё не видели; «Без срока» — чтобы назначить сроки; второй
-        щелчок снимает фильтр. «Показать» — что по умолчанию скрыто: договорённости между коллегами (собираются
+    {#- «Сегодня» — открытые задачи со сроком сегодня и просроченные; «Новые» — задачи, которые добавил Claude и вы ещё
+        не видели; «Без срока» — чтобы назначить сроки; второй щелчок снимает фильтр. «Показать» — что по умолчанию скрыто: договорённости между коллегами (собираются
         и закрываются сами, но вы их не ведёте) и готовые; «Кратко / Подробно» — вид карточек на доске. Выбор запоминается #}
     {% if view != 'projects' %}
     <div class="tgl-row">
+      {% if due == 'now' or due_now_count %}<a class="fchip sm{{ ' on' if due == 'now' }}" href="{{ toggles.today }}&view={{ view }}" aria-pressed="{{ 'true' if due == 'now' else 'false' }}"
+         title="{{ 'Показать все задачи' if due == 'now' else 'Только открытые задачи со сроком сегодня и просроченные' }}">Сегодня{% if due_now_count %}<span class="badge">{{ due_now_count }}</span>{% endif %}</a>{% endif %}
       {% if new or new_tasks_count %}<a class="fchip sm{{ ' on' if new }}" href="{{ toggles.new }}&view={{ view }}" aria-pressed="{{ 'true' if new else 'false' }}"
          title="{{ 'Показать все задачи' if new else 'Только задачи, которые добавил Claude и вы ещё не видели. Отметка снимается, когда задержите курсор на задаче или откроете её' }}"><i class="new-dot" aria-hidden="true"></i>Новые{% if new_tasks_count %}<span class="badge acc" data-unseen>{{ new_tasks_count }}</span>{% endif %}</a>{% endif %}
       {% if due == 'none' or no_due_count %}<a class="fchip sm{{ ' on' if due == 'none' }}" href="{{ toggles.no_due }}&view={{ view }}" aria-pressed="{{ 'true' if due == 'none' else 'false' }}"

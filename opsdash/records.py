@@ -14,8 +14,9 @@ DIRECTIONS = {"mine": "мои задачи", "to_me": "мне должны", "ot
 
 # готовые периоды для фильтров по дате: создана — назад от сегодня, срок — вперёд
 CREATED_PERIODS = [("today", "сегодня"), ("week", "за 7 дней"), ("month", "за 30 дней"), ("custom", "свой период…")]
-DUE_PERIODS = [("overdue", "просрочен"), ("today", "сегодня"), ("week", "ближайшие 7 дней"),
-               ("month", "ближайшие 30 дней"), ("none", "не указан"), ("custom", "свой период…")]
+DUE_PERIODS = [("overdue", "просрочен"), ("today", "сегодня"), ("now", "сегодня и просроченные"),
+               ("week", "ближайшие 7 дней"), ("month", "ближайшие 30 дней"), ("none", "не указан"),
+               ("custom", "свой период…")]
 
 
 def today_local() -> date:
@@ -31,7 +32,8 @@ def _as_date(value: str | None) -> date | None:
 
 def period(key: str, frm: str = "", to: str = "", *, ahead: bool = False) -> tuple[date | None, date | None]:
     """Границы периода из фильтра (включительно): today / week / month — от сегодня назад (дата создания)
-    или вперёд (срок, ahead); overdue — до вчера; custom — даты «с» и «по» из формы, любую можно не указывать."""
+    или вперёд (срок, ahead); overdue — до вчера; now — по сегодня включительно, с просроченными (быстрый фильтр
+    «Сегодня» в «Задачах»); custom — даты «с» и «по» из формы, любую можно не указывать."""
     today = today_local()
     if key in ("week", "month"):
         span = timedelta(days=6 if key == "week" else 29)
@@ -40,6 +42,8 @@ def period(key: str, frm: str = "", to: str = "", *, ahead: bool = False) -> tup
         return today, today
     if key == "overdue":
         return None, today - timedelta(days=1)
+    if key == "now":
+        return None, today
     if key == "custom":
         return _as_date(frm), _as_date(to)
     return None, None
@@ -239,6 +243,12 @@ def no_due_count(others: bool = True) -> int:
     """Сколько открытых задач без срока — на кнопке «Без срока» в «Задачах»."""
     return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND due IS NULL "
                         "AND archived_at IS NULL" + _others(others)) or 0
+
+
+def due_now_count(others: bool = True) -> int:
+    """Сколько открытых задач со сроком сегодня или просроченных — на кнопке «Сегодня» в «Задачах»."""
+    return store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND due <= ? "
+                        "AND archived_at IS NULL" + _others(others), (today_local().isoformat(),)) or 0
 
 
 def due_queue() -> list[dict]:

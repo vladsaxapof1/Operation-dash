@@ -938,7 +938,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
         (f"проект: {proj_title}", ("project",), bool(project)),
         (f"человек: {person}", ("person",), bool(person)),
         (f"создана: {period_titles.get(created, created)}", ("created", "created_from", "created_to"), bool(created)),
-        (f"срок: {period_titles.get(due, due)}", ("due", "due_from", "due_to"), bool(due) and due != "none"),
+        (f"срок: {period_titles.get(due, due)}", ("due", "due_from", "due_to"), bool(due) and due not in ("none", "now")),
         (records.DIRECTIONS.get(direction, direction), ("direction",), view == "list" and bool(direction)),
         ({"done": "выполненные", "all": "все статусы"}.get(status, status), ("status",), view == "list" and status != "open"),
         ("с архивными", ("archived",), show_archived),
@@ -950,8 +950,10 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     no_due = [c for c in ((board["mine"] + board["to_me"]) if board else items or [])
               if c["status"] == "open" and not c["due"] and not c["archived"] and c["direction"] != "other"
               ] if due == "none" else []
-    # переключатели «Новые» и «Без срока» под заголовком (вместо «× снять» у этих двух фильтров): второй щелчок снимает
+    # переключатели «Сегодня», «Новые», «Без срока» и «Без движения» под заголовком (вместо «× снять» у этих фильтров):
+    # второй щелчок снимает. «Сегодня» — срок сегодня и просроченные (due=now); с «Без срока» они взаимоисключающие
     toggles = {key: (without(*keys) + ("" if on else add)).replace("?&", "?", 1) for key, keys, on, add in (
+        ("today", ("due", "due_from", "due_to"), due == "now", "&due=now"),
         ("new", ("new",), new == "1", "&new=1"), ("no_due", ("due", "due_from", "due_to"), due == "none", "&due=none"),
         ("quiet", ("quiet",), still, "&quiet=1"))}
     # «Без движения»: счётчик на кнопке и окно «Разобрать по одной» — ваши задачи и «мне должны», без других фильтров
@@ -979,6 +981,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       group=group if group in LIST_GROUPS else "dir", list_groups=LIST_GROUPS,
                       filter_chips=chips, filter_count=sum(1 for c in chips if not c[0].startswith("поиск")),
                       no_due_count=records.no_due_count(others_pref), no_due=no_due, due_choices=due_choices() if no_due else [],
+                      due_now_count=records.due_now_count(others_pref),
                       toggles=toggles, later_after=horizon, quiet_on=still, quiet_tasks=quiet_tasks,
                       in_projects=store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL "
                                                "AND project_id IS NOT NULL") or 0,

@@ -1,7 +1,7 @@
 """«Уточнить срок»: задачи без срока по одной на Сводке и в «Задачах», быстрые сроки, «оставить без срока»;
-переключатели «Новые» и «Без срока» в «Задачах»."""
+переключатели «Сегодня», «Новые» и «Без срока» в «Задачах»."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -124,6 +124,38 @@ def test_tasks_toggles_new_and_no_due(client):
     no_due = client.get("/commitments?due=none&view=list").text
     assert f'action="/commitments/{to_me}/due"' in no_due and "вы уже оставляли её без срока" in no_due
     assert "Разобрать сроки" not in client.get("/commitments").text
+
+
+def test_tasks_toggle_today(client):
+    """«Сегодня» — первая кнопка ряда: открытые задачи со сроком сегодня и просроченные."""
+    today = records.today_local()
+    records.add_commitment(direction="mine", whom="Тимур", title="Сценарий", what="Собрать сценарий",
+                           due=(today - timedelta(days=2)).isoformat())
+    records.add_commitment(direction="to_me", who="Пётр", title="Прогноз", what="Прислать прогноз", due=today.isoformat())
+    records.add_commitment(direction="mine", whom="Анна", title="Бюджет", what="Бюджет на декабрь",
+                           due=(today + timedelta(days=1)).isoformat())
+    records.add_commitment(direction="mine", whom="Анна", title="Регламент", what="Написать регламент")
+    records.add_commitment(direction="other", who="Олег", whom="Ирина", title="Графики", what="Графики",
+                           due=today.isoformat())
+    closed = records.add_commitment(direction="mine", whom="Анна", title="Отчёт", what="Отчёт", due=today.isoformat())
+    records.update_commitment(closed, status="done")
+
+    page = client.get("/commitments").text  # между коллегами скрыты — и в счётчике их нет
+    row = page.split('class="tgl-row"')[1]
+    assert ">Сегодня<span class=\"badge\">2</span>" in row and 'href="?due=now&view=board"' in row
+    assert row.index(">Сегодня<") < row.index(">Без срока<")  # самая левая
+    assert '>Сегодня<span class="badge">3</span>' in client.get("/commitments?others=1").text
+
+    on = client.get("/commitments?due=now").text
+    assert 'class="fchip sm on" href="?&view=board" aria-pressed="true"' in on  # второй щелчок снимает
+    assert "Собрать сценарий" in on and "Прислать прогноз" in on
+    assert "Бюджет на декабрь" not in on and "Написать регламент" not in on
+    assert "срок: сегодня и просроченные" not in on  # кнопка вместо «× снять»
+    assert '<option value="now" selected>' in on  # фильтр не теряется, когда меняют другие
+    # «Без срока» сменяет «Сегодня», а не добавляется к нему
+    assert 'href="?due=none&view=board"' in on
+    listing = client.get("/commitments?due=now&view=list").text
+    assert "Собрать сценарий" in listing and "Бюджет на декабрь" not in listing
 
 
 def test_wait_mark_says_waits(client):
