@@ -26,6 +26,7 @@
         {% if a.draft %}<button type="button" class="btn sm" data-copy-btn>Копировать ответ</button>{% endif %}
         {% if a.orig_url %}<a class="btn sm" href="{{ a.orig_url }}" target="_blank" rel="noopener">↗ {{ a.orig_label }}</a>{% endif %}
         <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">{{ icons.icon('check', 14) }} Ответила</button></form>
+        <button type="button" class="btn sm" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">{{ icons.icon('plus', 14) }} Сделать задачей</button>
       </div>
     </div>
   </div>
@@ -36,6 +37,7 @@
     {% call ui.menu() %}
       <button type="button" class="menu-i" data-reveal="att-{{ a.id }}">Показать сообщение</button>
       <form method="post" action="/attention/{{ a.id }}/done"><button class="menu-i">Ответила</button></form>
+      <button type="button" class="menu-i" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">Сделать задачей</button>
       <form method="post" action="/attention/{{ a.id }}/dismiss"><button class="menu-i">Скрыть</button></form>
       <a class="menu-i" href="/chats?chat={{ (a.source ~ '|' ~ a.chat_id) | urlencode }}">Открыть в Переписке</a>
     {% endcall %}
@@ -206,6 +208,10 @@
     </section>
     {% if no_due %}{{ ui.due_dialog(no_due, due_choices, meeting_titles) }}{% endif %}
     {% if still %}{{ ui.quiet_dialog(still) }}{% endif %}
+    {#- «Сделать задачей» у строк «Ответить» — окна вне ленты: фильтр ленты прячет строки, а окно должно открываться #}
+    {% set answers = feed['items'] | selectattr('kind', 'equalto', 'answer') | list %}
+    {% for it in answers %}{{ ui.att_task_dialog(it.a, due_choices) }}{% endfor %}
+    {% if answers %}<datalist id="att-people">{% for name in day_people() %}<option value="{{ name }}">{% endfor %}</datalist>{% endif %}
     {{ ui.task_datalist() }}
     {{ ui.event_datalist() }}
   </div>

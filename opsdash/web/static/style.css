@@ -461,6 +461,10 @@ button.chip:hover { border-color: var(--accent); color: var(--text); }
 .due-own { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; color: var(--muted); }
 .due-own input { width: auto; height: 36px; font-size: 14px; }
 .due-own.on input { border-color: var(--accent); background: var(--accent-soft); }
+/* «Сделать задачей» у строки «Ответить» на Сводке: окно новой задачи, заполненное по сообщению */
+.dlg-att-task .att-task-quote { margin-top: 12px; max-height: 120px; overflow: auto; }
+.dlg-att-task .due-own { margin-top: 10px; }
+.dlg-att-task .att-task-close { margin-top: 18px; }
 .due-end p { margin: 0; }
 /* «Без движения» (opsdash.quiet): метка на карточке и в списке, подсказка в окне задачи, окно «Разобрать по одной» */
 .quiet-mark { color: var(--warn-text); white-space: nowrap; }

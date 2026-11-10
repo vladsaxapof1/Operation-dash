@@ -19,6 +19,40 @@
 </li>
 {% endmacro %}
 
+{% macro att_task_dialog(a, choices=[]) %}
+{#- «Сделать задачей» у строки «Ответить» (Сводка): одного ответа мало — по сообщению нужна работа. Окно уже заполнено:
+    заголовок — коротко из сути, подробности — суть целиком, «кому» — отправитель. Сообщение станет источником задачи
+    (первая запись хода, кнопка «открыть в оригинале»). Срок — плитки или своя дата (app.js, data-date-pick); тип
+    «Мне должны» переносит отправителя в «кто делает» (app.js, data-att-task) #}
+{% set short = {'what': a.summary} | headline %}
+<dialog class="dlg dlg-att-task" id="att-task-{{ a.id }}" aria-labelledby="att-task-title-{{ a.id }}">
+  <form class="dlg-box dlg-form" method="post" action="/attention/{{ a.id }}/task" tabindex="-1" data-att-task="{{ a.sender_name or '' }}">
+    <div class="dlg-head"><h2 class="dlg-title" id="att-task-title-{{ a.id }}">Сделать задачей</h2>
+      <button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    <div class="dlg-meta">{{ a.sender_name or a.chat_title }} · {{ SOURCE_TITLES.get(a.source, a.source or '') }}{% if a.chat_title and a.chat_title != a.sender_name %}, {{ a.chat_title }}{% endif %}{% if a.msg_ts %} · {{ a.msg_ts | local('%d.%m %H:%M') }}{% endif %}</div>
+    {% if a.msg_text %}<blockquote class="dlg-quote att-task-quote">{{ a.msg_text[:400] }}{% if a.msg_text | length > 400 %}…{% endif %}</blockquote>{% endif %}
+    <label for="att-task-t-{{ a.id }}">Задача</label>
+    <input type="text" id="att-task-t-{{ a.id }}" name="title" required maxlength="120" value="{{ short }}" placeholder="Коротко, например: прогноз по ключевым клиентам">
+    <label for="att-task-w-{{ a.id }}">Подробности</label>
+    <textarea id="att-task-w-{{ a.id }}" name="what" rows="3" placeholder="Что именно сделать, в каком виде, кому прислать">{{ a.summary if a.summary != short else '' }}</textarea>
+    <label for="att-task-d-{{ a.id }}">Тип</label>
+    <select id="att-task-d-{{ a.id }}" name="direction">{% for key, title in [('mine', 'Моя задача'), ('to_me', 'Мне должны'), ('other', 'Между коллегами')] %}<option value="{{ key }}">{{ title }}</option>{% endfor %}</select>
+    <div class="form-row">
+      <div><label>Кто делает</label><input type="text" name="who" list="att-people" placeholder="пусто — вы"></div>
+      <div><label>Кому</label><input type="text" name="whom" list="att-people" value="{{ a.sender_name or '' }}"></div>
+    </div>
+    <label>Срок</label>
+    <div class="due-pick" role="group" aria-label="Срок" data-date-pick>
+      {% for ch in choices[:4] %}<button type="button" class="due-q" data-date="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
+    </div>
+    <label class="due-own">или своя дата <input type="date" name="due"></label>
+    <label class="check att-task-close"><input type="checkbox" name="close" value="1" checked> Убрать из «Ответить» — дальше веду как задачу</label>
+    <div class="dlg-actions"><button class="btn primary">Создать задачу</button><button type="button" class="btn ghost" data-dlg-close>Отмена</button>
+      <span class="muted small">Сообщение останется в задаче — с цитатой и ссылкой на оригинал</span></div>
+  </form>
+</dialog>
+{% endmacro %}
+
 {% macro attention(a, full=False) %}
 {#- кнопки — строкой под черновиком: справа от текста они сжимали его в узкую колонку #}
 <li class="att">

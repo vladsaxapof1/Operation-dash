@@ -786,6 +786,29 @@ def _day_label(d: date) -> str:
     return f"{d.day} {MONTHS_GEN[d.month - 1]}"
 
 
+@app.post("/attention/{aid}/task")
+def attention_task(request: Request, aid: int, direction: str = Form("mine"), title: str = Form(""),
+                   what: str = Form(""), who: str = Form(""), whom: str = Form(""), due: str = Form(""),
+                   close: str = Form("")):
+    """«Сделать задачей» у строки «Ответить» на Сводке: ответа мало — задача на доске, с сообщением в источнике.
+    Выше общего /attention/{aid}/{action}: тот любое незнакомое действие считает «Скрыть»."""
+    try:
+        cid = records.attention_to_task(aid, direction=direction, title=title, what=what, who=who, whom=whom,
+                                        due=due or None, close=close == "1")
+    except ValueError as e:
+        return back(request, err=str(e))
+    c = store.row("SELECT * FROM commitments WHERE id=?", (cid,))
+    column = dict(BOARD_TITLES).get(c["direction"], "Задачи")
+    similar = [s for s in records.similar_open(direction=c["direction"], who=c["who"] or "", whom=c["whom"] or "",
+                                               title=c["title"] or "", what=c["what"], exclude=cid)
+               if s["similarity"] >= 0.5]
+    if similar:
+        return back(request, f"Задача «{records.headline(c)}» — в «{column}». Похожая уже есть: «{similar[0]['headline']}» "
+                             "— если это одно и то же, откройте новую и выберите «Это дубль задачи…»")
+    return back(request, f"Задача «{records.headline(c)}» — в «{column}»"
+                         + (". Строка «Ответить» осталась: ответить всё равно нужно" if close != "1" else ""))
+
+
 @app.post("/attention/{aid}/{action}")
 def attention_action(request: Request, aid: int, action: str):
     records.close_attention(aid, "done" if action == "done" else ("open" if action == "reopen" else "dismissed"))

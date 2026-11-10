@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS attention (
     why TEXT,
     draft TEXT,
     priority TEXT DEFAULT 'normal',  -- high | normal | low
-    status TEXT DEFAULT 'open',      -- open | done | dismissed
+    status TEXT DEFAULT 'open',      -- open | done | dismissed | task (сделали задачей)
     reopened_at TEXT,                -- директор вернула закрытый пункт: сам по ответу в чате он больше не закрывается
     created TEXT, updated TEXT
 );

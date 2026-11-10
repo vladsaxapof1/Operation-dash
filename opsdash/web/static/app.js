@@ -472,6 +472,40 @@
     if (pane) { pane.hidden = false; pane.closest(".frow").scrollIntoView({ block: "center" }); }
   }
 
+  // плитки срока в форме ([data-date-pick] [data-date]): «Сегодня», «Завтра»… ставят дату в поле due той же формы,
+  // повторный щелчок — снять; своя дата снимает подсветку плиток («Сделать задачей» на Сводке)
+  var datePickMark = function (form) {
+    var input = form.querySelector("input[name=due]");
+    var quick = false;
+    form.querySelectorAll("[data-date-pick] [data-date]").forEach(function (b) {
+      var on = !!input.value && b.dataset.date === input.value;
+      quick = quick || on;
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    var own = input.closest(".due-own");
+    if (own) own.classList.toggle("on", !!input.value && !quick);
+  };
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-date-pick] [data-date]");
+    var input = b && b.form && b.form.querySelector("input[name=due]");
+    if (!input) return;
+    input.value = b.getAttribute("aria-pressed") === "true" ? "" : b.dataset.date;
+    datePickMark(b.form);
+  });
+  document.addEventListener("input", function (e) {
+    if (e.target.name === "due" && e.target.form && e.target.form.querySelector("[data-date-pick]")) datePickMark(e.target.form);
+  });
+
+  // «Сделать задачей»: «Мне должны» — делает отправитель (он в «Кто делает», «Кому» — пусто), «Моя задача» — обратно
+  document.addEventListener("change", function (e) {
+    var form = e.target.name === "direction" && e.target.closest("form[data-att-task]");
+    if (!form) return;
+    var sender = form.dataset.attTask, who = form.elements.who, whom = form.elements.whom;
+    if (!sender) return;
+    if (e.target.value === "to_me" && !who.value && whom.value === sender) { who.value = sender; whom.value = ""; }
+    else if (e.target.value === "mine" && !whom.value && who.value === sender) { whom.value = sender; who.value = ""; }
+  });
+
   // свой MCP-сервер: «Программа на этом компьютере» или «Адрес в интернете» — показываем только нужные поля
   var mcpTr = document.querySelectorAll("[data-mcp-tr]");
   function mcpShow() {

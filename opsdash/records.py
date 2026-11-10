@@ -1430,11 +1430,50 @@ def close_attention(aid: int, status: str = "done") -> None:
         store.execute("UPDATE attention SET status='open', reopened_at=?, updated=? WHERE id=?", (now, now, aid))
         return
     store.execute("UPDATE attention SET status=?, updated=? WHERE id=?", (status, now, aid))
-    # закрыли сами — предложение Claude «похоже, вы ответили» больше не ждёт ответа
+    # закрыли сами — предложение Claude «похоже, вы ответили» больше не ждёт ответа. «Сделали задачей» — не «Нет»
+    # подсказке: уроки из отказов (навык lessons) её не считают
     store.execute(
         "UPDATE proposals SET status=?, decided_at=?, result=? WHERE kind='attention.done' AND status='pending' "
         "AND json_extract(payload, '$.attention_id')=?",
-        ("done" if status == "done" else "rejected", now, store.json_col({"note": "закрыли вручную"}), aid))
+        ("rejected" if status == "dismissed" else "done", now,
+         store.json_col({"note": "сделали задачей" if status == "task" else "закрыли вручную"}), aid))
+
+
+ATTENTION_QUOTE_MAX = 400
+
+
+def attention_to_task(aid: int, *, direction: str = "mine", title: str = "", what: str = "", who: str | None = None,
+                      whom: str | None = None, due: str | None = None, close: bool = True) -> int:
+    """«Сделать задачей» у строки «Ответить»: одного ответа мало — по сообщению нужна работа. Задача помнит сообщение:
+    источник и цитата — первая запись её хода, кнопка открывает его в оригинале. Директор задачу уже видела — без
+    отметки «новая». Срочное сообщение — важная задача, «не к спеху» — неважная (остальное оценит Claude, навык
+    priorities). close — строка уходит из «Нужно от вас» (статус task); False — остаётся: ответить всё равно нужно."""
+    a = store.row("SELECT a.*, m.text AS msg_text, m.source AS msg_source FROM attention a "
+                  "LEFT JOIN messages m ON m.id = a.message_id WHERE a.id=?", (aid,))
+    if not a:
+        raise ValueError("Этого сообщения уже нет в «Нужно от вас»")
+    title, what = " ".join((title or "").split()), (what or "").strip() or a["summary"]
+    source = a["msg_source"] or a["source"]
+    from_msg = bool(a["message_id"]) and source in worklog.MESSAGE_SOURCES
+    quote = " ".join((a["msg_text"] or "").split()) if from_msg else ""
+    if len(quote) > ATTENTION_QUOTE_MAX:
+        quote = quote[:ATTENTION_QUOTE_MAX].rsplit(" ", 1)[0] + "…"
+    last = store.scalar("SELECT MAX(id) FROM commitments") or 0
+    cid = add_commitment(direction=direction, title=title or None, what=what, who=(who or "").strip() or None,
+                         whom=(whom or "").strip() or None, due=due or None,
+                         source_type=source if from_msg else "manual",
+                         source_ref=str(a["message_id"]) if from_msg else None, quote=quote or None)
+    if cid > last:  # новая, а не та же задача второй раз. «Появилась» в ходе — время сообщения (оно могло ждать
+        # ответа неделю), а это — когда директор взяла его в работу: от него, а не от сообщения, считаем «без движения»
+        worklog.event(cid, "Сделали задачей из «Ответить» на Сводке")
+    now = store.utcnow()
+    store.execute("UPDATE commitments SET seen_at=COALESCE(seen_at, ?), importance=COALESCE(importance, ?), "
+                  "importance_why=CASE WHEN importance IS NULL THEN ? ELSE importance_why END WHERE id=?",
+                  (now, {"high": "high", "low": "low"}.get(a["priority"]),
+                   {"high": "срочно в переписке", "low": "не к спеху"}.get(a["priority"]), cid))
+    if close and a["status"] == "open":
+        close_attention(aid, "task")
+    return cid
 
 
 def list_attention(status: str = "open") -> list[dict]:
