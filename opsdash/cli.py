@@ -651,6 +651,53 @@ def cmd_decisions(a) -> None:
         fail(str(e))
 
 
+def _meeting_messages(a) -> None:
+    """Переписка с начала встречи по её задачам (opsdash.chat_tasks.for_meeting) — шаг 7а навыка process-meeting."""
+    if not records.get_meeting(a.id):
+        fail(f"нет встречи {a.id}")
+    res = chat_tasks.for_meeting(a.id)
+    if a.json:
+        return as_json(res)
+    if not res["tasks"]:
+        return out("У встречи нет открытых задач. Если ты ещё не записал её задачи — вызови эту команду снова, когда "
+                   "запишешь (после шагов 5 и 7): переписку сверяют с уже записанными задачами.")
+    if not res["chats"]:
+        return out(f"С начала встречи ({store.local(res['start'])}) в чатах по её задачам ничего не писали.")
+    out(f"Переписка с начала встречи ({store.local(res['start'])}) в чатах, связанных с её задачами. Triage разобрал "
+        "эти сообщения, когда задач встречи ещё не было: сверь их с задачами под каждым чатом — выполнена (прислали, "
+        "сделали) — propose done и log, продвинулась — log.")
+    _meeting_chats(res["chats"], limit=500)
+
+
+def _meeting_chats(chats: list[dict], *, limit: int, tasks: bool = True, more: str = "") -> None:
+    for ch in chats:
+        out(f"\n## {ch['source']} · «{ch['title']}» ({ch['kind']}, chat_id={ch['chat_id']})")
+        if tasks:
+            out("→ Задачи встречи, к которым может относиться этот чат:")
+            for f in ch["tasks"]:
+                out(f"  {_commitment_brief(f['task'], now=140)} — {f['why']}")
+        for m in ch["messages"]:
+            out(_msg_line(m, limit=limit))
+        if ch["more"]:
+            out(f"…и ещё {ch['more']}: " + (more or f"./ops messages chat \"{ch['title']}\" --days 2"))
+
+
+TASK_MEETING_MESSAGES = 8  # под только что записанной задачей встречи: остальное — ./ops meetings messages
+
+
+def _meeting_messages_for_task(cid: int, meeting_id: str) -> None:
+    """commitments add с --source meeting:<id>: переписка с начала встречи по этой задаче — сразу, а не отдельным
+    шагом в конце разбора: его Claude вызывал раньше, чем записывал задачи, и сверять было не с чем."""
+    task = records.list_commitments(status="open", ids=[cid])
+    res = chat_tasks.for_meeting(meeting_id, tasks=task, limit=TASK_MEETING_MESSAGES) if task else {"chats": []}
+    if not res["chats"]:
+        return
+    out(f"\nПо этой задаче уже писали с начала встречи ({store.local(res['start'])}) — triage разобрал это, когда "
+        "задачи ещё не было. Прислали или сделали то, о чём договорились, — ./ops commitments log и ./ops propose "
+        "done (шаг 7а навыка process-meeting); прислали не всё или задача продвинулась — только log:")
+    _meeting_chats(res["chats"], limit=400, tasks=False, more=f"./ops meetings messages {meeting_id}")
+
+
 def cmd_meetings(a) -> None:
     if a.action == "list":
         items = records.list_meetings(limit=a.limit, days=a.days)
@@ -699,6 +746,8 @@ def cmd_meetings(a) -> None:
                             return
         if not hits:
             out("Ничего не нашлось.")
+    elif a.action == "messages":
+        _meeting_messages(a)
     elif a.action == "guess":
         from opsdash import voice
 
@@ -885,6 +934,8 @@ def cmd_commitments(a) -> None:
                 out(f"  [{c['id']}] «{c['headline']}» ({c['route']}): {short(c['what'], 160)}")
             out(f"Если это та же работа — ./ops commitments merge {cid} --into <id> (новую ты только что добавил, "
                 "её можно объединить сразу); если часть — --parent; если другая задача — ничего делать не нужно.")
+        if st == "meeting" and ref:
+            _meeting_messages_for_task(cid, ref)
     elif a.action == "wait":
         if not a.waits_for and not a.event:
             fail("укажите --for <id задачи> или --event \"<событие>\"")
@@ -1872,6 +1923,9 @@ def build_parser() -> argparse.ArgumentParser:
     x = ms.add_parser("search", help="поиск по разборам и расшифровкам")
     x.add_argument("query")
     x.add_argument("--limit", type=int, default=40)
+    x = ms.add_parser("messages", help="переписка с начала встречи в чатах по её задачам — не выполнены ли они уже")
+    x.add_argument("id")
+    x.add_argument("--json", action="store_true")
     x = ms.add_parser("guess", help="догадка, кто из спикеров кто: директор подтвердит на странице встречи")
     x.add_argument("id")
     x.add_argument("--speaker", required=True, help="«Спикер 2»")

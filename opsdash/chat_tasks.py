@@ -7,10 +7,14 @@
 - задачи собеседника личного чата («Ольга LIFE» — Ольга Петрова из справочника, у которой псевдоним «Ольга»);
 - задачи автора нового сообщения и упомянутых в нём людей («@Ольга Петрова», «@olga_p»).
 Задачи директора сами по себе в счёт не идут — у неё все задачи: важен второй участник (кому она обещала,
-кто обещал ей)."""
+кто обещал ей).
+
+То же в обратную сторону — для разбора встречи (./ops meetings messages <id>): переписка с начала встречи в чатах,
+связанных с её задачами, — то, что triage разобрал, пока этих задач ещё не было (for_meeting)."""
 
 from __future__ import annotations
 
+import json
 import re
 
 from opsdash import config, records, store
@@ -107,7 +111,22 @@ def related(source: str, chat_id: str, title: str | None, kind: str | None, msgs
     picked = [c["id"] for c in tasks if c["id"] in by_task]  # порядок tasks — по приоритету
     picked.sort(key=lambda i: history.get(i) or "", reverse=True)  # свежий ход из этого чата — выше
     picked.sort(key=lambda i: by_task[i][0])  # сильная связь — выше (сортировка устойчивая)
-    return [{"task": by_id[i], "why": by_task[i][1]} for i in picked]
+    return [{"task": by_id[i], "why": by_task[i][1], "history": by_task[i][0] == _ORDER["chat"]} for i in picked]
+
+
+def _matcher(tasks: list[dict]):
+    """related() для чата по ключу (source, chat_id, title) — со справочником и именем директора, прочитанными раз."""
+    people = records.list_people()
+    owner = (config.load_settings().get("owner") or {}).get("name") or ""
+
+    def match(key: tuple, msgs: list[dict], ch: dict) -> list[dict]:
+        return related(*key, ch.get("kind"), msgs, tasks=tasks, people=people, owner=owner,
+                       username=ch.get("username"))
+    return match
+
+
+def _chat_row(source: str, chat_id: str) -> dict:
+    return store.row("SELECT kind, username FROM chats WHERE source=? AND chat_id=?", (source, chat_id)) or {}
 
 
 def for_pending(chats: dict[tuple, list[dict]]) -> dict[tuple, list[dict]]:
@@ -115,11 +134,65 @@ def for_pending(chats: dict[tuple, list[dict]]) -> dict[tuple, list[dict]]:
     tasks = records.list_commitments(status="open", sort="priority")
     if not tasks:
         return {}
-    people = records.list_people()
-    owner = (config.load_settings().get("owner") or {}).get("name") or ""
-    out = {}
-    for (source, chat_id, title), msgs in chats.items():
-        ch = store.row("SELECT kind, username FROM chats WHERE source=? AND chat_id=?", (source, chat_id)) or {}
-        out[(source, chat_id, title)] = related(source, chat_id, title, ch.get("kind"), msgs, tasks=tasks,
-                                                people=people, owner=owner, username=ch.get("username"))
-    return out
+    match = _matcher(tasks)
+    return {key: match(key, msgs, _chat_row(*key[:2])) for key, msgs in chats.items()}
+
+
+MEETING_MESSAGES = 40  # сообщений в выдаче «переписка с начала встречи»: больше фоновый Claude не прочитает целиком
+
+
+def meeting_tasks(meeting_id: str) -> list[dict]:
+    """Открытые задачи встречи: появились на ней или директор заранее связала их со встречей (meta.json → tasks)."""
+    try:
+        meta = json.loads((records.meeting_dir(meeting_id) / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        meta = {}
+    linked = [t["id"] for t in meta.get("tasks") or [] if isinstance(t, dict) and t.get("id")]
+    ids = [r["id"] for r in store.rows("SELECT id FROM commitments WHERE source_type='meeting' AND source_ref=?",
+                                       (meeting_id,))] + linked
+    return records.list_commitments(status="open", sort="priority", ids=ids) if ids else []
+
+
+def for_meeting(meeting_id: str, *, tasks: list[dict] | None = None, limit: int | None = None) -> dict:
+    """Переписка с начала встречи в чатах, связанных с её задачами, — для разбора встречи.
+
+    Встреча расшифровывается и разбирается через 10–60 минут после конца, а triage тем временем уже разобрал
+    сообщения, которые пришли по ходу и сразу после, — без задач встречи, их ещё не было. «Скинь цены в
+    телегу» — и цены приходят, пока встреча идёт: задача появляется уже выполненной, но никто этого не видит.
+    Разбор встречи сверяет эти сообщения с только что записанными задачами (навык process-meeting, шаг 7а).
+
+    Личный чат — целиком: собеседник и есть второй участник задачи. В группах и почте — только сообщения тех, с кем
+    задачи, и те, где их упоминают: иначе одно упоминание в большом рабочем чате тащит за собой весь его поток.
+
+    tasks — только эти задачи (только что записанная: ./ops commitments add показывает её переписку сразу).
+
+    {"start", "tasks", "chats": [{"source", "chat_id", "title", "kind", "tasks": [{"task", "why", "history"}],
+    "messages", "more"}]} — чаты в порядке первого сообщения, в каждом — сообщения по порядку; всего не больше
+    limit (по умолчанию MEETING_MESSAGES), остальное — в "more" (сколько не показано)."""
+    m = records.get_meeting(meeting_id) or {}
+    start = m.get("started_at")
+    if not start:
+        tasks = []
+    elif tasks is None:
+        tasks = meeting_tasks(meeting_id)
+    if not tasks:
+        return {"start": start, "tasks": tasks, "chats": []}
+    chats: dict[tuple, list[dict]] = {}
+    for msg in store.rows("SELECT * FROM messages WHERE ts >= ? ORDER BY ts, id", (start,)):
+        chats.setdefault((msg["source"], msg["chat_id"], msg["chat_title"]), []).append(msg)
+    match = _matcher(tasks)
+    picked = []
+    for key, msgs in chats.items():
+        ch = _chat_row(*key[:2])
+        if ch.get("kind") != "private":
+            msgs = [x for x in msgs if any(not f["history"] for f in match(key, [x], ch))]
+        if msgs and (found := match(key, msgs, ch)):
+            picked.append((key, ch, msgs, found))
+    picked.sort(key=lambda p: (p[2][0]["ts"], p[2][0]["id"]))  # раньше написали по делу — выше
+    out, left = [], MEETING_MESSAGES if limit is None else limit
+    for key, ch, msgs, found in picked:
+        shown = msgs[:max(left, 0)]
+        left -= len(shown)
+        out.append({"source": key[0], "chat_id": key[1], "title": key[2], "kind": ch.get("kind") or "",
+                    "tasks": found, "messages": shown, "more": len(msgs) - len(shown)})
+    return {"start": start, "tasks": tasks, "chats": out}

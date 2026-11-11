@@ -4,6 +4,8 @@
 Ольга обещала цифры продаж и прислала их в личку; Мария (её нет в справочнике) отвечает на вопросы; в общем чате
 проверяющий пишет «все отчёты проверены, @Олег Соколов»."""
 
+import json
+
 from opsdash import chat_tasks, cli, records, store, worklog
 
 TS = "2026-11-09T07:5{}:00+00:00"
@@ -121,3 +123,98 @@ def test_brief_and_search(capsys):
     assert capsys.readouterr().out.strip() == f"[{b}] Я → Пётр: «Договор аренды»"
     cli.main(["commitments", "list", "--search", "менеджерам"])
     assert capsys.readouterr().out.startswith(f"[{a}] мне ← Ольга → ?: «Сводка продаж» Собрать сводку")
+
+
+def _meeting(mid: str, start: str, linked: list[int] | None = None) -> None:
+    store.execute("INSERT INTO meetings(id, title, status, started_at) VALUES(?, 'Продажи софта', 'processing', ?)",
+                  (mid, start))
+    folder = records.meeting_dir(mid)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "meta.json").write_text(json.dumps({"id": mid, "tasks": [{"id": i} for i in linked or []]}),
+                                      encoding="utf-8")
+
+
+def test_meeting_messages_since_start(settings_with, capsys, monkeypatch):
+    """«Скинь цены в телегу» — и Пётр прислал их, пока встреча ещё шла. Triage разобрал сообщение раньше, чем разбор
+    встречи записал задачу, и сверить было не с чем. Разбор встречи видит переписку с её начала по своим задачам."""
+    settings_with(owner={"name": "Анна Директорова"})
+    records.upsert_person("Пётр Смирнов", aliases=["Пётр"])
+    records.upsert_person("Ольга Петрова", aliases=["Ольга"])
+    linked = _task("to_me", "Отчёт по оттоку", who="Ольга Петрова")  # директор заранее связала со встречей
+    _meeting("m1", TS.format(1), linked=[linked])
+    prices = _task("to_me", "Цены тарифов", who="Пётр", source_type="meeting", source_ref="m1")
+    done = _task("to_me", "Список клиентов", who="Пётр", source_type="meeting", source_ref="m1")
+    store.execute("UPDATE commitments SET status='done' WHERE id=?", (done,))
+    elsewhere = _task("to_me", "Договор с банком", who="Пётр", source_type="meeting", source_ref="m0")
+
+    _chat("telegram", "1", "Пётр LP", "private")
+    _msg("telegram", "1", "Пётр LP", "1", "Старый прайс до встречи", sender="Пётр LP", minute=0, processed=1)
+    _msg("telegram", "1", "Пётр LP", "2", "Оптимальный 990 ₽/мес, Базовый 490 ₽/мес", sender="Пётр LP", minute=3,
+         processed=1)
+    _msg("telegram", "1", "Пётр LP", "3", "Спасибо!", sender="Я", minute=4, processed=1)
+    _chat("pachca", "2", "Продажи", "group")
+    _msg("pachca", "2", "Продажи", "1", "Кто сегодня дежурит?", sender="Игорь Волков", minute=2, processed=1)
+    _msg("pachca", "2", "Продажи", "2", "Отток выложила, @Анна Директорова", sender="Ольга Петрова", minute=5,
+         processed=1)
+    _chat("telegram", "3", "Вера", "private")
+    _msg("telegram", "3", "Вера", "1", "Привет!", sender="Вера", minute=6, processed=1)
+
+    cli.main(["meetings", "messages", "m1"])
+    out = capsys.readouterr().out
+    assert "Triage разобрал эти сообщения, когда задач встречи ещё не было" in out
+    peer = out.split("«Пётр LP»", 1)[1].split("\n## ", 1)[0]
+    assert f"[{prices}] Пётр → мне: «Цены тарифов» — собеседник" in peer
+    assert "Оптимальный 990 ₽/мес" in peer and "Я: Спасибо!" in peer  # личный чат — целиком, с ответами директора
+    assert "Старый прайс" not in out  # до начала встречи — не её переписка
+    assert "Список клиентов" not in out and "Договор с банком" not in out  # закрытая и задача другой встречи
+    group = out.split("«Продажи»", 1)[1].split("\n## ", 1)[0]
+    assert f"[{linked}] Ольга Петрова → мне: «Отчёт по оттоку» — пишет Ольга Петрова" in group
+    assert "Отток выложила" in group and "дежурит" not in group  # в группе — только сообщения по задачам
+    assert "«Вера»" not in out
+    assert elsewhere
+
+    monkeypatch.setattr(chat_tasks, "MEETING_MESSAGES", 1)
+    cli.main(["meetings", "messages", "m1"])
+    out = capsys.readouterr().out
+    # раньше по делу написал Пётр (дежурство в группе в счёт не идёт); чат с задачей виден и без сообщений
+    assert out.index("«Пётр LP»") < out.index("«Продажи»")
+    assert "Спасибо!" not in out and '…и ещё 1: ./ops messages chat "Пётр LP" --days 2' in out
+    assert "Отток выложила" not in out and '…и ещё 1: ./ops messages chat "Продажи" --days 2' in out
+
+    _meeting("m2", TS.format(7))
+    cli.main(["meetings", "messages", "m2"])
+    assert "нет открытых задач" in capsys.readouterr().out
+    _task("to_me", "Презентация", who="Пётр", source_type="meeting", source_ref="m2")
+    cli.main(["meetings", "messages", "m2"])
+    assert "в чатах по её задачам ничего не писали" in capsys.readouterr().out
+
+
+def test_meeting_task_shows_messages_on_add(settings_with, capsys, monkeypatch):
+    """Разбор встречи вызывал общую проверку раньше, чем записывал задачи, — и сверять было не с чем. Поэтому
+    commitments add со встречи сразу показывает переписку с её начала по новой задаче."""
+    settings_with(owner={"name": "Анна Директорова"})
+    records.upsert_person("Пётр Смирнов", aliases=["Пётр"])
+    _meeting("m1", TS.format(1))
+    cli.main(["meetings", "messages", "m1"])
+    assert "вызови эту команду снова, когда запишешь" in capsys.readouterr().out  # рано: задач ещё нет
+
+    _chat("telegram", "1", "Пётр LP", "private")
+    for i in range(3):
+        _msg("telegram", "1", "Пётр LP", str(i), f"Цены, часть {i}", sender="Пётр LP", minute=2 + i, processed=1)
+    _chat("telegram", "2", "Вера", "private")
+    _msg("telegram", "2", "Вера", "1", "Привет!", sender="Вера", minute=3, processed=1)
+    monkeypatch.setattr(cli, "TASK_MEETING_MESSAGES", 2)
+    cli.main(["commitments", "add", "--direction", "to_me", "--who", "Пётр", "--title", "Цены тарифов",
+              "--what", "Прислать цены тарифов", "--source", "meeting:m1"])
+    out = capsys.readouterr().out
+    assert "По этой задаче уже писали с начала встречи" in out and "propose done" in out
+    assert "Цены, часть 0" in out and "Цены, часть 1" in out and "Цены, часть 2" not in out
+    assert "…и ещё 1: ./ops meetings messages m1" in out
+    assert "Вера" not in out and "→ Задачи встречи" not in out  # задача одна — список задач под чатом не нужен
+
+    cli.main(["commitments", "add", "--direction", "to_me", "--who", "Ольга", "--title", "Отчёт",
+              "--what", "Прислать отчёт", "--source", "meeting:m1"])
+    assert "уже писали" not in capsys.readouterr().out  # по задаче никто не писал — и строки нет
+    cli.main(["commitments", "add", "--direction", "to_me", "--who", "Пётр", "--title", "Договор",
+              "--what", "Прислать договор", "--source", "telegram:1"])
+    assert "уже писали" not in capsys.readouterr().out  # не со встречи — переписку разбирает triage
