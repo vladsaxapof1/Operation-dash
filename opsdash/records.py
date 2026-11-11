@@ -133,8 +133,9 @@ def add_commitment(*, direction: str, what: str, who: str | None = None, whom: s
     if dup:
         if parent_id:
             set_parent(dup["id"], parent_id)
-        if project_id and not store.scalar("SELECT project_id FROM commitments WHERE id=?", (dup["id"],)):
-            set_project(dup["id"], project_id)
+        had = store.row("SELECT project_id, project_off FROM commitments WHERE id=?", (dup["id"],)) or {}
+        if project_id and not had.get("project_id") and had.get("project_off") != project_id:
+            set_project(dup["id"], project_id)  # из проекта, откуда директор задачу убрала, — не возвращаем
         return dup["id"]
     if kaiten_card_id and not force:
         same = store.row("SELECT * FROM commitments WHERE kaiten_card_id=? AND status='open' AND archived_at IS NULL",
@@ -194,12 +195,18 @@ def _check_project(project_id: int) -> None:
         raise ValueError(f"Нет проекта [{project_id}] (./ops projects list)")
 
 
-def set_project(cid: int, project_id: int | None) -> None:
+def set_project(cid: int, project_id: int | None, *, by: str | None = None) -> None:
     """Задача — в проекте (пусто — ни в каком). Её подзадачи идут следом, если они были там же, где она,
-    или без проекта."""
+    или без проекта. by — кто меняет, это попадает в ход задачи: director — директор (убрала задачу из проекта —
+    Claude её туда больше не вернёт, project_off), claude — навык (в проект, откуда директор задачу убрала, нельзя:
+    ValueError); пусто — проект следует из связей (подзадача — за основной), в ход не пишем."""
     if project_id:
         _check_project(project_id)
-    old = store.scalar("SELECT project_id FROM commitments WHERE id=?", (cid,))
+    row = store.row("SELECT project_id, project_off FROM commitments WHERE id=?", (cid,)) or {}
+    old = row.get("project_id")
+    if by == "claude" and project_id and project_id == row.get("project_off") and project_id != old:
+        title = store.scalar("SELECT title FROM projects WHERE id=?", (project_id,))
+        raise ValueError(f"Директор убрала задачу [{cid}] из проекта [{project_id}] «{title}» — туда её не возвращай")
     now, todo, seen = store.utcnow(), [cid], set()
     while todo:
         tid = todo.pop()
@@ -207,8 +214,23 @@ def set_project(cid: int, project_id: int | None) -> None:
             continue
         seen.add(tid)
         store.execute("UPDATE commitments SET project_id=?, updated=? WHERE id=?", (project_id or None, now, tid))
+        if by == "director" and old and old != project_id:  # убрала или перенесла — запоминаем, откуда
+            store.execute("UPDATE commitments SET project_off=? WHERE id=?", (old, tid))
+        elif by == "director" and project_id:  # вернула сама — запрет снимается
+            store.execute("UPDATE commitments SET project_off=NULL WHERE id=? AND project_off=?", (tid, project_id))
         todo += [r["id"] for r in store.rows(
             "SELECT id FROM commitments WHERE parent_id=? AND (project_id IS NULL OR project_id IS ?)", (tid, old))]
+    if by and old != (project_id or None):
+        names = {r["id"]: r["title"] for r in store.rows("SELECT id, title FROM projects WHERE id IN (?, ?)",
+                                                          (old or 0, project_id or 0))}
+        who = "" if by == "director" else "Claude: "
+        if not project_id:
+            text = f"{who}убрана из проекта «{names.get(old, old)}»"
+        elif old:
+            text = f"{who}перенесена из проекта «{names.get(old, old)}» в «{names.get(project_id)}»"
+        else:
+            text = f"{who}в проекте «{names.get(project_id)}»"
+        worklog.event(cid, text[:1].upper() + text[1:])
 
 
 def parse_task_ref(value: str | None) -> int | None:
@@ -336,11 +358,13 @@ def _settle_done_proposals(cid: int, status: str) -> None:
 
 
 def update_commitment(cid: int, **fields) -> None:
-    """Изменить поля задачи. parent_id: номер задачи-родителя, 0 — отвязать; project_id: проект, 0 — убрать из проекта."""
+    """Изменить поля задачи. parent_id: номер задачи-родителя, 0 — отвязать; project_id: проект, 0 — убрать из проекта;
+    by — кто меняет проект (set_project)."""
+    by = fields.pop("by", None)
     if (parent_id := fields.pop("parent_id", None)) is not None:
         set_parent(cid, int(parent_id) or None)
     if (project_id := fields.pop("project_id", None)) is not None:
-        set_project(cid, int(project_id) or None)
+        set_project(cid, int(project_id) or None, by=by)
     allowed = {"status", "due", "kaiten_card_id", "note", "what", "title", "who", "whom", "direction"}
     sets, params = [], []
     for k, v in fields.items():
@@ -902,7 +926,7 @@ def edit_commitment(cid: int, *, title: str, what: str, direction: str, who: str
                   (title or None, what, direction, (who or "").strip() or None, (whom or "").strip() or None,
                    due or None, parent_id or None, now, now, cid))
     if project_id != -1:
-        set_project(cid, project_id or None)
+        set_project(cid, project_id or None, by="director")
     if (due or None) != was.get("due"):
         worklog.event(cid, due_change(was.get("due"), due))
     if was and direction == was.get("direction"):  # передали другому: у моих — кому, у остальных — кто делает

@@ -1212,6 +1212,24 @@ def commitment_archive(request: Request, cid: int, on: int = Form(1)):
                 else "Задача возвращена из архива")
 
 
+@app.post("/commitments/{cid}/project")
+def commitment_project(request: Request, cid: int, project: str = Form("")):
+    """«Убрать из проекта» (✕ у проекта в окне задачи, «…», карточка в стопке): пусто — ни в каком. Claude эту задачу
+    в тот проект больше не положит (records.set_project)."""
+    c = records.get_commitment(cid)
+    if not c:
+        return back(request, err="Такой задачи нет")
+    try:
+        records.set_project(cid, int(project) if project.isdigit() else None, by="director")
+    except ValueError as e:
+        return back(request, err=str(e))
+    if project.isdigit():
+        return back(request, "Задача перенесена в проект")
+    title = (c.get("project") or {}).get("title")
+    return back(request, f"Задача убрана из проекта «{title}» — Claude её туда не вернёт" if title
+                else "Задача ни в каком проекте")
+
+
 @app.post("/commitments/{cid}/edit")
 def commitment_edit(request: Request, cid: int, title: str = Form(""), what: str = Form(""),
                     direction: str = Form("mine"), who: str = Form(""), whom: str = Form(""), due: str = Form(""),
@@ -1535,7 +1553,7 @@ def project_tasks(request: Request, pid: int, task: str = Form("")):
     tid = records.parse_task_ref(task) if task.strip().startswith("#") else None
     if not tid:
         return back(request, err="Выберите задачу из подсказок — начните вводить её название")
-    if not projects.assign(pid, [tid]):
+    if not projects.assign(pid, [tid], by="director"):
         return back(request, err="Такой задачи нет")
     return back(request, "Задача добавлена в проект")
 

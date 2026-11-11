@@ -861,6 +861,8 @@ def _commitment_line(c: dict) -> str:
         line += f" · kaiten #{c['kaiten_card_id']}"
     if c.get("project"):
         line += f" · проект [{c['project']['id']}] «{c['project']['title']}»"
+    elif c.get("project_off"):
+        line += f" · директор убрала из проекта [{c['project_off']}] — туда не возвращать"
     if c["source_type"]:
         line += f" · источник {c['source_type']}:{c['source_ref'] or ''}"
     if c.get("parent"):
@@ -1049,7 +1051,8 @@ def cmd_commitments(a) -> None:
     elif a.action == "set":
         try:
             records.update_commitment(a.id, status=a.status, due=a.due, kaiten_card_id=a.card, note=a.note, what=a.what,
-                                      title=a.title, who=a.who, whom=a.whom, parent_id=a.parent, project_id=a.project)
+                                      title=a.title, who=a.who, whom=a.whom, parent_id=a.parent, project_id=a.project,
+                                      by="claude" if os.environ.get("OPSDASH_AGENT") else "director")
         except ValueError as e:
             fail(str(e))
         if a.in_work:
@@ -1330,7 +1333,7 @@ def cmd_projects(a) -> None:
             fail("новый проект — только предложением: ./ops propose project --title … --tasks … --reason …")
         try:
             pid = projects.add(title=a.title, goal=a.goal, owner=a.owner, due=a.due, kaiten_card_id=a.card)
-            found = projects.assign(pid, _ids(a.tasks))
+            found = projects.assign(pid, _ids(a.tasks), by="director")
         except ValueError as e:
             fail(str(e))
         out(f"Проект [{pid}] «{a.title}» создан" + (f", задач: {len(found)}" if found else ""))
@@ -1339,7 +1342,7 @@ def cmd_projects(a) -> None:
             projects.update(a.id, title=a.title, goal=a.goal, owner=a.owner, due=a.due, kaiten_card_id=a.card,
                             status=a.status)
             if a.tasks:
-                projects.assign(a.id, _ids(a.tasks))
+                projects.assign(a.id, _ids(a.tasks), by="claude" if os.environ.get("OPSDASH_AGENT") else "director")
         except ValueError as e:
             fail(str(e))
         out("Сохранено")

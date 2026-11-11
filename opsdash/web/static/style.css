@@ -1175,6 +1175,10 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .task-dep .ico, .dep-ico { flex: none; margin-top: 1px; width: 14px; text-align: center; }
 .task-acts { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
 .task-open-link { margin-left: auto; font-size: 13px; }
+.task-unstack { margin-left: auto; font-size: 13px; white-space: nowrap; }
+.task-unstack + .task-open-link { margin-left: 12px; }
+.dlg-unproj { margin-left: 2px; padding: 2px 7px; border-radius: 6px; font-size: 12px; }
+.dlg-unproj:hover { background: var(--panel-2); color: var(--bad-text); text-decoration: none; }
 /* стопка на доске (opsdash.projects.stack): задачи одного проекта — одна карточка с двумя «листами» под ней.
    Раскрытая — задачи на подложке под шапкой стопки, листы прячутся */
 .stack { --pile: 0 6px 0 -3px var(--panel), 0 6px 0 -2px var(--line-strong), 0 13px 0 -6px var(--panel-2),

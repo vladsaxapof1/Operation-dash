@@ -643,7 +643,7 @@ def execute(p: dict) -> dict:
         from opsdash import projects
 
         pid = projects.add(title=pl["title"], goal=pl.get("goal"), owner=pl.get("owner"), due=pl.get("due"), by="claude")
-        found = projects.assign(pid, pl.get("tasks") or [])
+        found = projects.assign(pid, pl.get("tasks") or [], by="director")  # директор сказала «Да»
         return {"project_id": pid, "tasks": found}
     if kind == "task.wait":
         if not store.row("SELECT 1 FROM commitments WHERE id=?", (pl["commitment_id"],)):

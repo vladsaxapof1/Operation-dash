@@ -324,3 +324,47 @@ def test_projects_job_says_what_it_added_and_catches_up(monkeypatch):
     store.execute("UPDATE jobs SET last_run=? WHERE name='projects'", (store.utcnow(),))
     jobs.tick()
     assert started.count("projects") == 1  # только что собирали — до завтра
+
+
+def test_director_takes_task_out_of_project_and_claude_does_not_return_it(client, monkeypatch, capsys):
+    """Задача попала не в тот проект: директор убирает её — ✕ у проекта в окне задачи, «…» или «убрать из проекта»
+    на карточке в стопке. Подзадачи уходят следом, в ходе — запись; Claude её в тот проект больше не кладёт."""
+    pid = projects.add(title="План продаж 2027")
+    main = records.add_commitment(direction="mine", whom="Олег Соколов", title="Слой инициатив", what="Слой",
+                                  project_id=pid)
+    kid = records.add_commitment(direction="to_me", who="Пётр Иванов", title="Вводные", what="Вводные", parent_id=main)
+    other = records.add_commitment(direction="mine", whom="Анна", title="База для звонков", what="Выгрузить базу",
+                                   project_id=pid, source_type="meeting")
+    html = client.get("/commitments").text
+    assert f'action="/commitments/{other}/project"' in html and 'class="linkish muted dlg-unproj"' in html
+    assert "Убрать из проекта</button>" in html and ">вынести</button>" in html  # «…» и карточка в стопке
+
+    r = client.post(f"/commitments/{other}/project", data={"project": ""})
+    assert "убрана из проекта «План продаж 2027»" in unquote(str(r.url))
+    c = records.get_commitment(other)
+    assert c["project_id"] is None and c["project_off"] == pid
+    log = "SELECT text FROM task_log WHERE task_id=? AND kind='event' ORDER BY id DESC"
+    assert store.scalar(log, (other,)) == "Убрана из проекта «План продаж 2027»"
+    assert f'data-stack="mine-{pid}"' not in client.get("/commitments").text  # в колонке осталась одна — стопки нет
+
+    monkeypatch.setenv("OPSDASH_AGENT", "1")  # Claude: ни командой, ни повторной записью той же задачи
+    with pytest.raises(SystemExit):
+        cli.main(["commitments", "set", str(other), "--project", str(pid)])
+    assert "Директор убрала задачу" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        cli.main(["projects", "set", str(pid), "--tasks", str(other)])
+    capsys.readouterr()
+    records.add_commitment(direction="mine", whom="Анна", title="База для звонков", what="Выгрузить базу",
+                           project_id=pid, source_type="meeting")
+    assert records.get_commitment(other)["project_id"] is None
+    cli.main(["commitments", "list", "--search", "базу"])
+    assert f"директор убрала из проекта [{pid}] — туда не возвращать" in capsys.readouterr().out
+    fresh = records.add_commitment(direction="mine", whom="Анна", title="Сверка", what="Сверить базу с отделом")
+    cli.main(["commitments", "set", str(fresh), "--project", str(pid)])  # в ходе видно, что проект поставил Claude
+    assert store.scalar(log, (fresh,)) == "Claude: в проекте «План продаж 2027»"
+
+    monkeypatch.delenv("OPSDASH_AGENT")  # директор вернула сама — запрет снят
+    cli.main(["commitments", "set", str(other), "--project", str(pid)])
+    assert records.get_commitment(other)["project_off"] is None
+    client.post(f"/commitments/{main}/project", data={"project": ""})  # основная — вместе с подзадачей
+    assert records.get_commitment(kid)["project_id"] is None and records.get_commitment(kid)["project_off"] == pid

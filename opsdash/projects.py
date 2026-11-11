@@ -73,12 +73,13 @@ def delete(pid: int) -> None:
     store.execute("DELETE FROM projects WHERE id=?", (pid,))
 
 
-def assign(pid: int, task_ids: list[int]) -> list[int]:
-    """Добавить задачи в проект (вместе с их подзадачами). Возвращает те, что нашлись."""
+def assign(pid: int, task_ids: list[int], *, by: str | None = None) -> list[int]:
+    """Добавить задачи в проект (вместе с их подзадачами). Возвращает те, что нашлись. by — кто добавляет
+    (records.set_project): Claude не кладёт задачу в проект, из которого директор её убрала, — ValueError."""
     found = []
     for tid in task_ids:
         if store.row("SELECT 1 FROM commitments WHERE id=?", (tid,)):
-            records.set_project(tid, pid)
+            records.set_project(tid, pid, by=by)
             found.append(tid)
     return found
 

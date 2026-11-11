@@ -530,6 +530,8 @@ MIGRATIONS = [
     ("commitments", "priority_user_at", "TEXT"),
     # «без движения» (opsdash.quiet): «Не трогать неделю» — до этой даты задача не отмечается
     ("commitments", "quiet_until", "TEXT"),
+    # проект, из которого директор убрала задачу (2.0.35): Claude её туда больше не кладёт (records.set_project)
+    ("commitments", "project_off", "INTEGER"),
 ]
 
 

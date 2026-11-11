@@ -456,7 +456,7 @@
 {% endif %}
 {% endmacro %}
 
-{% macro task_card(c, meetings={}, show_project=True, full=False) %}
+{% macro task_card(c, meetings={}, show_project=True, full=False, in_stack=False) %}
 {#- карточка на доске (3.5): ровно две строки — название и «человек · срок». Клик раскрывает её на месте: зависимости,
     кнопки «готово / в работе / напомнить» и «открыть» (окно задачи). Второй клик сворачивает (app.js).
     full — «Подробно» на доске: под ними сразу видно, что сейчас по задаче, чего она ждёт, и строка «откуда · проект ·
@@ -513,6 +513,8 @@
       {% elif c.status != 'open' %}
       <form class="inline" method="post" action="/commitments/{{ c.id }}"><input type="hidden" name="status" value="open"><button class="btn sm">Вернуть</button></form>
       {% endif %}
+      {#- в стопке: задача попала не в тот проект — вынести её из стопки (убрать из проекта) #}
+      {% if in_stack and c.project %}<form class="inline task-unstack" method="post" action="/commitments/{{ c.id }}/project"><button class="linkish muted" title="Вынести из стопки: задача не из проекта «{{ c.project.title }}» — убрать её из проекта, Claude её туда не вернёт">вынести</button></form>{% endif %}
       <a class="task-open-link" href="/commitments?task={{ c.id }}" data-task-open="{{ c.id }}">открыть</a>
     </div>
   </div>
@@ -543,7 +545,7 @@
     </div>
   </div>
   <div class="stack-items" id="stack-{{ sid }}"{{ '' if open else ' hidden' }}>
-    {% for c in s.tasks %}{{ task_card(c, meetings, show_project=False, full=full) }}{% endfor %}
+    {% for c in s.tasks %}{{ task_card(c, meetings, show_project=False, full=full, in_stack=True) }}{% endfor %}
     <a class="stack-proj small" href="/projects/{{ s.id }}">Весь проект — по шагам →</a>
   </div>
 </div>
@@ -766,7 +768,8 @@
         {{ task_people(c) }} · {{ due_text(c, both=True) or 'без срока' }}
         {%- if c.source_type == 'meeting' and c.source_ref %} · из <a href="/meetings/{{ c.source_ref }}">{{ ('«' ~ meetings[c.source_ref] ~ '»') if meetings.get(c.source_ref) else 'встречи' }}</a>
         {%- elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif -%}
-        {%- if c.project %} · проект <a href="/projects/{{ c.project.id }}">{{ c.project.title }}</a>{% endif -%}
+        {%- if c.project %} · проект <a href="/projects/{{ c.project.id }}">{{ c.project.title }}</a>
+          <form class="inline" method="post" action="/commitments/{{ c.id }}/project"><button class="linkish muted dlg-unproj" title="Убрать задачу из проекта «{{ c.project.title }}» — Claude её туда не вернёт" aria-label="Убрать из проекта">✕</button></form>{% endif -%}
         {%- if c.kaiten_card_id %} · Kaiten #{{ c.kaiten_card_id }}{% endif -%}
         {%- if c.archived %} · в архиве{% endif %}
       </div>
@@ -909,6 +912,7 @@
           <button type="button" class="menu-i" data-dlg-edit>Изменить</button>
           {% if c.status == 'open' %}<a class="menu-i" href="/calendar?task={{ c.id }}#new">Назначить встречу</a>
           <a class="menu-i" href="/commitments?add={{ 'to_me' if c.direction == 'mine' else 'other' }}&parent={{ c.id }}#add">Передать другому</a>{% endif %}
+          {% if c.project %}<form method="post" action="/commitments/{{ c.id }}/project"><button class="menu-i" title="Задача не из этого проекта: уйдёт из его стопки и прогресса, Claude её туда не вернёт">Убрать из проекта</button></form>{% endif %}
           {% if c.link %}<a class="menu-i" href="{{ c.link }}" target="_blank" rel="noopener" title="{{ c.link_title }}">Открыть: {{ c.link_label }} ↗</a>{% endif %}
           <div class="menu-sep"></div>
           <form method="post" action="/commitments/{{ c.id }}/archive"><input type="hidden" name="on" value="{{ 0 if c.archived_at else 1 }}"><button class="menu-i">{{ 'Вернуть из архива' if c.archived_at else 'В архив' }}</button></form>
