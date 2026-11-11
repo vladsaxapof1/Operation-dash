@@ -5,6 +5,9 @@
   {% if pachca_me %}<p>✅ Токен принят: <b>{{ pachca_me.name or ('сотрудник #' ~ pachca_me.id) }}</b></p>{% endif %}
   <form method="post" action="/settings/pachca">
     {{ enabled_box('pachca', 'Читать Пачку') }}
+    <label class="check"><input type="checkbox" name="read_new_chats" {{ 'checked' if settings.pachca.read_new_chats }}> Новые чаты читать сразу</label>
+    <div class="hint">Вас добавили в новый чат или проектный канал — PULSE начнёт читать его сам, вместе с тредами
+      за последние дни, и напишет об этом в «Пока вас не было». Лишний — снимите галочку в списке ниже.</div>
     <label>Персональный токен</label>{{ secret_input('token', 'PACHCA_TOKEN') }}
     <div class="hint">Пачка → <b>Интеграции → API</b> → «Создать токен». Отметьте только права на чтение:
       <code class="nowrap">chats:read</code>, <code class="nowrap">messages:read</code>, <code class="nowrap">threads:read</code>,

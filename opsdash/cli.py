@@ -1591,6 +1591,10 @@ def cmd_propose(a) -> None:
         elif a.kind == "merge":
             p = proposals.propose_task_merge(commitment_id=a.commitment, into=a.into, quote=a.quote, batch=a.batch,
                                              reason=a.reason, source_ref=source_ref)
+        elif a.kind == "log":
+            p = proposals.propose_task_log(commitment_id=a.commitment, text=a.text, quote=a.quote, subtask=a.subtask,
+                                           who=a.who, whom=a.whom, due=a.due, batch=a.batch, reason=a.reason,
+                                           source_ref=source_ref)
         elif a.kind == "kaiten-block":
             p = proposals.propose_kaiten_block(card_id=a.card, blocker_card=a.blocker_card, text=a.text, batch=a.batch,
                                                reason=a.reason, source_ref=source_ref)
@@ -2227,6 +2231,16 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--commitment", type=int, required=True, help="id дубля — эта задача закроется")
     x.add_argument("--into", type=int, required=True, help="id задачи, которая остаётся")
     x.add_argument("--quote", help="дословно, откуда видно, что это одно и то же")
+    x = ps.add_parser("log", parents=[common],
+                      help="дописать в ход задачи сообщение, которое относится к ней по теме, а не по людям (после «Да»); "
+                           "с --subtask — ещё и подзадача")
+    x.add_argument("--commitment", type=int, required=True, help="id задачи (./ops commitments list --brief)")
+    x.add_argument("--text", required=True, help="запись в ход: что произошло, одной-двумя фразами, с датами ДД.ММ")
+    x.add_argument("--quote", help="дословно из сообщения")
+    x.add_argument("--subtask", help="заголовок подзадачи, 2–6 слов: в сообщении — новое «сделаю» по этой задаче")
+    x.add_argument("--whom", help="подзадача директора: кому она это сказала")
+    x.add_argument("--who", help="подзадачу обещал коллега — кто (тогда она «мне должны»)")
+    x.add_argument("--due", help="срок подзадачи, YYYY-MM-DD — если прозвучал")
     x = ps.add_parser("kaiten-block", parents=[common],
                       help="заблокировать карточку Kaiten: её задача ждёт другую (--blocker-card) или причину (--text)")
     x.add_argument("--card", type=int, required=True, help="карточка, которая ждёт")

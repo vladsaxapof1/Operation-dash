@@ -7,7 +7,8 @@
 - задачи собеседника личного чата («Ольга LIFE» — Ольга Петрова из справочника, у которой псевдоним «Ольга»);
 - задачи автора нового сообщения и упомянутых в нём людей («@Ольга Петрова», «@olga_p»).
 Задачи директора сами по себе в счёт не идут — у неё все задачи: важен второй участник (кому она обещала,
-кто обещал ей).
+кто обещал ей). Последними — до трёх задач по теме: два слова заголовка задачи в одном сообщении. Такая связь
+не наверняка, поэтому ход по ней фоновый Claude не пишет сам, а предлагает директору (propose log).
 
 То же в обратную сторону — для разбора встречи (./ops meetings messages <id>): переписка с начала встречи в чатах,
 связанных с её задачами, — то, что triage разобрал, пока этих задач ещё не было (for_meeting)."""
@@ -21,7 +22,39 @@ from opsdash import config, records, store
 
 PER_CHAT = 6  # задач под одним чатом: дальше — подсказка, как найти остальные
 _MENTION = re.compile(r"(?<![\w@])@([A-Za-zА-Яа-яЁё][\w.]*(?:[  ][A-ZА-ЯЁ][a-zа-яё]+)?)")
-_ORDER = {"chat": 0, "peer": 1, "mention": 2, "sender": 3}
+_ORDER = {"chat": 0, "peer": 1, "mention": 2, "sender": 3, "topic": 4}
+TOPIC_PER_CHAT = 3  # задач «по теме» под одним чатом: связь слабая, больше — шум
+TOPIC_HINT = "связь не наверняка: относится — propose log"
+
+
+def _topic(c: dict, msgs: list[dict]) -> tuple[int, str] | None:
+    """Задача по теме сообщения, а не по людям: два слова её заголовка — в одном сообщении («Демо и макеты CRM» и
+    «хочу отдать макет, как вижу CRM с очередью» — в треде с другим коллегой, 11.11.2026). (сколько слов совпало,
+    какие — словами заголовка) или None. Задачи без заголовка не сравниваем: суть длинная, совпадёт что угодно."""
+    title = c.get("title") or ""
+    stems = _topic_stems(title)
+    best: set[str] = set()
+    for m in msgs:
+        common = stems & _topic_stems(m.get("text"))
+        if len(common) > len(best):
+            best = common
+    if len(best) < 2:
+        return None
+    words = [w for w in _WORD.findall(title) if w.lower().replace("ё", "е")[:5] in best]
+    return len(best), ", ".join(dict.fromkeys(words))
+
+
+_WORD = re.compile(r"[A-Za-z0-9]+|[А-Яа-яЁё0-9]+")  # «CRMку», «API-шка» — латиница и кириллица отдельно
+# слова, которые есть в любой переписке: по ним тему не узнать (основы — первые 5 букв)
+_COMMON = {"еще", "один", "одна", "одно", "сегод", "завтр", "вчера", "сейча", "потом", "тоже", "тольк", "очень", "можно", "нужен", "нужна",
+           "давай", "прост", "когда", "котор", "следу", "недел", "месяц", "январ", "февра", "марта", "апрел", "мая",
+           "июня", "июля", "авгус", "сентя", "октяб", "ноябр", "декаб"}
+
+
+def _topic_stems(text: str | None) -> set[str]:
+    """Как records._stems, но слово из латиницы с русским окончанием («CRMку») — это «crm»; без общих слов."""
+    words = _WORD.findall((text or "").lower().replace("ё", "е"))
+    return {w[:5] for w in words if len(w) >= 3 and w not in records._STOP} - _COMMON
 
 
 def _counterparts(c: dict) -> list[str]:
@@ -73,9 +106,12 @@ def _history(source: str, chat_id: str) -> dict[int, str]:
 
 
 def related(source: str, chat_id: str, title: str | None, kind: str | None, msgs: list[dict], *,
-            tasks: list[dict], people: list[dict], owner: str = "", username: str | None = None) -> list[dict]:
+            tasks: list[dict], people: list[dict], owner: str = "", username: str | None = None,
+            topics: bool = False) -> list[dict]:
     """Открытые задачи для чата — [{"task", "why"}], сильные связи первыми (ход из чата, собеседник, упомянутый,
-    автор сообщения), внутри — в порядке tasks (обычно по приоритету)."""
+    автор сообщения), внутри — в порядке tasks (обычно по приоритету). topics — ещё и задачи по теме сообщений
+    (слова заголовка), не больше TOPIC_PER_CHAT, последними: задача директора «Демо и макеты CRM» обещана одному
+    коллеге, а продолжение пишут в треде с другим — по людям такую связь не найти."""
     me = records._words(owner)
     names: list[tuple[str, str, str | None]] = []  # (имя в чате, откуда, @имя Telegram)
     if kind == "private" and title:
@@ -107,21 +143,31 @@ def related(source: str, chat_id: str, title: str | None, kind: str | None, msgs
                     why = {"peer": "собеседник", "mention": f"упомянут(а) {label}", "sender": f"пишет {label}"}[how]
                     if c["id"] not in by_task or _ORDER[how] < by_task[c["id"]][0]:
                         by_task[c["id"]] = (_ORDER[how], why)
+    topic: dict[int, tuple[int, str]] = {}  # id → (сколько слов заголовка в сообщении, какие)
+    if topics:
+        topic = {c["id"]: t for c in tasks if (t := _topic(c, msgs))}
+        for cid, (n, words) in topic.items():
+            if cid in by_task:  # связь по людям есть, тема её подтверждает — такая задача выше остальных той же силы
+                by_task[cid] = (by_task[cid][0], f"{by_task[cid][1]}, и по теме ({words})")
+        found = sorted((cid for cid in topic if cid not in by_task), key=lambda i: -topic[i][0])
+        for cid in found[:TOPIC_PER_CHAT]:  # больше общих слов — выше; при равенстве — порядок tasks
+            by_task[cid] = (_ORDER["topic"], f"по теме ({topic[cid][1]}) — {TOPIC_HINT}")
     by_id = {c["id"]: c for c in tasks}
     picked = [c["id"] for c in tasks if c["id"] in by_task]  # порядок tasks — по приоритету
     picked.sort(key=lambda i: history.get(i) or "", reverse=True)  # свежий ход из этого чата — выше
+    picked.sort(key=lambda i: -topic.get(i, (0, ""))[0])  # больше слов заголовка в сообщениях — выше
     picked.sort(key=lambda i: by_task[i][0])  # сильная связь — выше (сортировка устойчивая)
     return [{"task": by_id[i], "why": by_task[i][1], "history": by_task[i][0] == _ORDER["chat"]} for i in picked]
 
 
-def _matcher(tasks: list[dict]):
+def _matcher(tasks: list[dict], topics: bool = False):
     """related() для чата по ключу (source, chat_id, title) — со справочником и именем директора, прочитанными раз."""
     people = records.list_people()
     owner = (config.load_settings().get("owner") or {}).get("name") or ""
 
     def match(key: tuple, msgs: list[dict], ch: dict) -> list[dict]:
         return related(*key, ch.get("kind"), msgs, tasks=tasks, people=people, owner=owner,
-                       username=ch.get("username"))
+                       username=ch.get("username"), topics=topics)
     return match
 
 
@@ -134,7 +180,7 @@ def for_pending(chats: dict[tuple, list[dict]]) -> dict[tuple, list[dict]]:
     tasks = records.list_commitments(status="open", sort="priority")
     if not tasks:
         return {}
-    match = _matcher(tasks)
+    match = _matcher(tasks, topics=True)
     return {key: match(key, msgs, _chat_row(*key[:2])) for key, msgs in chats.items()}
 
 

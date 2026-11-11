@@ -147,6 +147,48 @@ def test_collect_reads_enabled_chats_with_pagination_checkpoint_and_threads(fake
     assert not [r for r in fake.requests if r.method != "GET"]  # только чтение
 
 
+def test_new_chat_is_read_right_away_with_its_older_threads(fake):
+    """Директора добавили в новый проектный канал, она ответила там в треде — а чат в PULSE так и стоял «не читать»,
+    и ответ прошёл мимо разбора (11.11.2026). Новый чат PULSE читает сразу и говорит об этом; треды в нём — за
+    последние дни, даже если писали в них до того, как чат начали читать."""
+    from opsdash import notices
+
+    pachca.collect(transport=httpx.MockTransport(fake))  # самый первый список — выбор директора, сами не включаем
+    assert store.scalar("SELECT COUNT(*) FROM chats WHERE source='pachca' AND enabled=1") == 0
+    store.execute("UPDATE chats SET enabled=1 WHERE source='pachca' AND chat_id='10'")
+    fake.add(10, PETR, "Склад: всё ок", ago=timedelta(minutes=5))
+    pachca.collect(transport=httpx.MockTransport(fake))
+
+    # потом её добавили в проектный канал; там пост коллеги и её ответ в треде под ним — двое суток назад
+    fake.chats[60] = {"name": "Проект — новая CRM", "personal": False, "channel": False, "member_ids": [ME, PETR]}
+    fake.chats[61] = {"name": "", "personal": True, "channel": False, "member_ids": [ME, BOT]}
+    fake.messages.update({60: [], 61: [], 7000: []})
+    root = fake.add(60, PETR, "Мы обновили UX CRM", ago=timedelta(days=2, hours=1))
+    fake.add(61, BOT, "Уведомление сборки", ago=timedelta(hours=1))
+    fake.add(7000, ME, "Норм, хочу отдать макет — как вижу CRM с очередью", ago=timedelta(days=2))
+    fake.threads = [{"id": 950, "chat_id": 7000, "message_id": root["id"], "message_chat_id": 60,
+                     "updated_at": iso(NOW - timedelta(days=2))}]
+
+    pachca.collect(transport=httpx.MockTransport(fake))
+    chats = {c["chat_id"]: c["enabled"] for c in store.rows("SELECT * FROM chats WHERE source='pachca'")}
+    assert chats["60"] == 1 and chats["61"] == 0 and chats["20"] == 0  # бот — не переписка; старое — как выбрала
+    reply = store.row("SELECT * FROM messages WHERE text LIKE 'Норм, хочу%'")
+    assert reply and reply["chat_id"] == "60" and reply["reply_to"] == str(root["id"]) and reply["is_outgoing"] == 1
+    assert store.row("SELECT 1 FROM messages WHERE text='Мы обновили UX CRM'")
+    told = [n for n in notices.recent() if n["kind"] == "pachca"]
+    assert [n["title"] for n in told] == ["Пачка: новый чат «Проект — новая CRM»"]
+    assert told[0]["link"] == "/settings?tab=pachca" and "Не нужен" in told[0]["text"]
+
+    # выключила «Новые чаты читать сразу» — следующий новый чат ждёт её выбора, как раньше
+    config.update_settings("pachca", {"read_new_chats": False})
+    fake.chats[62] = {"name": "Флуд", "personal": False, "channel": False, "member_ids": [ME, PETR]}
+    fake.messages[62] = []
+    fake.add(62, PETR, "Котики", ago=timedelta(minutes=1))
+    pachca.collect(transport=httpx.MockTransport(fake))
+    assert store.scalar("SELECT enabled FROM chats WHERE source='pachca' AND chat_id='62'") == 0
+    assert not store.row("SELECT 1 FROM messages WHERE text='Котики'")
+
+
 def test_triage_sees_pachca_messages(fake, capsys):
     fake.add(20, PETR, "Анна, согласуете счёт до пятницы?")
     store.upsert_chat("pachca", "20", "Пётр Иванов", "private", enabled=1)

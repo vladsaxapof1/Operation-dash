@@ -21,7 +21,7 @@ description: Уроки из «Нет» директора — раз в нед�
    сервисов, статусы без поручений). Закономерность — **три и больше** похожих отказа, или два с одной и той же
    причиной, если признак очевиден. Без указанной причины выводи её из заголовка и «почему предлагали» осторожно.
 4. **Чей навык.** По типу предложения и источнику (`source_ref`):
-   - `task.meeting`, `task.done`, `attention.done`, `telegram.remind`, `kaiten.*` из переписки (`telegram:`, `pachca:`,
+   - `task.meeting`, `task.done`, `task.log`, `attention.done`, `telegram.remind`, `kaiten.*` из переписки (`telegram:`, `pachca:`,
      `mail:`, `ymessenger:`) → `triage`;
    - то же из встречи (`meeting:`) → `process-meeting`;
    - напоминания коллегам из дайджеста → `digest`;

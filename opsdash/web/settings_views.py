@@ -633,12 +633,14 @@ def register(app: FastAPI, render, back) -> None:
     # --- Пачка ---
 
     @app.post("/settings/pachca")
-    async def pachca_save(request: Request, token: str = Form(""), enabled: str = Form(None)):
+    async def pachca_save(request: Request, token: str = Form(""), enabled: str = Form(None),
+                          read_new_chats: str = Form(None)):
         from opsdash.sources import pachca
 
         # первый токен — директор подключает Пачку: читать сразу, а не ждать, пока заметит галочку
         first = bool(token.strip()) and not config.get_secret("PACHCA_TOKEN")
-        config.update_settings("pachca", {"enabled": checkbox(enabled) or first})
+        config.update_settings("pachca", {"enabled": checkbox(enabled) or first,
+                                          "read_new_chats": checkbox(read_new_chats) or first})
         msg = "Сохранено"
         if token.strip():
             config.set_secret("PACHCA_TOKEN", token.strip())

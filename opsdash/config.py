@@ -139,7 +139,9 @@ DEFAULTS: dict = {
         "quiet_hours": {"start": "21:00", "end": "08:30"},
     },
     "ymessenger": {"enabled": False, "my_login": ""},
-    "pachca": {"enabled": False},  # персональный токен — в secrets (PACHCA_TOKEN)
+    # персональный токен — в secrets (PACHCA_TOKEN); read_new_chats — чат, в который директора добавили после выбора
+    # чатов (новый проектный канал), PULSE начинает читать сам и говорит об этом (решение 11.11.2026)
+    "pachca": {"enabled": False, "read_new_chats": True},
     # Slack (opsdash.sources.slack): токен своего приложения — в secrets (SLACK_TOKEN); личные сообщения читаем все,
     # каналы — отмеченные
     "slack": {"enabled": False},
@@ -226,6 +228,7 @@ DEFAULTS: dict = {
         "task_meeting": "confirm",  # связывать задачу со встречей календаря, которая ей посвящена
         "task_wait": "confirm",  # отмечать, что задача ждёт другую задачу или событие (когда это не прозвучало прямо)
         "task_merge": "confirm",  # объединять задачи-дубли
+        "task_log": "confirm",  # дописывать в ход задачи переписку, которая относится к ней только по теме
         "project_create": "confirm",  # собирать задачи в новый проект
     },
     "notifications": {

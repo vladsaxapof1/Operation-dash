@@ -115,16 +115,16 @@
   </div>
   {% else %}{% set p = it.p %}
     {% set d = describe(p).split('\n')[1:] %}
-    <div class="frow-t">Подтвердить{% if p.kind == 'task.merge' %} · похоже на дубль{% elif p.kind == 'task.done' %} · похоже, сделано{% elif p.kind == 'task.wait' %} · связь «ждёт»{% endif %}</div>
+    <div class="frow-t">Подтвердить{% if p.kind == 'task.merge' %} · похоже на дубль{% elif p.kind == 'task.done' %} · похоже, сделано{% elif p.kind == 'task.wait' %} · связь «ждёт»{% elif p.kind == 'task.log' %} · похоже, по задаче{% endif %}</div>
     <h3 class="frow-title">{{ p.title }}</h3>
     <p class="frow-x">{% if p.reason %}{{ p.reason | truncate(140, True, '…') }}{% endif %}{% for label, url in proposal_links(p) %}{{ ' · ' if p.reason or not loop.first }}<a href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
-      {%- if d | length > 1 or (d and not p.reason) %} · <button type="button" class="linkish" data-reveal="pd-{{ p.id }}">{{ 'почему так думаю' if p.kind == 'task.merge' else 'подробнее' }}</button>{% endif %}</p>
+      {%- if d | length > 1 or (d and not p.reason) %} · <button type="button" class="linkish" data-reveal="pd-{{ p.id }}">{{ 'почему так думаю' if p.kind in ('task.merge', 'task.log') else 'подробнее' }}</button>{% endif %}</p>
     <div class="frow-pane muted small" id="pd-{{ p.id }}" hidden>{% for line in d %}<p>{{ line }}</p>{% endfor %}</div>
   </div>
   <div class="frow-act">
     <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn primary">{{ proposal_action(p) }}</button></form>
     {% call ui.menu() %}
-      <form method="post" action="/proposals/{{ p.id }}/reject"><button class="menu-i">{{ 'Это не дубль' if p.kind == 'task.merge' else 'Нет' }}</button></form>
+      <form method="post" action="/proposals/{{ p.id }}/reject"><button class="menu-i">{{ 'Это не дубль' if p.kind == 'task.merge' else 'Не про эту задачу' if p.kind == 'task.log' else 'Нет' }}</button></form>
     {% endcall %}
   </div>
   {% endif %}

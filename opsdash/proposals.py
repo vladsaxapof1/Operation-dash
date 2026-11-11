@@ -3,7 +3,8 @@
 Claude никогда не пишет во внешние системы напрямую: он создаёт «предложение»
 (создать карточку, оставить комментарий, назначить встречу). Так же — закрыть задачу PULSE,
 если по переписке или встрече она выглядит выполненной, связать задачи («эта ждёт ту»), объединить
-дубли и закрыть пункт «нужен ответ», если директор, судя по её сообщению, уже ответила: решает директор. Предложение
+дубли, дописать в ход задачи сообщение, которое относится к ней только по теме, и закрыть пункт «нужен ответ»,
+если директор, судя по её сообщению, уже ответила: решает директор. Предложение
 выполняется, когда директор нажимает «Да» в боте или в админке — либо сразу,
 если в настройках автономии для этого действия выбрано «auto».
 """
@@ -11,6 +12,7 @@ Claude никогда не пишет во внешние системы нап�
 from __future__ import annotations
 
 import json
+import re
 
 from opsdash import config, records, store
 from opsdash.sources import kaiten
@@ -26,6 +28,7 @@ KINDS = {
     "task.meeting": "Связать задачу со встречей",
     "task.wait": "Задача ждёт другую задачу или событие",
     "task.merge": "Объединить задачу-дубль",
+    "task.log": "Дописать в ход задачи",
     "project.create": "Собрать задачи в проект",
     "attention.done": "Закрыть «нужен ответ» — директор ответила",
     "telegram.remind": "Напомнить коллеге в Telegram",
@@ -45,6 +48,7 @@ ACTIONS = {
     "task.meeting": "Связать со встречей",
     "task.wait": "Отметить «ждёт»",
     "task.merge": "Объединить",
+    "task.log": "Записать в ход",
     "project.create": "Создать проект",
     "attention.done": "Отметить отвеченным",
     "telegram.remind": "Напомнить",
@@ -55,6 +59,8 @@ ACTIONS = {
 
 def action(p: dict) -> str:
     """Надпись на кнопке «выполнить» у предложения: «Закрыть задачу», «Связать со встречей», «Напомнить»."""
+    if p["kind"] == "task.log" and (p.get("payload") or {}).get("subtask"):
+        return "Добавить подзадачу"
     return ACTIONS.get(p["kind"], "Да")
 
 
@@ -369,6 +375,56 @@ def propose_task_merge(*, commitment_id: int, into: int, quote: str | None = Non
                    source_ref=source_ref, batch=batch)
 
 
+def propose_task_log(*, commitment_id: int, text: str, quote: str | None = None, subtask: str | None = None,
+                     who: str | None = None, whom: str | None = None, due: str | None = None,
+                     batch: str | None = None, reason: str | None = None, source_ref: str | None = None) -> dict:
+    """Сообщение (или место встречи), похоже, продолжает открытую задачу, но связь не наверняка — по теме, а не по
+    людям: директор обещала «Демо и макеты CRM» одному коллеге, а в треде с другим пишет «хочу отдать макет, как
+    вижу CRM с очередью». После её «Да» text станет записью в ходе задачи; subtask — ещё и подзадача с этим заголовком
+    (её новое «сделаю» по этой задаче; who — если подзадачу обещал коллега, whom — кому обещала она)."""
+    from opsdash import worklog
+
+    c = store.row("SELECT * FROM commitments WHERE id=?", (int(commitment_id),))
+    if not c:
+        raise ProposalError(f"Нет задачи [{commitment_id}] (./ops commitments list)")
+    if c["status"] != "open":
+        raise ProposalError(f"Задача [{commitment_id}] уже закрыта")
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if not text:
+        raise ProposalError("Напишите в --text, что произошло — это станет записью в ходе задачи")
+    if not (reason or "").strip():
+        raise ProposalError("Напишите в --reason, почему это про эту задачу")
+    try:
+        st, ref = worklog.parse_source(source_ref)
+    except ValueError as e:
+        raise ProposalError(str(e)) from e
+    if not st or not ref:
+        raise ProposalError("Укажите --source: сообщение (pachca:<id>, telegram:<id>…) или встречу (meeting:<id>)")
+    if store.row("SELECT 1 FROM task_log WHERE task_id=? AND source_type=? AND source_ref=? AND kind!='event'",
+                 (c["id"], st, ref)):
+        raise ProposalError("Это уже есть в ходе задачи — ./ops commitments show " + str(c["id"]))
+    if due and not records._as_date(due):
+        raise ProposalError("Срок — дата в виде ГГГГ-ММ-ДД")
+    subtask = " ".join((subtask or "").split()) or None
+    payload = {"commitment_id": c["id"], "text": text, "quote": " ".join((quote or "").split()),
+               "subtask": {"title": subtask, "who": (who or "").strip() or None, "whom": (whom or "").strip() or None,
+                           "due": due or None} if subtask else None}
+    source_ref = f"{st}:{ref}"
+    head = f"«{records.headline(c)}» ({records.route(c)})"
+    # заголовок на Сводке — короткий; вся запись — в «почему так думаю»
+    label = (f"{head}: подзадача «{subtask}» и запись в ход" if subtask
+             else f"{head}: в ход — {text if len(text) <= 80 else text[:text.rfind(' ', 0, 80)].rstrip(' ,.;—') + '…'}")
+    for p in store.rows("SELECT * FROM proposals WHERE kind='task.log' AND status IN ('pending', 'rejected') "
+                        "AND source_ref=? AND json_extract(payload, '$.commitment_id')=?", (source_ref, c["id"])):
+        if p["status"] == "rejected":
+            raise ProposalError("Директор уже ответила «Нет»: это не про эту задачу — по этому сообщению не предлагай")
+        store.execute("UPDATE proposals SET payload=?, reason=?, title=? WHERE id=?",
+                      (store.json_col(payload), reason.strip(), label, p["id"]))
+        return get(p["id"])
+    return _create("task.log", label, payload, autonomy_key="task_log", reason=reason.strip(), source_ref=source_ref,
+                   batch=batch)
+
+
 def propose_project(*, title: str, tasks: list[int], goal: str | None = None, owner: str | None = None,
                     due: str | None = None, batch: str | None = None, reason: str | None = None,
                     source_ref: str | None = None) -> dict:
@@ -654,6 +710,22 @@ def execute(p: dict) -> dict:
     if kind == "task.merge":
         records.merge_commitments(pl["commitment_id"], pl["into"], note=p.get("reason"))
         return {"commitment_id": pl["commitment_id"], "into": pl["into"]}
+    if kind == "task.log":
+        from opsdash import worklog
+
+        if not store.row("SELECT 1 FROM commitments WHERE id=?", (pl["commitment_id"],)):
+            raise ProposalError("Задачи уже нет")
+        st, ref = worklog.parse_source(p.get("source_ref"))
+        res = {"commitment_id": pl["commitment_id"]}
+        sub = pl.get("subtask")
+        if sub:  # сначала подзадача: запись в ходе основной задачи — о том, что появилось
+            res["subtask_id"] = records.add_commitment(
+                direction="to_me" if sub.get("who") else "mine", title=sub["title"], what=pl["text"],
+                who=sub.get("who"), whom=sub.get("whom"), due=sub.get("due"), source_type=st or "manual",
+                source_ref=ref, quote=pl.get("quote") or None, parent_id=pl["commitment_id"])
+        res["entry_id"], _ = worklog.add(pl["commitment_id"], pl["text"], source=p.get("source_ref"),
+                                         quote=pl.get("quote") or None, by="claude")
+        return res
     if kind == "skill.rule":
         from opsdash import skills
 
@@ -705,6 +777,8 @@ def links(p: dict) -> list[tuple[str, str]]:
     other = pl.get("into") or pl.get("waits_for")
     if other:
         out.append(("Дубль чего" if pl.get("into") else "Чего ждёт", f"/commitments?task={other}"))
+    if p["kind"] == "task.log" and isinstance(p.get("result"), dict) and p["result"].get("subtask_id"):
+        out.append(("Подзадача", f"/commitments?task={p['result']['subtask_id']}"))
     if pl.get("attention_id"):
         out.append(("Нужен ответ", "/"))
     if p["kind"] == "task.meeting":
@@ -805,6 +879,23 @@ def describe(p: dict) -> str:
         lines.append(f"«{action(p)}» — первая задача закроется как дубль; её источник, цитата, связи и подзадачи перейдут во вторую. "
                      "Вернуть дубль можно кнопкой «Вернуть» в его окне.")
         return "\n".join(lines)
+    if p["kind"] == "task.log":
+        if p.get("reason"):
+            lines.append(f"Почему так думаю: {p['reason']}")
+        lines.append(f"Запись в ход: {pl.get('text', '')[:400]}")
+        if pl.get("quote"):
+            lines.append(f"«{pl['quote'][:400]}»")
+        if p.get("source_ref"):
+            lines.append(f"Источник: {_source_text(p['source_ref'])}")
+        sub = pl.get("subtask")
+        if sub:
+            whose = f"обещал(а) {sub['who']}" if sub.get("who") else f"ваша{', для ' + sub['whom'] if sub.get('whom') else ''}"
+            lines.append(f"«{action(p)}» — у задачи появится подзадача «{sub['title']}» ({whose}"
+                         f"{', до ' + _fmt_date(sub['due']) if sub.get('due') else ''}), а в её ходе — эта запись.")
+        else:
+            lines.append(f"«{action(p)}» — запись появится в ходе задачи и станет строкой «Сейчас» на карточке; "
+                         "«Не про эту задачу» — по этому сообщению Claude больше не предложит.")
+        return "\n".join(lines)
     if p["kind"] == "task.meeting":
         if p.get("reason"):
             lines.append(f"Почему так думаю: {p['reason']}")
@@ -849,6 +940,9 @@ def result_text(p: dict) -> str:
         return "✅ Дубль объединён с задачей"
     if p["status"] == "done" and p["kind"] == "task.meeting":
         return "✅ Встреча — на карточке задачи"
+    if p["status"] == "done" and p["kind"] == "task.log":
+        sub = isinstance(p.get("result"), dict) and p["result"].get("subtask_id")
+        return "✅ Подзадача добавлена, запись — в ходе задачи" if sub else "✅ Записано в ход задачи"
     if p["status"] == "done" and p["kind"] == "skill.rule":
         return "✅ Правило включено — Навыки → " + ((p.get("payload") or {}).get("skill") or "")
     if p["status"] == "done" and p["kind"] == "mcp.call":

@@ -169,10 +169,15 @@ def parse_message(m: dict, chat_id: str, chat_title: str, me_id: int, users: dic
 
 
 def _refresh_chats(http: httpx.Client, me_id: int) -> list[dict]:
+    """Список чатов Пачки — в таблицу chats. Чат, которого раньше не было (директора добавили в новый проектный
+    канал), при включённом «Новые чаты читать сразу» читаем сразу и говорим об этом: иначе его переписка тихо
+    проходит мимо PULSE. Самый первый список — выбор директора, там ничего сами не включаем."""
     chats = list(_pages(http, "/chats", {}, 100))
     others = {u for c in chats if c.get("personal") for u in c.get("member_ids") or [] if u != me_id}
     users = _users(http, others)
-    out = []
+    known = {r["chat_id"] for r in store.rows("SELECT chat_id FROM chats WHERE source=?", (SOURCE,))}
+    auto = bool(known) and bool(config.load_settings()["pachca"].get("read_new_chats", True))
+    out, added = [], []
     for c in chats:
         kind = "channel" if c.get("channel") else "private" if c.get("personal") else "group"
         title = (c.get("name") or "").strip()
@@ -185,10 +190,28 @@ def _refresh_chats(http: httpx.Client, me_id: int) -> list[dict]:
             if person.get("bot"):
                 kind = "bot"
         last = _ts(c.get("last_message_at"))
-        store.upsert_chat(SOURCE, str(c["id"]), title or f"Чат {c['id']}", kind,
+        title = title or f"Чат {c['id']}"
+        enable = 1 if auto and str(c["id"]) not in known and kind != "bot" else None  # бот — уведомления, не переписка
+        store.upsert_chat(SOURCE, str(c["id"]), title, kind, enabled=enable,
                           last_ts=store.to_utc_iso(last) if last else None)
+        if enable:
+            added.append(title)
         out.append(c)
+    if added:
+        _announce_new(added)
     return out
+
+
+def _announce_new(titles: list[str]) -> None:
+    """«Пока вас не было» и угол экрана: какие новые чаты PULSE начал читать и где это выключить."""
+    from opsdash import notices
+
+    names = ", ".join(f"«{t}»" for t in titles[:5]) + (f" и ещё {len(titles) - 5}" if len(titles) > 5 else "")
+    one = len(titles) == 1
+    title = f"Пачка: новый чат {names}" if one else f"Пачка: новые чаты — {names}"
+    notices.add(SOURCE, title, f"PULSE читает {'его' if one else 'их'} сам, с тредами за последние дни. "
+                f"{'Не нужен' if one else 'Лишние'} — снимите галочку: Подключения → Пачка", link="/settings?tab=pachca")
+    store.log(SOURCE, f"{title}: читаю сразу (настройка «Новые чаты читать сразу»)")
 
 
 def _read_chat(http: httpx.Client, api_chat_id: int, chat_id: str, title: str, me_id: int, since: datetime,
@@ -217,11 +240,15 @@ def _read_chat(http: httpx.Client, api_chat_id: int, chat_id: str, title: str, m
     return new
 
 
-def _read_threads(http: httpx.Client, enabled: dict[str, dict], me_id: int, since: datetime) -> int:
+def _read_threads(http: httpx.Client, enabled: dict[str, dict], me_id: int, since: datetime,
+                  fresh: set[str] = frozenset()) -> int:
     """Треды под сообщениями отмеченных чатов. Их сообщения кладём в сам чат — ответом на сообщение,
-    под которым тред."""
+    под которым тред. Обычно — треды, где писали с прошлого прохода; fresh — чаты, которые читаем впервые
+    (только что отметили или PULSE включил новый чат сам): для них — все треды, где писали за последние дни,
+    иначе ответ в треде, написанный до включения чата, так и не попадёт в PULSE."""
     started = datetime.now(timezone.utc)
-    after = store.get_state("pachca_threads_since") or since.replace(microsecond=0).isoformat()
+    stored = store.get_state("pachca_threads_since")
+    after = stored if stored and not fresh else since.replace(microsecond=0).isoformat()
     new = 0
     for t in _pages(http, "/threads", {"last_message_at_after": after}, 20):
         parent = str(t.get("message_chat_id") or "")
@@ -240,17 +267,19 @@ def collect(settings: dict | None = None, transport: httpx.BaseTransport | None 
         chats = _refresh_chats(http, me["id"])
         enabled = {r["chat_id"]: r for r in store.rows("SELECT chat_id, title FROM chats WHERE source=? AND enabled=1",
                                                          (SOURCE,))}
-        new_total, read = 0, 0
+        new_total, read, fresh = 0, 0, set()
         for c in chats:
             chat_id = str(c["id"])
             if chat_id not in enabled:
                 continue
             read += 1
+            if not store.get_state(f"pachca_last:{c['id']}"):
+                fresh.add(chat_id)  # читаем впервые — и треды в нём возьмём за последние дни
             new_total += _read_chat(http, c["id"], chat_id, enabled[chat_id]["title"], me["id"], since,
                                     last_at=c.get("last_message_at"))
         note = ""
         try:
-            new_total += _read_threads(http, enabled, me["id"], since)
+            new_total += _read_threads(http, enabled, me["id"], since, fresh)
         except PachcaError as e:
             if e.status != 403:
                 raise

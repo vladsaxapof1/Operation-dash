@@ -6,6 +6,8 @@
 
 import json
 
+import pytest
+
 from opsdash import chat_tasks, cli, records, store, worklog
 
 TS = "2026-11-09T07:5{}:00+00:00"
@@ -71,9 +73,11 @@ def test_tasks_under_each_chat(settings_with, capsys):
     assert _block(out, "Мария LP") == [
         f"[{answers}] мария → мне: «Ответить на вопросы» · сейчас (09.11, Telegram · Мария LP): Вопросы отправлены "
         "Марии — по ней уже был ход из этого чата"]
-    # общий чат: упомянутый человек и автор сообщения; директор среди упомянутых не в счёт
+    # общий чат: упомянутый человек и автор сообщения; директор среди упомянутых не в счёт; два слова заголовка
+    # в сообщении — «и по теме»
     assert _block(out, "Отчёты отдела") == [
-        f"[{reports}] Олег Соколов → мне: «Сдать отчёты на проверку» — упомянут(а) Олег Соколов",
+        f"[{reports}] Олег Соколов → мне: «Сдать отчёты на проверку» — упомянут(а) Олег Соколов, "
+        "и по теме (отчёты, проверку)",
         f"[{checker}] Я → Игорь Волков: «Согласовать график проверок» — пишет Игорь Волков"]
     # полное имя сильнее одного псевдонима: в чате Ольги Смирновой — только её задача
     assert _block(out, "Ольга Смирнова") == [f"[{smirnova}] Ольга Смирнова → мне: «Договор аренды» — собеседник"]
@@ -107,6 +111,81 @@ def test_history_strength_order_cap_and_mail(settings_with, capsys, monkeypatch)
     _msg("mail", "gmail:INBOX", "Gmail: входящие", "m2", "Отчёт готов", sender="Вера Лис", minute=2)
     cli.main(["messages", "pending"])
     assert "Оплатить счёт" not in capsys.readouterr().out
+
+
+def _reply(source: str, chat_id: str, title: str, msg_id: str, text: str, *, sender: str, to: str,
+           minute: int = 0) -> int:
+    store.add_message({"source": source, "chat_id": chat_id, "chat_title": title, "msg_id": msg_id, "reply_to": to,
+                       "sender_name": sender, "is_outgoing": sender == "Я", "text": text, "ts": TS.format(minute)})
+    return store.scalar("SELECT id FROM messages WHERE source=? AND chat_id=? AND msg_id=?", (source, chat_id, msg_id))
+
+
+def test_topic_tasks_and_propose_log(settings_with, capsys, monkeypatch):
+    """Директор обещала Олегу «Демо и макеты CRM», а в треде Петра про новый интерфейс CRM ответила «хочу отдать
+    макет, как вижу CRM с очередью» (11.11.2026). По людям задача с тредом не связана — разбор её не видел и мог
+    завести новую задачу. Теперь она под чатом «по теме», а ход и подзадачу Claude предлагает, не пишет сам."""
+    from fastapi.testclient import TestClient
+
+    from opsdash import proposals, welcome
+    from opsdash.web.app import app
+
+    settings_with(owner={"name": "Анна Директорова"})
+    records.upsert_person("Олег Соколов")
+    records.upsert_person("Пётр Иванов")
+    crm = _task("mine", "Демо и макеты CRM", whom="Олег Соколов")
+    _task("to_me", "Отчёт по CRM", who="Вера Лис")  # одно общее слово — не тема
+    _task("mine", "Договор аренды", whom="Олег Соколов")
+
+    _chat("pachca", "9", "Проект CRM", "group")
+    _msg("pachca", "9", "Проект CRM", "100", "Мы обновили интерфейс CRM", sender="Пётр Иванов")
+    reply = _reply("pachca", "9", "Проект CRM", "101", "Норм. Хочу макет отдать, как вижу «тунельную» CRMку с очередью", sender="Я",
+                   to="100", minute=1)
+    cli.main(["messages", "pending"])
+    assert _block(capsys.readouterr().out, "Проект CRM") == [
+        f"[{crm}] Я → Олег Соколов: «Демо и макеты CRM» — по теме (макеты, CRM) — {chat_tasks.TOPIC_HINT}"]
+
+    args = ["propose", "log", "--commitment", str(crm), "--source", f"pachca:{reply}",
+            "--text", "Пётр показал новый интерфейс CRM; вы ответили, что отдадите макет CRM с очередью",
+            "--quote", "хочу отдать макет, как вижу CRM с очередью", "--subtask", "Макет CRM с очередью",
+            "--whom", "Пётр Иванов", "--batch", "triage:2026-11-11"]
+    with pytest.raises(SystemExit):  # без «почему» не предлагаем
+        cli.main(args)
+    assert "почему это про эту задачу" in capsys.readouterr().err
+    args += ["--reason", "Тот же макет CRM, что вы обещали Олегу"]
+    cli.main(args)
+    cli.main(args)  # повтор — то же предложение, не второе
+    assert "ждёт подтверждения директора" in capsys.readouterr().out
+    [p] = proposals.list_proposals()
+    assert p["kind"] == "task.log" and proposals.action(p) == "Добавить подзадачу"
+    assert p["title"] == "«Демо и макеты CRM» (Я → Олег Соколов): подзадача «Макет CRM с очередью» и запись в ход"
+    assert "подзадача «Макет CRM с очередью» (ваша, для Пётр Иванов)" in proposals.describe(p)
+    assert [label for label, _ in proposals.links(p)] == ["Задача", "Сообщение в Пачке"]
+
+    monkeypatch.setattr(welcome, "should_open", lambda settings: False)
+    home = TestClient(app, base_url="http://localhost:8765").get("/").text
+    assert "похоже, по задаче" in home and "Не про эту задачу" in home and "Добавить подзадачу" in home
+
+    done = proposals.approve(p["id"])
+    assert done["status"] == "done" and proposals.result_text(done) == "✅ Подзадача добавлена, запись — в ходе задачи"
+    sub = store.row("SELECT * FROM commitments WHERE id=?", (done["result"]["subtask_id"],))
+    assert (sub["parent_id"], sub["direction"], sub["whom"], sub["title"]) == (crm, "mine", "Пётр Иванов",
+                                                                              "Макет CRM с очередью")
+    assert (sub["source_type"], sub["source_ref"]) == ("pachca", str(reply))
+    entry = store.row("SELECT * FROM task_log WHERE task_id=? AND kind!='event'", (crm,))
+    assert entry["text"].startswith("Пётр показал") and (entry["source_type"], entry["source_ref"]) == ("pachca",
+                                                                                                         str(reply))
+    with pytest.raises(proposals.ProposalError, match="уже есть в ходе"):
+        proposals.propose_task_log(commitment_id=crm, text="ещё раз", reason="то же", source_ref=f"pachca:{reply}")
+
+    # «Не про эту задачу» — по этому сообщению больше не предлагаем; без подзадачи — просто запись в ход
+    other = _msg("pachca", "9", "Проект CRM", "102", "Макеты CRM для склада посмотрим позже", sender="Пётр Иванов",
+                 minute=2)
+    p2 = proposals.propose_task_log(commitment_id=crm, text="Пётр: макеты для склада — позже", reason="макеты CRM",
+                                    source_ref=f"pachca:{other}")
+    assert proposals.action(p2) == "Записать в ход" and p2["title"].endswith("в ход — Пётр: макеты для склада — позже")
+    proposals.reject(p2["id"])
+    with pytest.raises(proposals.ProposalError, match="уже ответила «Нет»"):
+        proposals.propose_task_log(commitment_id=crm, text="снова", reason="макеты", source_ref=f"pachca:{other}")
 
 
 def test_brief_and_search(capsys):
