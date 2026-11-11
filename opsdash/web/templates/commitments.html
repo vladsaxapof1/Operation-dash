@@ -28,7 +28,7 @@
   <div>
     <h1>Задачи</h1>
     <p class="sub">
-      {%- if view == 'projects' %}{% set live = projects | rejectattr('status', 'equalto', 'done') | list %}{{ live | length }} {{ plural(live | length, 'проект', 'проекта', 'проектов') }} в работе · {{ in_projects }} {{ plural(in_projects, 'задача', 'задачи', 'задач') }} в проектах · {{ tasks_all - in_projects }} вне проектов
+      {%- if view == 'projects' %}{{ projects | length }} {{ plural(projects | length, 'проект', 'проекта', 'проектов') }} в работе · {{ in_projects }} {{ plural(in_projects, 'задача', 'задачи', 'задач') }} в проектах · {{ tasks_all - in_projects }} вне проектов
       {%- else %}{{ open_cards | length }} {{ plural(open_cards | length, 'активная', 'активных', 'активных') }}{% if n_late %} · {{ n_late }} {{ plural(n_late, 'просрочена', 'просрочены', 'просрочено') }}{% endif %}{% endif %}
       {%- for label, url in filter_chips %} · {{ label }} <a class="unfilter" href="{{ url }}&view={{ view }}" title="Снять фильтр">× снять</a>{% endfor %}
     </p>
@@ -54,6 +54,8 @@
         {% if view != 'list' %}<a class="fchip sm{{ ' on' if show_done }}" href="{{ toggles.done }}&view={{ view }}" aria-pressed="{{ 'true' if show_done else 'false' }}"
            title="Закрытые за последние две недели · архивные — в фильтре">{{ tick(show_done) }}Готово<span class="badge">{{ board.done | length }}</span></a>{% endif %}
       </span>
+      {% if view == 'board' and not project %}<a class="fchip sm{{ ' on' if stacks_on }}" href="{{ toggles.stacks }}&view=board" aria-pressed="{{ 'true' if stacks_on else 'false' }}"
+         title="{{ 'Показывать задачи проектов по одной' if stacks_on else 'Задачи одного проекта — одной стопкой с названием проекта; щелчок по стопке раскрывает её' }}">{{ tick(stacks_on) }}Стопки по проектам</a>{% endif %}
       {% if view == 'board' %}<span class="seg sm" role="group" aria-label="Вид карточек">
         <a href="{{ toggles.cards_short }}&view=board" class="{{ 'active' if not cards_full }}" aria-pressed="{{ 'false' if cards_full else 'true' }}" title="Название, кто и срок; подробности — по щелчку">Кратко</a><a href="{{ toggles.cards_full }}&view=board" class="{{ 'active' if cards_full }}" aria-pressed="{{ 'true' if cards_full else 'false' }}" title="Плюс что сейчас по задаче, чего она ждёт, откуда взялась, проект и пункты">Подробно</a>
       </span>{% endif %}
@@ -113,7 +115,6 @@
       {% endif %}
     </form>
     {% endif %}
-    {% if view == 'projects' %}<a class="small muted" href="?view=projects{{ '' if done_projects else '&done_projects=1' }}">{{ 'Скрыть завершённые' if done_projects else 'Завершённые · ' ~ done_projects_count }}</a>{% endif %}
     <nav class="seg" aria-label="Вид">
       <a href="?view=board{{ keep }}" class="{{ 'active' if view == 'board' }}">Доска</a><a href="?view=list{{ keep }}" class="{{ 'active' if view == 'list' }}">Список</a><a href="?view=gantt&scale={{ scale }}{{ keep }}" class="{{ 'active' if view == 'gantt' }}">Гант</a><a href="?view=projects" class="{{ 'active' if view == 'projects' }}" title="Задачи с общим результатом: прогресс, на ком стоит, что можно делать">Проекты</a><a href="?view=kaiten">Kaiten</a>
     </nav>
@@ -159,23 +160,44 @@
   <div><label>Срок</label><input type="date" name="due" value="{{ (p.due or '') if p else '' }}"></div>
 </div>
 {% endmacro %}
+{% macro pj_card(p) %}
+<a class="pj-card{{ ' paused' if p.status == 'paused' }}{{ ' finished' if p.status == 'done' or p.complete }}" href="/projects/{{ p.id }}">
+  <div class="pj-top">
+    <span class="pj-title">{{ p.title }}</span>
+    <span class="pj-due">{% if p.status == 'done' %}завершён{% if p.closed_at %} {{ p.closed_at | local('%d.%m') }}{% endif %}{% elif p.complete %}<span class="ok-text">всё готово</span>{% elif p.status != 'active' %}{{ p.status_title }}{% elif p.due %}<span class="{{ 'bad-text' if p.late }}">до {{ p.due | date }}{% if p.due_days is not none %} · {{ ('просрочен на ' ~ (-p.due_days) ~ ' ' ~ plural(-p.due_days, 'день', 'дня', 'дней')) if p.due_days < 0 else (p.due_days ~ ' ' ~ plural(p.due_days, 'день', 'дня', 'дней')) }}{% endif %}</span>{% endif %}</span>
+  </div>
+  {% if p.goal %}<div class="pj-goal">{{ p.goal }}</div>{% endif %}
+  <div class="pj-prog"><span class="pj-bar" title="Выполнено {{ p.done }} из {{ p.total }}"><i style="width: {{ p.percent }}%"></i></span><span>{{ p.done }} из {{ p.total }}</span></div>
+  {% if p.complete and p.status != 'done' %}<div class="pj-line">Все задачи выполнены — проект можно завершить</div>
+  {% elif p.status != 'done' %}<div class="pj-line">{{ p.ready | length }} можно делать · {{ p.blocked }} {{ plural(p.blocked, 'ждёт', 'ждут', 'ждут') }} других{% if p.overdue %} · <span class="bad-text">{{ p.overdue }} {{ plural(p.overdue, 'просрочена', 'просрочены', 'просрочено') }}</span>{% endif %}{% if p.at_risk %} · <span class="bad-text">{{ p.at_risk }} под угрозой</span>{% endif %}</div>{% endif %}
+</a>
+{% endmacro %}
+{#- готовые проекты — завершённые и те, где выполнены все задачи («10 из 10»): не мешают в общей сетке, а прячутся за
+    пунктирной плиткой рядом с «+ Новый проект»; щелчок показывает их ниже, второй — прячет (app.js, data-later) #}
+{% set n_fin = finished_projects | length %}
+{% set fin_open = n_fin and done_projects %}
 <div class="pj-grid">
-  {% for p in projects %}
-  <a class="pj-card{{ ' paused' if p.status == 'paused' }}{{ ' finished' if p.status == 'done' }}" href="/projects/{{ p.id }}">
-    <div class="pj-top">
-      <span class="pj-title">{{ p.title }}</span>
-      <span class="pj-due">{% if p.status != 'active' %}{{ p.status_title }}{% elif p.due %}<span class="{{ 'bad-text' if p.late }}">до {{ p.due | date }}{% if p.due_days is not none %} · {{ ('просрочен на ' ~ (-p.due_days) ~ ' ' ~ plural(-p.due_days, 'день', 'дня', 'дней')) if p.due_days < 0 else (p.due_days ~ ' ' ~ plural(p.due_days, 'день', 'дня', 'дней')) }}{% endif %}</span>{% endif %}</span>
-    </div>
-    {% if p.goal %}<div class="pj-goal">{{ p.goal }}</div>{% endif %}
-    <div class="pj-prog"><span class="pj-bar" title="Выполнено {{ p.done }} из {{ p.total }}"><i style="width: {{ p.percent }}%"></i></span><span>{{ p.done }} из {{ p.total }}</span></div>
-    <div class="pj-line">{{ p.ready | length }} можно делать · {{ p.blocked }} {{ plural(p.blocked, 'ждёт', 'ждут', 'ждут') }} других{% if p.overdue %} · <span class="bad-text">{{ p.overdue }} {{ plural(p.overdue, 'просрочена', 'просрочены', 'просрочено') }}</span>{% endif %}{% if p.at_risk %} · <span class="bad-text">{{ p.at_risk }} под угрозой</span>{% endif %}</div>
-  </a>
-  {% endfor %}
+  {% for p in projects %}{{ pj_card(p) }}{% endfor %}
   <div class="pj-card pj-new">
     <button type="button" class="linkish pj-new-b" data-dlg-open="pj-new-dlg">+ Новый проект</button>
     <form method="post" action="/jobs/run" data-busy="Claude собирает проекты…" class="muted small"><input type="hidden" name="name" value="projects">или <button class="linkish" title="Claude пройдёт по задачам, встречам и переписке и предложит проекты, связи «ждёт» и объединение дублей — вы подтвердите">собрать проекты с Claude</button> — он предложит, какие из {{ tasks_all }} {{ plural(tasks_all, 'задачи', 'задач', 'задач') }} складываются в проекты</form>
   </div>
+  {% if n_fin %}
+  <button type="button" class="pj-card pj-new pj-done-tile" data-later aria-controls="pj-done" aria-expanded="{{ 'true' if fin_open else 'false' }}"
+          title="Завершённые проекты и те, где выполнены все задачи">
+    <span class="pj-new-b">{{ icons.icon('check', 18) }}Готовые проекты · {{ n_fin }}</span>
+    {% set waiting_close = finished_projects | rejectattr('status', 'equalto', 'done') | list | length %}
+    <span class="muted small lt-show">{% if waiting_close %}{{ waiting_close }} {{ plural(waiting_close, 'проект', 'проекта', 'проектов') }} — все задачи выполнены, {{ plural(waiting_close, 'его', 'их', 'их') }} можно завершить · {% endif %}показать</span>
+    <span class="muted small lt-hide">скрыть готовые</span>
+  </button>
+  {% endif %}
 </div>
+{% if n_fin %}
+<section class="pj-done" id="pj-done"{{ '' if fin_open else ' hidden' }} aria-label="Готовые проекты">
+  <h2 class="pj-done-h">Готовые проекты</h2>
+  <div class="pj-grid">{% for p in finished_projects %}{{ pj_card(p) }}{% endfor %}</div>
+</section>
+{% endif %}
 <dialog class="dlg" id="pj-new-dlg" aria-labelledby="pj-new-title">
   <form class="dlg-box dlg-form" method="post" action="/projects" tabindex="-1">
     <div class="dlg-head"><h2 class="dlg-title" id="pj-new-title">Новый проект</h2><button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
@@ -199,7 +221,12 @@
       {% if key != 'done' %}<a class="ibtn ghost" href="?view=board&add={{ key }}#add" data-dlg-open="add-dlg" data-add-dir="{{ key }}" title="Добавить в «{{ title }}»" aria-label="Добавить в «{{ title }}»">{{ icons.icon('plus', 16) }}</a>{% endif %}
     </div>
     {% set far = col | selectattr('later') | list %}
+    {% if piles and key in piles %}
+    {#- «Стопки»: задачи одного проекта — одной стопкой на месте самой верхней из них (opsdash.projects.stack) #}
+    {% for e in piles[key] %}{% if e.stack %}{{ ui.task_stack(e.stack, key, meetings, full=cards_full, open=(key ~ '-' ~ e.stack.id) in stacks_open) }}{% else %}{{ ui.task_card(e.task, meetings, full=cards_full) }}{% endif %}{% else %}{% if not far %}<div class="col-empty">Пусто</div>{% endif %}{% endfor %}
+    {% else %}
     {% for c in col | rejectattr('later') %}{{ ui.task_card(c, meetings, full=cards_full) }}{% else %}{% if not far %}<div class="col-empty">{{ 'Ничего не закрыто' if key == 'done' else 'Пусто' }}</div>{% endif %}{% endfor %}
+    {% endif %}
     {% if far %}{{ later_tile(far, 'later-' ~ key) }}
     <div class="later-items" id="later-{{ key }}" hidden>{% for c in far %}{{ ui.task_card(c, meetings, full=cards_full) }}{% endfor %}</div>{% endif %}
   </section>

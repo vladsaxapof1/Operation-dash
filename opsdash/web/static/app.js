@@ -782,6 +782,31 @@
     }).catch(function () { delete list.dataset.loaded; });
   });
 
+  // доска задач: стопка — задачи одного проекта в колонке. Щелчок (Enter, пробел) по ней раскрывает задачи под ней,
+  // второй — сворачивает. Раскрытые помним в cookie («mine-3» — колонка и проект): сервер сразу отдаёт их раскрытыми
+  var openStack = function (stack, open) {
+    var head = stack.querySelector("[data-stack-toggle]");
+    var box = document.getElementById(head.getAttribute("aria-controls"));
+    stack.classList.toggle("open", open);
+    head.setAttribute("aria-expanded", open ? "true" : "false");
+    if (box) box.hidden = !open;
+  };
+  var saveStacks = function () {
+    var open = Array.prototype.map.call(document.querySelectorAll(".stack.open[data-stack]"), function (s) { return s.dataset.stack; });
+    document.cookie = "kb_stacks=" + open.join(".") + "; path=/; max-age=31536000; samesite=lax";
+  };
+  document.querySelectorAll("[data-stack-toggle]").forEach(function (head) {
+    var flip = function () {
+      var stack = head.closest("[data-stack]");
+      openStack(stack, !stack.classList.contains("open"));
+      saveStacks();
+    };
+    head.addEventListener("click", flip);
+    head.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); }
+    });
+  });
+
   // «Задачи» по ссылке ?task=<id> (со встречи, со сводки): показать задачу на доске и открыть её окно.
   // Из адреса ссылку убираем — после «Готово» или «Сохранить» окно не должно открываться снова
   var focus = document.querySelector("[data-focus-task]");
@@ -790,6 +815,8 @@
     var spot = document.querySelector('.task[data-task="' + fid + '"], li[data-task="' + fid + '"], .gantt-bar[data-task-open="' + fid + '"]');
     var far = spot && spot.closest(".later-items[hidden]");  // задача с дальним сроком — раскрыть её плашку
     if (far) showLater(laterBtn(far.id), true);
+    var pile = spot && spot.closest(".stack:not(.open)");  // задача в свёрнутой стопке — раскрыть стопку (не запоминая)
+    if (pile) openStack(pile, true);
     if (spot) {
       spot.scrollIntoView({ block: "center" });
       spot.classList.add("flash");

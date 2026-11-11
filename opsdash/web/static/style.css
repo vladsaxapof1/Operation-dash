@@ -1175,6 +1175,24 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .task-dep .ico, .dep-ico { flex: none; margin-top: 1px; width: 14px; text-align: center; }
 .task-acts { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
 .task-open-link { margin-left: auto; font-size: 13px; }
+/* стопка на доске (opsdash.projects.stack): задачи одного проекта — одна карточка с двумя «листами» под ней.
+   Раскрытая — задачи на подложке под шапкой стопки, листы прячутся */
+.stack { --pile: 0 6px 0 -3px var(--panel), 0 6px 0 -2px var(--line-strong), 0 13px 0 -6px var(--panel-2),
+  0 13px 0 -5px var(--line-strong); display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
+.stack-card { background: var(--panel); border-radius: 8px; padding: 10px 12px; cursor: pointer; color: var(--text); outline: none;
+  box-shadow: var(--shadow-card), var(--pile); }
+.stack-card:hover { box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-card), var(--pile); }
+.stack-card:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent), var(--pile); }
+.stack-card.overdue { border-left: 3px solid var(--bad-text); }
+.stack-card > .prio { float: right; margin: 0 -4px 2px 8px; cursor: inherit; }
+.stack-ico { display: inline-flex; margin-right: 6px; vertical-align: -2px; color: var(--accent); }
+.stack-chev { float: right; display: inline-flex; margin: 2px -4px 0 6px; color: var(--faint); transition: transform .15s; }
+.stack.open { padding: 6px 6px 8px; margin: 0 -6px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, var(--sunken)); }
+.stack.open .stack-card { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), var(--shadow-card); }
+.stack.open .stack-chev { transform: rotate(180deg); color: var(--accent); }
+.stack-items { display: flex; flex-direction: column; gap: 8px; }
+.stack-items[hidden] { display: none; }
+.stack-proj { align-self: flex-start; padding: 0 6px; }
 
 /* окно задачи */
 .dlg-task { width: min(720px, calc(100vw - 32px)); }
@@ -1386,6 +1404,16 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .pj-new { border-style: dashed; border-color: var(--line-strong); background: transparent; align-content: center; min-height: 170px; }
 .pj-new-b { font-size: 16px; text-align: left; }
 .pj-new form { margin: 0; line-height: 1.5; }
+/* «Готовые проекты · N» — пунктирная плитка рядом с «+ Новый проект»: щелчок показывает готовые ниже (data-later) */
+button.pj-card { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.pj-done-tile .pj-new-b { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); }
+.pj-done-tile:hover { border-color: var(--accent); background: var(--accent-soft); }
+.pj-done-tile .lt-hide, .pj-done-tile[aria-expanded="true"] .lt-show { display: none; }
+.pj-done-tile[aria-expanded="true"] .lt-hide { display: inline; }
+.pj-done { margin-top: 28px; }
+.pj-done[hidden] { display: none; }
+.pj-done-h { margin: 0 0 12px; font-size: 15px; color: var(--muted); }
+.pj-complete { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .pj-sum { padding: 18px 20px; }
 .pj-sum-top { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 14px; }
 .pj-pct { font-size: 22px; font-weight: 600; }

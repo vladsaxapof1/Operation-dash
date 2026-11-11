@@ -1,12 +1,13 @@
 """Проекты: задачи с общим результатом — прогресс, на ком стоит, шаги цепочки; подзадачи в проекте основной
 задачи; предложение «собрать проект»; вид «Проекты» и страница проекта. Пример — запуск склада в Казани."""
 
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
 
-from opsdash import cli, jobs, office, overview, projects, proposals, records, store
+from opsdash import brain, cli, config, jobs, office, overview, projects, proposals, records, store
 
 
 @pytest.fixture
@@ -199,8 +200,10 @@ def test_web_projects_view_page_and_dialog(client):
     assert store.row("SELECT title, goal, kaiten_card_id FROM projects WHERE id=?", (pid,)) == {
         "title": "Запуск склада", "goal": None, "kaiten_card_id": 4343}
     client.post(f"/projects/{pid}/status", data={"status": "done"})
-    assert "Завершённые · 1" in client.get("/commitments?view=projects").text
-    assert "Запуск склада" in client.get("/commitments?view=projects&done_projects=1").text
+    listing = client.get("/commitments?view=projects").text  # завершённый — под плиткой «Готовые проекты»
+    assert "Готовые проекты · 1" in listing and 'id="pj-done" hidden' in listing and "0 проектов в работе" in listing
+    listing = client.get("/commitments?view=projects&done_projects=1").text  # старые ссылки — сразу раскрытыми
+    assert "Запуск склада" in listing and 'id="pj-done" hidden' not in listing
     client.post(f"/projects/{pid}/delete")
     assert not projects.get(pid) and records.get_commitment(t["contractor"])["project_id"] is None
     assert client.get("/commitments?view=projects").status_code == 200
@@ -216,3 +219,108 @@ def test_overview_bot_and_job():
     assert "📁 Проекты: 1" in overview.today_text() and "стоит на: Дмитрий Орлов" in overview.today_text()
     assert "projects" in jobs.REGISTRY and "projects" in jobs.TITLES
     assert "projects" in next(d for d in office.DESKS if d["key"] == "triage")["jobs"]
+
+
+def test_complete_projects_go_under_done_tile(client):
+    """Проект, где выполнены все задачи («10 из 10»), не мешает среди тех, что в работе: он под плиткой «Готовые
+    проекты» вместе с завершёнными, а на его странице — «Завершить проект» одной кнопкой."""
+    a = records.add_commitment(direction="mine", whom="Пётр Иванов", title="Отчёт за квартал", what="Отчёт")
+    b = records.add_commitment(direction="mine", whom="Пётр Иванов", title="Слайды к отчёту", what="Слайды")
+    pid = projects.add(title="Квартальный отчёт")
+    projects.assign(pid, [a, b])
+    hire = projects.add(title="Найм в регион")
+    projects.assign(hire, [records.add_commitment(direction="mine", whom="Анна", title="Вакансия", what="Вакансия")])
+    projects.add(title="Пустой проект")  # без задач — не готов, а только начат
+    records.update_commitment(a, status="done")
+    assert not projects.get(pid)["complete"]
+    records.update_commitment(b, status="done")
+    assert projects.get(pid)["complete"] and projects.get(pid)["status"] == "active"
+    live, done = projects.split_finished(projects.list_projects("all"))
+    assert [p["title"] for p in live] == ["Найм в регион", "Пустой проект"] and [p["id"] for p in done] == [pid]
+
+    listing = client.get("/commitments?view=projects").text
+    assert "2 проекта в работе" in listing and "Готовые проекты · 1" in listing and "всё готово" in listing
+    assert "1 проект — все задачи выполнены, его можно завершить" in listing
+    page = client.get(f"/projects/{pid}").text
+    assert 'class="empty pj-complete"' in page and "Завершить проект</button>" in page
+    client.post(f"/projects/{pid}/status", data={"status": "done"})
+    page = client.get(f"/projects/{pid}").text
+    assert "Проект завершён, все задачи выполнены." in page and "Завершить проект</button>" not in page
+    assert "можно завершить" not in client.get("/commitments?view=projects").text
+    # новая задача в готовом, но не завершённом проекте возвращает его к тем, что в работе
+    projects.update(pid, status="active")
+    projects.assign(pid, [records.add_commitment(direction="mine", whom="Анна", title="Разослать отчёт", what="Разослать")])
+    live, done = projects.split_finished(projects.list_projects("all"))
+    assert pid in [p["id"] for p in live] and not done
+
+
+def test_board_stacks_tasks_of_one_project(client):
+    """На доске задачи одного проекта в колонке — одной стопкой с названием проекта на месте самой верхней из них;
+    одиночная задача проекта и задачи вне проектов — как были. «Стопки по проектам» выключаются и запоминаются."""
+    today = records.today_local()
+    pid = projects.add(title="План продаж 2027")
+    main = records.add_commitment(direction="mine", whom="Олег Соколов", title="Слой инициатив", what="Слой",
+                                  due=today.isoformat(), project_id=pid)
+    kid = records.add_commitment(direction="mine", whom="Пётр Иванов", title="Подтвердить инициативы", what="Подтвердить",
+                                 due=today.isoformat(), parent_id=main, source_type="meeting")  # добавил Claude — новая
+    late = records.add_commitment(direction="mine", whom="Пётр Иванов", title="Драфт амбиции", what="Драфт",
+                                  due=(today - timedelta(days=2)).isoformat(), parent_id=main)
+    alone = records.add_commitment(direction="mine", whom="Анна", title="Отдельная задача", what="Отдельная",
+                                   due=(today + timedelta(days=1)).isoformat())
+    single = projects.add(title="Одна задача")
+    one = records.add_commitment(direction="mine", whom="Анна", title="Единственная в проекте", what="Одна",
+                                 project_id=single)
+    board = records.commitments_board(sort="priority")
+    piles = projects.stack(board["mine"])
+    stacks = [e["stack"] for e in piles if "stack" in e]
+    assert len(piles) == 3 and len(stacks) == 1 and "stack" in piles[0]  # просроченная — сверху, стопка на её месте
+    s = stacks[0]
+    assert s["project"]["title"] == "План продаж 2027" and {c["id"] for c in s["tasks"]} == {main, kid, late}
+    assert s["tasks"][0]["id"] == late and s["overdue"] == 1 and s["next"]["id"] == late and s["unseen"]
+    assert s["people"] == ["Пётр Иванов", "Олег Соколов"]
+    assert [e["task"]["id"] for e in piles if "task" in e] == [alone, one]
+
+    html = client.get("/commitments").text
+    assert f'data-stack="mine-{pid}"' in html and f'id="stack-mine-{pid}" hidden' in html and "3 задачи" in html
+    assert "Стопки по проектам" in html and "1 просрочена" in html and f'data-stack="mine-{single}"' not in html
+    assert f'id="task-{kid}"' in html  # окна задач стопки — на странице: открываются со Сводки и по связям
+    client.cookies.set("kb_stacks", f"mine-{pid}")  # раскрытые стопки помнит браузер
+    assert f'class="stack open" data-stack="mine-{pid}"' in client.get("/commitments").text
+    client.cookies.delete("kb_stacks")
+    assert "data-stack=" not in client.get(f"/commitments?project={pid}").text  # смотрят один проект — без стопок
+    r = client.get("/commitments?stacks=0")
+    assert "data-stack=" not in r.text and r.cookies.get("task_stacks") == "0"
+    assert "data-stack=" not in client.get("/commitments").text  # выбор запомнился
+    assert "data-stack=" in client.get("/commitments?stacks=1").text
+
+
+def test_projects_job_says_what_it_added_and_catches_up(monkeypatch):
+    """Сборка проектов называет задачи, которые Claude сам положил в проекты; между понедельниками она запускается,
+    когда набралось PROJECTS_PILE новых задач вне проектов — в рабочее время и не чаще раза в день."""
+    pid = projects.add(title="План продаж 2027")
+    tid = records.add_commitment(direction="mine", whom="Олег Соколов", title="Слой инициатив", what="Слой")
+    monkeypatch.setattr(brain, "run", lambda *a, **k: records.set_project(tid, pid) or {"text": ""})
+    assert jobs.job_projects() == "в проекты добавлено 1 задача"
+    monkeypatch.setattr(brain, "run", lambda *a, **k: {"text": ""})
+    assert jobs.job_projects() == "проекты собраны, новых предложений нет"
+
+    started = []
+    monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: started.append(name) or True)
+    monkeypatch.setattr(jobs, "in_work_hours", lambda *a, **k: True)
+    monkeypatch.setattr(config, "now", lambda s=None: datetime(2026, 11, 11, 12, 0, tzinfo=config.tz(s)))  # среда
+    jobs.tick()
+    assert "projects" not in started  # ещё ни разу не собирали — первая сборка в понедельник или по кнопке
+    last = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(timespec="seconds")
+    store.execute("INSERT OR REPLACE INTO jobs(name, last_run) VALUES('projects', ?)", (last,))
+    for i in range(jobs.PROJECTS_PILE - 1):
+        records.add_commitment(direction="mine", whom="Анна", title=f"Задача {i}", what=f"Сделать часть {i} отчёта")
+    records.add_commitment(direction="other", who="Анна", whom="Пётр Иванов", title="Между коллегами", what="Чужое")
+    records.add_commitment(direction="mine", whom="Анна", title="В проекте", what="Уже в проекте", project_id=pid)
+    jobs.tick()
+    assert "projects" not in started and jobs.projects_pile() == jobs.PROJECTS_PILE - 1
+    records.add_commitment(direction="to_me", who="Пётр Иванов", title="Прислать расчёт", what="Расчёт")
+    jobs.tick()
+    assert started.count("projects") == 1
+    store.execute("UPDATE jobs SET last_run=? WHERE name='projects'", (store.utcnow(),))
+    jobs.tick()
+    assert started.count("projects") == 1  # только что собирали — до завтра

@@ -365,15 +365,46 @@ def job_company_context(**_) -> str:
     return "раздел «О компании» обновлён"
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    n = abs(n)
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
 def job_projects(**_) -> str:
     settings = config.load_settings()
     prompt = (
         "Собери проекты строго по навыку projects (.claude/skills/projects/SKILL.md): какие задачи объединены одним "
         "результатом, что чего ждёт, где дубли. Это фоновый запуск: директор узнаёт итог только через ./ops notify."
     )
+    # задачи, которые Claude сам положит в уже созданные проекты (без предложения), — чтобы итог их называл:
+    # иначе «новых предложений нет» читается как «ничего не сделал»
+    before = {r["id"]: r["project_id"] for r in store.rows("SELECT id, project_id FROM commitments WHERE status='open'")}
     brain.run(prompt, model=settings["claude"]["model_digest"], job="projects", timeout_min=20)
+    moved = sum(1 for r in store.rows("SELECT id, project_id FROM commitments WHERE status='open' AND project_id IS NOT NULL")
+                if r["id"] in before and before[r["id"]] != r["project_id"])
     n = store.scalar("SELECT COUNT(*) FROM proposals WHERE status='pending' AND batch LIKE 'projects:%'") or 0
-    return f"на подтверждение: {n}" if n else "проекты собраны, новых предложений нет"
+    parts = ([f"на подтверждение: {n}"] if n else []) + (
+        [f"в проекты добавлено {moved} {_plural(moved, 'задача', 'задачи', 'задач')}"] if moved else [])
+    return " · ".join(parts) if parts else "проекты собраны, новых предложений нет"
+
+
+PROJECTS_PILE = 5  # новых задач вне проектов, после которых проекты собираются, не дожидаясь понедельника
+PROJECTS_GAP = 20 * 60  # минут: такая сборка — не чаще раза в день
+
+
+def projects_pile() -> int:
+    """Сколько ваших задач и «мне должны» появилось после прошлой сборки проектов и всё ещё ни в каком проекте
+    (подзадачи не считаем — они идут в проект основной задачи сами)."""
+    last = store.row("SELECT last_run FROM jobs WHERE name='projects'")
+    if not last or not last["last_run"]:
+        return 0  # ещё ни разу не собирали — первую сборку делает понедельник или кнопка
+    return store.scalar(
+        "SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL AND project_id IS NULL "
+        "AND parent_id IS NULL AND direction IN ('mine', 'to_me') AND created > ?", (last["last_run"],)) or 0
 
 
 def job_stale(**_) -> str:
@@ -846,6 +877,11 @@ def tick(settings: dict | None = None) -> list[str]:
             go("decisions", "heavy")
     if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
             and _daily("projects", sch["projects_weekly"], settings)):
+        go("projects", "heavy")
+    # и между понедельниками: набралось PROJECTS_PILE новых задач вне проектов — собрать ещё раз, в рабочее время
+    # и не чаще раза в день (новые задачи встреч и переписки ложатся в проекты, а не ждут неделю)
+    elif (sch.get("projects_weekly") and config.now(settings).weekday() != 0 and in_work_hours(settings)
+          and _due("projects", PROJECTS_GAP) and projects_pile() >= PROJECTS_PILE):
         go("projects", "heavy")
     # «Реальность дня»: один раз оценить время у открытых задач директора, появившихся до оценок (opsdash.day)
     from opsdash import day

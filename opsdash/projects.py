@@ -149,6 +149,8 @@ def _stats(p: dict, tasks: list[dict]) -> dict:
     for s in p["stuck_on"]:
         s["whom"] = "вас" if s["who"] == "Я" else s["who"]  # «стоит на вас» — в текстах для директора
     p["ready"] = [c for c in live if not c["blocked"]]
+    # все задачи выполнены («10 из 10»), а проект, может быть, ещё не завершили — в виде «Проекты» он среди готовых
+    p["complete"] = bool(counted) and not live
     due = _as_date(p["due"])
     today = records.today_local()
     p["due_days"] = (due - today).days if due else None
@@ -179,4 +181,51 @@ def list_projects(status: str = "active") -> list[dict]:
     out = []
     for p in store.rows(sql + " ORDER BY status='paused', due IS NULL, due, title"):
         out.append(_stats(p, _tasks(p["id"])))
+    return out
+
+
+def split_finished(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Вид «Проекты»: в работе — и готовые (завершённые и те, где выполнены все задачи), они — под плиткой
+    «Готовые проекты». Среди готовых сначала те, что ещё не завершили (их стоит закрыть), потом недавно завершённые."""
+    live = [p for p in items if p["status"] != "done" and not p["complete"]]
+    done = [p for p in items if p["status"] == "done" or p["complete"]]
+    done.sort(key=lambda p: p.get("closed_at") or p.get("updated") or "", reverse=True)
+    done.sort(key=lambda p: p["status"] == "done")
+    return live, done
+
+
+STACK_MIN = 2  # задач одного проекта в колонке доски, чтобы сложить их в стопку
+
+
+def stack(cards: list[dict], *, min_size: int = STACK_MIN) -> list[dict]:
+    """Колонка доски стопками: открытые задачи одного проекта (min_size и больше) — одна стопка с названием проекта
+    на месте самой верхней из них, внутри — в том же порядке. Остальные задачи — как были. Элементы — {"task": c}
+    или {"stack": {...}}: проект, задачи, самый высокий приоритет, ближайший срок, сколько просрочено и новых."""
+    groups: dict[int, list[dict]] = {}
+    for c in cards:
+        if c.get("project_id") and c.get("project") and c["status"] == "open":
+            groups.setdefault(c["project_id"], []).append(c)
+    out, placed = [], set()
+    for c in cards:
+        tasks = groups.get(c.get("project_id")) if c["status"] == "open" else None
+        if not tasks or len(tasks) < min_size:
+            out.append({"task": c})
+            continue
+        if c["project_id"] in placed:
+            continue
+        placed.add(c["project_id"])
+        prios = [t["prio"] for t in tasks if t.get("prio")]
+        dated = [t for t in tasks if t.get("due") and t.get("due_days") is not None]
+        # люди — как на карточке: у ваших задач — кому, у остальных — кто делает
+        people = dict.fromkeys((t.get("whom") if t["direction"] == "mine" else t.get("who")) or "" for t in tasks)
+        out.append({"stack": {
+            "project": c["project"], "id": c["project_id"], "tasks": tasks,
+            "prio": min(prios, key=lambda p: p["rank"]) if prios else None,
+            "next": min(dated, key=lambda t: t["due"]) if dated else None,
+            "overdue": sum(1 for t in tasks if t.get("overdue")),
+            "in_work": sum(1 for t in tasks if t.get("in_work")),
+            "waiting": sum(1 for t in tasks if t.get("blocked")),
+            "unseen": any(not t.get("seen_at") for t in tasks),
+            "people": [p for p in people if p],
+        }})
     return out

@@ -144,7 +144,7 @@
       <div><label>Напоминание о задачах без движения</label><input type="time" lang="ru" name="stale_check" value="{{ settings.schedule.stale_check | hhmm }}"></div>
       <div><label>База знаний: обзор недели, по пятницам</label><input type="time" lang="ru" name="anthology_weekly" value="{{ settings.schedule.anthology_weekly | hhmm }}"><div class="hint">Пусто — не делать.</div></div>
       <div><label>Сводка «О компании» для Claude, по понедельникам</label><input type="time" lang="ru" name="context_weekly" value="{{ settings.schedule.context_weekly | hhmm }}"><div class="hint">Пусто — не обновлять.</div></div>
-      <div><label>Сборка проектов, по понедельникам</label><input type="time" lang="ru" name="projects_weekly" value="{{ settings.schedule.projects_weekly | hhmm }}"><div class="hint">Claude предложит проекты, связи «ждёт» и объединение дублей. Пусто — только по кнопке в «Задачи → Проекты».</div></div>
+      <div><label>Сборка проектов, по понедельникам</label><input type="time" lang="ru" name="projects_weekly" value="{{ settings.schedule.projects_weekly | hhmm }}"><div class="hint">Claude предложит проекты, связи «ждёт» и объединение дублей. В будни соберёт ещё раз, если появилось 5 новых задач вне проектов. Пусто — только по кнопке в «Задачи → Проекты».</div></div>
     </div>
     <div class="hint">Пустое время — не отправлять. Если компьютер был выключен, дайджест придёт после включения (в пределах 4 часов).</div>
     <label class="check"><input type="checkbox" name="meeting_processed" {{ 'checked' if settings.notifications.meeting_processed }}> Присылать итог каждой разобранной встречи</label>

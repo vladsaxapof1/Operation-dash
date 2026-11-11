@@ -828,7 +828,7 @@ BOARD_COLUMNS = tuple(key for key, _ in BOARD_TITLES)
 # (группы Ганта, в «Списке» — договорённости между коллегами), «Кратко / Подробно» — вид карточек на доске.
 # Ссылка с ?others=1 (?done=1, ?cards=full) меняет выбор и запоминает его
 TASK_PREFS = {"others": ("task_others", ("0", "1"), "0"), "done": ("task_done", ("0", "1"), "0"),
-              "cards": ("task_cards", ("short", "full"), "short")}
+              "cards": ("task_cards", ("short", "full"), "short"), "stacks": ("task_stacks", ("0", "1"), "1")}
 
 
 def task_prefs(request: Request, query: bool = True) -> dict[str, str]:
@@ -916,6 +916,13 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     for c in shown:
         c["later"] = bool(fold and c["status"] == "open" and not c["archived"] and not c["in_work"]
                           and c["due"] and c["due"] > horizon.isoformat())
+    # «Стопки» (по умолчанию включены): на доске задачи одного проекта в колонке — одной стопкой с названием проекта.
+    # Не складываем, когда смотрят один проект или задачи из уведомления «Обновил ход задач». Раскрытые стопки
+    # («mine-3» — колонка и проект) запоминает браузер — cookie из app.js, чтобы не мелькали
+    stacks_on = prefs["stacks"] == "1"
+    piles = ({key: projects.stack([c for c in board[key] if not c["later"]]) for key in ("mine", "to_me", "other")}
+             if view == "board" and stacks_on and not project and not upd else None)
+    stacks_open = set(request.cookies.get("kb_stacks", "").split("."))
     # ?task=<id> — открыть окно задачи (ссылка со встречи или со сводки); если фильтры её прячут — окно всё равно есть
     extra = None
     if task and not any(c["id"] == task for c in shown):
@@ -967,6 +974,9 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     toggles |= {key: (without(key) + f"&{key}={value}").replace("?&", "?", 1) for key, value in (
         ("others", "0" if others_pref else "1"), ("done", "0" if show_done else "1"))}
     toggles |= {f"cards_{v}": (without("cards") + f"&cards={v}").replace("?&", "?", 1) for v in ("short", "full")}
+    toggles["stacks"] = (without("stacks") + f"&stacks={'0' if stacks_on else '1'}").replace("?&", "?", 1)
+    # вид «Проекты»: в работе — карточками, готовые (завершённые и «10 из 10») — под плиткой «Готовые проекты»
+    live_projects, done_projects_list = projects.split_finished(projects.list_projects("all")) if view == "projects" else ([], [])
     response = render(request, "commitments.html", nav="commitments", view=view, board=board, items=items, status=status,
                       direction=direction, person=person, q=q, people=records.list_people(), meetings=meetings,
                       add=add if add in records.DIRECTIONS else "mine", today=records.today_local().isoformat(),
@@ -978,8 +988,9 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       updated=",".join(map(str, upd)),
                       archived_count=store.scalar("SELECT COUNT(*) FROM commitments WHERE archived_at IS NOT NULL") or 0,
                       project=project, project_options=projects.options(),
-                      projects=projects.list_projects("all" if done_projects else "active") if view == "projects" else [],
+                      projects=live_projects, finished_projects=done_projects_list,
                       done_projects=bool(done_projects), others_pref=others_pref,
+                      piles=piles, stacks_on=stacks_on, stacks_open=stacks_open,
                       show_done=show_done or bool(upd and board and board["done"]),  # обновили ход у закрытой
                       others_col=others_col, others_n=others_n, cards_full=prefs["cards"] == "full" or bool((upd or still) and "cards" not in request.query_params),
                       tasks_all=records.active_count(),
@@ -989,8 +1000,7 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       due_now_count=records.due_now_count(others_pref),
                       toggles=toggles, later_after=horizon, quiet_on=still, quiet_tasks=quiet_tasks,
                       in_projects=store.scalar("SELECT COUNT(*) FROM commitments WHERE status='open' AND archived_at IS NULL "
-                                               "AND project_id IS NOT NULL") or 0,
-                      done_projects_count=store.scalar("SELECT COUNT(*) FROM projects WHERE status='done'") or 0)
+                                               "AND project_id IS NOT NULL") or 0)
     if request.query_params.get("sort") in records.SORTS:
         response.set_cookie(SORT_COOKIE, sort, max_age=31536000, samesite="lax")
     if "task_sort" in request.cookies:  # до 2.0.26

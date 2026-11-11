@@ -62,7 +62,13 @@
   {% endfor %}
 </div>
 {% elif p.total %}
-<section class="card"><p class="empty">Открытых задач нет — всё выполнено. Если результат получен, завершите проект: «…» → «Завершить проект».</p></section>
+{#- все задачи выполнены: в «Проектах» он уже среди готовых; завершить — одной кнопкой здесь #}
+<section class="card">
+  {% if p.status != 'done' %}<form class="empty pj-complete" method="post" action="/projects/{{ p.id }}/status"><input type="hidden" name="status" value="done">
+    <span>Открытых задач нет — всё выполнено. Если результат получен, завершите проект.</span>
+    <button class="btn sm primary">Завершить проект</button></form>
+  {% else %}<p class="empty">Проект завершён, все задачи выполнены.</p>{% endif %}
+</section>
 {% else %}
 <section class="card"><p class="empty">В проекте пока нет задач. Добавьте их кнопкой «+ Задача в проект», через «…» → «Добавить задачу в проект» или в окне задачи — поле «Проект».</p></section>
 {% endif %}

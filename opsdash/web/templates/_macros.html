@@ -520,6 +520,35 @@
 </div>
 {% endmacro %}
 
+{% macro task_stack(s, col, meetings={}, full=False, open=False) %}
+{#- стопка на доске (opsdash.projects.stack): задачи одного проекта в колонке — одна карточка «стопкой» на месте самой
+    верхней из них. Две строки, как у карточки: название проекта и «N задач · кто · ближайший срок»; справа — самый
+    высокий приоритет внутри. Щелчок раскрывает задачи под ней, второй — сворачивает; раскрытые помнит браузер (app.js) #}
+{% set sid = col ~ '-' ~ s.id %}
+{% set n = s.tasks | length %}
+{% set names = s.people[:2] | join(', ') ~ (' и ещё ' ~ (s.people | length - 2) if s.people | length > 2 else '') %}
+<div class="stack{{ ' open' if open }}" data-stack="{{ sid }}">
+  <div class="stack-card{{ ' overdue' if s.overdue }}" role="button" tabindex="0" data-stack-toggle aria-controls="stack-{{ sid }}"
+       aria-expanded="{{ 'true' if open else 'false' }}" title="Задачи проекта «{{ s.project.title }}»: {% for c in s.tasks %}{{ c | headline }}{{ '; ' if not loop.last }}{% endfor %}">
+    {%- if s.prio and s.prio.key != 'normal' %}<span class="prio p-{{ s.prio.key }}" title="Самое срочное в стопке — {{ s.prio.title | lower }}">{{ s.prio.title }}</span>{% endif %}
+    <div class="task-what">{% if s.unseen %}<i class="new-dot" title="Среди них есть новые"></i>{% endif %}<span class="stack-ico">{{ icons.icon('stack', 15) }}</span>{{ s.project.title }}</div>
+    <div class="task-meta">
+      {{- n }} {{ plural(n, 'задача', 'задачи', 'задач') }}
+      {%- if names %} · {{ names }}{% endif %}
+      {%- if s.overdue %} · <span class="bad-text">{{ s.overdue }} {{ plural(s.overdue, 'просрочена', 'просрочены', 'просрочено') }}</span>
+      {%- elif s.next %} · ближайшая — {{ due_text(s.next) }}{% endif %}
+      {%- if s.in_work %} · <span class="ok-text">{{ s.in_work }} в работе</span>{% endif %}
+      {%- if s.waiting %} · <span class="task-wait">{{ icons.icon('hourglass', 13) }}{{ s.waiting }} {{ plural(s.waiting, 'ждёт', 'ждут', 'ждут') }}</span>{% endif -%}
+      <span class="stack-chev" aria-hidden="true">{{ icons.icon('chevron', 14) }}</span>
+    </div>
+  </div>
+  <div class="stack-items" id="stack-{{ sid }}"{{ '' if open else ' hidden' }}>
+    {% for c in s.tasks %}{{ task_card(c, meetings, show_project=False, full=full) }}{% endfor %}
+    <a class="stack-proj small" href="/projects/{{ s.id }}">Весь проект — по шагам →</a>
+  </div>
+</div>
+{% endmacro %}
+
 {% macro quiet_last(q) -%}
 {#- последнее движение по задаче без движения (opsdash.quiet): «последнее 31.10 · Пачка · Пётр: «…»» -#}
 {%- if q.origin %}появилась {{ q.since | date }}, хода не было{% else %}последнее {{ q.since | date }}{% if q.src %} · {{ q.src }}{% endif %}: «{{ q.text | truncate(200, True, '…') }}»{% endif -%}
