@@ -428,7 +428,8 @@
     ta.name = "text";
     ta.rows = 3;
     ta.required = true;
-    ta.value = (li.querySelector(".log-t") || {}).textContent || "";
+    var logT = li.querySelector(".log-t");  // исходный текст: пути в нём показаны кнопками
+    ta.value = logT ? (logT.dataset.text != null ? logT.dataset.text : logT.textContent) : "";
     ta.setAttribute("aria-label", "Текст записи");
     var row = document.createElement("div");
     row.className = "log-form-row";
@@ -850,6 +851,41 @@
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(done);
     else { var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done(); }
   });
+
+  // пути к файлам в текстах (filepaths.py): щелчок — показать в Finder / Проводнике, значок — скопировать полный путь.
+  // В фазе захвата: путь бывает внутри строки задачи или карточки, которые сами открываются по щелчку
+  function fpathTip(box, text, bad) {
+    var old = box.querySelector(".fpath-tip");
+    if (old) old.remove();
+    var tip = document.createElement("span");
+    tip.className = "fpath-tip" + (bad ? " bad" : "");
+    tip.setAttribute("role", "status");
+    tip.textContent = text;
+    box.appendChild(tip);
+    var over = tip.getBoundingClientRect().right - (window.innerWidth - 8);  // у правого края окна — сдвигаем влево
+    if (over > 0) tip.style.left = -over + "px";
+    setTimeout(function () { tip.remove(); }, bad ? 3500 : 1800);
+  }
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest(".fpath-go, .fpath-copy");
+    if (!btn) return;
+    var box = btn.closest("[data-fpath]");
+    if (!box) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var path = box.dataset.fpath;
+    if (btn.classList.contains("fpath-copy")) {
+      var done = function () { fpathTip(box, "Путь скопирован"); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(path).then(done, function () { fpathTip(box, path, true); });
+      else { var ta = document.createElement("textarea"); ta.value = path; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done(); }
+      return;
+    }
+    var body = new FormData();
+    body.append("path", path);
+    fetch("/files/reveal", { method: "POST", body: body }).then(function (r) { return r.json(); }).then(function (res) {
+      fpathTip(box, res.ok ? res.msg : res.err, !res.ok);
+    }, function () { fpathTip(box, "PULSE не ответил — попробуйте ещё раз", true); });
+  }, true);
 
   // бриф к встрече: «Открыть бриф» в карточке встречи календаря — окно с брифом целиком
   document.addEventListener("click", function (e) {

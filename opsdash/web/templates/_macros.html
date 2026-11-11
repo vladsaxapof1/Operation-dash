@@ -377,7 +377,7 @@
     {% if c.source_type == 'meeting' and c.source_ref %} · <a href="/meetings/{{ c.source_ref }}">встреча</a>{% elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif %}
     {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
   </div>
-  {% if c.now %}<div class="cm-now" title="Последнее по задаче — {{ c.now.day }}, {{ c.now.src }}">{{ icons.icon('inbox', 13) }}<span>{{ c.now.text }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</span></div>{% endif %}
+  {% if c.now %}<div class="cm-now" title="Последнее по задаче — {{ c.now.day }}, {{ c.now.src }}">{{ icons.icon('inbox', 13) }}<span>{{ c.now.text | fpaths }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</span></div>{% endif %}
   <div class="actions cm-actions">
     {% if c.archived_at %}
     {{ archive_button(c, small=True) }}
@@ -606,7 +606,7 @@
         {%- elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif -%}
         {%- if c.created %} · появилась {{ c.created | local('%d.%m') }}{% endif -%}
         {%- if c.no_due_at %} · вы уже оставляли её без срока{% endif %}</div>
-      {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
+      {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what | fpaths }}</p>{% endif %}
       {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}
       {% if c.due_hint %}<p class="warn-text small">Срок {{ c.due | date }} под угрозой с самого начала: {{ c.due_hint_why }}. Реальнее — {{ c.due_hint | day_text }}.</p>{% endif %}
       <div class="due-pick" role="group" aria-label="Срок">
@@ -644,7 +644,7 @@
     со встречи). Вопрос без ответа — «ответа нет N дней». Обновляется само: Claude дописывает ход при разборе -#}
 <div class="dlg-now-slot" data-now-slot>{% if c.now %}<div class="dlg-now{{ ' wait' if c.now.waiting }}" title="Последнее по задаче; весь ход — в колонке «Ход задачи»">
   <span class="now-l">Сейчас</span>
-  <span class="now-t">{{ c.now.text }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</span>
+  <span class="now-t">{{ c.now.text | fpaths }}{% if c.now.waiting %} — <span class="warn-text">{{ c.now.waiting }}</span>{% endif %}</span>
   <span class="now-m">{{ c.now.day }} · {{ c.now.src }}</span>
 </div>{% endif %}</div>
 {%- endmacro %}
@@ -662,7 +662,7 @@
     встреча, вы), когда, ссылка на сообщение, текст и цитата. Справа — «изменить» и «удалить» -#}
 <li class="log-i k-{{ e.kind }}{{ ' waiting' if e.waiting }}"{% if e.id %} data-log-id="{{ e.id }}"{% endif %}>
   {%- if e.kind == 'event' %}
-  <div class="log-ev"><span class="log-when">{{ e.when }}</span> <span class="log-ev-t">{{ e.text }}{% if e.link %} <a href="{{ e.link }}" target="_blank" rel="noopener" title="{{ e.link_label }}">↗</a>{% endif %}</span>
+  <div class="log-ev"><span class="log-when">{{ e.when }}</span> <span class="log-ev-t">{{ e.text | fpaths }}{% if e.link %} <a href="{{ e.link }}" target="_blank" rel="noopener" title="{{ e.link_label }}">↗</a>{% endif %}</span>
     {{ log_acts(c, e, edit=False) }}</div>
   {%- else %}
   <div class="log-meta">
@@ -673,8 +673,8 @@
     {%- if e.id %}{{ log_acts(c, e) }}{% endif %}
   </div>
   {%- if e.kind != 'origin' %}
-  <div class="log-text"><span class="log-t">{{ e.text }}</span>{% if e.waiting %} <span class="log-wait">{{ e.waiting }}</span>{% elif e.kind == 'ask' %} <span class="log-asked">вопрос</span>{% endif %}</div>
-  {%- if e.quote %}<div class="log-quote">«{{ e.quote }}»</div>{% endif %}
+  <div class="log-text"><span class="log-t" data-text="{{ e.text }}">{{ e.text | fpaths }}</span>{% if e.waiting %} <span class="log-wait">{{ e.waiting }}</span>{% elif e.kind == 'ask' %} <span class="log-asked">вопрос</span>{% endif %}</div>
+  {%- if e.quote %}<div class="log-quote">«{{ e.quote | fpaths }}»</div>{% endif %}
   {%- endif %}
   {%- endif %}
 </li>
@@ -745,7 +745,7 @@
       {% if c.quiet %}{{ quiet_hint(c) }}{% endif %}
       {{ prio_row(c) }}
       {{ dayui.estimate_row(c) }}
-      {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what }}</p>{% endif %}
+      {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what | fpaths }}</p>{% endif %}
       {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}
       {% if c.done_hint %}{% set h = c.done_hint %}
       <div class="dlg-hint">

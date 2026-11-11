@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from opsdash import __version__, briefs, config, digests, overview, priorities, proposals, records, store, worklog
+from opsdash import __version__, briefs, config, digests, filepaths, overview, priorities, proposals, records, store, worklog
 from opsdash import day as day_mod
 from opsdash.web import agent_views, decisions_views, settings_views, skills_views, welcome_views
 
@@ -76,7 +76,9 @@ def f_md(text: str, breaks: bool = True) -> str:
     out = out.replace('<a href="/commitments?task=', '<a class="task-ref" href="/commitments?task=')
     # «Сделать задачей» у пункта «Открытых вопросов» (records.link_questions) — открывает окно на странице встречи
     out = re.sub(rf'<a href="#({records.QUESTION_DLG}\d+)">', r'<a class="q-task" href="#\1" data-dlg-open="\1">', out)
-    return UNSAFE_URL.sub(r'\1="#"', out)
+    # пути к файлам (`data/briefs/….md`, «Работа/Отчёты/…») — кнопкой «Показать в Finder» и «Скопировать путь»
+    out = filepaths.html_paths(UNSAFE_URL.sub(r'\1="#"', out))
+    return out
 
 
 def f_plain(text: str) -> str:
@@ -212,7 +214,8 @@ def f_timecodes(html_text: str) -> Markup:
 templates.env.filters.update(timecodes=f_timecodes)
 templates.env.filters.update(local=f_local, date=f_date, md=f_md, ago=f_ago, tg=f_tg_html, hhmm=config.hhmm,
                              people=f_people, place=f_place, note=f_note, hl=f_hl, size=f_size,
-                             headline=records.headline, route=records.route, plain=f_plain)
+                             headline=records.headline, route=records.route, plain=f_plain,
+                             fpaths=lambda text: filepaths.text(text))  # пути к файлам в простом тексте — кнопкой
 templates.env.globals.update(
     plural=f_plural, version=__version__, SOURCE_TITLES=overview.SOURCE_TITLES,
     # метка для ?v= у app.js/style.css: меняется с файлами, и браузер не берёт старые из кэша
@@ -1677,6 +1680,19 @@ def doc_open(request: Request, path: str = Form(...), reveal: str = Form("")):
         return back(request, err="Файл не найден — возможно, его переместили")
     _open_local(d["path"], bool(reveal))
     return back(request, "Показала в Finder" if reveal else "Открыла файл")
+
+
+@app.post("/files/reveal")
+def file_reveal(path: str = Form(...)):
+    """Путь из текста (ответ Claude, ход задачи, бриф) — показать в Finder / Проводнике. Только показывает, не
+    запускает; только существующие файлы из папки PULSE, рабочих папок и домашней, без secrets/."""
+    found = filepaths.Resolver().resolve(path)
+    if not found:
+        return JSONResponse({"ok": False, "err": "Файл не найден — возможно, его переместили или удалили"},
+                            status_code=404)
+    filepaths.reveal(found)
+    where = "Finder" if sys.platform == "darwin" else "Проводнике" if os.name == "nt" else "папке"
+    return JSONResponse({"ok": True, "msg": f"Открыла в {where}", "path": str(found)})
 
 
 def _open_local(path: str, reveal: bool) -> None:

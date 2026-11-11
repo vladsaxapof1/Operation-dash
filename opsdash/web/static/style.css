@@ -276,6 +276,23 @@ table.t tr.dim td { opacity: .55; }
 .doc th { background: var(--panel-2); }
 .doc code { background: var(--panel-2); padding: 1px 5px; border-radius: 5px; }
 .doc pre code { display: block; padding: 10px 12px; }
+/* путь к файлу в тексте (filepaths.py): щелчок — показать в Finder / Проводнике, значок справа — скопировать путь */
+.fpath { position: relative; overflow-wrap: anywhere; }
+a.fpath-go { color: var(--accent); cursor: pointer; }
+a.fpath-go:hover { text-decoration: none; }
+a.fpath-go:hover .fpath-t { text-decoration: underline; }
+.fpath-i { margin-right: 3px; vertical-align: -2px; }
+.fpath.mono .fpath-go { padding: 1px 5px; border-radius: 5px; background: var(--accent-soft); -webkit-box-decoration-break: clone;
+  box-decoration-break: clone; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .87em; }
+.fpath-copy { margin-left: 1px; padding: 1px 3px; border: 0; border-radius: 5px; background: none; color: var(--faint);
+  vertical-align: -1px; cursor: pointer; line-height: 1; opacity: .7; }
+.fpath:hover .fpath-copy { opacity: 1; }
+.fpath-copy:hover, .fpath-copy:focus-visible { background: var(--accent-soft); color: var(--accent); opacity: 1; }
+/* ширина — по тексту: у пути в две строки «коробка» строчного элемента узкая, и подсказка сжалась бы в столбик */
+.fpath-tip { position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 30; width: max-content; max-width: min(420px, 80vw);
+  padding: 3px 8px; border-radius: 6px; background: var(--text); color: var(--panel); font: 12px/1.4 var(--font);
+  pointer-events: none; box-shadow: var(--shadow-pop); }
+.fpath-tip.bad { background: var(--bad-text); color: #fff; }
 /* ссылка из разбора встречи на задачу PULSE (records.link_summary) */
 .doc a.task-ref { display: inline-block; margin-left: 4px; padding: 0 8px; border-radius: 999px; background: var(--accent-soft);
   font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
