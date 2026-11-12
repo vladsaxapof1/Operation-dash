@@ -60,6 +60,36 @@ def test_colleague_tasks_hidden_until_shown(client):
     assert "Графики на декабрь" not in client.get("/commitments?others=0").text  # выключили
 
 
+def test_search_finds_hidden_and_old_done(client):
+    """Поиск — по всем задачам: директор искала закрытую договорённость коллег, а она была в выключенной «Готово»
+    (12.11.2026). Найденные закрытые — в «Готово» за любой срок, колонка видна и выключенной."""
+    from opsdash import store
+
+    shut = records.add_commitment(direction="other", who="Пётр", whom="Мария", title="Минус ставка в отделе",
+                                  what="Сократить ставку")
+    records.update_commitment(shut, status="done")
+    store.execute("UPDATE commitments SET closed_at='2026-01-10T10:00:00+00:00' WHERE id=?", (shut,))  # давно
+    records.add_commitment(direction="mine", whom="Тимур", title="Ставка аренды", what="Узнать ставку")
+
+    page = client.get("/commitments").text
+    assert 'data-col="done"' not in page and "Минус ставка" not in page
+    found = client.get("/commitments?q=минус ставка").text
+    assert 'data-col="done"' in found and "Минус ставка в отделе" in found
+    assert '>Готово<span class="badge">1</span>' in found and 'aria-pressed="false"' in found.split(">Готово<")[0][-300:]
+    assert 'data-col="done"' not in client.get("/commitments?q=аренды").text  # закрытых не нашлось — колонки нет
+    assert "Минус ставка в отделе" in client.get("/commitments?view=gantt&q=минус").text
+
+    # «Список»: при поиске статус «все», пока не выбрали сами; «открытые» — только открытые
+    listing = client.get("/commitments?view=list&q=ставк").text
+    assert "Минус ставка в отделе" in listing and "Ставка аренды" in listing and "Готово и отменённые" in listing
+    assert '<select name="status"><option value="">все</option>' in listing and "все статусы" not in listing
+    listing = client.get("/commitments?view=list&q=ставк&status=open").text
+    assert "Минус ставка в отделе" not in listing and "Ставка аренды" in listing and "только открытые" in listing
+    listing = client.get("/commitments?view=list&q=ставк&status=").text  # форма с пустым статусом — как без него
+    assert "Минус ставка в отделе" in listing
+    assert "Минус ставка в отделе" not in client.get("/commitments?view=list").text  # без поиска — открытые
+
+
 def test_new_and_no_due_counters_skip_hidden(client):
     records.add_commitment(direction="mine", whom="Тимур", title="Отчёт", what="Отчёт", source_type="meeting")
     records.add_commitment(direction="other", who="Пётр", whom="Мария", title="Графики", what="Графики",

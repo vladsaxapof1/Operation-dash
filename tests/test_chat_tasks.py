@@ -188,6 +188,46 @@ def test_topic_tasks_and_propose_log(settings_with, capsys, monkeypatch):
         proposals.propose_task_log(commitment_id=crm, text="снова", reason="макеты", source_ref=f"pachca:{other}")
 
 
+def test_colleague_task_names_the_sender(settings_with, capsys):
+    """HR пишет директору, что с сотрудником поговорили и дату согласовали, а задача «Минус ставка в отделе ОП» — между
+    двумя руководителями: HR только назван в её тексте (12.11.2026). По людям связи не было, по теме — одно общее
+    слово («АБ» из двух букв не считалось), и разбор записал новость в соседнюю задачу HR. Теперь задача под чатом."""
+    settings_with(owner={"name": "Анна Директорова"})
+    records.upsert_person("Ольга Петрова", aliases=["Ольга"])
+    records.upsert_person("Ольга Смирнова")
+    records.upsert_person("Пётр Иванов")
+    records.upsert_person("Олег Соколов")
+    cut = records.add_commitment(direction="other", who="Пётр Иванов", whom="Олег Соколов",
+                                 title="Минус ставка в отделе ОП", force=True,
+                                 what="Сократить одну ставку в отделе ОП до конца месяца; разговор — с Ольгой Петровой")
+    # «с Ольгой» без фамилии — Ольг в справочнике две: не угадываем
+    records.add_commitment(direction="other", who="Пётр Иванов", whom="Олег Соколов", title="График отпусков",
+                           what="Свести график отпусков, согласовать с Ольгой", force=True)
+    store_mo = _task("other", "Склад в МО", who="Пётр Иванов", whom="Олег Соколов")
+    _task("other", "Склад в области", who="Пётр Иванов", whom="Олег Соколов")  # «МО» нет — одно слово, не тема
+
+    _chat("telegram", "11", "Ольга HR Петрова", "private")
+    _msg("telegram", "11", "Ольга HR Петрова", "1", "в ОП поговорили, договорились на дату, как подпишет — дам знать",
+         sender="Ольга HR Петрова")
+    _chat("telegram", "12", "Логистика", "group")
+    _msg("telegram", "12", "Логистика", "1", "по МО склад нашли", sender="Вера Лис", minute=1)
+    cli.main(["messages", "pending"])
+    out = capsys.readouterr().out
+    [line] = _block(out, "Ольга HR Петрова")
+    assert line.startswith(f"[{cut}] ") and line.endswith("— Ольга Петрова упомянут(а) в тексте задачи")
+    assert "График отпусков" not in out
+    [line] = _block(out, "Логистика")
+    assert line.startswith(f"[{store_mo}] ") and line.endswith(f"— по теме (Склад, МО) — {chat_tasks.TOPIC_HINT}")
+    assert "Склад в области" not in out
+
+    # слова с маленькой буквы — не имя; падежи имени — имя
+    people = records.list_people()
+    olga = next(p for p in people if p["name"] == "Ольга Петрова")
+    assert chat_tasks._named(olga, chat_tasks._names_in("Передать Ольге Петровой отчёт"), people)
+    assert not chat_tasks._named(olga, chat_tasks._names_in("ольга петрова"), people)
+    assert not chat_tasks._named(olga, chat_tasks._names_in("Передать Ольге отчёт"), people)
+
+
 def test_brief_and_search(capsys):
     long_what = "Собрать сводку по продажам за октябрь по всем направлениям, с разбивкой по менеджерам " * 5
     a = records.add_commitment(direction="to_me", who="Ольга", title="Сводка продаж", what=long_what, due="2026-11-12")

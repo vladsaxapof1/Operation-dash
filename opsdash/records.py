@@ -1409,21 +1409,21 @@ def _wait_risk(c: dict, pending: list[dict], today: date) -> str | None:
     return None
 
 
-def commitments_board(*, person: str | None = None, q: str | None = None, done_days: int = 14,
+def commitments_board(*, person: str | None = None, q: str | None = None, done_days: int | None = 14,
                       created: Period | None = None, due: Period | None = None,
                       no_due: bool = False, unseen: bool = False, sort: str = "due",
                       archived: bool = False, project: int | str | None = None,
                       ids: list[int] | None = None, quiet: bool = False) -> dict[str, list[dict]]:
     """Доска задач и договорённостей: открытые — по направлению, «Готово» — закрытые за done_days дней
-    (последние закрытые сверху при любой сортировке). archived — добавить архивные в конец колонок:
-    открытые — в свою, выполненные и отменённые — в «Готово», за любой срок."""
+    (None — за любой срок: так ищут), последние закрытые сверху при любой сортировке. archived — добавить архивные
+    в конец колонок: открытые — в свою, выполненные и отменённые — в «Готово», за любой срок."""
     board = {d: list_commitments(status="open", direction=d, person=person, q=q, created=created, due=due,
                                  no_due=no_due, unseen=unseen, sort=sort, archived=archived, project=project, ids=ids,
                                  quiet=quiet)
              for d in DIRECTIONS}
     if quiet:  # без движения бывают только открытые
         return {**board, "done": []}
-    since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=done_days))
+    since = store.to_utc_iso(datetime.now(timezone.utc) - timedelta(days=done_days)) if done_days is not None else ""
     where, params = _filters(person, q, created, due, no_due, unseen, project, ids)
     sql = ("SELECT * FROM commitments WHERE status='done' AND archived_at IS NULL "
            "AND COALESCE(closed_at, updated) >= ?" + where)

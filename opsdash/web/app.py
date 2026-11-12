@@ -848,7 +848,7 @@ KAITEN_PARAMS = ("who", "space", "q", "mine", "only", "created", "created_from",
 
 
 @app.get("/commitments", response_class=HTMLResponse)
-def commitments(request: Request, view: str = "board", status: str = "open", direction: str = "", person: str = "",
+def commitments(request: Request, view: str = "board", status: str = "", direction: str = "", person: str = "",
                 q: str = "", add: str = "", created: str = "", created_from: str = "", created_to: str = "",
                 due: str = "", due_from: str = "", due_to: str = "", scale: str = "week", sort: str = "",
                 new: str = "", task: int = 0, parent: int = 0, archived: str = "", project: str = "",
@@ -864,6 +864,10 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
     show_archived = archived == "1" or status == "archived"  # status=archived — ссылки из прошлой версии
     status = "all" if status == "archived" else status
     person, q = person.strip(), q.strip()
+    # поиск — по всем задачам: и закрытым, за любой срок. В «Списке» статус, который не выбирали сами (пусто), при
+    # поиске — «все», без поиска — «открытые»; на доске и Ганте найденные закрытые — в «Готово», она видна и выключенной
+    status_set = status in ("open", "done", "all")
+    status = status if status_set else ("all" if q else "open")
     # ?updated=12,15,40 — из уведомления «Обновил ход задач: N»: на доске только они, подробно — видно новое «Сейчас»
     upd = list(dict.fromkeys(int(x) for x in updated.split(",") if x.strip().isdigit()))[:100]
     still = quiet == "1"  # «Без движения»: только задачи, по которым давно ничего не происходит (opsdash.quiet)
@@ -875,7 +879,8 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
              "no_due": due == "none", "unseen": new == "1"}
     board = (records.commitments_board(person=person or None, q=q or None, sort=sort, archived=show_archived,
-                                       project=project or None, ids=upd or None, quiet=still, **dates)
+                                       project=project or None, ids=upd or None, quiet=still,
+                                       done_days=None if q else 14, **dates)
              if view in ("board", "gantt") else None)
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
                                       sort=sort, archived=show_archived, project=project or None, ids=upd or None,
@@ -952,7 +957,8 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
         (f"создана: {period_titles.get(created, created)}", ("created", "created_from", "created_to"), bool(created)),
         (f"срок: {period_titles.get(due, due)}", ("due", "due_from", "due_to"), bool(due) and due not in ("none", "now")),
         (records.DIRECTIONS.get(direction, direction), ("direction",), view == "list" and bool(direction)),
-        ({"done": "выполненные", "all": "все статусы"}.get(status, status), ("status",), view == "list" and status != "open"),
+        ({"open": "только открытые", "done": "выполненные", "all": "все статусы"}.get(status, status), ("status",),
+         view == "list" and status_set and status != ("all" if q else "open")),
         ("с архивными", ("archived",), show_archived),
         (f"поиск «{q}»", ("q",), bool(q)),
         (f"обновился ход: {len(upd)} {f_plural(len(upd), 'задача', 'задачи', 'задач')}", ("updated",), bool(upd)),
@@ -991,7 +997,9 @@ def commitments(request: Request, view: str = "board", status: str = "open", dir
                       projects=live_projects, finished_projects=done_projects_list,
                       done_projects=bool(done_projects), others_pref=others_pref,
                       piles=piles, stacks_on=stacks_on, stacks_open=stacks_open,
-                      show_done=show_done or bool(upd and board and board["done"]),  # обновили ход у закрытой
+                      show_done=show_done, status_set=status_set,
+                      # колонка «Готово»: включена, или нашлись закрытые (поиск), или обновили ход у закрытой
+                      done_col=show_done or bool((upd or q) and board and board["done"]),
                       others_col=others_col, others_n=others_n, cards_full=prefs["cards"] == "full" or bool((upd or still) and "cards" not in request.query_params),
                       tasks_all=records.active_count(),
                       group=group if group in LIST_GROUPS else "dir", list_groups=LIST_GROUPS,

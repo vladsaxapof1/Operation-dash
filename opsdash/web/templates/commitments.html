@@ -52,7 +52,7 @@
         <a class="fchip sm{{ ' on' if others_pref }}" href="{{ toggles.others }}&view={{ view }}" aria-pressed="{{ 'true' if others_pref else 'false' }}"
            title="{{ 'Скрыть договорённости между коллегами' if others_pref else 'Договорённости между коллегами: PULSE собирает их со встреч и из переписки и закрывает сам. При поиске и фильтре по человеку или проекту они видны всегда' }}">{{ tick(others_pref) }}Между коллегами<span class="badge">{{ others_n }}</span></a>
         {% if view != 'list' %}<a class="fchip sm{{ ' on' if show_done }}" href="{{ toggles.done }}&view={{ view }}" aria-pressed="{{ 'true' if show_done else 'false' }}"
-           title="Закрытые за последние две недели · архивные — в фильтре">{{ tick(show_done) }}Готово<span class="badge">{{ board.done | length }}</span></a>{% endif %}
+           title="Закрытые за последние две недели · архивные — в фильтре. При поиске найденные закрытые видны всегда, за любой срок">{{ tick(show_done) }}Готово<span class="badge">{{ board.done | length }}</span></a>{% endif %}
       </span>
       {% if view == 'board' and not project %}<a class="fchip sm{{ ' on' if stacks_on }}" href="{{ toggles.stacks }}&view=board" aria-pressed="{{ 'true' if stacks_on else 'false' }}"
          title="{{ 'Показывать задачи проектов по одной' if stacks_on else 'Задачи одного проекта — одной стопкой с названием проекта; щелчок по стопке раскрывает её' }}">{{ tick(stacks_on) }}Стопки по проектам</a>{% endif %}
@@ -84,7 +84,9 @@
             {% for key, t in [('mine', 'мои задачи'), ('to_me', 'мне должны'), ('other', 'между коллегами')] %}<option value="{{ key }}" {{ 'selected' if direction == key }}>{{ t }}</option>{% endfor %}
           </select>
           <label>Статус</label>
-          <select name="status">{% for key, t in [('open', 'открытые'), ('done', 'выполненные'), ('all', 'все')] %}<option value="{{ key }}" {{ 'selected' if status == key }}>{{ t }}</option>{% endfor %}</select>
+          {#- пусто — как обычно: открытые, а при поиске — все (ищут и закрытые) #}
+          {% set auto = 'all' if q else 'open' %}
+          <select name="status"><option value="">{{ 'все' if q else 'открытые' }}</option>{% for key, t in [('open', 'открытые'), ('done', 'выполненные'), ('all', 'все')] if key != auto %}<option value="{{ key }}" {{ 'selected' if status_set and status == key }}>{{ t }}</option>{% endfor %}</select>
           {% endif %}
           <label>Человек</label><input type="text" name="person" value="{{ person }}" placeholder="Имя" list="people-list">
           {% if project_options %}
@@ -208,7 +210,7 @@
 {% elif view == 'board' %}
 {#- доска (5.2): «Мои задачи» и «Мне должны»; «Между коллегами» и «Готово» — по переключателям «Показать» под заголовком #}
 {% set cols = [('mine', 'Мои задачи'), ('to_me', 'Мне должны')] + ([('other', 'Между коллегами')] if others_col else [])
-   + ([('done', 'Готово')] if show_done else []) %}
+   + ([('done', 'Готово')] if done_col else []) %}
 <div class="board{{ ' wide' if cols | length > 3 }}" style="--cols: {{ cols | length }}">
   {% for key, title in cols %}
   {% set col = board[key] %}
@@ -283,7 +285,7 @@
           {% for x in gantt.weekends %}<i style="left: {{ x }}px; width: {{ gantt.px }}px"></i>{% endfor %}
           <b class="gantt-now" style="left: {{ gantt.now_x }}px"></b>
         </div>
-        {% for g in gantt.groups if (g.key != 'done' or show_done) and (g.key != 'other' or others_col) %}
+        {% for g in gantt.groups if (g.key != 'done' or done_col) and (g.key != 'other' or others_col) %}
         {% set late = g['items'] | selectattr('overdue') | list | length %}
         <section class="gantt-group" data-kb-col="{{ g.key }}">
           <div class="gantt-group-h"><span class="gantt-group-t">{{ g.title }}</span><span class="col-n">{{ g['items'] | length }}</span>{% if late %}<span class="cnt bad" title="{{ late }} просрочено">{{ late }}</span>{% endif %}</div>

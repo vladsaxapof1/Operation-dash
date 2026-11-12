@@ -5,7 +5,9 @@
 Поэтому под каждым чатом PULSE сам выкладывает задачи, к которым его сообщения вероятнее всего относятся:
 - по задаче уже был ход из этого чата (или задача из него появилась);
 - задачи собеседника личного чата («Ольга LIFE» — Ольга Петрова из справочника, у которой псевдоним «Ольга»);
-- задачи автора нового сообщения и упомянутых в нём людей («@Ольга Петрова», «@olga_p»).
+- задачи автора нового сообщения и упомянутых в нём людей («@Ольга Петрова», «@olga_p»);
+- задачи, в тексте которых автор назван, хотя они не на нём: о договорённости коллег директору часто пишет третий
+  участник — HR о сокращении, которое ведёт руководитель («разговор — вместе с Ольгой из HR», 12.11.2026).
 Задачи директора сами по себе в счёт не идут — у неё все задачи: важен второй участник (кому она обещала,
 кто обещал ей). Последними — до трёх задач по теме: два слова заголовка задачи в одном сообщении. Такая связь
 не наверняка, поэтому ход по ней фоновый Claude не пишет сам, а предлагает директору (propose log).
@@ -22,7 +24,7 @@ from opsdash import config, records, store
 
 PER_CHAT = 6  # задач под одним чатом: дальше — подсказка, как найти остальные
 _MENTION = re.compile(r"(?<![\w@])@([A-Za-zА-Яа-яЁё][\w.]*(?:[  ][A-ZА-ЯЁ][a-zа-яё]+)?)")
-_ORDER = {"chat": 0, "peer": 1, "mention": 2, "sender": 3, "topic": 4}
+_ORDER = {"chat": 0, "peer": 1, "mention": 2, "sender": 3, "named": 4, "topic": 5}
 TOPIC_PER_CHAT = 3  # задач «по теме» под одним чатом: связь слабая, больше — шум
 TOPIC_HINT = "связь не наверняка: относится — propose log"
 
@@ -52,9 +54,53 @@ _COMMON = {"еще", "один", "одна", "одно", "сегод", "завт
 
 
 def _topic_stems(text: str | None) -> set[str]:
-    """Как records._stems, но слово из латиницы с русским окончанием («CRMку») — это «crm»; без общих слов."""
-    words = _WORD.findall((text or "").lower().replace("ё", "е"))
-    return {w[:5] for w in words if len(w) >= 3 and w not in records._STOP} - _COMMON
+    """Как records._stems, но слово из латиницы с русским окончанием («CRMку») — это «crm»; без общих слов.
+    Сокращение из двух заглавных букв — тоже слово темы: «Склад в МО» в заголовке и «по МО склад нашли» в сообщении
+    — уже два общих слова (12.11.2026), а не одно."""
+    stems = set()
+    for w in _WORD.findall(text or ""):
+        low = w.lower().replace("ё", "е")
+        if len(low) >= 3 and low not in records._STOP:
+            stems.add(low[:5])
+        elif len(w) == 2 and w.isalpha() and w.isupper():
+            stems.add(low)
+    return stems - _COMMON
+
+
+_CAPITAL = re.compile(r"[A-ZА-ЯЁ][a-zа-яё]+")  # имена в тексте задачи пишут с заглавной
+# окончания имён и фамилий в падежах: Катя — Кати, Кате, Катю, Катей; Соколов — Соколова, Соколову, Соколовым
+_CASE_ENDINGS = {"", "а", "я", "у", "ю", "е", "и", "ы", "ой", "ей", "ою", "ею", "ом", "ем", "ым", "им", "ого", "ому"}
+
+
+def _name_base(word: str) -> str:
+    """Имя без окончания: «Ольга» → «ольг», «Никита» → «никит», «Соколов» → «соколов»."""
+    w = word.lower().replace("ё", "е")
+    return w[:-1] if len(w) > 3 and w[-1] in "аяйь" else w
+
+
+def _names_in(text: str) -> set[str]:
+    return {w.lower().replace("ё", "е") for w in _CAPITAL.findall(text or "")}
+
+
+def _named(person: dict, words: set[str], people: list[dict]) -> bool:
+    """Назван ли человек из справочника в тексте задачи (words — слова с заглавной, _names_in): все слова его имени
+    или псевдонима в любом падеже («с Ольгой Петровой» — Ольга Петрова). Псевдоним из одного слова («Оля») — только если
+    больше ни у кого в справочнике такого слова в имени нет."""
+    def found(name_word: str) -> bool:
+        base = _name_base(name_word)
+        return len(base) >= 3 and any(w.startswith(base) and w[len(base):] in _CASE_ENDINGS for w in words)
+
+    for variant in [person["name"], *(person.get("aliases") or [])]:
+        parts = variant.split()
+        if not parts or not all(found(x) for x in parts):
+            continue
+        if len(parts) > 1:
+            return True
+        base = _name_base(parts[0])
+        if not any(_name_base(x) == base for p in people if p["id"] != person["id"]
+                   for n in [p["name"], *(p.get("aliases") or [])] for x in n.split()):
+            return True
+    return False
 
 
 def _counterparts(c: dict) -> list[str]:
@@ -109,7 +155,7 @@ def related(source: str, chat_id: str, title: str | None, kind: str | None, msgs
             tasks: list[dict], people: list[dict], owner: str = "", username: str | None = None,
             topics: bool = False) -> list[dict]:
     """Открытые задачи для чата — [{"task", "why"}], сильные связи первыми (ход из чата, собеседник, упомянутый,
-    автор сообщения), внутри — в порядке tasks (обычно по приоритету). topics — ещё и задачи по теме сообщений
+    автор сообщения, собеседник или автор назван в тексте задачи), внутри — в порядке tasks (обычно по приоритету). topics — ещё и задачи по теме сообщений
     (слова заголовка), не больше TOPIC_PER_CHAT, последними: задача директора «Демо и макеты CRM» обещана одному
     коллеге, а продолжение пишут в треде с другим — по людям такую связь не найти."""
     me = records._words(owner)
@@ -143,6 +189,15 @@ def related(source: str, chat_id: str, title: str | None, kind: str | None, msgs
                     why = {"peer": "собеседник", "mention": f"упомянут(а) {label}", "sender": f"пишет {label}"}[how]
                     if c["id"] not in by_task or _ORDER[how] < by_task[c["id"]][0]:
                         by_task[c["id"]] = (_ORDER[how], why)
+        if c["id"] in by_task:
+            continue
+        # пишет человек, который назван в тексте задачи, хотя она не на нём (не упомянутый в сообщении — это уже
+        # второй шаг от переписки)
+        words = _names_in(f"{c.get('title') or ''} {c.get('what') or ''}")
+        for n, how, ps in persons:
+            if how in ("peer", "sender") and len(ps) == 1 and _named(ps[0], words, people):
+                by_task[c["id"]] = (_ORDER["named"], f"{ps[0]['name']} упомянут(а) в тексте задачи")
+                break
     topic: dict[int, tuple[int, str]] = {}  # id → (сколько слов заголовка в сообщении, какие)
     if topics:
         topic = {c["id"]: t for c in tasks if (t := _topic(c, msgs))}
