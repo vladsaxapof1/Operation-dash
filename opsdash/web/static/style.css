@@ -1886,6 +1886,20 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .conn-main .card-h, .conn-main .card-b { padding-left: 0; padding-right: 0; }
 .conn-main .card-b { padding-bottom: 8px; }
 .conn-main > .card:first-of-type .card-b { padding-top: 0; }
+/* «PULSE в вашем Claude Code» — наверху каталога: сам PULSE как MCP-сервер для Claude Code (opsdash.mcp_server) */
+.conn-pulse { margin: 14px 0 4px; padding: 16px 18px; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 24px; align-items: center; background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: var(--radius); }
+.conn-pulse-h { display: flex; gap: 14px; align-items: flex-start; min-width: 0; }
+.conn-pulse h3 { margin: 0 0 4px; font-size: 17px; color: var(--text); text-transform: none; letter-spacing: 0; }
+.conn-pulse-tag { margin-left: 4px; font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+.conn-pulse-t { margin: 0; font-size: 15px; }
+.conn-pulse-f { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.conn-pulse-f form { margin: 0; }
+.conn-pulse-more { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.conn-pulse-more details { margin-top: 4px; }
+.conn-pulse-cmd { display: block; margin-top: 4px; word-break: break-all; }
+@media (max-width: 760px) { .conn-pulse { grid-template-columns: minmax(0, 1fr); } .conn-pulse-f { align-items: flex-start; } }
 /* «Здоровье» над каталогом: плитки системы, что не так — с подсказкой (CON-5) */
 .conn-health { margin: 14px 0 4px; padding: 14px 16px 16px; background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); }

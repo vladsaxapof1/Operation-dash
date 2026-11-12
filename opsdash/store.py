@@ -641,7 +641,19 @@ def connect() -> sqlite3.Connection:
                 _migrate(conn)
                 conn.commit()
                 _initialized.add(path)
+    if _query_only:
+        conn.execute("PRAGMA query_only=ON")
     return conn
+
+
+_query_only = False
+
+
+def read_only() -> None:
+    """Этот процесс базу только читает (MCP-сервер PULSE для сессий Claude Code, opsdash.mcp_server): любая запись
+    в нём падает на уровне SQLite. Схему и миграции первое подключение ещё делает — до этой строки в connect()."""
+    global _query_only
+    _query_only = True
 
 
 _guard = None  # в процессе расшифровки — замок от PULSE: на паузу её ставят только вне обращения к базе

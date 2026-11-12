@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from urllib.parse import urlparse
 
@@ -212,6 +213,11 @@ def register(app: FastAPI, render, back) -> None:
             from opsdash import doctor
 
             ctx["health"] = doctor.run(settings, catalog=catalog)  # блок «Здоровье» над каталогом (CON-5)
+            from opsdash import mcp_server
+
+            # «PULSE в вашем Claude Code» — над «Здоровьем»: сам PULSE как MCP-сервер только для чтения
+            ctx["pulse_mcp"] = {**mcp_server.status(), "manual": mcp_server.manual_command(),
+                                "tools": ", ".join(mcp_server.TOOLS)}
         if tab == "updates":
             from opsdash import updates
 
@@ -899,6 +905,20 @@ def register(app: FastAPI, render, back) -> None:
         if missing:
             return back(request, err="Сохранено, но этих папок нет: " + "; ".join(missing))
         return back(request, "Сохранено")
+
+    # --- PULSE в вашем Claude Code (наверху «Подключений») ---
+
+    @app.post("/settings/pulse-mcp")
+    async def pulse_mcp(request: Request, on: str = Form("")):
+        """Подключить PULSE ко всем сессиям Claude Code (MCP-сервер только для чтения) или отключить."""
+        from opsdash import mcp_server
+
+        try:
+            await run_in_threadpool(mcp_server.connect if on else mcp_server.disconnect)
+        except (mcp_server.ToolError, OSError, subprocess.SubprocessError) as e:
+            return back(request, err=f"Не получилось: {e}")
+        return back(request, "PULSE подключён к Claude Code: новые сессии в любой папке его видят" if on
+                    else "PULSE отключён от сессий Claude Code")
 
     # --- офис ---
 

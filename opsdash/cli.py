@@ -565,6 +565,10 @@ def cmd_mcp(a) -> None:
                 out("Инструменты ещё не известны — ./ops mcp check " + a.id)
         elif a.action == "check":
             out(mcp.check(a.id))
+        elif a.action == "serve":
+            from opsdash import mcp_server
+
+            mcp_server.serve()
     except mcp.MCPError as e:
         fail(str(e))
 
@@ -2279,6 +2283,8 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("id")
     x = ms.add_parser("check", help="подключиться и обновить список инструментов")
     x.add_argument("id")
+    ms.add_parser("serve", help="сам PULSE как MCP-сервер только для чтения — для сессий Claude Code в любой папке "
+                                "(подключается наверху Настройки → Подключения)")
     s.set_defaults(fn=cmd_mcp)
 
     s = sub.add_parser("decisions", help="решения по темам: что действует, цепочки, следующий шаг")

@@ -10,6 +10,30 @@
   <p class="conn-private small">Всё хранится на этом компьютере: пароли и ключи — в папке <code>secrets</code>, письма и сообщения — в <code>data</code>. Наружу уходит только текст для разбора — в {{ catalog.engine }} по вашей подписке. <a href="/settings?tab=data">Что PULSE делает с данными →</a></p>
 </div>
 
+{% if pulse_mcp %}
+{#- PULSE в вашем Claude Code (opsdash.mcp_server): сам PULSE — MCP-сервер только для чтения для сессий Claude Code
+    в любой папке. Наоборот к «Сервисам через MCP» ниже (там PULSE читает сервисы) — поэтому отдельно и наверху #}
+{% set mcp_on = pulse_mcp.on and not pulse_mcp.stale %}
+<section class="conn-pulse{{ ' is-on' if mcp_on }}" id="pulse-mcp" aria-labelledby="pulse-mcp-h">
+  <div class="conn-pulse-h">
+    {{ logo({'color': 'var(--accent)', 'mono': 'P', 'logo': ''}, 44) }}
+    <div>
+      <h3 id="pulse-mcp-h">PULSE в вашем Claude Code <span class="conn-pulse-tag">MCP · только чтение</span></h3>
+      <p class="conn-pulse-t">Claude Code в любой папке сам читает PULSE: встречи и расшифровки, задачи с ходом, решения и проекты. Спросите в сессии проекта «что решили по бюджету склада?» — найдёт сам, пересказывать не нужно.</p>
+    </div>
+  </div>
+  <div class="conn-pulse-f">
+    <span class="st small">{% if mcp_on %}<span class="dot ok"></span>подключено{% elif pulse_mcp.on %}<span class="dot warn"></span><span class="warn-text">подключено к другой папке PULSE</span>{% else %}<span class="dot off"></span>не подключено{% endif %}</span>
+    <form method="post" action="/settings/pulse-mcp" data-busy="Подключаю…">
+      {% if mcp_on %}<button class="btn ghost">Отключить</button>
+      {% else %}<input type="hidden" name="on" value="1"><button class="btn primary">{{ 'Переподключить' if pulse_mcp.on else 'Подключить' }}</button>{% endif %}
+    </form>
+  </div>
+  <div class="conn-pulse-more small">{% if mcp_on %}У Claude есть инструменты PULSE: {{ pulse_mcp.tools }}. {% elif pulse_mcp.on %}PULSE перенесли или переустановили — «Переподключить» пропишет новую папку. {% endif %}Изменить что-то в PULSE из сессии нельзя, переписку она не видит. Подключение хранится в настройках Claude Code (<code>~/.claude.json</code>), в папки проектов ничего не кладётся; открытые сессии увидят PULSE после перезапуска. Это не «Сервисы через MCP» ниже: там PULSE читает ваши сервисы, здесь Claude Code читает PULSE.
+    <details><summary>Подключить вручную</summary><code class="conn-pulse-cmd">{{ pulse_mcp.manual }}</code></details></div>
+</section>
+{% endif %}
+
 {% if health %}
 {#- «Здоровье» (CON-5): система одной строкой плиток — помощник, фоновые задания, уведомления, записи, диск, ошибки,
     автозапуск; что не так — с подсказкой, что сделать. Источники — на своих карточках ниже. То же — ./ops doctor #}
