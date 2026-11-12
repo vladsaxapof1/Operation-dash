@@ -29,7 +29,7 @@
       {% else %}<input type="hidden" name="on" value="1"><button class="btn primary">{{ 'Переподключить' if pulse_mcp.on else 'Подключить' }}</button>{% endif %}
     </form>
   </div>
-  <div class="conn-pulse-more small">{% if mcp_on %}У Claude есть инструменты PULSE: {{ pulse_mcp.tools }}. {% elif pulse_mcp.on %}PULSE перенесли или переустановили — «Переподключить» пропишет новую папку. {% endif %}Изменить что-то в PULSE из сессии нельзя, переписку она не видит. Подключение хранится в настройках Claude Code (<code>~/.claude.json</code>), в папки проектов ничего не кладётся; открытые сессии увидят PULSE после перезапуска. Это не «Сервисы через MCP» ниже: там PULSE читает ваши сервисы, здесь Claude Code читает PULSE.
+  <div class="conn-pulse-more small">{% if mcp_on %}У Claude есть инструменты PULSE: {{ pulse_mcp.tools }}. {% elif pulse_mcp.on %}PULSE перенесли или переустановили — «Переподключить» пропишет новую папку. {% endif %}Изменить что-то в PULSE из сессии нельзя. Самих чатов и писем она не видит — только то, что PULSE записал из них в ход задач. Подключение хранится в настройках Claude Code (<code>~/.claude.json</code>), в папки проектов ничего не кладётся; открытые сессии увидят PULSE после перезапуска. Это не «Сервисы через MCP» ниже: там PULSE читает ваши сервисы, здесь Claude Code читает PULSE.
     <details><summary>Подключить вручную</summary><code class="conn-pulse-cmd">{{ pulse_mcp.manual }}</code></details></div>
 </section>
 {% endif %}
