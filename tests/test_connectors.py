@@ -139,6 +139,25 @@ def test_recordings_and_claude_are_panels_not_menu_items(client):
     assert 'data-conn="claude"' in claude and "Расход Claude" in claude and "Путь к codex" not in claude
 
 
+def test_docs_folders_have_own_menu_item(client):
+    """Папки с документами — пунктом «Документы» в подменю: в архиве раздела карточки в каталоге нет, а папки
+    задаются и тогда (их читает Claude); раздел можно включить прямо там."""
+    assert not config.section_on("docs")  # по умолчанию раздел в архиве
+    page = client.get("/settings?tab=docs").text
+    menu = page.split('class="subnav"')[1].split("</nav>")[0]
+    assert 'aria-current="page"><span>Документы</span><span class="subnav-n">в архиве</span>' in menu
+    assert "Папки с рабочими документами" in page and "Включить раздел" in page
+    assert 'data-conn="knowledge"' not in client.get("/settings?tab=connections").text  # карточки в каталоге нет
+    old = client.get("/settings?tab=knowledge").text  # старая ссылка — на пункт меню, а не в пустой каталог
+    assert 'aria-current="page"><span>Документы</span>' in old and "Папки с рабочими документами" in old
+    r = client.post("/settings/sections/docs", data={"on": "1"}, follow_redirects=False,
+                    headers={"referer": "http://localhost:8765/settings?tab=docs"})
+    assert config.section_on("docs") and r.headers["location"].startswith("/settings?tab=docs&msg=")
+    page = client.get("/settings?tab=docs").text
+    assert "Включить раздел" not in page and 'aria-current="page"><span>Документы</span></a>' in page
+    assert 'data-conn="knowledge"' in client.get("/settings?tab=knowledge").text  # раздел включён — снова окно
+
+
 def test_data_page(client, settings_with):
     settings_with(mail={"enabled": True})
     page = client.get("/settings?tab=data").text

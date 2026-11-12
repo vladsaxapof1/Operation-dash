@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sys
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -17,7 +18,8 @@ TABS = [
     ("telegram", "Telegram"), ("bot", "Telegram-бот"), ("ymessenger", "Я.Мессенджер"), ("pachca", "Пачка"), ("slack", "Slack"),
     ("mail", "Яндекс Почта"), ("gmail", "Gmail"), ("calendar", "Яндекс Календарь"), ("google_calendar", "Google Календарь"),
     ("imap", "Другая почта"), ("caldav", "Другой календарь"), ("ics_calendar", "Календарь по ссылке"),
-    ("kaiten", "Kaiten"), ("recordings", "Записи встреч"), ("knowledge", "Документы"), ("office", "Офис"),
+    ("kaiten", "Kaiten"), ("recordings", "Записи встреч"), ("knowledge", "Документы"), ("docs", "Документы"),
+    ("office", "Офис"),
     ("autonomy", "Автономия"), ("schedule", "Расписание"), ("day", "День"), ("claude", "Claude"), ("chatgpt", "ChatGPT"),
     ("data", "Ваши данные"), ("archive", "Архивные разделы"),
 ]
@@ -33,7 +35,10 @@ def settings_menu(settings: dict, catalog: dict) -> list[dict]:
             {"tab": "connections", "title": "Подключения", "note": f"{catalog['on']} из {catalog['total']}",
              "warn": bool(catalog["problems"])},
             {"tab": "schedule", "title": "Расписание"}, {"tab": "day", "title": "День"},
-            {"tab": "autonomy", "title": "Автономия"}, {"tab": "office", "title": "Офис"}]
+            {"tab": "autonomy", "title": "Автономия"},
+            # папки с документами — своим пунктом: в архиве раздела карточки в каталоге нет, а папки нужны Claude
+            {"tab": "docs", "title": "Документы", "note": "" if config.section_on("docs", settings) else "в архиве"},
+            {"tab": "office", "title": "Офис"}]
     archived = sum(not config.section_on(n, settings) for n in config.SECTIONS)
     menu += [{"sep": True}, {"tab": "data", "title": "Ваши данные"},
              {"tab": "updates", "title": "Обновления", "note": __version__},
@@ -175,6 +180,8 @@ def register(app: FastAPI, render, back) -> None:
         settings = config.load_settings()
         secrets = config.load_secrets()
         tab = {"connection": "connections"}.get(tab, tab)
+        if tab == "knowledge" and not config.section_on("docs", settings):
+            tab = "docs"  # раздел в архиве — окна в каталоге нет, старые ссылки ведут на пункт «Документы»
         catalog = connectors.catalog(settings)
         # вкладка источника (?tab=telegram — старые ссылки, бот, возврат после «Сохранить») — это каталог
         # «Подключений» с окном этого источника поверх него (CON-3)
@@ -192,6 +199,8 @@ def register(app: FastAPI, render, back) -> None:
                 ctx["tab"] = "connections"
         if tab == "archive":
             ctx["sections"] = archive_rows(settings)
+        if tab == "docs":
+            ctx["docs_on"] = config.section_on("docs", settings)
         if tab == "data":
             ctx["data"] = connectors.data_overview(settings)
         if tab == "claude":
@@ -300,8 +309,11 @@ def register(app: FastAPI, render, back) -> None:
         config.save_settings(settings)
         daemon.sync_claude_settings()
         title = config.SECTIONS[name]["title"]
+        # включили со страницы «Документы» в Настройках — туда же и вернуться
+        from_docs = "tab=docs" in urlparse(request.headers.get("referer") or "").query.split("&")
+        to = "/settings?tab=docs" if from_docs else "/settings?tab=archive"
         return back(request, f"Раздел «{title}» включён — он снова в меню, его задания работают" if on
-                    else f"Раздел «{title}» в архиве. Данные сохранены", to="/settings?tab=archive")
+                    else f"Раздел «{title}» в архиве. Данные сохранены", to=to)
 
     @app.post("/settings/theme")
     def save_theme(request: Request, theme: str = Form("system")):

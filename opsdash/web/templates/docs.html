@@ -34,13 +34,13 @@
   <div><h1>Документы</h1>
     <div class="muted">{% if stats.indexed %}В поиске {{ stats.indexed }} {{ plural(stats.indexed, 'документ', 'документа', 'документов') }}{% if stats.last_ok %} · обновлено {{ stats.last_ok | ago }}{% endif %}{% else %}Индекс ещё пуст{% endif %} · файлы только читаются</div></div>
   <div class="actions">
-    <a class="btn ghost" href="/settings?tab=knowledge">Папки</a>
+    <a class="btn ghost" href="/settings?tab=docs">Папки</a>
     {% if folders %}<form method="post" action="/docs/index" data-busy="Обновляю…"><button class="btn">↻ Обновить индекс</button></form>{% endif %}
   </div>
 </div>
 
 {% if not folders %}
-<div class="alert info">Папки с документами не выбраны — <a href="/settings?tab=knowledge">выбрать</a>. PULSE найдёт в них текст презентаций, таблиц, документов Word, PDF и заметок.</div>
+<div class="alert info">Папки с документами не выбраны — <a href="/settings?tab=docs">выбрать</a>. PULSE найдёт в них текст презентаций, таблиц, документов Word, PDF и заметок.</div>
 {% elif stats.last_error %}
 <div class="alert bad">Индекс не обновился: {{ stats.last_error }}</div>
 {% endif %}

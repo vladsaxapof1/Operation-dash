@@ -1060,6 +1060,10 @@ a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 .arch-name .st { font-weight: 400; margin-top: 2px; }
 .arch-what { font-size: 15px; }
 @media (max-width: 760px) { .arch-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+/* Настройки → Документы: раздел в архиве — объяснение и «Включить раздел» рядом */
+.arch-docs { display: flex; gap: 16px; align-items: center; justify-content: space-between; }
+.arch-docs form { flex: none; }
+@media (max-width: 760px) { .arch-docs { flex-direction: column; align-items: flex-start; } }
 
 /* ===== Задачи 2.0: шапка с панелью фильтра, доска, карточка, окно задачи ===== */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; }

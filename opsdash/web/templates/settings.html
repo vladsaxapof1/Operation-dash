@@ -112,6 +112,18 @@
   </form>
 </div></section>
 
+{% elif tab == 'docs' %}
+{#- папки с документами — своим пунктом подменю: в архиве раздела карточки «Документы» в каталоге нет #}
+{% if not docs_on %}
+<div class="alert warn arch-docs">
+  <div>Раздел «Документы» в архиве: PULSE не обновляет индекс этих папок. Поэтому не работает поиск по документам, в промт
+    для агента не попадают файлы, найденные по словам задачи, а раздел «О компании» в сводке контекста не обновляется.
+    Открыть файл из этих папок Claude может и сейчас.</div>
+  <form method="post" action="/settings/sections/docs"><input type="hidden" name="on" value="1"><button class="btn">Включить раздел</button></form>
+</div>
+{% endif %}
+{% include "connectors/knowledge.html" %}
+
 {% elif tab == 'autonomy' %}
 <section class="card"><div class="card-b" style="padding-top:12px">
   <p>Что Claude может делать сам, а что — только после вашего «Да» в боте или на сводке.</p>
