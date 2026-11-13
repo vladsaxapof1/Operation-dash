@@ -77,6 +77,15 @@ def test_settings_forms_save(client):
     assert "dark.css?v=" in page and "prefers-color-scheme" not in page and 'value="dark" class="active"' in page
     client.post("/settings/theme", data={"theme": "neon"})
     assert config.load_settings()["web"]["theme"] == "dark"
+    # «Графит»: тёмный — поверх dark.css всегда, светлый — graphite.css и graphite-light.css без dark.css
+    client.post("/settings/theme", data={"theme": "graphite"})
+    page = client.get("/").text
+    assert "graphite.css?v=" in page and "graphite-light.css" not in page and "dark.css?v=" in page
+    assert "prefers-color-scheme" not in page
+    client.post("/settings/theme", data={"theme": "graphite-light"})
+    page = client.get("/").text
+    assert "graphite.css?v=" in page and "graphite-light.css?v=" in page and "/dark.css" not in page
+    client.post("/settings/theme", data={"theme": "dark"})
     client.post("/settings/mail", data={"email": "a@x.ru", "password": "abcd efgh", "enabled": "on",
                                         "folders": "INBOX\r\nРабота", "ignore_senders": "noreply"})
     assert config.get_secret("MAIL_APP_PASSWORD") == "abcdefgh"

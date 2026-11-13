@@ -73,7 +73,9 @@ def plural(n: int, one: str, few: str, many: str) -> str:
     return one if n % 10 == 1 else few if 2 <= n % 10 <= 4 else many
 
 
-THEMES = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}  # оформление (dark.css, base.html)
+# оформление (dark.css, base.html); «Графит» — свой вид (graphite.css, светлый — graphite-light.css)
+THEMES = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная",
+          "graphite": "Графит тёмный", "graphite-light": "Графит светлый"}
 CHAT_KINDS = {"private": "Личные", "group": "Группы", "channel": "Каналы", "bot": "Боты"}
 
 WHISPER_MODELS = [

@@ -1,0 +1,217 @@
+/* Оформление «Графит». Подключается, когда в «Настройки → Оформление» выбран «Графит» (base.html):
+   тёмный — после dark.css, светлый — этот файл и следом graphite-light.css (там только другие значения токенов).
+   Разметка и структура экранов те же — здесь только вид: графитовые поверхности с мягким цветным свечением фона,
+   тонкие линии вместо рамок, кнопки-пилюли, спокойный мелкий текст, цвет — только у смысла.
+   Источник стиля — графитовое окно в духе переписки в мессенджере.
+   Правило: цвета — только токенами (--g-* ниже), иначе светлый вариант разойдётся с тёмным. */
+:root {
+  --bg: #0b0b0e;
+  --panel: #1a1a1e;
+  --panel-2: #222227;
+  --sunken: #131316;
+  --text: #ececef;
+  --muted: #9b9ba4;
+  --faint: #5d5d66;
+  --line: #2b2b31;
+  --line-strong: #37373e;
+  --accent: #7fb0ff;
+  --accent-soft: #1c2a40;
+  --ok: #5fcf8b;
+  --ok-soft: #16281f;
+  --ok-text: #7ddba1;
+  --warn: #e9a95a;
+  --warn-soft: #2e2416;
+  --warn-text: #ecb673;
+  --warn-fill: #c98a3c;
+  --bad: #ff6f69;
+  --bad-soft: #321b1c;
+  --bad-text: #ff8a84;
+  --today: #171d2a;
+  --weekend: #151518;
+  --radius: 14px;
+  --shadow-card: none;
+  --shadow-raised: 0 6px 18px rgba(0, 0, 0, .45);
+  --shadow-pop: 0 10px 30px rgba(0, 0, 0, .55);
+  --shadow-dlg: 0 30px 80px rgba(0, 0, 0, .65);
+  --backdrop: rgba(4, 4, 8, .6);
+  --dlg-line: #34343b;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ev-bg: #1e2c47; --ev-fg: #d7e5ff; --ev-line: #7fb0ff;
+  --evg-bg: #2a2444; --evg-fg: #e6defc; --evg-line: #b39dfa;
+  /* свои токены оформления */
+  --g-fill: rgba(255, 255, 255, .07);         /* заливка кнопок, чипов, счётчиков */
+  --g-fill-hover: rgba(255, 255, 255, .12);
+  --g-hair: rgba(255, 255, 255, .08);         /* тонкая линия на полупрозрачном */
+  --g-hover: rgba(255, 255, 255, .05);        /* наведение на пункт меню */
+  --g-active: rgba(255, 255, 255, .09);       /* выбранный пункт меню, списка */
+  --g-subtle: rgba(255, 255, 255, .03);       /* колонка доски, строка-группа */
+  --g-seg-on: rgba(255, 255, 255, .14);       /* выбранная часть переключателя */
+  --g-seg-shadow: none;
+  --g-strong: #fff;                           /* выделенный текст: выбранный пункт, главная кнопка */
+  --g-nav-text: #d4d4da;
+  --g-on-accent: #0b0b0e;                     /* текст на заливке акцентом */
+  --g-side: rgba(18, 20, 28, .55);            /* меню */
+  --g-side-solid: rgba(18, 20, 28, .92);      /* меню поверх страницы, нижняя панель телефона */
+  --g-card: rgba(26, 26, 30, .78);
+  --g-float: rgba(33, 33, 37, .92);           /* уведомления, подсказки */
+  --g-dlg: #212125;
+  --g-field: rgba(255, 255, 255, .05);
+  --g-primary: #26262c;                       /* главная кнопка: заливка под цветной обводкой */
+  --g-primary-hover: #303038;
+  --g-ring: linear-gradient(115deg, #8fc0ff 0%, #b7a6ff 45%, #ffb48c 100%);
+  --g-focus: rgba(127, 176, 255, .6);
+  --g-bar-text: #f2f6ff;                      /* подпись на полосе Ганта */
+  --g-scroll: #3a3a42;
+  --g-glow-1: rgba(46, 96, 168, .30);         /* свечение фона: слева сверху, справа сверху, снизу */
+  --g-glow-2: rgba(28, 120, 96, .22);
+  --g-glow-3: rgba(140, 52, 62, .26);
+  --g-mark: radial-gradient(circle at 32% 30%, #dcecff, #86b4f5 46%, #5a6fd6 100%);
+  color-scheme: dark;
+}
+
+/* --- фон: свечение по углам; стоит на месте при прокрутке --- */
+html { background: var(--bg); }
+body {
+  font-size: 15px;
+  background:
+    radial-gradient(900px 620px at 0% 0%, var(--g-glow-1), transparent 70%),
+    radial-gradient(760px 520px at 100% 0%, var(--g-glow-2), transparent 70%),
+    radial-gradient(1100px 620px at 55% 115%, var(--g-glow-3), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+* { scrollbar-color: var(--g-scroll) transparent; }
+
+/* --- текст: меньше жирного, заголовки спокойнее --- */
+h1 { font-size: 23px; letter-spacing: -.01em; }
+h2 { font-size: 16px; }
+h3 { font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+label { font-weight: 500; font-size: 13px; color: var(--muted); }
+label.check { color: var(--text); }
+
+/* --- меню: полупрозрачная панель над свечением, выбранный пункт — плашка без синего --- */
+.sidebar { background: var(--g-side); border-right-color: var(--g-hair);
+  -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+.brand { font-weight: 600; letter-spacing: .01em; }
+.brand-mark { border-radius: 50%; color: #0b0b0e; background: var(--g-mark); }
+.nav a { border-radius: 10px; font-size: 14px; color: var(--g-nav-text); }
+.nav a:hover { background: var(--g-hover); }
+.nav a.active { background: var(--g-active); color: var(--g-strong); font-weight: 500; }
+.nav-g { font-size: 12px; color: var(--faint); }
+.nav .sep { background: var(--g-hair); }
+.nav-toggle { border-radius: 50%; }
+.nav-toggle:hover { background: var(--g-fill); }
+@media (min-width: 761px) {
+  body.nav-collapsed .sidebar:hover, body.nav-collapsed .sidebar:focus-within { background: var(--g-side-solid); }
+}
+
+/* --- счётчики и чипы: нейтральная заливка без рамки --- */
+.badge { background: var(--g-fill); color: var(--g-nav-text); font-size: 12px; }
+.badge.acc { background: var(--g-seg-on); color: var(--g-strong); box-shadow: var(--g-seg-shadow); }
+.badge.bad { background: var(--bad-soft); color: var(--bad-text); font-weight: 500; }
+.badge.warn { background: var(--warn-soft); color: var(--warn-text); font-weight: 500; }
+.chip { background: var(--g-fill); border-color: transparent; font-size: 12px; padding: 2px 9px; }
+.chip.ghost { background: transparent; border-color: var(--line-strong); }
+.chip.new { background: var(--accent); color: var(--g-on-accent); }
+.chip.work { background: var(--ok-soft); color: var(--ok-text); font-weight: 500; }
+.chip.archived { background: var(--g-fill); color: var(--muted); font-weight: 400; }
+
+/* --- карточки и списки: тонкая линия, фон чуть просвечивает --- */
+.card { background: var(--g-card); border-color: var(--g-hair); }
+.card-h h2 { font-size: 15px; font-weight: 600; }
+.list > li { border-top-color: var(--g-hair); }
+.list > li.day-h { background: var(--g-subtle); }
+.alert { border-radius: 12px; }
+
+/* --- кнопки: пилюли. Обычная — заливка без рамки; главная — с цветной обводкой; текстовая — без всего --- */
+.btn { border-radius: 999px; border-color: transparent; background: var(--g-fill); font-size: 13px; height: 34px; padding: 0 15px; }
+.btn:hover { background: var(--g-fill-hover); border-color: transparent; }
+.btn.primary, .btn.primary:hover { color: var(--g-strong); border: 1.5px solid transparent;
+  background: linear-gradient(var(--g-primary), var(--g-primary)) padding-box, var(--g-ring) border-box; }
+.btn.primary:hover { background: linear-gradient(var(--g-primary-hover), var(--g-primary-hover)) padding-box, var(--g-ring) border-box; }
+.btn.sm { border-radius: 999px; height: 28px; padding: 0 12px; font-size: 12px; }
+.btn.lg { height: 38px; font-size: 14px; padding: 0 18px; }
+.btn.icon { width: 30px; padding: 0; }
+.btn.ghost { background: transparent; }
+.btn.ghost:hover { background: var(--g-fill); }
+.btn.toggle.on, .btn.work.on { border-color: transparent; }
+.btn:disabled:hover { background: var(--g-fill); border-color: transparent; }
+.btn:focus-visible, .fchip:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.fchip { border-color: transparent; background: var(--g-fill); }
+.fchip:hover { background: var(--g-fill-hover); }
+.fchip.active { background: var(--text); color: var(--bg); }
+.fchip.on { background: var(--accent-soft); border-color: transparent; }
+
+/* --- поля --- */
+input[type=text], input[type=search], input[type=password], input[type=number], input[type=time], input[type=date],
+input[type=email], select, textarea {
+  background: var(--g-field); border-color: var(--g-hair); border-radius: 10px; font-size: 14px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-color: var(--g-focus); }
+input::placeholder, textarea::placeholder { color: var(--faint); }
+
+/* --- таблицы: как на макете «Мои данные» — мелкая серая шапка, строки через тонкую линию --- */
+table.t { font-size: 14px; }
+table.t th { font-weight: 400; font-size: 12px; color: var(--muted); border-bottom-color: var(--g-hair); }
+table.t td { border-bottom-color: var(--g-hair); }
+table.t th[scope=rowgroup] { background: var(--g-subtle); font-size: 13px; }
+
+/* --- вкладки и переключатели --- */
+.tabs { border-bottom-color: var(--g-hair); }
+.tabs a { font-size: 14px; }
+.tabs a.active { color: var(--g-strong); border-bottom-color: var(--g-strong); font-weight: 500; }
+.seg { border-radius: 999px; border-color: transparent; background: var(--g-fill); padding: 3px; overflow: visible; }
+.seg a, .seg button { height: 28px; border-radius: 999px; font-size: 13px; padding: 0 13px; color: var(--g-nav-text); }
+.seg button + button, .seg a + a { border-left: 0; }
+.seg a.active, .seg button.active { background: var(--g-seg-on); color: var(--g-strong); font-weight: 500; box-shadow: var(--g-seg-shadow); }
+.seg a:hover, .seg button:hover:not(.active) { background: var(--g-hover); text-decoration: none; }
+.tri { border-color: var(--g-hair); border-radius: 10px; }
+.tri label { font-weight: 500; }
+
+/* --- окна: крупный радиус, размытая подложка --- */
+.dlg { border-radius: 18px; background: var(--g-dlg); font-size: 15px; }
+.dlg::backdrop { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.dlg-title { font-size: 18px; }
+.dlg-x { border-radius: 50%; }
+
+/* --- доска задач: колонка — едва заметная подложка --- */
+.kb-col { background: var(--g-subtle); border-color: transparent; }
+
+/* --- уведомления в углу, подсказки --- */
+.notice-now, .notice, .toast, .why-bar { background: var(--g-float); border-color: var(--g-hair);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.notice-t { font-weight: 500; }
+.notice-more, .notice-clear { background: var(--g-float); border-color: var(--g-hair); }
+
+/* --- «Спросить Claude»: поле ввода — пилюля, как строка сообщения --- */
+.ask-box { background: var(--g-field); border-color: var(--g-hair); border-radius: 22px; }
+.ask-box:focus-within { border-color: var(--g-focus); }
+.ask-box textarea { background: transparent; border: 0; }
+
+/* --- телефон: нижняя панель; выбранный пункт — как в меню --- */
+.tabbar { background: var(--g-side-solid); border-top-color: var(--g-hair);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.tabbar a.active, .tabbar-more[open] > summary { color: var(--g-strong); }
+
+/* --- выбранное в списках (раздел настроек, чат, разговор, дайджест) — плашка, как в меню --- */
+.subnav a.active, .tabbar-sheet a.active, .wiz-step.active { background: var(--g-active); color: var(--g-strong); font-weight: 500; }
+.chat-i.active, .dg-i.active, .ask-list a.active { background: var(--g-active); }
+.subnav a, .chat-i, .dg-i, .ask-list a { border-radius: 10px; }
+
+/* --- текст на заливке акцентом — свой цвет: в тёмном варианте акцент светлый, белое на нём не читается --- */
+.fchip.on .tick, .tchip.active, .ask-send, .conn-steps li.now .conn-step-n,
+.wiz-step.active .wiz-n, .doc a.task-ref:hover { color: var(--g-on-accent); }
+.tchip.active::before { background: var(--g-on-accent); }
+
+/* --- подписи групп — обычным регистром, как на макете («Сегодня, 9 ноября»): тише заглавных --- */
+.dlg-sec, .due-kind, .doc.summary h2, .ask-side-h, .jr-day, .list > li.day-h, .mday, .dg-day, .chat-g,
+.rel-k, .now-l, .wk-dow, .month-h div { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+/* --- Гант: полосы приглушены, цвет остаётся смыслом (моя / мне должны / просрочено) --- */
+.gantt-bar, .gantt-bar.mine { background: color-mix(in srgb, var(--accent) 46%, var(--panel)); color: var(--g-bar-text); border-radius: 8px; }
+.gantt-bar.to_me { background: color-mix(in srgb, var(--ok) 40%, var(--panel)); }
+.gantt-bar.overdue { background: color-mix(in srgb, var(--bad) 52%, var(--panel)); }
+.gantt-bar.other { background: color-mix(in srgb, var(--muted) 40%, var(--panel)); }
+.gantt-what { font-weight: 500; }
+.gantt-top span { font-weight: 500; }

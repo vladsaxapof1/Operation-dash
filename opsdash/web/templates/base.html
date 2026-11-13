@@ -8,7 +8,11 @@
   <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/day.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/agents.css?v={{ static_v }}">
-  {% if theme != 'light' %}<link rel="stylesheet" href="/static/dark.css?v={{ static_v }}"{% if theme != 'dark' %} media="(prefers-color-scheme: dark)"{% endif %}>{% endif %}
+  {% if theme not in ('light', 'graphite-light') %}<link rel="stylesheet" href="/static/dark.css?v={{ static_v }}"{% if theme not in ('dark', 'graphite') %} media="(prefers-color-scheme: dark)"{% endif %}>{% endif %}
+  {#- «Графит» — своё оформление: та же разметка, другой вид (graphite.css); светлый вариант — те же
+      правила с другими значениями токенов (graphite-light.css) #}
+  {% if theme in ('graphite', 'graphite-light') %}<link rel="stylesheet" href="/static/graphite.css?v={{ static_v }}">{% endif %}
+  {% if theme == 'graphite-light' %}<link rel="stylesheet" href="/static/graphite-light.css?v={{ static_v }}">{% endif %}
 </head>
 <body class="{{ 'nav-collapsed' if nav_collapsed }} page-{{ nav or 'other' }}">
 {% import "_icons.html" as icons %}

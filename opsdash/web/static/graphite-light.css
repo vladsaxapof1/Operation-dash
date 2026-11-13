@@ -1,0 +1,63 @@
+/* «Графит светлый»: те же правила, что в graphite.css, — здесь только значения токенов.
+   Подключается после graphite.css; dark.css при этом варианте не подключается (base.html).
+   Тёплая светлая бумага, белые поверхности, тот же мягкий цвет по углам фона, акцент — спокойный синий. */
+:root {
+  --bg: #f4f4f1;
+  --panel: #ffffff;
+  --panel-2: #f6f6f3;
+  --sunken: #ebebe7;
+  --text: #17171a;
+  --muted: #696972;
+  --faint: #a4a4ac;
+  --line: #e6e6e2;
+  --line-strong: #d6d6d1;
+  --accent: #2f5fe0;
+  --accent-soft: #e8eeff;
+  --ok: #2f9e5a;
+  --ok-soft: #e6f6ec;
+  --ok-text: #23804a;
+  --warn: #d98a1f;
+  --warn-soft: #fdf1df;
+  --warn-text: #a8650c;
+  --warn-fill: #d98a1f;
+  --bad: #e0483f;
+  --bad-soft: #fdecea;
+  --bad-text: #c4352d;
+  --today: #f1f5ff;
+  --weekend: #f0f0ec;
+  --shadow-card: 0 1px 2px rgba(23, 23, 26, .05);
+  --shadow-raised: 0 6px 18px rgba(23, 23, 26, .10);
+  --shadow-pop: 0 10px 30px rgba(23, 23, 26, .14);
+  --shadow-dlg: 0 30px 80px rgba(23, 23, 26, .22);
+  --backdrop: rgba(23, 23, 26, .32);
+  --dlg-line: transparent;
+  --ev-bg: #e1e9ff; --ev-fg: #1d3a96; --ev-line: #2f5fe0;
+  --evg-bg: #ece6ff; --evg-fg: #4a2fa6; --evg-line: #7a55e6;
+  --g-fill: rgba(23, 23, 26, .06);
+  --g-fill-hover: rgba(23, 23, 26, .10);
+  --g-hair: rgba(23, 23, 26, .09);
+  --g-hover: rgba(23, 23, 26, .04);
+  --g-active: rgba(23, 23, 26, .07);
+  --g-subtle: rgba(23, 23, 26, .03);
+  --g-seg-on: #ffffff;
+  --g-seg-shadow: 0 1px 2px rgba(23, 23, 26, .12);
+  --g-strong: #0e0e11;
+  --g-nav-text: #3c3c44;
+  --g-on-accent: #ffffff;
+  --g-side: rgba(255, 255, 255, .55);
+  --g-side-solid: rgba(250, 250, 248, .94);
+  --g-card: rgba(255, 255, 255, .82);
+  --g-float: rgba(255, 255, 255, .94);
+  --g-dlg: #ffffff;
+  --g-field: rgba(255, 255, 255, .8);
+  --g-primary: #ffffff;
+  --g-primary-hover: #f4f6ff;
+  --g-ring: linear-gradient(115deg, #4f8df0 0%, #8a72ee 45%, #f08a55 100%);
+  --g-focus: rgba(47, 95, 224, .55);
+  --g-bar-text: #14244f;
+  --g-scroll: #c9c9c4;
+  --g-glow-1: rgba(96, 150, 240, .22);
+  --g-glow-2: rgba(80, 190, 160, .16);
+  --g-glow-3: rgba(240, 150, 140, .18);
+  color-scheme: light;
+}
