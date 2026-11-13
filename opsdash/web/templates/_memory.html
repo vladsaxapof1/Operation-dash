@@ -28,6 +28,7 @@
   </div>
   <div class="mem-text">{{ f.text }}</div>
   {% if f.prev %}<div class="mem-was"><span class="muted">было:</span> {{ f.prev.text }} <span class="muted">({{ f.prev.happened | date }})</span></div>{% endif %}
+  {% if f.because %}<div class="mem-was"><span class="muted">потому что:</span> {{ f.because.text }} <span class="muted">({{ f.because.happened | date }})</span></div>{% endif %}
   <div class="mem-foot">
     <span class="muted small">{{ source(f, msgs) }}{% if f.quote %} · <span class="mem-quote" title="{{ f.quote }}">«{{ f.quote | truncate(90, true, '…') }}»</span>{% endif %}{% if f.key %} · <span title="Ключ: новый факт с тем же ключом сменит этот">{{ f.key }}</span>{% endif %}</span>
     {% if actions %}

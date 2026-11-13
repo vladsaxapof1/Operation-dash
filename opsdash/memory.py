@@ -43,7 +43,8 @@ SOURCE_TYPES = (*MESSAGE_SOURCES, "meeting", "kaiten", "agent", "manual", "docum
 PAGE_MAX = 6_000          # байт: страница в выдаче CLI и MCP
 SIMILAR_SKIP = 0.8        # факт без ключа почти дословно повторяет действующий о той же сущности — «уже известно»
 SIMILAR_HINT = 0.5        # похож — подсказка «укажите replaces»
-SAME_SOURCE_UPDATE = 0.6  # повторный разбор той же встречи: похожий факт обновляет прежний, а не дублирует
+CAUSE_MIN_WORDS = 3       # причина фразой (поле because) короче — обрывок, фактом её не записываем
+SAME_SOURCE_UPDATE = 0.6  # повторный разбор той же встречи: похожий факт обновляет прежний,а не дублирует
 
 
 class MemoryError_(Exception):
@@ -583,7 +584,7 @@ def _set_entities(fid: int, eids: list[int]) -> None:
 
 def _new_report() -> dict:
     return {"added": [], "updated": [], "replaced": [], "history": [], "proposed": [], "known": [], "hints": [],
-            "new_entities": [], "secrets": [], "private": [], "skipped": [], "errors": [], "over": 0}
+            "new_entities": [], "secrets": [], "private": [], "skipped": [], "errors": [], "over": 0, "causes": []}
 
 
 def import_facts(data: dict | list, *, source: str | None = None, by: str = "claude", cap: int | None = None,
@@ -608,35 +609,77 @@ def import_facts(data: dict | list, *, source: str | None = None, by: str = "cla
         report["over"] = len(facts) - cap
         facts = facts[:cap]
     refs: dict[str, int] = {}
-    pending_because: list[tuple[int, str]] = []
+    pending_because: list[tuple[int, object, str]] = []
     touched: list[int] = []
     for f in facts:
         if not isinstance(f, dict):
             report["errors"].append("факт — объект JSON")
             continue
-        because = f.get("because")
-        because_id = int(because) if isinstance(because, int) or str(because or "").isdigit() else None
         fid = add_fact(text=f.get("text") or "", kind=f.get("kind") or "state", about=f.get("about"),
                        key=f.get("key"), when=f.get("when"), source=f.get("source") or default_source,
-                       quote=f.get("quote"), replaces=f.get("replaces"), because=because_id, by=by,
+                       quote=f.get("quote"), replaces=f.get("replaces"), by=by,
                        session=session, kinds=kinds, aliases=aliases, report=report)
         if fid:
             touched.append(fid)
             if f.get("ref"):
                 refs[str(f["ref"])] = fid
-            if because and not because_id:
-                pending_because.append((fid, str(because)))
-    for fid, ref in pending_because:
-        if ref in refs and refs[ref] != fid:
-            store.execute("UPDATE facts SET because_id=? WHERE id=?", (refs[ref], fid))
-    report["touched"] = touched
+            if f.get("because") not in (None, ""):
+                pending_because.append((fid, f["because"], f.get("text") or ""))
+    # причина — другой факт. Навык называет её фразой («Подрядчик не успевает к февралю») — записываем эту фразу
+    # фактом сами; либо `ref` факта из этого же файла, либо номер уже известного ([ф12] из «Уже известно»).
+    # Связываем после всех записей: причина может стоять в файле ниже следствия, а следствие — оказаться повтором
+    for fid, because, text in pending_because:
+        cause = refs.get(str(because)) or fact_ref(because)
+        if cause and not store.scalar("SELECT 1 FROM facts WHERE id=?", (cause,)):
+            cause = None
+        phrase = " ".join(str(because).split()) if isinstance(because, str) else ""
+        # фраза, а не метка вроде «f1» и не обрывок («Новые правила»): причина станет фактом, ей нужно сказуемое
+        if not cause and len(phrase.split()) >= CAUSE_MIN_WORDS:
+            cause = _cause_fact(phrase, fid, by=by, session=session, kinds=kinds, aliases=aliases, report=report)
+            if cause == fid:
+                continue  # причина повторяет сам факт
+        if cause and cause != fid:
+            store.execute("UPDATE facts SET because_id=? WHERE id=?", (cause, fid))
+            report["causes"].append((fid, cause))
+            touched.append(cause)
+        elif cause != fid:
+            report["hints"].append(
+                f"[ф{fid}] «{_short(text, 50)}»: причина «{_short(str(because), 40)}» не привязана. Напиши её целой "
+                f"фразой (кто или что, и что с ним) в поле because или свяжи с записанным фактом: "
+                f"./ops facts set {fid} --because <номер причины>")
+    report["touched"] = list(dict.fromkeys(touched))
     if touched:
         store.set_state("memory_facts_changed", store.utcnow())
     return report
 
 
+def _cause_fact(phrase: str, effect: int, *, by: str, session: str | None, kinds: dict, aliases: dict,
+                report: dict) -> int | None:
+    """Причина, названная фразой: похожий факт из того же источника, уже известный факт о тех же сущностях или
+    новый — с источником, цитатой, датой и сущностями следствия. Возвращает номер факта-причины; номер самого
+    следствия — если фраза его повторяет."""
+    e = store.row("SELECT * FROM facts WHERE id=?", (effect,))
+    if not e:
+        return None
+    # похожий факт той же встречи или того же сообщения уже записан — он и есть причина. Через add_fact нельзя:
+    # повтор из того же источника обновил бы его текст фразой причины
+    near = max(store.rows("SELECT id, text FROM facts WHERE source_type IS ? AND source_ref IS ? AND status != 'wrong'",
+                          (e["source_type"], e["source_ref"])),
+               key=lambda f: similarity(phrase, f["text"]), default=None)
+    if near and similarity(phrase, near["text"]) >= SAME_SOURCE_UPDATE:
+        return near["id"]
+    about = [r["name"] for r in store.rows(
+        "SELECT en.name FROM fact_entities fe JOIN entities en ON en.id=fe.entity_id WHERE fe.fact_id=? ORDER BY fe.rowid",
+        (effect,))]
+    source = f"{e['source_type']}:{e['source_ref']}" if e["source_type"] and e["source_ref"] else e["source_type"]
+    return add_fact(text=phrase[:1].upper() + phrase[1:], kind="state", about=about, when=e["happened"], source=source,
+                    quote=e["quote"], by=by, session=session, kinds=kinds, aliases=aliases, report=report)
+
+
 def report_text(r: dict) -> str:
     parts = [f"Записано фактов: {len(r['added'])}"]
+    if r.get("causes"):
+        parts.append(f"причин связано: {len(r['causes'])} (" + ", ".join(f"[ф{a}] ← [ф{b}]" for a, b in r["causes"]) + ")")
     if r["replaced"]:
         parts.append(f"сменили прежние: {len(r['replaced'])} (" + ", ".join(f"[ф{a}] → [ф{b}]" for a, b in r["replaced"]) + ")")
     if r["updated"]:
@@ -720,6 +763,27 @@ def set_replaces(fid: int, old: int) -> None:
     store.execute("UPDATE facts SET status='replaced', replaced_by=?, updated=? WHERE id=?", (fid, store.utcnow(), old))
 
 
+def fact_ref(value) -> int | None:
+    """Номер факта, как его пишут в выдаче и в файлах навыков: 12, «12», «ф12», «[ф12]»."""
+    m = re.fullmatch(r"\[?ф?(\d+)\]?", str(value if value is not None else "").strip(), re.IGNORECASE)
+    return int(m.group(1)) if m and not isinstance(value, bool) else None  # «f1» — метка ref в файле, не номер
+
+
+def set_because(fid: int, cause: int | None) -> None:
+    """Причина факта — другой факт: на карте это связь «причина», у факта — строка «потому что». None — убрать."""
+    if not store.scalar("SELECT 1 FROM facts WHERE id=?", (fid,)):
+        raise MemoryError(f"нет факта [ф{fid}]")
+    if cause is not None:
+        if cause == fid:
+            raise MemoryError("факт не может быть причиной самого себя")
+        if not store.scalar("SELECT 1 FROM facts WHERE id=?", (cause,)):
+            raise MemoryError(f"нет факта [ф{cause}]")
+        if store.scalar("SELECT because_id FROM facts WHERE id=?", (cause,)) == fid:
+            raise MemoryError(f"[ф{cause}] уже записан следствием [ф{fid}] — причина и следствие перепутаны")
+    store.execute("UPDATE facts SET because_id=?, updated=? WHERE id=?", (cause, store.utcnow(), fid))
+    store.set_state("memory_facts_changed", store.utcnow())  # карта перестроит связи
+
+
 # --- факты: чтение ---------------------------------------------------------------------------------------------
 
 def _decorate(items: list[dict]) -> list[dict]:
@@ -733,12 +797,15 @@ def _decorate(items: list[dict]) -> list[dict]:
         ents.setdefault(r["fact_id"], []).append({"id": r["id"], "name": r["name"], "kind": r["kind"]})
     olds = {r["id"]: r for r in store.rows(
         f"SELECT id, text, happened FROM facts WHERE id IN (SELECT replaces_id FROM facts WHERE id IN ({marks}))", ids)}
+    causes = {r["id"]: r for r in store.rows(
+        f"SELECT id, text, happened FROM facts WHERE id IN (SELECT because_id FROM facts WHERE id IN ({marks}))", ids)}
     meetings = {r["id"]: r for r in store.rows(
         f"SELECT id, title, started_at FROM meetings WHERE id IN "
         f"(SELECT source_ref FROM facts WHERE source_type='meeting' AND id IN ({marks}))", ids)}
     for f in items:
         f["entities"] = ents.get(f["id"], [])
         f["prev"] = olds.get(f.get("replaces_id"))
+        f["because"] = causes.get(f.get("because_id"))  # причина — другой факт, когда она названа прямо
         f["kind_title"] = FACT_KINDS.get(f["kind"], f["kind"])
         f["status_title"] = STATUSES.get(f["status"], f["status"])
         f["meeting"] = meetings.get(f.get("source_ref")) if f.get("source_type") == "meeting" else None
@@ -802,7 +869,6 @@ def fact(fid: int) -> dict | None:
         cur = store.scalar("SELECT replaces_id FROM facts WHERE id=?", (cur,))
     f["history"] = chain
     f["next"] = store.row("SELECT id, text, happened FROM facts WHERE id=?", (f["replaced_by"],)) if f.get("replaced_by") else None
-    f["because"] = store.row("SELECT id, text FROM facts WHERE id=?", (f["because_id"],)) if f.get("because_id") else None
     return f
 
 
@@ -835,8 +901,9 @@ def fact_line(f: dict, *, mcp: bool = False, about: bool = True, width: int = 26
         prev = f" (было: {_short(p['text'], 70)}, {_ddmm(p['happened'])})"
     text = _short(f["text"], width)
     mine = " · от вас" if f.get("author") == "director" else ""
+    why = f" · потому что: {_short(f['because']['text'], 90)} [ф{f['because']['id']}]" if f.get("because") else ""
     head = f"[ф{f['id']}] {_ddmm(f.get('happened'))} · {FACT_KINDS.get(f['kind'], f['kind'])}" + (f" · {who}" if who else "")
-    return f"{head} · {text}{prev} · {source_label(f, mcp=mcp)}{mine if f.get('author') == 'director' and f.get('source_type') not in (None, 'manual') else ''}"
+    return f"{head} · {text}{prev}{why} · {source_label(f, mcp=mcp)}{mine if f.get('author') == 'director' and f.get('source_type') not in (None, 'manual') else ''}"
 
 
 def _short(text: str | None, n: int) -> str:
@@ -1073,7 +1140,10 @@ def page_text(ref: str | int, *, mcp: bool = False, max_bytes: int = PAGE_MAX) -
                 line = f"- [ф{f['id']}] {FACT_KINDS[kind]}: {_short(f['text'], 220)} ({_ddmm(f['happened'])}"
                 if hist:
                     line += "; было: " + " → ".join(f"{_short(h['text'], 60)} ({_ddmm(h['happened'])})" for h in hist[-2:])
-                line += f") · {source_label(f, mcp=mcp)}"
+                line += ")"
+                if f.get("because"):
+                    line += f" · потому что: {_short(f['because']['text'], 90)} [ф{f['because']['id']}]"
+                line += f" · {source_label(f, mcp=mcp)}"
                 out.append(line)
     if d["tasks"]:
         out.append("\n## Открытые задачи")

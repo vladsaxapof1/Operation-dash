@@ -634,6 +634,8 @@ def cmd_facts(a) -> None:
         elif a.action == "set":
             if a.replaces:
                 memory.set_replaces(a.id, a.replaces)
+            if a.because is not None:
+                memory.set_because(a.id, a.because or None)
             if a.status:
                 memory.set_status(a.id, a.status, a.reason)
             if a.forget:
@@ -2291,11 +2293,13 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--limit", type=int, default=50)
     x = ms.add_parser("show", help="факт: источник, цитата, история «было → стало»")
     x.add_argument("id", type=int)
-    x = ms.add_parser("set", help="поправить факт: --status wrong --reason …, outdated, active; --replaces <id>; --forget")
+    x = ms.add_parser("set", help="поправить факт: --status wrong --reason …, outdated, active; --replaces <id>; "
+                                  "--because <id причины>; --forget")
     x.add_argument("id", type=int)
     x.add_argument("--status", choices=["active", "outdated", "wrong"])
     x.add_argument("--reason")
     x.add_argument("--replaces", type=int)
+    x.add_argument("--because", type=int, help="номер факта-причины (она названа прямо); 0 — убрать причину")
     x.add_argument("--forget", action="store_true")
     s.set_defaults(fn=cmd_facts)
 

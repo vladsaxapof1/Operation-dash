@@ -396,3 +396,92 @@ def test_stalled_backfill_is_resumed_by_tick(monkeypatch, settings_with):
     store.set_state("memory_backfill", "stopped")
     store.execute("UPDATE jobs SET last_run='2026-01-01T00:00:00+00:00' WHERE name='memory-backfill'")
     assert "memory-backfill" not in jobs.tick()  # остановлено пользователем — не трогаем
+
+
+def test_cause_is_linked_by_ref_and_by_known_fact_number(client):
+    """Причина названа прямо — это связь двух фактов: `ref` в том же файле или номер уже известного факта."""
+    meeting("m1", transcript="[00:30:40] Олег: подрядчик к февралю не успеет\n[00:31:10] Олег: переезд двигаем на март\n")
+    meeting("m2", started="2026-11-10T08:00:00+00:00", transcript="[00:05:00] Анна: аренду продлеваем до апреля\n")
+    r = memory.import_facts(batch(  # причина стоит в файле ниже следствия
+        F("Переезд склада перенесли на март", kind="event", key="срок переезда склада", because="f1"),
+        F("Подрядчик по стеллажам не успевает к февралю", ref="f1")))
+    effect, cause = r["added"]
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (effect,)) == cause and not r["hints"]
+    assert memory.facts(ids=[effect], status="all")[0]["because"]["id"] == cause
+    assert f"потому что: Подрядчик по стеллажам не успевает к февралю [ф{cause}]" in memory.fact_line(memory.fact(effect))
+    assert memory.build_links().get("causal") == 1
+    assert "потому что:" in client.get("/memory", params={"tab": "feed", "days": 0}).text
+    assert "потому что: Подрядчик" in memory.page_text("Склад")
+
+    # причина уже известна — её номер, как в выдаче: [ф12]
+    r2 = memory.import_facts(batch(
+        F("Аренду старого склада продлили до апреля", kind="event", key="аренда старого склада", because=f"[ф{effect}]"),
+        source="meeting:m2"))
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (r2["added"][0],)) == effect
+    assert memory.build_links().get("causal") == 2
+
+
+def test_unknown_cause_is_reported_not_guessed():
+    meeting("m1", transcript="[00:11:37] Олег: склад переезжает\n")
+    first = memory.import_facts(batch(F("Склад работает до 20:00")))["added"][0]
+    assert first == 1
+    # «f1» — метка ref, а не факт номер 1; причины с такой меткой в файле нет — связь не пишем, навыку подсказка
+    r = memory.import_facts(batch(F("Отгрузки перенесли на утро", kind="event", because="f1")))
+    fid = r["added"][0]
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (fid,)) is None
+    assert len(r["hints"]) == 1 and "не привязана" in r["hints"][0] and f"facts set {fid} --because" in r["hints"][0]
+    assert "причина «f1» не привязана" in memory.report_text(r)
+    r = memory.import_facts(batch(F("Приёмку перенесли на вечер", kind="event", because=999)))
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (r["added"][0],)) is None and r["hints"]
+
+    cli.main(["facts", "set", str(fid), "--because", str(first)])  # связал руками, как просит подсказка
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (fid,)) == first
+    for bad, why in ((fid, "самого себя"), (999, "нет факта")):
+        with pytest.raises(memory.MemoryError, match=why):
+            memory.set_because(fid, bad)
+    with pytest.raises(memory.MemoryError, match="перепутаны"):
+        memory.set_because(first, fid)
+    cli.main(["facts", "set", str(fid), "--because", "0"])
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (fid,)) is None
+    assert [memory.fact_ref(v) for v in (12, "12", "ф12", "[ф12]", "f1", "", None, True)] == [12, 12, 12, 12, None, None, None, None]
+
+
+def test_cause_given_as_phrase_becomes_a_fact_and_a_link():
+    """Навык называет причину фразой в поле because — PULSE сам записывает её фактом и связывает со следствием."""
+    meeting("m1", transcript="[00:31:10] Олег: переезд двигаем на март, подрядчик к февралю не успеет\n")
+    meeting("m2", started="2026-11-10T08:00:00+00:00", transcript="[00:05:00] Анна: аренду продлеваем до апреля\n")
+    one = batch(F("Переезд склада перенесли на март из-за подрядчика", kind="event", key="срок переезда склада",
+                  quote="[00:31:10] переезд двигаем на март, подрядчик к февралю не успеет",
+                  because="подрядчик по стеллажам не успевает к февралю"))
+    r = memory.import_facts(one)
+    effect, cause = r["added"]
+    c = memory.fact(cause)
+    assert c["text"] == "Подрядчик по стеллажам не успевает к февралю" and c["kind"] == "state"
+    assert c["quote"].startswith("[00:31:10]") and c["source_ref"] == "m1" and c["happened"] == memory.fact(effect)["happened"]
+    assert [e["name"] for e in c["entities"]] == ["Склад"]
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (effect,)) == cause and r["causes"] == [(effect, cause)]
+    assert f"причин связано: 1 ([ф{effect}] ← [ф{cause}])" in memory.report_text(r) and not r["hints"]
+    assert memory.build_links().get("causal") == 1
+
+    memory.import_facts(one)  # тот же файл ещё раз — ни дублей, ни затёртого текста
+    assert store.scalar("SELECT COUNT(*) FROM facts") == 2
+    assert memory.fact(effect)["text"].startswith("Переезд склада") and memory.fact(cause)["text"].startswith("Подрядчик")
+
+    # другая встреча называет ту же причину — связь с уже известным фактом, второго такого же не появляется
+    r3 = memory.import_facts(batch(F("Аренду старого склада продлили до апреля", kind="event", quote="[00:05:00] аренду продлеваем",
+                                     because="Подрядчик по стеллажам не успевает к февралю"), source="meeting:m2"))
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (r3["added"][0],)) == cause
+    assert store.scalar("SELECT COUNT(*) FROM facts") == 3
+
+    # причина повторяет сам факт — ни нового факта, ни связи
+    r4 = memory.import_facts(batch(F("Приёмка закрыта на ремонт до среды", quote="[00:31:10] приёмка закрыта",
+                                     because="приёмка закрыта на ремонт")))
+    assert store.scalar("SELECT because_id FROM facts WHERE id=?", (r4["added"][0],)) is None and not r4["causes"]
+    assert store.scalar("SELECT COUNT(*) FROM facts") == 4
+
+
+def test_cause_fragment_is_not_made_a_fact():
+    meeting("m1", transcript="[00:11:37] Олег: отгрузки теперь по утрам\n")
+    r = memory.import_facts(batch(F("Отгрузки со склада перенесли на утро", because="Новые правила")))
+    assert store.scalar("SELECT COUNT(*) FROM facts") == 1 and not r["causes"]
+    assert len(r["hints"]) == 1 and "целой фразой" in r["hints"][0]
