@@ -1456,7 +1456,8 @@ a.task:hover { text-decoration: none; }
 @media (max-width: 760px) { .kboard-cols { grid-template-columns: minmax(0, 1fr); } }
 .page-tasks .tb-search { width: 170px !important; }
 
-/* Сводка 2.0: лента «Нужно от вас» слева, день и «Пока вас не было» справа */
+/* Сводка 2.0: лента «Нужно от вас» слева, день и «Пока вас не было» справа. Заголовок ленты — рядом .home-head
+   с теми же колонками, поэтому лента и «Сегодня» начинаются на одном уровне */
 .home { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
 .home-main { flex: 999 1 560px; min-width: 0; }
 .home-side { flex: 1 1 320px; max-width: 340px; display: grid; gap: 22px; }
@@ -1492,7 +1493,18 @@ a.task:hover { text-decoration: none; }
 .today-h .muted { font-size: 13px; }
 .today-h { flex-wrap: nowrap; white-space: nowrap; }
 .today .day { padding: 6px 16px 10px 0; }
-.away h3 { margin: 0 0 10px; }
+/* заголовок ленты — своим рядом с теми же колонками (home.html): «Сегодня» начинается вровень с первой строкой ленты.
+   row-gap 0 — когда колонки встают друг под другом, пустая правая не добавляет отступ */
+.home-head { row-gap: 0; }
+/* «Пока вас не было» — свёрнуто по умолчанию: строка-заголовок с числом записей и стрелкой */
+.away > summary { display: flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; list-style: none; color: var(--muted); }
+.away > summary::-webkit-details-marker { display: none; }
+.away > summary:hover { color: var(--text); }
+.away-h { font-size: 15px; font-weight: 600; }
+.away-n { font-size: 13px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.away > summary .ico { margin-left: auto; transform: rotate(-90deg); transition: transform .15s; }
+.away[open] > summary { margin-bottom: 10px; }
+.away[open] > summary .ico { transform: none; }
 .away p { margin: 0 0 10px; font-size: 15px; line-height: 1.45; }
 .alert-x-wrap { position: relative; padding-right: 44px; }
 .alert-x { position: absolute; top: 9px; right: 10px; width: 28px; height: 28px; border: 0; border-radius: 6px; background: none;

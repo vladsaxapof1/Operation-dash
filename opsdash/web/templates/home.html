@@ -4,7 +4,6 @@
 {% import "_day.html" as dayui %}
 {% block title %}Сводка{% endblock %}
 {% block content %}
-{% macro loop_id(it) -%}{{ it.batch | replace(':', '-') | replace(' ', '-') | replace('|', '-') }}{%- endmacro %}
 {% macro feed_row(it) %}
 {#- строка ленты: значок типа, «тип · срочность», название, одна строка контекста; справа одна кнопка и «…».
     Кнопка раскрывает под строкой черновик ответа или текст напоминания #}
@@ -103,23 +102,12 @@
       <a class="menu-i" href="/commitments?due=none">Все задачи без срока</a>
     {% endcall %}
   </div>
-  {% elif it.group %}{% set group = it.group %}{% set mid = it.batch[8:] if it.batch.startswith('meeting:') else '' %}{% set m = meetings.get(mid) %}
-    <div class="frow-t">Подтвердить · {{ group | length }} {{ plural(group | length, 'предложение', 'предложения', 'предложений') }}{% if mid %} по встрече{% if m %} <a href="/meetings/{{ mid }}">«{{ m.title or mid }}»</a>{% endif %}{% elif it.batch.startswith('ask:') %} из разговора в Telegram{% endif %}</div>
-    <ul class="frow-titles">{% for p in group %}<li>{{ p.title }}</li>{% endfor %}</ul>
-    {% set reasons = group | map(attribute='reason') | select | unique | list %}
-    <p class="frow-x">{% if reasons | length == 1 %}{{ reasons[0] }} · {% endif %}<button type="button" class="linkish" data-reveal="pb-{{ loop_id(it) }}">посмотреть по одному</button></p>
-    <ul class="frow-pane list frow-props" id="pb-{{ loop_id(it) }}" hidden>{% for p in group %}{{ ui.proposal(p, describe) }}{% endfor %}</ul>
-  </div>
-  <div class="frow-act">
-    <form class="inline" method="post" action="/proposals/batch"><input type="hidden" name="batch" value="{{ it.batch }}"><input type="hidden" name="top" value="{{ group | map(attribute='id') | max }}"><button class="btn primary">Подтвердить все {{ group | length }}</button></form>
-    {% call ui.menu() %}
-      <button type="button" class="menu-i" data-reveal="pb-{{ loop_id(it) }}">Посмотреть по одному</button>
-      <form method="post" action="/proposals/batch" data-confirm="Отклонить все {{ group | length }}?"><input type="hidden" name="batch" value="{{ it.batch }}"><input type="hidden" name="top" value="{{ group | map(attribute='id') | max }}"><input type="hidden" name="action" value="reject"><button class="menu-i">Нет, все</button></form>
-    {% endcall %}
-  </div>
   {% else %}{% set p = it.p %}
+    {#- предложения — только по одному (13.11.2026): «Подтвердить все» на Сводке убрано; откуда пачка — подписью в строке типа #}
     {% set d = describe(p).split('\n')[1:] %}
-    <div class="frow-t">Подтвердить{% if p.kind == 'task.merge' %} · похоже на дубль{% elif p.kind == 'task.done' %} · похоже, сделано{% elif p.kind == 'task.wait' %} · связь «ждёт»{% elif p.kind == 'task.log' %} · похоже, по задаче{% endif %}</div>
+    {% set mid = it.batch[8:] if it.batch.startswith('meeting:') else '' %}{% set m = meetings.get(mid) if mid else none %}
+    <div class="frow-t">Подтвердить{% if p.kind == 'task.merge' %} · похоже на дубль{% elif p.kind == 'task.done' %} · похоже, сделано{% elif p.kind == 'task.wait' %} · связь «ждёт»{% elif p.kind == 'task.log' %} · похоже, по задаче{% endif %}
+      {%- if m %} · по встрече <a href="/meetings/{{ mid }}">«{{ m.title or mid }}»</a>{% elif it.batch.startswith('ask:') %} · из разговора в Telegram{% endif %}</div>
     <h3 class="frow-title">{{ p.title }}</h3>
     <p class="frow-x">{% if p.reason %}{{ p.reason | truncate(140, True, '…') }}{% endif %}{% for label, url in proposal_links(p) %}{{ ' · ' if p.reason or not loop.first }}<a href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
       {%- if d | length > 1 or (d and not p.reason) %} · <button type="button" class="linkish" data-reveal="pd-{{ p.id }}">{{ 'почему так думаю' if p.kind in ('task.merge', 'task.log') else 'подробнее' }}</button>{% endif %}</p>
@@ -191,7 +179,9 @@
 </dialog>
 {% endif %}
 
-<div class="home">
+{#- заголовок ленты — отдельным рядом с теми же колонками, что и ниже (13.11.2026): «Сегодня» начинается вровень
+    с первой строкой ленты, сколько бы строк ни заняли фильтры. Справа — пустое место той же ширины, что «Сегодня» #}
+<div class="home home-head">
   <div class="home-main">
     <div class="feed-h">
       <h2>Нужно от вас</h2>
@@ -200,6 +190,11 @@
         {% for key, t in [('confirm', 'Подтвердить'), ('answer', 'Ответить'), ('remind', 'Напомнить'), ('quiet', 'Без движения'), ('due', 'Уточнить срок')] if feed.counts[key] %}<button type="button" class="fchip" data-feed-filter="{{ key }}">{{ t }} · {{ feed.counts[key] }}</button>{% endfor %}
       </div>
     </div>
+  </div>
+  <div class="home-side" aria-hidden="true"></div>
+</div>
+<div class="home">
+  <div class="home-main">
     <section class="card feed">
       {% for it in feed['items'] %}{{ feed_row(it) }}{% endfor %}
       {% if not feed['items'] and not messages_on %}
@@ -258,15 +253,18 @@
       {{ dayui.review(dp, due_choices, next_label) }}
     </section>
 
-    <section class="away">
-      <h3>Пока вас не было</h3>
+    {#- «Пока вас не было» — свёрнуто по умолчанию (13.11.2026): что PULSE сделал сам, читают по щелчку, а не каждый раз #}
+    {% set away_n = log | length + (1 if s.unprocessed else 0) %}
+    <details class="away">
+      <summary><span class="away-h">Пока вас не было</span>
+        <span class="away-n">{{ away_n if away_n else 'ничего нового' }}</span>{{ icons.icon('chevron', 16) }}</summary>
       {% for n in log %}
       <p>{% if n.link %}<a href="{{ n.link }}">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}{% if n.text %}: {{ n.text }}{% endif %}</p>
       {% endfor %}
       {% if s.unprocessed %}<p>{{ s.unprocessed }} {{ plural(s.unprocessed, 'новое сообщение ждёт', 'новых сообщения ждут', 'новых сообщений ждут') }} разбора.</p>{% endif %}
       {% if not log and not s.unprocessed %}<p class="muted">Ничего нового.</p>{% endif %}
       <p class="muted small">{% if next_collect %}Следующий сбор в {{ next_collect.strftime('%H:%M') }} · {% endif %}<a href="/journal">журнал</a></p>
-    </section>
+    </details>
   </aside>
 </div>
 {% endblock %}

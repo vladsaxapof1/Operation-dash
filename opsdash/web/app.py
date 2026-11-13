@@ -573,14 +573,10 @@ def needs_from_you(snap: dict | None = None, *, due: bool = False) -> dict:
                       "order": 0 if a["priority"] == "high" else (3 if a["priority"] == "low" else 2)})
     for c in reminders:
         items.append({"kind": "remind", "c": c, "urgent": c["overdue"], "order": 0 if c["overdue"] else 4})
-    batches: dict[str, list] = {}
+    # каждое предложение — своей строкой, без «Подтвердить все» (13.11.2026): директор разбирает их по одному.
+    # Пачка (batch) — только подпись «по встрече …» у строки; предложения одной пачки идут подряд
     for p in props:
-        batches.setdefault(p["batch"] or f"single:{p['id']}", []).append(p)
-    for batch, group in batches.items():
-        if len(group) > 1:
-            items.append({"kind": "confirm", "batch": batch, "group": group, "urgent": False, "order": 1})
-        else:
-            items.append({"kind": "confirm", "p": group[0], "urgent": False, "order": 1})
+        items.append({"kind": "confirm", "p": p, "batch": p["batch"] or "", "urgent": False, "order": 1})
     for k in stale:
         items.append({"kind": "remind", "kaiten": k, "urgent": False, "order": 5})
     still = quiet.queue() if due else []
