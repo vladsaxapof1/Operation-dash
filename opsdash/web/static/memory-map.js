@@ -3,6 +3,9 @@
    времени, по смыслу, причина) с переключателями в легенде. «Сущности»: точки — люди, клиенты, проекты; толщина
    линии — сколько раз упоминались вместе, цвет — как давно.
    Раскладка — силовая (Барнс — Хат для отталкивания, пружины для связей), остывает сама; «Пауза» её останавливает.
+   В «Сущностях» почти все упоминались вместе со всеми, поэтому раскладку держит каркас — несколько самых частых
+   связей каждой сущности, остальные линии бледные и сил не дают; под имя закладывается место («коробка» из кружка
+   и подписи под ним), коробки не пересекаются — подписи не наезжают друг на друга.
    Колесо — масштаб вокруг курсора, перетаскивание — сдвиг (точки — переносит), наведение — подпись, щелчок —
    карточка справа. Цвета берутся из токенов темы (style.css, dark.css, graphite*.css) и перечитываются при смене. */
 (function () {
@@ -17,6 +20,7 @@
   var counter = stage.querySelector('[data-counter]');
   var card = wrap.querySelector('[data-card]');
   var elist = stage.querySelector('[data-elist]');
+  var ctrl = stage.querySelector('.mem-map-ctrl');
   var tools = document.querySelector('[data-map-tools]');
 
   var LINK_KINDS = [['entity', 'Общая сущность'], ['temporal', 'По времени'], ['semantic', 'По смыслу'], ['causal', 'Причина']];
@@ -26,6 +30,15 @@
     scale: 1, tx: 0, ty: 0, running: true, alpha: 1, hover: null, sel: null, nodes: [], links: [], byId: {},
     neighbours: {}, total: 0, maxDeg: 1, dpr: 1, w: 0, h: 0, drag: null, t0: performance.now(), lastData: null };
   var C = {};
+  // «Сущности»: каркас и коробки. top — сколько самых частых связей сущности держат раскладку; far — дальше этого
+  // расстояния сущности не отталкиваются (одиночки без связей не улетают и не сжимают карту при вписывании);
+  // fill — какую долю свободного места холста занимают коробки, dots — предел для одних кружков (labelBoxes);
+  // repel и gravity — пара «просторно, тесно»: когда кружки занимают от tight[0] до tight[1] холста, отталкивание
+  // слабеет, а тяга к центру растёт — иначе в тесноте сущности выстраиваются рядами вдоль краёв
+  var ENT = { top: 2, repel: [110, 20], far: 230, spring: 0.7, gap: 14, gravity: [0.03, 0.06], tight: [0.29, 0.38],
+    collide: 0.6, labelH: 14, labelGap: 3, fill: 0.62, dots: 0.36 };
+  function labelFont() { return '12px ' + token('--font', 'system-ui'); }
+  function weight(n) { return n.d.facts * 3 + n.d.mentions; }
 
   // --- цвета из темы ---------------------------------------------------------------------------------------
   function token(name, fallback) {
@@ -73,8 +86,12 @@
       url = '/api/memory/graph?view=entities&kind=' + encodeURIComponent(f.ekind || '') + '&limit=300';
     }
     counter.textContent = 'Загружаю…';
-    fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(build)
-      .catch(function () { counter.textContent = 'Не получилось загрузить карту'; });
+    // ответ на прошлый запрос может прийти позже нового (быстро переключили вид или фильтр) — такой не рисуем:
+    // иначе факты раскладывались как сущности
+    var req = state.req = (state.req || 0) + 1;
+    fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); })
+      .then(function (data) { if (req === state.req) build(data); })
+      .catch(function () { if (req === state.req) counter.textContent = 'Не получилось загрузить карту'; });
   }
   function build(data) {
     state.lastData = data;
@@ -111,14 +128,106 @@
     nodes.slice().sort(function (a, b) { return a.deg - b.deg; }).forEach(function (o, i, arr) { o.rank = arr.length > 1 ? i / (arr.length - 1) : 0.5; });
     state.nodes = nodes; state.links = links; state.byId = byId; state.neighbours = nb; state.maxDeg = maxDeg;
     state.total = data.total || nodes.length; state.alpha = 1; state.sel = null; state.hover = null;
+    tip.hidden = true;
+    drawLegend(data);  // до раскладки: «Сущности» раскладываются в место, свободное от легенды
+    if (state.view === 'entities') { backbone(nodes, links); labelBoxes(nodes); }
     // раскладку прогреваем сразу, без рисования: карта появляется уже собранной, а не разлетается на глазах
     var warm = Math.min(220, Math.round(60000 / Math.max(1, nodes.length + links.length / 4)));
     for (var i = 0; i < warm && state.alpha > 0.08; i++) tick();
+    if (state.view === 'entities') for (i = 0; i < 80; i++) collide(nodes, 1);  // коробки расходятся до конца
     if (!state.touched) state.needFit = !fit();
-    drawLegend(data);
     if (state.view === 'entities' && state.emode === 'list') renderList();
     draw(performance.now());  // сразу, не дожидаясь кадра: в фоновой вкладке кадров нет
+    reflow();  // счётчик под картой мог занять вторую строку — легенда и свободное место сдвинулись
     kick();
+  }
+
+  // --- «Сущности»: каркас и место под подписи ----------------------------------------------------------------
+  function backbone(nodes, links) {
+    var by = {};
+    links.forEach(function (l) { l.main = false; (by[l.a.id] = by[l.a.id] || []).push(l); (by[l.b.id] = by[l.b.id] || []).push(l); });
+    nodes.forEach(function (n) {
+      n.mdeg = 0;
+      (by[n.id] || []).sort(function (p, q) {
+        var pl = p.last || '', ql = q.last || '';
+        return q.n - p.n || (ql > pl ? 1 : ql < pl ? -1 : 0);
+      }).slice(0, ENT.top).forEach(function (l) { l.main = true; });
+    });
+    links.forEach(function (l) { if (l.main) { l.a.mdeg++; l.b.mdeg++; } });
+  }
+  function freeArea() {  // холст без кнопок сверху, легенды и счётчика снизу
+    var top = 46, bottom = 40;
+    if (state.view === 'entities' && legend.offsetHeight) bottom = legend.offsetHeight + counter.offsetHeight + 28;
+    return { x: 16, y: top, w: Math.max(60, state.w - 32), h: Math.max(60, state.h - top - bottom) };
+  }
+  function overlays() {
+    // что лежит поверх холста: легенда — над счётчиком (в узком окне он в две строки); под кнопки и легенду имена
+    // сущностей не ставятся
+    legend.style.bottom = (counter.offsetHeight + 16) + 'px';
+    var cr = canvas.getBoundingClientRect();
+    state.blocked = [ctrl, legend].map(function (el) {
+      var r = el.getBoundingClientRect();
+      return [r.left - cr.left - 4, r.top - cr.top - 4, r.width + 8, r.height + 8];
+    });
+  }
+  function reflow() {  // свободного места стало заметно больше или меньше — коробки «Сущностей» заново
+    overlays();
+    if (state.view !== 'entities' || !state.nodes.length) return;
+    var now = freeArea(), was = state.area;
+    if (!was || Math.abs(now.w - was.sw) > 0.12 * was.sw || Math.abs(now.h - was.sh) > 0.12 * was.sh) {
+      labelBoxes(state.nodes); state.alpha = Math.max(state.alpha, 0.6);
+    }
+  }
+  function labelBoxes(nodes) {
+    // коробка сущности — кружок и имя под ним; раскладка идёт в точках экрана и не выходит за свободное место холста,
+    // поэтому масштаб после неё — около 1 и имя занимает ровно то место, что под него заложено
+    var area = freeArea(), S = Math.max(area.w * area.h, 400 * 300), top = 1, need = 0;
+    // кружок — по заметности (факты и упоминания, логарифм: иначе десяток самых упоминаемых одного размера);
+    // в тесноте кружки и поля вокруг них мельче
+    var crowd = Math.max(0.65, Math.min(1, Math.sqrt(S / (Math.max(1, nodes.length) * 3000)))), pad = 7 * crowd;
+    nodes.forEach(function (n) { top = Math.max(top, weight(n)); });
+    nodes.forEach(function (n) {
+      n.r = (4 + 9 * Math.log(1 + weight(n)) / Math.log(1 + top)) * crowd;
+      need += 4 * (n.r + pad) * (n.r + pad);
+    });
+    // одни кружки заняли бы больше ENT.dots свободного места — сущностей слишком много для холста: раскладка шире
+    // холста в k раз, «вписать» её уменьшит, имена — у самых заметных и при приближении
+    var k = Math.max(1, Math.sqrt(need / (ENT.dots * S)));
+    var tight = Math.max(0, Math.min(1, (need / S - ENT.tight[0]) / (ENT.tight[1] - ENT.tight[0])));
+    state.area = { w: area.w * k, h: area.h * k, sw: area.w, sh: area.h, tight: tight };
+    // имена получают самые заметные, пока коробки всех занимают не больше ENT.fill свободного места
+    var budget = k > 1 ? 0 : ENT.fill * S - need, used = 0;
+    ctx.font = labelFont();
+    nodes.slice().sort(function (a, b) { return weight(b) - weight(a); }).forEach(function (n) {
+      n.lw = ctx.measureText(n.d.name).width;
+      var w = Math.max(2 * n.r, n.lw) + 14, h = 2 * n.r + ENT.labelGap + ENT.labelH + 8;
+      var extra = w * h - 4 * (n.r + pad) * (n.r + pad);
+      n.lab = used + extra <= budget;
+      if (n.lab) used += extra;
+      n.hw = n.lab ? w / 2 : n.r + pad; n.hh = n.lab ? h / 2 : n.r + pad;
+      n.oy = n.lab ? (ENT.labelGap + ENT.labelH) / 2 : 0;  // центр коробки ниже центра кружка: под ним имя
+    });
+  }
+  function collide(nodes, strength) {
+    var pin = state.drag && state.drag.node;
+    for (var i = 0; i < nodes.length; i++) {
+      var p = nodes[i];
+      for (var j = i + 1; j < nodes.length; j++) {
+        var q = nodes[j], dx = q.x - p.x, dy = (q.y + q.oy) - (p.y + p.oy);
+        var ox = p.hw + q.hw - Math.abs(dx), oy = p.hh + q.hh - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        var kp = p === pin ? 0 : q === pin ? 1 : 0.5, kq = 1 - kp;  // точку под курсором не двигаем
+        if (ox < oy) { var sx = (dx < 0 ? -1 : 1) * ox * strength; p.x -= sx * kp; q.x += sx * kq; }
+        else { var sy = (dy < 0 ? -1 : 1) * oy * strength; p.y -= sy * kp; q.y += sy * kq; }
+      }
+    }
+    var a = state.area;  // и остаются в свободном месте холста
+    if (!a) return;
+    nodes.forEach(function (n) {
+      if (n === pin) return;
+      n.x = Math.max(-a.w / 2 + n.hw, Math.min(a.w / 2 - n.hw, n.x));
+      n.y = Math.max(-a.h / 2 + n.hh - n.oy, Math.min(a.h / 2 - n.hh - n.oy, n.y));
+    });
   }
 
   // --- раскладка ------------------------------------------------------------------------------------------
@@ -145,39 +254,51 @@
     nodes.forEach(function (n) { insert(root, n, 0); });
     return root;
   }
-  function repel(c, n, k) {
+  function repel(c, n, k, far2) {
     if (!c || !c.m) return;
     var dx = c.cx - n.x, dy = c.cy - n.y, d2 = dx * dx + dy * dy + 0.01;
     if (c.n === n && !c.kids) return;
     if (!c.kids || (c.s * c.s) / d2 < 0.64) {  // θ = 0.8
+      if (d2 > far2) return;
       var f = k * c.m / d2;
       n.vx -= dx * f; n.vy -= dy * f;
       return;
     }
-    for (var i = 0; i < 4; i++) repel(c.kids[i], n, k);
+    for (var i = 0; i < 4; i++) repel(c.kids[i], n, k, far2);
   }
-  var LEN = { entity: 70, temporal: 55, semantic: 65, causal: 45, co: 170 };
+  var LEN = { entity: 70, temporal: 55, semantic: 65, causal: 45 };
   function tick() {
-    var nodes = state.nodes, a = state.alpha;
+    var nodes = state.nodes, a = state.alpha, ent = state.view === 'entities';
     if (!nodes.length) return;
-    var root = quad(nodes), k = (state.view === 'facts' ? 70 : 160) * a;
-    nodes.forEach(function (n) { repel(root, n, k); });
+    var tight = ent && state.area ? state.area.tight : 0;
+    function between(pair) { return pair[0] + (pair[1] - pair[0]) * tight; }
+    var root = quad(nodes), k = (ent ? between(ENT.repel) : 70) * a, far2 = ent ? ENT.far * ENT.far : Infinity;
+    nodes.forEach(function (n) { repel(root, n, k, far2); });
     state.links.forEach(function (l) {
+      if (ent && !l.main) return;  // раскладку «Сущностей» держит каркас
       var dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.sqrt(dx * dx + dy * dy) || 0.01;
       // сила пружины — как в d3: 1 / меньшая степень концов, иначе узлы со многими связями слипаются в клубок
-      var w = (state.view === 'facts' ? (l.kind === 'causal' ? 1 : 0.5) * (l.w || 1) : 0.4 + 0.12 * Math.min(5, l.n)) /
-        Math.max(1, Math.min(l.a.deg, l.b.deg));
-      var f = (d - LEN[l.kind]) / d * w * a;
-      var ba = l.a.deg / (l.a.deg + l.b.deg);
+      var da = ent ? l.a.mdeg : l.a.deg, db = ent ? l.b.mdeg : l.b.deg;
+      var w = (ent ? ENT.spring : (l.kind === 'causal' ? 1 : 0.5) * (l.w || 1)) / Math.max(1, Math.min(da, db));
+      var len = ent ? l.a.hw + l.b.hw + ENT.gap : LEN[l.kind];
+      var f = (d - len) / d * w * a;
+      var ba = da / (da + db);
       l.b.vx -= dx * f * ba; l.b.vy -= dy * f * ba; l.a.vx += dx * f * (1 - ba); l.a.vy += dy * f * (1 - ba);
     });
+    var gx = 0.012, gy = 0.012;
+    if (ent && state.area) {  // облако тянется по форме свободного места на холсте: широкий холст — широкая раскладка
+      var asp = Math.max(0.6, Math.min(2.4, state.area.w / state.area.h));
+      gx = between(ENT.gravity) / asp; gy = between(ENT.gravity) * asp;
+    }
     nodes.forEach(function (n) {
-      n.vx -= n.x * 0.012 * a; n.vy -= n.y * 0.012 * a;  // к центру
+      n.vx -= n.x * gx * a; n.vy -= n.y * gy * a;  // к центру
       if (state.drag && state.drag.node === n) { n.vx = n.vy = 0; return; }
       n.vx *= 0.58; n.vy *= 0.58;
       n.x += Math.max(-30, Math.min(30, n.vx)); n.y += Math.max(-30, Math.min(30, n.vy));
     });
+    if (ent) collide(nodes, ENT.collide);
     state.alpha = Math.max(0, a - 0.012);
+    if (ent && !state.alpha) for (var i = 0; i < 40; i++) collide(nodes, 1);  // остыла — коробки расходятся до конца
   }
 
   // --- рисование ------------------------------------------------------------------------------------------
@@ -185,12 +306,24 @@
     var r = stage.getBoundingClientRect();
     state.dpr = window.devicePixelRatio || 1; state.w = r.width; state.h = r.height;
     canvas.width = Math.round(r.width * state.dpr); canvas.height = Math.round(r.height * state.dpr);
+    reflow();
     if (!state.touched) state.needFit = !fit();
     if (state.nodes.length) draw(performance.now());
     kick(true);
   }
   function fit() {
     if (!state.nodes.length || state.w < 80 || state.h < 80) return false;
+    if (state.view === 'entities') {  // вписываем коробки целиком (кружок с именем) в свободное место холста
+      var area = freeArea(), x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      state.nodes.forEach(function (n) {
+        x0 = Math.min(x0, n.x - n.hw); x1 = Math.max(x1, n.x + n.hw);
+        y0 = Math.min(y0, n.y + n.oy - n.hh); y1 = Math.max(y1, n.y + n.oy + n.hh);
+      });
+      state.scale = Math.max(0.15, Math.min(1.5, Math.min(area.w / (x1 - x0 + 1), area.h / (y1 - y0 + 1))));
+      state.tx = area.x + area.w / 2 - (x0 + x1) / 2 * state.scale;
+      state.ty = area.y + area.h / 2 - (y0 + y1) / 2 * state.scale;
+      return true;
+    }
     // вписываем 96% точек: одиночки на краю не должны сжимать всю карту в точку
     var xs = state.nodes.map(function (n) { return n.x; }).sort(function (a, b) { return a - b; });
     var ys = state.nodes.map(function (n) { return n.y; }).sort(function (a, b) { return a - b; });
@@ -240,11 +373,18 @@
         }
       });
     } else {
-      state.links.forEach(function (l) {
-        var on = !focus || (l.a.id === state.sel || l.b.id === state.sel);
-        c.beginPath(); c.moveTo(l.a.x, l.a.y); c.lineTo(l.b.x, l.b.y);
-        c.strokeStyle = css(mix(C.faint, C.accent, l.fresh), on ? (focus ? 0.85 : 0.45) : 0.06);
-        c.lineWidth = l.width / s; c.stroke(); if (on) shown++;
+      // без выбора яркие — каркас и связи точки под курсором; остальные бледные. Выбрана точка — яркие все её связи
+      [false, true].forEach(function (bright) {
+        state.links.forEach(function (l) {
+          var mine = l.a.id === state.sel || l.b.id === state.sel;
+          var hov = !!state.hover && (l.a === state.hover || l.b === state.hover);
+          var on = focus ? mine : (l.main || hov);
+          if (on !== bright) return;  // яркие — поверх бледных
+          c.beginPath(); c.moveTo(l.a.x, l.a.y); c.lineTo(l.b.x, l.b.y);
+          c.strokeStyle = css(mix(C.faint, C.accent, l.fresh), on ? (focus || hov ? 0.85 : 0.42) : (focus ? 0.04 : 0.08));
+          c.lineWidth = (on ? 0.5 + l.width * 0.7 : Math.min(l.width, 1)) / s; c.stroke();
+          if (!focus || mine) shown++;
+        });
       });
     }
     var t = (now - state.t0) / 1000, visible = 0;
@@ -268,10 +408,61 @@
       }
     });
     c.restore();
+    var labels = state.view === 'entities' ? entityLabels(c, s, focus) : factLabels(c, s, focus);
+    counter.innerHTML = (state.view === 'facts'
+      ? 'Фактов: <b>' + state.nodes.length + '</b>' + (state.total > state.nodes.length ? ' из ' + state.total : '')
+      : 'Сущностей: <b>' + state.nodes.length + '</b>') +
+      ' · видно: <b>' + visible + '</b> · подписей: <b>' + labels + '</b> · связей: <b>' + shown + '</b> · масштаб: <b>' +
+      s.toFixed(1).replace('.', ',') + '×</b>' + (state.running ? '' : ' · пауза');
+  }
+  function entityLabels(c, s, focus) {
+    // имя — под кружком, там под него заложено место; занято (мелкий масштаб, коробки без имени) — над кружком,
+    // справа, слева. Имя не ложится на другое имя и на чужой кружок; первыми — выбранная, наведённая, самые заметные
+    var H = ENT.labelH, gap = ENT.labelGap, placed = [], labels = 0;
+    var dots = state.nodes.map(function (n) { var p = toScreen(n); return [p[0], p[1], n.r * Math.sqrt(s) + 0.3 * s + 1, n]; });
+    c.font = labelFont(); c.textBaseline = 'top'; c.textAlign = 'left';
+    function free(box, self) {
+      var i, q, busy = placed.concat(state.blocked || []);
+      for (i = 0; i < busy.length; i++) { q = busy[i]; if (box[0] < q[0] + q[2] && box[0] + box[2] > q[0] && box[1] < q[1] + q[3] && box[1] + box[3] > q[1]) return false; }
+      for (i = 0; i < dots.length; i++) {
+        q = dots[i];
+        if (q[3] === self) continue;
+        var nx = Math.max(box[0], Math.min(q[0], box[0] + box[2])), ny = Math.max(box[1], Math.min(q[1], box[1] + box[3]));
+        if ((nx - q[0]) * (nx - q[0]) + (ny - q[1]) * (ny - q[1]) < q[2] * q[2]) return false;
+      }
+      return true;
+    }
+    function label(n, strong) {
+      var p = toScreen(n);
+      if (p[0] < 0 || p[1] < 0 || p[0] > state.w || p[1] > state.h) return false;
+      var w = n.lw || c.measureText(n.d.name).width, rr = n.r * Math.sqrt(s) + 0.3 * s;
+      var spots = [[p[0] - w / 2, p[1] + rr + gap], [p[0] - w / 2, p[1] - rr - gap - H], [p[0] + rr + 5, p[1] - H / 2], [p[0] - rr - 5 - w, p[1] - H / 2]];
+      for (var i = 0; i < spots.length; i++) {
+        if (strong) spots[i][0] = Math.max(4, Math.min(state.w - w - 4, spots[i][0]));  // выбранная — всегда целиком
+        var box = [spots[i][0] - 2, spots[i][1] - 1, w + 4, H + 2];
+        if (!strong && (box[0] < 2 || box[1] < 2 || box[0] + box[2] > state.w - 2 || box[1] + box[3] > state.h - 2)) continue;
+        if (!strong && !free(box, n)) continue;
+        placed.push(box);
+        c.lineWidth = 3; c.strokeStyle = css(C.bg, 0.92); c.strokeText(n.d.name, spots[i][0], spots[i][1]);
+        c.fillStyle = css(strong ? C.text : C.muted, 1); c.fillText(n.d.name, spots[i][0], spots[i][1]);
+        return true;
+      }
+      return false;
+    }
+    if (state.sel != null && state.byId[state.sel] && label(state.byId[state.sel], true)) labels++;
+    if (state.hover && state.hover.id !== state.sel && label(state.hover, true)) labels++;
+    state.nodes.slice().sort(function (a, b) { return weight(b) - weight(a); }).forEach(function (n) {
+      if (n === state.hover || n.id === state.sel) return;
+      if (focus && !focus[n.id]) return;
+      if (label(n, false)) labels++;
+    });
+    return labels;
+  }
+  function factLabels(c, s, focus) {
     // подписи — у самых связанных (больше при приближении), у наведённой и выбранной
     var labels = 0, budget = Math.round(10 * Math.max(1, s * s)), order = state.nodes.slice().sort(function (a, b) { return b.deg - a.deg; });
-    c.font = '12px ' + token('--font', 'system-ui');
-    c.textBaseline = 'middle';
+    c.font = labelFont();
+    c.textBaseline = 'middle'; c.textAlign = 'left';
     var placed = [];
     function label(n, strong) {
       var p = toScreen(n), text = state.view === 'facts' ? n.d.label : n.d.name;
@@ -290,14 +481,10 @@
       var n = order[i];
       if (n === state.hover || n.id === state.sel) continue;
       if (focusIds && !focusIds[n.id]) continue;
-      if (state.view === 'facts' && n.deg < 2 && !focusIds) break;
+      if (n.deg < 2 && !focusIds) break;
       if (label(n, false)) labels++;
     }
-    counter.innerHTML = (state.view === 'facts'
-      ? 'Фактов: <b>' + state.nodes.length + '</b>' + (state.total > state.nodes.length ? ' из ' + state.total : '')
-      : 'Сущностей: <b>' + state.nodes.length + '</b>') +
-      ' · видно: <b>' + visible + '</b> · подписей: <b>' + labels + '</b> · связей: <b>' + shown + '</b> · масштаб: <b>' +
-      s.toFixed(1).replace('.', ',') + '×</b>' + (state.running ? '' : ' · пауза');
+    return labels;
   }
   var raf = 0;
   function frame(now) {
@@ -315,6 +502,7 @@
 
   // --- легенда, список, карточка ---------------------------------------------------------------------------
   function drawLegend(data) {
+    legend.classList.toggle('row', state.view === 'entities');  // у «Сущностей» — строкой внизу: холст свободен
     if (state.view === 'facts') {
       var counts = {};
       state.links.forEach(function (l) { counts[l.kind] = (counts[l.kind] || 0) + 1; });
@@ -328,10 +516,10 @@
     } else {
       var used = {};
       state.nodes.forEach(function (n) { used[n.d.kind] = true; });
-      legend.innerHTML = '<b>Сущности</b>' + Object.keys(EKINDS).filter(function (k) { return used[k]; }).map(function (k) {
-        return '<label><span class="sw" style="height:9px;width:9px;border-radius:50%;background:' + css(C.ekind[k]) + '"></span>' + EKINDS[k] + '</label>';
-      }).join('') + '<b style="margin-top:6px">Линия</b><span>толщина — сколько раз вместе</span>' +
-        '<div class="grad" style="background:linear-gradient(90deg,' + css(C.faint) + ',' + css(C.accent) + ')"></div><div class="scale"><span>давно</span><span>недавно</span></div>';
+      legend.innerHTML = Object.keys(EKINDS).filter(function (k) { return used[k]; }).map(function (k) {
+        return '<span class="kind"><span class="sw" style="height:9px;width:9px;border-radius:50%;background:' + css(C.ekind[k]) + '"></span>' + EKINDS[k] + '</span>';
+      }).join('') + '<span class="note">Линия толще: чаще упоминались вместе. Яркие линии: самые частые связи сущности, остальные видны при наведении.</span>' +
+        '<span class="ages">давно<span class="grad" style="background:linear-gradient(90deg,' + css(C.faint) + ',' + css(C.accent) + ')"></span>недавно</span>';
     }
   }
   legend.addEventListener('change', function (e) {
@@ -479,6 +667,8 @@
   window.addEventListener('resize', resize);
   readColors(); resize(); state.needFit = true; load();
   window.__memMap = state;  // для проверки в браузере: сколько точек, связей, масштаб
+  state.ent = ENT;  // и подбор раскладки «Сущностей»: поменять число, затем relayout()
+  state.relayout = function () { state.byId = {}; state.touched = false; if (state.lastData) build(state.lastData); };
   // замер без сервера: n точек и m связей — сколько мс уходит на шаг раскладки и на кадр (60 кадров/с — это 16 мс)
   window.__memMapBench = function (n, m) {
     var kinds = ['entity', 'temporal', 'semantic', 'causal'], nodes = [], links = [];
