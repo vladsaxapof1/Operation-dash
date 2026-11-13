@@ -797,6 +797,7 @@ def attention_task(request: Request, aid: int, direction: str = Form("mine"), ti
                    close: str = Form("")):
     """«Сделать задачей» у строки «Ответить» на Сводке: ответа мало — задача на доске, с сообщением в источнике.
     Выше общего /attention/{aid}/{action}: тот любое незнакомое действие считает «Скрыть»."""
+    last = store.scalar("SELECT MAX(id) FROM commitments") or 0
     try:
         cid = records.attention_to_task(aid, direction=direction, title=title, what=what, who=who, whom=whom,
                                         due=due or None, close=close == "1")
@@ -804,14 +805,17 @@ def attention_task(request: Request, aid: int, direction: str = Form("mine"), ti
         return back(request, err=str(e))
     c = store.row("SELECT * FROM commitments WHERE id=?", (cid,))
     column = dict(BOARD_TITLES).get(c["direction"], "Задачи")
+    left = ". Строка «Ответить» осталась: ответить всё равно нужно" if close != "1" else ""
+    if cid <= last:  # по этому сообщению задача уже была — вторую не завели
+        return back(request, f"По этому сообщению задача уже есть: «{records.headline(c)}» — в «{column}». "
+                             "Вторую не заводили" + left)
     similar = [s for s in records.similar_open(direction=c["direction"], who=c["who"] or "", whom=c["whom"] or "",
                                                title=c["title"] or "", what=c["what"], exclude=cid)
                if s["similarity"] >= 0.5]
     if similar:
         return back(request, f"Задача «{records.headline(c)}» — в «{column}». Похожая уже есть: «{similar[0]['headline']}» "
                              "— если это одно и то же, откройте новую и выберите «Это дубль задачи…»")
-    return back(request, f"Задача «{records.headline(c)}» — в «{column}»"
-                         + (". Строка «Ответить» осталась: ответить всё равно нужно" if close != "1" else ""))
+    return back(request, f"Задача «{records.headline(c)}» — в «{column}»" + left)
 
 
 @app.post("/attention/{aid}/{action}")

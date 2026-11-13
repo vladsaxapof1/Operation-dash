@@ -230,11 +230,11 @@ def test_colleague_task_names_the_sender(settings_with, capsys):
 
 def test_brief_and_search(capsys):
     long_what = "Собрать сводку по продажам за октябрь по всем направлениям, с разбивкой по менеджерам " * 5
-    a = records.add_commitment(direction="to_me", who="Ольга", title="Сводка продаж", what=long_what, due="2026-11-12")
+    a = records.add_commitment(direction="to_me", who="Ольга", title="Сводка продаж", what=long_what, due="2099-11-12")
     b = records.add_commitment(direction="mine", whom="Пётр", title="Договор аренды", what="Подписать договор")
     cli.main(["commitments", "list", "--brief"])
     brief = capsys.readouterr().out
-    assert brief.splitlines() == [f"[{a}] Ольга → мне: «Сводка продаж» · до 2026-11-12",
+    assert brief.splitlines() == [f"[{a}] Ольга → мне: «Сводка продаж» · до 2099-11-12",
                                   f"[{b}] Я → Пётр: «Договор аренды»"]
     cli.main(["commitments", "list"])
     assert len(capsys.readouterr().out) > 3 * len(brief)  # полный — с сутью и всем остальным

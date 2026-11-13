@@ -1444,6 +1444,8 @@ def cmd_attention(a) -> None:
                 marks += f" · вернула вручную {store.local(x['reopened_at'])}"
             if x["done_hint"]:
                 marks += " · предложено закрыть, ждёт директора"
+            for c in x["tasks"]:  # по сообщению уже заведена задача — вторую по нему не заводить
+                marks += f" · по сообщению уже есть задача [{c['id']}] «{c['headline']}» ({c['route']})"
             out(f"[{x['id']}] {x['priority']} · {x['status']}{marks} · {x['source']} · «{x['chat_title']}» · "
                 f"{x['sender_name']}: {x['summary']} (сообщение {x['message_id']})"
                 + (f"\n    черновик: {short(x['draft'], 300)}" if x["draft"] else ""))

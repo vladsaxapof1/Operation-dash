@@ -92,6 +92,61 @@ def test_home_offers_make_task_and_route_creates_it():
     assert "err=" in r.headers["location"]
 
 
+def _triage_task(direction: str = "mine", **kw) -> int:
+    """Задача, которую разбор переписки завёл по тому же сообщению, что и строку «Ответить», — своими словами."""
+    mid = store.scalar("SELECT id FROM messages WHERE msg_id='501'")
+    return records.add_commitment(direction=direction, title="Ответ по заявкам онбординга",
+                                  what="Проверить, можно ли считать заявки «в процессе» успехом, и ответить Ольге",
+                                  whom="Ольга Петрова", source_type="telegram", source_ref=str(mid), **kw)
+
+
+def test_message_task_already_made_by_triage_is_not_duplicated():
+    """Разбор переписки по сообщению завёл и строку «Ответить», и задачу; «Сделать задачей» у строки — та же задача,
+    хотя тексты разные (12.11 по одному письму получились две задачи, и они не склеились)."""
+    aid = _ask()
+    cid = _triage_task()
+    a = records.list_attention("open")[0]
+    assert [c["id"] for c in a["tasks"]] == [cid] and a["my_task"]["id"] == cid
+    assert a["my_task"]["headline"] == "Ответ по заявкам онбординга" and a["my_task"]["route"] == "Я → Ольга Петрова"
+    got = records.attention_to_task(aid, title="Конверсия онбординга: заявки «в процессе»", whom="Ольга Петрова")
+    assert got == cid and store.scalar("SELECT COUNT(*) FROM commitments") == 1, "вторую не завели"
+    c = store.row("SELECT * FROM commitments WHERE id=?", (cid,))
+    assert c["title"] == "Ответ по заявкам онбординга", "формулировку разбора не трогаем"
+    assert c["seen_at"] and c["importance"] == "high", "директор её видела; срочное сообщение — важная задача"
+    assert store.scalar("SELECT status FROM attention WHERE id=?", (aid,)) == "task"
+    assert not any("Сделали задачей" in e["text"] for e in worklog.entries([cid]).get(cid, []))
+
+
+def test_other_type_or_closed_task_does_not_block_new_one():
+    """По сообщению есть только «мне должны» или задача уже закрыта — своя задача директора заводится как обычно."""
+    aid = _ask()
+    theirs = _triage_task("to_me", who="Ольга Петрова")
+    done = _triage_task()
+    records.update_commitment(done, status="done")
+    a = records.list_attention("open")[0]
+    assert [c["id"] for c in a["tasks"]] == [theirs] and a["my_task"] is None
+    mine = records.attention_to_task(aid, title="Ответ по конверсии онбординга")
+    assert mine not in (theirs, done) and store.scalar("SELECT COUNT(*) FROM commitments") == 3
+
+
+def test_home_shows_existing_task_instead_of_make_task():
+    from opsdash.web.app import app
+
+    aid = _ask()
+    cid = _triage_task()
+    client = TestClient(app, base_url="http://localhost:8765")
+    page = client.get("/").text
+    assert "задача уже есть" in page and f'<a href="/commitments?task={cid}">Ответ по заявкам онбординга</a>' in page
+    assert f'data-dlg-open="att-task-{aid}"' not in page and f'class="btn sm" href="/commitments?task={cid}"' in page
+    # окно из старой вкладки всё равно отправили — вторую не заводим и говорим об этом
+    r = client.post(f"/attention/{aid}/task", data={"direction": "mine", "title": "Ответ по конверсии", "what": "",
+                                                    "whom": "Ольга Петрова", "due": "", "close": "1"},
+                    headers={"referer": "http://localhost:8765/"}, follow_redirects=False)
+    assert "По этому сообщению задача уже есть: «Ответ по заявкам онбординга» — в «Мои задачи». Вторую не заводили" \
+        in unquote(r.headers["location"])
+    assert store.scalar("SELECT COUNT(*) FROM commitments") == 1
+
+
 def test_close_attention_dismiss_still_rejects_hint():
     aid = _ask()
     p = proposals.propose_answered(attention_id=aid, reason="ответила", quote="проверю",

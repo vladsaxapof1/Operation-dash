@@ -1476,12 +1476,33 @@ def close_attention(aid: int, status: str = "done") -> None:
 ATTENTION_QUOTE_MAX = 400
 
 
+def message_tasks(message_ids: list[int]) -> dict[int, list[dict]]:
+    """Открытые задачи, заведённые по этим сообщениям (сообщение — их источник), по номеру сообщения. Разбор
+    переписки по одному письму может завести и строку «Ответить», и задачу: строка показывает, что задача уже есть,
+    а «Сделать задачей» не заводит вторую такую же (12.11: две задачи по одному письму не склеились — тексты разные)."""
+    ids = sorted({int(m) for m in message_ids if m})
+    if not ids:
+        return {}
+    rows = store.rows(
+        f"SELECT * FROM commitments WHERE status='open' AND archived_at IS NULL "
+        f"AND source_type IN ({','.join('?' * len(worklog.MESSAGE_SOURCES))}) "
+        f"AND source_ref IN ({','.join('?' * len(ids))}) ORDER BY id",
+        (*worklog.MESSAGE_SOURCES, *map(str, ids)))
+    out: dict[int, list[dict]] = {}
+    for c in rows:
+        c["headline"], c["route"] = headline(c), route(c)
+        out.setdefault(int(c["source_ref"]), []).append(c)
+    return out
+
+
 def attention_to_task(aid: int, *, direction: str = "mine", title: str = "", what: str = "", who: str | None = None,
                       whom: str | None = None, due: str | None = None, close: bool = True) -> int:
     """«Сделать задачей» у строки «Ответить»: одного ответа мало — по сообщению нужна работа. Задача помнит сообщение:
     источник и цитата — первая запись её хода, кнопка открывает его в оригинале. Директор задачу уже видела — без
     отметки «новая». Срочное сообщение — важная задача, «не к спеху» — неважная (остальное оценит Claude, навык
-    priorities). close — строка уходит из «Нужно от вас» (статус task); False — остаётся: ответить всё равно нужно."""
+    priorities). close — строка уходит из «Нужно от вас» (статус task); False — остаётся: ответить всё равно нужно.
+    По этому сообщению уже есть открытая задача того же типа (её завёл разбор переписки) — вторую не заводим,
+    возвращаем ту: одно сообщение — одна задача, как бы её ни сформулировали."""
     a = store.row("SELECT a.*, m.text AS msg_text, m.source AS msg_source FROM attention a "
                   "LEFT JOIN messages m ON m.id = a.message_id WHERE a.id=?", (aid,))
     if not a:
@@ -1493,10 +1514,12 @@ def attention_to_task(aid: int, *, direction: str = "mine", title: str = "", wha
     if len(quote) > ATTENTION_QUOTE_MAX:
         quote = quote[:ATTENTION_QUOTE_MAX].rsplit(" ", 1)[0] + "…"
     last = store.scalar("SELECT MAX(id) FROM commitments") or 0
-    cid = add_commitment(direction=direction, title=title or None, what=what, who=(who or "").strip() or None,
-                         whom=(whom or "").strip() or None, due=due or None,
-                         source_type=source if from_msg else "manual",
-                         source_ref=str(a["message_id"]) if from_msg else None, quote=quote or None)
+    same = [c for c in message_tasks([a["message_id"]]).get(a["message_id"], []) if c["direction"] == direction] \
+        if from_msg else []
+    cid = same[0]["id"] if same else add_commitment(
+        direction=direction, title=title or None, what=what, who=(who or "").strip() or None,
+        whom=(whom or "").strip() or None, due=due or None, source_type=source if from_msg else "manual",
+        source_ref=str(a["message_id"]) if from_msg else None, quote=quote or None)
     if cid > last:  # новая, а не та же задача второй раз. «Появилась» в ходе — время сообщения (оно могло ждать
         # ответа неделю), а это — когда директор взяла его в работу: от него, а не от сообщения, считаем «без движения»
         worklog.event(cid, "Сделали задачей из «Ответить» на Сводке")
@@ -1525,10 +1548,14 @@ def list_attention(status: str = "open") -> list[dict]:
     for p in store.rows("SELECT * FROM proposals WHERE kind='attention.done' AND status='pending' ORDER BY id"):
         p["payload"] = store.loads(p["payload"], {})
         hints[p["payload"].get("attention_id")] = p
+    # задачи, уже заведённые по этим сообщениям: строка показывает их, а не «Сделать задачей» (my_task — моя)
+    tasks = message_tasks([a["message_id"] for a in items if a["status"] == "open"])
     for a in items:  # кнопка «открыть в оригинале»: сообщение, чат или письмо
         a["orig_url"], a["orig_label"] = links.original(
             a["msg_source"] or a["source"], a["chat_id"], a["msg_ext_id"], a["msg_sender"]) or (None, None)
         a["done_hint"] = hints.get(a["id"]) if a["status"] == "open" else None
+        a["tasks"] = tasks.get(a["message_id"], []) if a["status"] == "open" else []
+        a["my_task"] = next((c for c in a["tasks"] if c["direction"] == "mine"), None)
     return items
 
 

@@ -15,8 +15,10 @@
   {% if k == 'answer' %}{% set a = it.a %}
     <div class="frow-t">Ответить{% if a.priority == 'high' %} · срочно{% elif a.priority == 'low' %} · не к спеху{% endif %}</div>
     <h3 class="frow-title">{{ a.summary }}</h3>
-    <p class="frow-x">{{ a.sender_name or a.chat_title }} · {{ SOURCE_TITLES.get(a.source, a.source or '') }}{% if a.chat_title and a.chat_title != a.sender_name %}, {{ a.chat_title }}{% endif %} · {{ a.msg_ts | ago if a.msg_ts else a.created | ago }}{% if a.draft %} · черновик: «{{ a.draft | truncate(110, True, '…') }}»{% endif %}{% if a.done_hint %} · <span class="ok-text">похоже, вы уже ответили</span>{% endif %}</p>
+    <p class="frow-x">{{ a.sender_name or a.chat_title }} · {{ SOURCE_TITLES.get(a.source, a.source or '') }}{% if a.chat_title and a.chat_title != a.sender_name %}, {{ a.chat_title }}{% endif %} · {{ a.msg_ts | ago if a.msg_ts else a.created | ago }}{% if a.draft %} · черновик: «{{ a.draft | truncate(110, True, '…') }}»{% endif %}{% if a.done_hint %} · <span class="ok-text">похоже, вы уже ответили</span>{% endif %}{% if a.tasks %} · задача уже есть{% endif %}</p>
     <div class="frow-pane" id="att-{{ a.id }}" data-copy-scope hidden>
+      {#- по этому сообщению задачу уже завёл разбор переписки: показываем её — вторую такую же не заводим (records.message_tasks) #}
+      {% for t in a.tasks %}<p class="small">Задача по этому сообщению: <a href="/commitments?task={{ t.id }}">{{ t.headline }}</a> <span class="muted">· {{ t.route }}</span></p>{% endfor %}
       {% if a.why %}<p class="muted small">Почему важно: {{ a.why }}</p>{% endif %}
       {% if a.msg_text %}<blockquote class="dlg-quote">{{ a.msg_text[:400] }}{% if a.msg_text | length > 400 %}…{% endif %}</blockquote>{% endif %}
       {% if a.draft %}<div class="draft" data-copy>{{ a.draft }}</div>{% endif %}
@@ -26,7 +28,8 @@
         {% if a.draft %}<button type="button" class="btn sm" data-copy-btn>Копировать ответ</button>{% endif %}
         {% if a.orig_url %}<a class="btn sm" href="{{ a.orig_url }}" target="_blank" rel="noopener">↗ {{ a.orig_label }}</a>{% endif %}
         <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">{{ icons.icon('check', 14) }} Ответила</button></form>
-        <button type="button" class="btn sm" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">{{ icons.icon('plus', 14) }} Сделать задачей</button>
+        {% if a.my_task %}<a class="btn sm" href="/commitments?task={{ a.my_task.id }}">Открыть задачу</a>
+        {% else %}<button type="button" class="btn sm" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">{{ icons.icon('plus', 14) }} Сделать задачей</button>{% endif %}
       </div>
     </div>
   </div>
@@ -37,7 +40,8 @@
     {% call ui.menu() %}
       <button type="button" class="menu-i" data-reveal="att-{{ a.id }}">Показать сообщение</button>
       <form method="post" action="/attention/{{ a.id }}/done"><button class="menu-i">Ответила</button></form>
-      <button type="button" class="menu-i" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">Сделать задачей</button>
+      {% if a.my_task %}<a class="menu-i" href="/commitments?task={{ a.my_task.id }}">Открыть задачу</a>
+      {% else %}<button type="button" class="menu-i" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">Сделать задачей</button>{% endif %}
       <form method="post" action="/attention/{{ a.id }}/dismiss"><button class="menu-i">Скрыть</button></form>
       <a class="menu-i" href="/chats?chat={{ (a.source ~ '|' ~ a.chat_id) | urlencode }}">Открыть в Переписке</a>
     {% endcall %}
