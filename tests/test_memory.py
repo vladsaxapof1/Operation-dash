@@ -325,3 +325,74 @@ def test_private_meeting_menu_toggle(client):
     assert store.scalar("SELECT private FROM meetings WHERE id='m1'") == 1
     assert not store.scalar("SELECT COUNT(*) FROM memory_chunks WHERE src='m1'")
     assert "личная" in client.get("/meetings/m1").text
+
+
+def test_backfill_goes_through_all_portions_in_the_queue(monkeypatch):
+    """Наполнение ставит само себя на следующую порцию. В очереди PULSE такая просьба приходит, пока задание ещё
+    идёт: раньше очередь её отбрасывала, и после первых 10 встреч наполнение молча останавливалось."""
+    import queue
+    import threading
+    import time
+
+    from opsdash import jobs
+
+    for i in range(5):
+        meeting(f"m{i}", started=f"2026-11-0{i + 1}T08:00:00+00:00")
+        (records.meeting_dir(f"m{i}") / "summary.md").write_text("# Планёрка\n", encoding="utf-8")
+    calls = []
+
+    def fake_claude(prompt, **_):
+        calls.append(prompt)
+        memory.backfill_done(memory.backfill_state()["todo"][:2])
+
+    monkeypatch.setattr(jobs.brain, "run", fake_claude)
+    monkeypatch.setattr(jobs, "_queues", {"heavy": queue.Queue()})
+    stop = threading.Event()
+    worker = threading.Thread(target=jobs._worker, args=("heavy", stop), daemon=True)
+    worker.start()
+    try:
+        store.set_state("memory_backfill", "running")
+        assert jobs.submit("memory-backfill", "heavy")
+        deadline = time.time() + 15
+        while store.get_state("memory_backfill") != "done" and time.time() < deadline:
+            time.sleep(0.05)
+    finally:
+        stop.set()
+        worker.join(5)
+    assert len(calls) == 3 and not memory.backfill_state()["todo"]
+    assert store.get_state("memory_backfill") == "done" and not jobs._pending and not jobs._again
+
+
+def test_running_job_is_queued_again_only_when_it_asks(monkeypatch):
+    import queue
+
+    from opsdash import jobs
+
+    key = jobs._key("memory-index", None)
+    monkeypatch.setattr(jobs, "_queues", {"light": queue.Queue()})
+    monkeypatch.setattr(jobs, "_pending", {key})
+    monkeypatch.setattr(jobs, "_running", {key})
+    monkeypatch.setattr(jobs, "_again", {})
+    assert not jobs.submit("memory-index")  # попросил кто-то другой — как и раньше, второй раз не встаёт
+    assert jobs.submit("memory-index", again=True) and jobs._again[key] == ("memory-index", "light", None)
+    assert jobs._queues["light"].empty()  # в очередь встанет, когда закончит (jobs._worker)
+
+
+def test_stalled_backfill_is_resumed_by_tick(monkeypatch, settings_with):
+    """Наполнение «идёт», а задания нет — PULSE перезапустили или Claude упал: планировщик продолжает сам."""
+    from opsdash import jobs
+
+    settings_with(schedule={"digest_morning": "", "digest_evening": "", "stale_check": ""}, memory={"day": False})
+    meeting("m1")
+    (records.meeting_dir("m1") / "summary.md").write_text("# Планёрка\n", encoding="utf-8")
+    submitted = []
+    monkeypatch.setattr(jobs, "submit", lambda name, kind="light", args=None: submitted.append(name) or True)
+    store.set_state("memory_backfill", "running")
+    assert "memory-backfill" in jobs.tick()
+    submitted.clear()
+    store.execute("INSERT INTO jobs(name, last_run) VALUES('memory-backfill', ?) "
+                  "ON CONFLICT(name) DO UPDATE SET last_run=excluded.last_run", (store.utcnow(),))
+    assert "memory-backfill" not in jobs.tick()  # только что запускали — ждём BACKFILL_RETRY минут
+    store.set_state("memory_backfill", "stopped")
+    store.execute("UPDATE jobs SET last_run='2026-01-01T00:00:00+00:00' WHERE name='memory-backfill'")
+    assert "memory-backfill" not in jobs.tick()  # остановлено пользователем — не трогаем

@@ -336,17 +336,35 @@ def neighbours(query: str, k: int = 50) -> dict | None:
         if not ready():
             return None
         return near_local(query, k)
+    port = _pulse_port()
+    if not port:
+        return None
     import httpx
 
-    port = config.load_settings()["web"].get("port") or 8765
     try:
         r = httpx.get(f"http://127.0.0.1:{port}/api/memory/near", params={"q": query, "k": k}, timeout=NEAR_TIMEOUT)
     except httpx.HTTPError:
         return None
     if r.status_code != 200:
         return None
-    data = r.json()
-    return data if data.get("ok") else None
+    try:
+        data = r.json()
+    except ValueError:
+        return None
+    if not data.get("ok") or data.get("home") != str(config.DATA_DIR):
+        return None  # на этом порту PULSE с другой папкой данных: у его фактов и фрагментов свои номера
+    return data
+
+
+def _pulse_port() -> int | None:
+    """Порт PULSE, который работает с этой же папкой данных (data/pult.pid). Другой PULSE на этом компьютере —
+    живой рядом с копией, демо, тесты — не спрашиваем: его номера фактов и фрагментов к этой базе не подходят."""
+    import json
+
+    try:
+        return int(json.loads((config.DATA_DIR / "pult.pid").read_text(encoding="utf-8"))["port"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 # --- связи по смыслу -------------------------------------------------------------------------------------------

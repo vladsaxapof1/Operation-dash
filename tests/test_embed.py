@@ -65,6 +65,37 @@ def test_without_model_recall_and_links_still_work():
     assert links.get("entity") and links.get("temporal") and "semantic" not in links
 
 
+def test_recall_asks_only_the_pulse_of_this_data_folder(monkeypatch):
+    """./ops recall спрашивает соседей по смыслу только у PULSE этой же папки данных. Чужой PULSE на том же порту
+    (живой рядом с копией, демо, тесты) вернул бы номера фактов и фрагментов из своей базы."""
+    import httpx
+
+    from opsdash import config
+
+    calls = []
+
+    class Reply:
+        status_code = 200
+
+        def __init__(self, data):
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    def fake_get(url, **_):
+        calls.append(url)
+        return Reply(reply)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    reply = {"ok": True, "home": "/чужая/папка/data", "facts": [41], "chunks": [944]}
+    assert embed.neighbours("склад") is None and not calls  # PULSE этой папки не запущен — никого не спрашиваем
+    (config.DATA_DIR / "pult.pid").write_text('{"pid": 1, "port": 8765}', encoding="utf-8")
+    assert embed.neighbours("склад") is None and len(calls) == 1  # на порту PULSE с другой папкой данных
+    reply = {"ok": True, "home": str(config.DATA_DIR), "facts": [1], "chunks": [2]}
+    assert embed.neighbours("склад")["facts"] == [1]
+
+
 def test_fill_vectors_and_semantic_links_and_hybrid(fake, monkeypatch):
     meeting("m1", transcript="[00:00:01] Олег: стеллажи для склада привезут в пятницу\n")
     meeting("m2", started="2026-11-10T08:00:00+00:00",

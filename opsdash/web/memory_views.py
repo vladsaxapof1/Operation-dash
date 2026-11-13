@@ -240,7 +240,7 @@ def register(app: FastAPI, render, back) -> None:
         if not q.strip() or not embed.enabled() or not embed.ready():
             return JSONResponse({"ok": False})
         try:
-            return JSONResponse({"ok": True, **embed.near_local(q, min(max(k, 1), 200))})
+            return JSONResponse({"ok": True, "home": str(config.DATA_DIR), **embed.near_local(q, min(max(k, 1), 200))})
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"ok": False, "error": str(e)[:200]})
 

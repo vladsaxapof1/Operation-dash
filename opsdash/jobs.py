@@ -22,6 +22,7 @@ _queues: dict[str, queue.Queue] = {}
 _pending: set[str] = set()
 _running: set[str] = set()  # из _pending — те, что выполняются прямо сейчас
 _dropped: set[str] = set()  # из _pending — убранные из очереди (unqueue): поток их пропустит
+_again: dict[str, tuple] = {}  # задание попросило запустить себя ещё раз (submit(again=True)): встанет, когда закончит
 _pending_lock = threading.Lock()
 
 
@@ -81,7 +82,7 @@ def job_memory_embed(**_) -> str:
     n = embed.fill()
     embed.drop_orphans()
     if n and embed.missing():
-        submit("memory-embed")
+        submit("memory-embed", again=True)
     elif n:
         memory.build_links()
     return f"векторов: +{n}" if n else "векторы на месте"
@@ -141,7 +142,7 @@ def job_memory_backfill(**_) -> str:
         store.set_state("memory_backfill", "stopped")
         return f"разборы не отмечены пройденными — наполнение остановлено (фактов: +{facts})"
     if st["todo"] and (store.get_state("memory_backfill") or "") != "stopped":
-        submit("memory-backfill", "heavy")
+        submit("memory-backfill", "heavy", again=True)
     else:
         store.set_state("memory_backfill", "done" if not st["todo"] else "stopped")
     return f"разборов {st['done']} из {st['total']}, фактов +{facts}"
@@ -503,6 +504,7 @@ def job_projects(**_) -> str:
 
 PROJECTS_PILE = 5  # новых задач вне проектов, после которых проекты собираются, не дожидаясь понедельника
 PROJECTS_GAP = 20 * 60  # минут: такая сборка — не чаще раза в день
+BACKFILL_RETRY = 30  # минут: наполнение памяти «идёт», а задания нет (перезапуск, сбой Claude) — продолжить через столько
 
 
 def projects_pile() -> int:
@@ -789,8 +791,11 @@ def in_daemon() -> bool:
     return bool(_queues)
 
 
-def submit(name: str, kind: str = "light", args: dict | None = None) -> bool:
-    """Поставить задание в очередь PULSE. Без PULSE (из командной строки) — выполнить сразу."""
+def submit(name: str, kind: str = "light", args: dict | None = None, again: bool = False) -> bool:
+    """Поставить задание в очередь PULSE. Без PULSE (из командной строки) — выполнить сразу.
+
+    Задание, которое уже стоит или идёт, второй раз не ставится. again=True — для задания, которое работает порциями и
+    ставит само себя: пока оно идёт, просьба запоминается, и в очередь оно встанет, как только закончит."""
     if name not in REGISTRY:
         raise KeyError(name)
     if not _queues:
@@ -801,6 +806,9 @@ def submit(name: str, kind: str = "light", args: dict | None = None) -> bool:
         if key in _pending:
             if key in _dropped:  # убрали из очереди и снова попросили — задание в ней ещё стоит, пусть выполнится
                 _dropped.discard(key)
+                return True
+            if again and key in _running:
+                _again[key] = (name, kind, args)
                 return True
             return False
         _pending.add(key)
@@ -834,6 +842,9 @@ def _worker(kind: str, stop: threading.Event) -> None:
             with _pending_lock:
                 _pending.discard(key)
                 _running.discard(key)
+                nxt = _again.pop(key, None)
+            if nxt:  # следующая порция: задание просило запустить себя ещё раз
+                submit(*nxt)
 
 
 def queued() -> list[str]:
@@ -1018,7 +1029,8 @@ def tick(settings: dict | None = None) -> list[str]:
     if mem.get("enabled", True):
         if mem.get("day", True) and mem.get("day_time") and _daily("memory-day", mem["day_time"], settings):
             go("memory-day", "heavy")
-        if not store.get_state("memory_backfill") and in_work_hours(settings) and _due("memory-backfill", 60):
+        backfill = store.get_state("memory_backfill")
+        if not backfill and in_work_hours(settings) and _due("memory-backfill", 60):
             from opsdash import memory
 
             if memory.backfill_state()["todo"]:
@@ -1026,6 +1038,8 @@ def tick(settings: dict | None = None) -> list[str]:
                 go("memory-backfill", "heavy")
             else:
                 store.set_state("memory_backfill", "done")
+        elif backfill == "running" and not pending("memory-backfill") and _due("memory-backfill", BACKFILL_RETRY):
+            go("memory-backfill", "heavy")  # цепочку порций оборвал перезапуск PULSE или сбой Claude — продолжаем
         if in_work_hours(settings) and _due("memory-leads", 24 * 60):
             from opsdash import memory
 
