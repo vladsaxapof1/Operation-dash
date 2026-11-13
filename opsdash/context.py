@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from opsdash import config, store
@@ -104,6 +104,24 @@ def _work(settings: dict) -> list[str]:
     return ["## Сейчас в работе", *out] if out else []
 
 
+def _memory() -> list[str]:
+    """«Недавно узнано» — до 10 свежих фактов памяти за неделю: сначала то, что сменило прежнее (было → стало)."""
+    try:
+        from opsdash import memory
+
+        week = (config.now().date() - timedelta(days=7)).isoformat()
+        rows = memory.facts(since=week, limit=60)
+    except Exception:  # noqa: BLE001 — сводка собирается и без памяти
+        return []
+    rows.sort(key=lambda f: (not f.get("prev"), f["kind"] not in ("metric", "state", "role"), f["happened"] or ""))
+    out = []
+    for f in rows[:10]:
+        about = ", ".join(e["name"] for e in f["entities"][:2])
+        was = f" (было: {_cut(f['prev']['text'], 50)})" if f.get("prev") else ""
+        out.append(f"- на {_date(f['happened'])}{' · ' + about if about else ''}: {_cut(f['text'], 160)}{was}")
+    return ["## Недавно узнано (факты памяти — на их дату)", *out] if out else []
+
+
 def _people() -> list[str]:
     rows = store.rows("SELECT name, role FROM people ORDER BY name LIMIT 40")
     if not rows:
@@ -120,9 +138,9 @@ def build(settings: dict | None = None) -> str:
     settings = settings or config.load_settings()
     owner = (settings["owner"].get("name") or "директор").strip()
     head = [f"# Контекст для Claude — {owner}",
-            f"_Собрано PULSE {config.now(settings):%d.%m.%Y %H:%M}. Это короткая память о компании: детали ищи командами "
-            "`./ops kb search`, `./ops docs search`, `./ops meetings search`._"]
-    parts = [head, _company(), _decisions(), _lessons(), _work(settings), _people(), _rules_hint()]
+            f"_Собрано PULSE {config.now(settings):%d.%m.%Y %H:%M}. Это короткая память о компании: детали ищи одним "
+            "`./ops recall \"<тема>\"`, о человеке или клиенте — `./ops page \"<имя>\"`._"]
+    parts = [head, _company(), _decisions(), _lessons(), _work(settings), _memory(), _people(), _rules_hint()]
     text = "\n\n".join("\n".join(p) for p in parts if p)
     return _cut(text, MAX_CHARS) + "\n"
 

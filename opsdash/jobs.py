@@ -67,6 +67,66 @@ def job_memory_index(**_) -> str:
     return " · ".join(parts)
 
 
+def job_memory_day(day: str | None = None, **_) -> str:
+    """«Память дня»: факты из рабочей переписки за день — навык memory, один файл и один import."""
+    from opsdash import memory
+
+    settings = config.load_settings()
+    day = day or config.now(settings).date().isoformat()
+    n = len(memory.day_messages(day))
+    if not n:
+        return "сообщений за день нет — фактов не будет"
+    before = store.scalar("SELECT COUNT(*) FROM facts") or 0
+    prompt = (f"«Память дня» за {day} ({n} сообщений) строго по навыку memory (.claude/skills/memory/SKILL.md), "
+              f"раздел «Память дня»: ./ops memory day --date {day}. Это фоновый запуск.")
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="memory-day", timeout_min=20)
+    return f"новых фактов: {(store.scalar('SELECT COUNT(*) FROM facts') or 0) - before} из {n} сообщений"
+
+
+def job_memory_backfill(**_) -> str:
+    """Разовое наполнение памяти из готовых разборов встреч: по 10 за запуск, пока не пройдены все или не нажали
+    «Остановить» (memory_backfill = stopped)."""
+    from opsdash import memory
+
+    st = memory.backfill_state()
+    if st["state"] == "stopped":
+        return "остановлено"
+    if not st["todo"]:
+        store.set_state("memory_backfill", "done")
+        return "все разборы пройдены"
+    store.set_state("memory_backfill", "running")
+    settings = config.load_settings()
+    before, facts0 = st["done"], store.scalar("SELECT COUNT(*) FROM facts") or 0
+    prompt = ("Разовое наполнение памяти строго по навыку memory (.claude/skills/memory/SKILL.md), раздел «Разовое "
+              "наполнение»: ./ops memory backfill --next 10. Это фоновый запуск.")
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="memory-backfill", timeout_min=30)
+    st = memory.backfill_state()
+    store.set_state("memory_backfill_at", store.utcnow())
+    facts = (store.scalar("SELECT COUNT(*) FROM facts") or 0) - facts0
+    if st["done"] <= before:
+        store.set_state("memory_backfill", "stopped")
+        return f"разборы не отмечены пройденными — наполнение остановлено (фактов: +{facts})"
+    if st["todo"] and (store.get_state("memory_backfill") or "") != "stopped":
+        submit("memory-backfill", "heavy")
+    else:
+        store.set_state("memory_backfill", "done" if not st["todo"] else "stopped")
+    return f"разборов {st['done']} из {st['total']}, фактов +{facts}"
+
+
+def job_memory_leads(**_) -> str:
+    """Выжимки страниц знаний: где набралось 10 новых фактов, не чаще раза в день, до 20 самых живых."""
+    from opsdash import memory
+
+    todo = memory.leads_due()
+    if not todo:
+        return "выжимки не нужны"
+    settings = config.load_settings()
+    prompt = ("Выжимки страниц знаний строго по навыку memory (.claude/skills/memory/SKILL.md), раздел «Выжимки "
+              "страниц»: ./ops memory leads. Это фоновый запуск.")
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="memory-leads", timeout_min=20)
+    return f"выжимок: {len(todo) - len(memory.leads_due())} из {len(todo)}"
+
+
 def job_agent_brief(brief_id: int, **_) -> str:
     from opsdash import agents
 
@@ -574,6 +634,9 @@ REGISTRY = {
     "agents-index": job_agents_index,
     "agents-watch": job_agents_watch,
     "memory-index": job_memory_index,
+    "memory-day": job_memory_day,
+    "memory-backfill": job_memory_backfill,
+    "memory-leads": job_memory_leads,
     "transcribe": job_transcribe,
     "process-meeting": job_process_meeting,
     "triage": job_triage,
@@ -611,6 +674,9 @@ TITLES = {
     "agents-index": "Опыт агентов: индекс сессий",
     "agents-watch": "Поручения агентам: сессии и готовность",
     "memory-index": "Память: индекс «Вспомнить»",
+    "memory-day": "Память дня: факты из переписки (Claude)",
+    "memory-backfill": "Память: наполнение из разборов встреч (Claude)",
+    "memory-leads": "Память: выжимки страниц (Claude)",
     "transcribe": "Расшифровка встречи",
     "process-meeting": "Разбор встречи (Claude)",
     "triage": "Разбор сообщений (Claude)",
@@ -902,6 +968,25 @@ def tick(settings: dict | None = None) -> list[str]:
     elif (sch.get("projects_weekly") and config.now(settings).weekday() != 0 and in_work_hours(settings)
           and _due("projects", PROJECTS_GAP) and projects_pile() >= PROJECTS_PILE):
         go("projects", "heavy")
+    # «Память»: факты из переписки за день — до вечернего дайджеста; разовое наполнение из разборов — один раз после
+    # обновления, в рабочее время; выжимки страниц — раз в день, если набралось новое
+    mem = settings.get("memory") or {}
+    if mem.get("enabled", True):
+        if mem.get("day", True) and mem.get("day_time") and _daily("memory-day", mem["day_time"], settings):
+            go("memory-day", "heavy")
+        if not store.get_state("memory_backfill") and in_work_hours(settings) and _due("memory-backfill", 60):
+            from opsdash import memory
+
+            if memory.backfill_state()["todo"]:
+                store.set_state("memory_backfill", "running")
+                go("memory-backfill", "heavy")
+            else:
+                store.set_state("memory_backfill", "done")
+        if in_work_hours(settings) and _due("memory-leads", 24 * 60):
+            from opsdash import memory
+
+            if memory.leads_due():
+                go("memory-leads", "heavy")
     # «Реальность дня»: один раз оценить время у открытых задач директора, появившихся до оценок (opsdash.day)
     from opsdash import day
 

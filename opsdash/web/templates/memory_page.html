@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% import "_memory.html" as mm %}
+{% block title %}{{ d.entity.name }} · Память{% endblock %}
+{#- Страница знаний (opsdash.memory.page_data): выжимка от Claude, факты по видам с историей, задачи, решения,
+    встречи и переписка, где упоминается; «Объединить с…», «Переименовать», псевдонимы, «Забыть всё о …» #}
+{% block content %}
+{% set e = d.entity %}
+<div class="mhead">
+  <a class="small" href="/memory?tab=pages">← Страницы</a>
+  <h1>{{ e.name }}<button type="button" class="dlg-pencil" data-reveal="mem-edit" title="Переименовать, псевдонимы" aria-label="Изменить страницу">{{ icons.icon('edit', 18) }}</button></h1>
+  <p class="sub">{{ d.kind_title }}{% if e.aliases %} · также: {{ e.aliases | join(', ') }}{% endif %}
+    {% if d.person %} · <a href="/people">{{ d.person.role or 'в справочнике' }}</a>{% endif %}
+    {% if d.project %} · <a href="/projects/{{ d.project.id }}">проект</a>{% endif %}
+    · фактов {{ d.facts | length }}{% if d.n_messages %} · упоминаний в переписке {{ d.n_messages }}{% endif %}</p>
+  <form class="card mem-edit" id="mem-edit" method="post" action="/memory/entity/{{ e.id }}" hidden>
+    <div class="form-row">
+      <div><label>Название</label><input type="text" name="name" value="{{ e.name }}"></div>
+      <div><label>Ещё написания, через запятую</label><input type="text" name="alias" placeholder="РМШ, ООО «Ромашка»"></div>
+      <div><label>Вид</label><select name="kind">{% for k, t in ekinds.items() %}<option value="{{ k }}" {{ 'selected' if k == e.kind }}>{{ t }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div>
+
+<div class="mem-page">
+<div class="mem-main">
+  {% if d.lead and d.lead.lead %}
+  <section class="card mem-lead"><div class="card-h"><h2>Главное</h2><span class="muted small">выжимка Claude на {{ d.lead.lead_at | date }}</span></div>
+    <div class="card-b">{{ d.lead.lead | md }}</div></section>
+  {% endif %}
+  {% for k, t in kinds.items() %}{% set items = d.by_kind.get(k) %}{% if items %}
+  <section class="card mem-day"><div class="card-h"><h2>{{ t | capitalize }}</h2><span class="muted small">{{ items | length }}</span></div>
+    {% for f in items %}{{ mm.fact(f, msgs, show_about=false) }}
+      {% set hist = d.history.get(f.id) %}{% if hist %}<div class="mem-hist"><span class="muted small">история:</span>{% for h in hist | sort(attribute='happened') %} <span class="mem-old">{{ h.text | truncate(80, true, '…') }} <span class="muted">({{ h.happened | date }})</span></span>{% endfor %}</div>{% endif %}
+    {% endfor %}
+  </section>
+  {% endif %}{% endfor %}
+  {% if not d.facts %}<section class="card"><p class="empty">Фактов о «{{ e.name }}» пока нет: страница собрана из задач, решений и упоминаний.</p></section>{% endif %}
+</div>
+<aside class="mem-side">
+  {% if d.tasks %}<section class="card"><div class="card-h"><h2>Открытые задачи</h2></div><ul class="list mem-list">
+    {% for c in d.tasks[:10] %}<li><a href="/commitments?task={{ c.id }}">{{ c.title or c.what | truncate(70, true, '…') }}</a>{% if c.due %} <span class="muted small">до {{ c.due | date }}</span>{% endif %}</li>{% endfor %}</ul></section>{% endif %}
+  {% if d.decisions %}<section class="card"><div class="card-h"><h2>Решения</h2></div><ul class="list mem-list">
+    {% for r in d.decisions %}<li><a href="/decisions?topic={{ r.topic | urlencode }}#d{{ r.id }}">{{ r.title | truncate(90, true, '…') }}</a> <span class="muted small">{{ r.when | date }}</span></li>{% endfor %}</ul></section>{% endif %}
+  {% if d.meetings %}<section class="card"><div class="card-h"><h2>Встречи</h2></div><ul class="list mem-list">
+    {% for m in d.meetings %}<li><a href="/meetings/{{ m.id }}">{{ m.title }}</a> <span class="muted small">{{ m.started_at | local('%d.%m') }}</span></li>{% endfor %}</ul></section>{% endif %}
+  {% if d.messages %}<section class="card"><div class="card-h"><h2>Переписка</h2><span class="muted small">{{ d.n_messages }}</span></div><ul class="list mem-list">
+    {% for c in d.messages %}<li><span class="muted small">{{ c.ts | local('%d.%m') }} · {{ c.title }}</span><br>{{ (c.text.splitlines()[-1] if c.text else '') | truncate(120, true, '…') }}</li>{% endfor %}</ul></section>{% endif %}
+  <section class="card mem-danger"><div class="card-h"><h2>Страница</h2></div><div class="card-b">
+    <form method="post" action="/memory/entity/{{ e.id }}" class="mem-merge"><input type="hidden" name="action" value="merge">
+      <label>Это одно и то же с…</label>
+      <select name="into" aria-label="С какой страницей объединить"><option value="">выберите страницу</option>{% for o in others %}<option value="{{ o.id }}">{{ o.name }} ({{ o.kind_title }})</option>{% endfor %}</select>
+      <button class="btn sm" data-confirm="Объединить? Факты, псевдонимы и упоминания перейдут на выбранную страницу.">Объединить</button></form>
+    <form method="post" action="/memory/entity/{{ e.id }}" data-confirm="Забыть всё о «{{ e.name }}»? Удалятся страница и факты только о ней. Вернуть будет нельзя."><input type="hidden" name="action" value="forget"><button class="btn sm ghost danger-text">Забыть всё о «{{ e.name }}»</button></form>
+  </div></section>
+</aside>
+</div>
+{% endblock %}

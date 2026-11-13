@@ -1,0 +1,57 @@
+{#- Настройки → Память (opsdash.memory, web/memory_views.py): «Память дня», потолки фактов, записи агентов, модель
+    для поиска и связей по смыслу, чаты «не запоминать», «Забыть всё о …» #}
+<section class="card"><div class="card-h"><h2>Память</h2><span class="muted small">фактов {{ mem_stats.facts }} · страниц {{ mem_stats.entities }} · <a href="/memory">открыть</a></span></div>
+<div class="card-b">
+  <form method="post" action="/settings/memory">
+    <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if mem.enabled }}> Запоминать факты из встреч и переписки</label>
+    <label class="check"><input type="checkbox" name="day" value="1" {{ 'checked' if mem.day }}> «Память дня»: вечером в рабочие дни — факты из переписки за день</label>
+    <div class="form-row">
+      <div><label>Во сколько</label><input type="time" name="day_time" value="{{ mem.day_time | hhmm }}"></div>
+      <div><label>Фактов из встречи, не больше</label><input type="number" name="max_facts_meeting" min="1" max="40" value="{{ mem.max_facts_meeting }}"></div>
+      <div><label>Из переписки за день, не больше</label><input type="number" name="max_facts_day" min="1" max="100" value="{{ mem.max_facts_day }}"></div>
+    </div>
+    <label>Что выяснили агенты (remember из сессий Claude Code)</label>
+    <select name="agents"><option value="confirm" {{ 'selected' if not mem_agents_auto }}>Показывать в «Памяти → От агентов», принимаю я</option>
+      <option value="auto" {{ 'selected' if mem_agents_auto }}>Запоминать сразу</option></select>
+    <label class="check"><input type="checkbox" name="embeddings" value="1" {{ 'checked' if mem.embeddings }}> Поиск и связи по смыслу (если модель скачана)</label>
+    <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  </form>
+</div></section>
+
+{% if mem_model %}
+<section class="card" id="model"><div class="card-h"><h2>Модель для поиска по смыслу</h2><span class="muted small">multilingual-e5-small, 135 МБ, MIT</span></div>
+<div class="card-b">
+  {% if mem_model.ready %}
+  <p class="st ok"><span class="dot ok"></span>Скачана и проверена{% if mem_model.loaded %} · сейчас в памяти PULSE{% else %} · загружается при первом поиске, выгружается после 10 минут простоя{% endif %}.
+    Векторов: {{ mem_model.vectors }}.</p>
+  <form method="post" action="/settings/memory/model" data-confirm="Удалить модель? Поиск останется по словам, связи по смыслу на карте пропадут."><input type="hidden" name="action" value="remove"><button class="btn ghost">Удалить модель</button></form>
+  {% elif mem_model.downloading %}
+  <p class="st"><span class="dot warn"></span>Скачивается… {{ mem_model.progress }}</p>
+  {% else %}
+  <p class="muted">Без модели память работает: поиск идёт по словам в любой форме, а связи на карте строятся по общим людям и клиентам, по времени и причинам. С моделью добавятся поиск и связи по смыслу. В памяти PULSE модель занимает 0,7–1 ГБ, пока ею пользуются.</p>
+  <form method="post" action="/settings/memory/model"><input type="hidden" name="action" value="download"><button class="btn">Скачать модель</button></form>
+  {% if mem_model.error %}<p class="err small">{{ mem_model.error }}</p>{% endif %}
+  {% endif %}
+</div></section>
+{% endif %}
+
+<section class="card"><div class="card-h"><h2>Не запоминать</h2><span class="muted small">переписка этих чатов не уходит в «Память дня»</span></div>
+<form method="post" action="/settings/memory/chats" class="card-b">
+  {% if mem_chats %}
+  <div class="mem-chats">
+    {% for c in mem_chats %}<label class="check"><input type="checkbox" name="off" value="{{ c.source }}:{{ c.chat_id }}" {{ 'checked' if c.off }}> {{ c.title or c.chat_id }} <span class="muted small">{{ c.source }}{{ ' · личный' if c.kind == 'private' }} · {{ c.n }}</span></label>{% endfor %}
+  </div>
+  <div class="form-actions"><button class="btn primary">Сохранить</button></div>
+  {% else %}<p class="muted">Чатов пока нет.</p>{% endif %}
+</form></section>
+
+<section class="card"><div class="card-h"><h2>Забыть всё о …</h2></div>
+<div class="card-b">
+  <p class="muted">Страница и все факты только о ней удалятся совсем — из памяти, поиска и ответов. Встречи, задачи и переписка останутся.</p>
+  {% if mem_pages %}
+  <form method="post" action="/memory/forget" class="mem-merge" data-confirm="Забыть всё о выбранной странице? Вернуть будет нельзя.">
+    <select name="eid" aria-label="О ком или о чём забыть">{% for p in mem_pages %}<option value="{{ p.id }}">{{ p.name }} ({{ p.kind_title }}, фактов {{ p.facts or 0 }})</option>{% endfor %}</select>
+    <button class="btn ghost danger-text">Забыть</button>
+  </form>
+  {% else %}<p class="muted">Страниц пока нет.</p>{% endif %}
+</div></section>

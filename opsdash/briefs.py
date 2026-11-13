@@ -187,6 +187,33 @@ def _tasks_of(name: str, known: list[str]) -> list[dict]:
     return found
 
 
+def _known(names: list[str], title: str, last: dict | None) -> list[str]:
+    """«Что известно» к встрече (opsdash.memory): факты об участниках и теме; что изменилось с прошлой встречи серии
+    («было → стало» — факты, сменившие прежние после неё)."""
+    try:
+        from opsdash import memory
+
+        if not store.scalar("SELECT 1 FROM facts WHERE status='active' LIMIT 1"):
+            return []
+        eids = memory.entities_for([title], [n for n in names if "@" not in n])
+        out = []
+        if last:
+            since = store.local(last["started_at"], "%Y-%m-%d")
+            changed = [f for f in memory.known_about(eids, limit=8, since=since) if f.get("prev")]
+            if changed:
+                out.append(f"\nИзменилось с прошлой встречи серии ({memory._ddmm(since)}):")
+                out += [f"- {memory.fact_line(f, width=180)}" for f in changed]
+        facts = memory.known_about(eids, limit=8)
+        if facts:
+            out.append("\nЧто известно об участниках и теме (факты памяти — на их дату):")
+            out += [f"- {memory.fact_line(f, width=180)}" for f in facts]
+            out.append("Больше — ./ops page \"<имя>\" или ./ops recall \"<тема>\".")
+        return out
+    except Exception as e:  # noqa: BLE001 — бриф собирается и без памяти
+        store.log("briefs", f"«Что известно»: {e}", "warning")
+        return []
+
+
 def context(uid: str, settings: dict | None = None) -> str:
     """Что известно к встрече — одним текстом для Claude: сама встреча и участники, прошлые встречи этой серии,
     с похожим названием или (для встречи один на один) с этим человеком, открытые задачи с участниками,
@@ -269,6 +296,8 @@ def context(uid: str, settings: dict | None = None) -> str:
             for c in sorted(tasks.values(), key=lambda c: c["due"] or "9")]
     if not tasks:
         out.append("- не нашлось (проверь ./ops commitments list --person \"<имя>\")")
+
+    out += _known(names, e["title"] or "", past[0][0] if past and past[0][1] else None)
 
     query = " ".join(w for w in re.findall(r"\w+", e["title"] or "") if records._stems(w) & topic)
     try:

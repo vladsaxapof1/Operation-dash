@@ -67,6 +67,63 @@ CREATE TABLE IF NOT EXISTS recall_log (       -- журнал «Вспомнит
     ms REAL
 );
 
+CREATE TABLE IF NOT EXISTS entities (         -- о ком или о чём факты: человек, компания, проект… (opsdash.memory)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT,                       -- person | company | product | project | metric | system | team | other
+    name TEXT NOT NULL,
+    aliases TEXT DEFAULT '[]',       -- JSON: «Ромашка», «ООО „Ромашка“», «РМШ» — словарь для связи с текстом
+    person_id INTEGER,               -- people.id, если это человек из справочника
+    project_id INTEGER,              -- projects.id, если это проект PULSE
+    merged_into INTEGER,             -- дубль: влит в эту сущность
+    created TEXT, updated TEXT
+);
+CREATE TABLE IF NOT EXISTS facts (            -- факты: одно утверждение с датой, источником и цитатой (opsdash.memory)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,              -- metric | state | role | trait | event | how
+    text TEXT NOT NULL,
+    key TEXT,                        -- имя признака у цифр и состояний: тот же ключ у той же сущности сменяет прежний
+    happened TEXT,                   -- YYYY-MM-DD: на какую дату верно
+    source_type TEXT, source_ref TEXT, quote TEXT,
+    status TEXT DEFAULT 'active',    -- active | replaced | outdated | wrong | proposed (ждёт «Да»)
+    replaces_id INTEGER,             -- что сменил («было»)
+    replaced_by INTEGER,             -- чем сменён
+    because_id INTEGER,              -- причина — другой факт, когда это сказано прямо
+    author TEXT,                     -- claude | director («от вас») | agent
+    agent_session TEXT,              -- сессия агента, приславшая факт
+    reason TEXT,                     -- «Неверно»: почему — уходит в уроки навыку
+    hash TEXT,                       -- повтор того же факта из того же источника — обновление, а не дубль
+    created TEXT, updated TEXT, decided_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_facts_status ON facts(status, happened);
+CREATE INDEX IF NOT EXISTS ix_facts_source ON facts(source_type, source_ref);
+CREATE INDEX IF NOT EXISTS ix_facts_hash ON facts(hash);
+CREATE TABLE IF NOT EXISTS fact_entities (
+    fact_id INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    PRIMARY KEY (fact_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS ix_fact_entities_entity ON fact_entities(entity_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(   -- rowid = facts.id; about — имена сущностей
+    text, key, about, tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TABLE IF NOT EXISTS fact_links (       -- связи фактов для карты: entity | temporal | semantic | causal
+    a INTEGER NOT NULL, b INTEGER NOT NULL,  -- a < b
+    kind TEXT NOT NULL,
+    weight REAL,
+    PRIMARY KEY (a, b, kind)
+);
+CREATE INDEX IF NOT EXISTS ix_fact_links_b ON fact_links(b);
+CREATE TABLE IF NOT EXISTS memory_vectors (   -- векторы e5-small (384 × float32): f:<id факта> | c:<hash фрагмента>
+    key TEXT PRIMARY KEY,
+    vec BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pages (            -- выжимка страницы знаний от Claude: когда и по скольким фактам написана
+    entity_id INTEGER PRIMARY KEY,
+    lead TEXT,
+    lead_at TEXT,
+    lead_facts INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS anthology (      -- решения, уроки, удачи (opsdash.anthology)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,              -- decision | lesson | win

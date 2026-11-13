@@ -34,6 +34,8 @@ KINDS = {
     "telegram.remind": "Напомнить коллеге в Telegram",
     "skill.rule": "Правило для навыка — урок из ваших «Нет»",
     "mcp.call": "Действие в подключённом сервисе (MCP)",
+    "memory.merge": "Объединить страницы памяти",
+    "memory.fact": "Запомнить факт",
 }
 
 # надпись на кнопке подтверждения — что произойдёт, а не просто «Да»
@@ -54,6 +56,8 @@ ACTIONS = {
     "telegram.remind": "Напомнить",
     "skill.rule": "Включить правило",
     "mcp.call": "Выполнить",
+    "memory.merge": "Объединить",
+    "memory.fact": "Запомнить",
 }
 
 
@@ -572,7 +576,12 @@ def reject(pid: int) -> dict:
     store.execute(
         "UPDATE proposals SET status='rejected', decided_at=? WHERE id=? AND status='pending'", (store.utcnow(), pid)
     )
-    return get(pid)
+    p = get(pid)
+    if p and p["kind"].startswith("memory."):
+        from opsdash import memory
+
+        memory.on_reject(p)
+    return p
 
 
 def approve(pid: int) -> dict:
@@ -601,8 +610,38 @@ def approve_batch(batch: str) -> list[dict]:
     return [approve(p["id"]) for p in reversed(list_proposals("pending", batch=batch))]
 
 
+def propose_memory_fact(*, fact_id: int, replaces: int | None = None, batch: str | None = None,
+                        reason: str | None = None) -> dict:
+    """Факт ждёт «Да»: сменяет факт «от вас» (его Claude сам не сменяет) или прислан агентом."""
+    f = store.row("SELECT * FROM facts WHERE id=?", (fact_id,))
+    if not f:
+        raise ProposalError(f"нет факта [ф{fact_id}]")
+    old = store.row("SELECT text FROM facts WHERE id=?", (replaces,)) if replaces else None
+    text = f["text"] if len(f["text"]) <= 90 else f["text"][:f["text"].rfind(" ", 0, 90)] + "…"
+    title = f"Запомнить: {text}" + (f" (вместо: {old['text'][:50]})" if old else "")
+    why = reason or ("сменяет факт, записанный вами" if old else "прислал агент")
+    return _create("memory.fact", title, {"fact_id": fact_id, "replaces": replaces}, autonomy_key="memory_agents",
+                   reason=why, source_ref=f"{f['source_type'] or 'agent'}:{f['source_ref'] or ''}",
+                   batch=batch or "memory")
+
+
+def propose_memory_merge(*, entity_id: int, into: int, reason: str = "", batch: str | None = None) -> dict:
+    from opsdash import memory
+
+    a, b = memory.entity(entity_id), memory.entity(into)
+    if not a or not b or a["id"] == b["id"]:
+        raise ProposalError("нужны две разные страницы памяти")
+    return _create("memory.merge", f"Объединить «{a['name']}» со страницей «{b['name']}»",
+                   {"entity_id": a["id"], "into": b["id"]}, autonomy_key="memory_merge",
+                   reason=reason or "похоже, это одно и то же", source_ref=None, batch=batch or "memory")
+
+
 def execute(p: dict) -> dict:
     kind, pl = p["kind"], p["payload"]
+    if kind.startswith("memory."):
+        from opsdash import memory
+
+        return memory.execute_proposal(p)
     if kind == "mcp.call":
         from opsdash import mcp
 

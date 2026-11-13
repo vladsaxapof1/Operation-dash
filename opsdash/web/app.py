@@ -30,7 +30,7 @@ from starlette.concurrency import run_in_threadpool
 
 from opsdash import __version__, briefs, config, digests, filepaths, overview, priorities, proposals, records, store, worklog
 from opsdash import day as day_mod
-from opsdash.web import agent_views, decisions_views, settings_views, skills_views, welcome_views
+from opsdash.web import agent_views, decisions_views, memory_views, settings_views, skills_views, welcome_views
 
 HERE = Path(__file__).parent
 app = FastAPI(title="PULSE", docs_url=None, redoc_url=None, openapi_url=None)
@@ -394,8 +394,9 @@ SECURITY_HEADERS = {
 
 
 def _archived_section(path: str) -> str:
-    """Страница архивного раздела (Документы, База знаний) — или пусто. Сводка контекста (/kb/context) — не раздел."""
-    for name, prefix in (("docs", "/docs"), ("kb", "/kb")):
+    """Страница архивного раздела (Документы) — или пусто. База знаний (/kb) с 2.0.46 — вкладка «Уроки и удачи»
+    в «Памяти»: открывается всегда, а архив выключает только её задание — обзор недели по пятницам."""
+    for name, prefix in (("docs", "/docs"),):
         if (path == prefix or path.startswith(prefix + "/")) and path != "/kb/context" and not config.section_on(name):
             return name
     return ""
@@ -1651,7 +1652,9 @@ def kb_page(request: Request, kind: str = "", status: str = "current", project: 
     meeting_ids = [r["source_ref"] for r in shown if r["source_type"] == "meeting" and r["source_ref"]]
     meetings = {m["id"]: m["title"] for m in store.rows(
         f"SELECT id, title FROM meetings WHERE id IN ({','.join('?' * len(meeting_ids))})", meeting_ids)} if meeting_ids else {}
-    return render(request, "kb.html", nav="kb", months=months, total=len(shown), kind=kind, status=status,
+    from opsdash.web import memory_views
+
+    return render(request, "kb.html", nav="memory", tabs=memory_views.TABS, tab="kb", months=months, total=len(shown), kind=kind, status=status,
                   project=project, q=q, kinds=anthology.KINDS, projects=anthology.projects(), counts=anthology.counts(),
                   proposed=[] if q or status != "current" else anthology.items(status="proposed", kind=kind or None),
                   meetings=meetings, today=records.today_local().isoformat())
@@ -2166,7 +2169,17 @@ def meeting(request: Request, mid: str, tab: str = "summary"):
                   short_speakers=[s for s in speakers if len(speakers) > 4 and s["short"] and not s["who"]], guesses=guesses,
                   people=records.list_people(), can_tidy=len(speakers) > 1 and not (records.meeting_dir(mid) / voice.PRINTS_FILE).exists(),
                   recording=recording, memory=recordings.memory(mid), questions=questions,
-                  due_choices=due_choices() if questions else [])
+                  due_choices=due_choices() if questions else [], mem_facts=_meeting_facts(mid))
+
+
+def _meeting_facts(mid: str) -> list[dict]:
+    """«Запомнено из встречи» (opsdash.memory): факты, которые разбор записал из этой встречи."""
+    from opsdash import memory
+
+    try:
+        return memory.facts(source=f"meeting:{mid}", status="all", limit=60)
+    except Exception:  # noqa: BLE001 — страница встречи открывается и без памяти
+        return []
 
 
 @app.post("/meetings/{mid}/question-task")
@@ -2661,7 +2674,8 @@ def job_run(request: Request, name: str = Form(...)):
         return back(request, err=f"«{jobs.TITLES.get(name, name)}» — задание архивного раздела. Включите раздел в "
                                  "Настройки → Архивные разделы")
     args = {"force": True} if name == "triage" else None
-    heavy = name in ("triage", "digest", "anthology", "company-context", "projects")  # запуски Claude — не мешать сбору
+    heavy = name in ("triage", "digest", "anthology", "company-context", "projects", "memory-day", "memory-backfill",
+                     "memory-leads")  # запуски Claude — не мешать сбору
     jobs.submit(name, "heavy" if heavy else "light", args)
     return back(request, f"Запущено: {jobs.TITLES.get(name, name)}")
 
@@ -2716,6 +2730,7 @@ settings_views.register(app, render, back)
 welcome_views.register(app, render, back)
 skills_views.register(app, render, back)
 decisions_views.register(app, render, back)
+memory_views.register(app, render, back)
 agent_views.register(app, render, templates, back)
 
 

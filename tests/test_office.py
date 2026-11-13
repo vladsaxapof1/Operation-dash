@@ -194,7 +194,7 @@ def test_scene_for_pulse_says_what_workers_do():
                   (store.utcnow(), json.dumps([{"t": "Ищет в переписке: «склад»", "at": store.utcnow()}])))
     scene = office.snapshot("pulse")["scene"]
     desks = {d["id"]: d for d in scene["desks"]}
-    assert len(desks) == 9 and desks["desk:triage"]["state"] == "working"
+    assert len(desks) == 10 and desks["desk:triage"]["state"] == "working"
     assert desks["desk:triage"]["say"] == "Ищет в переписке: «склад»" and desks["desk:triage"]["label"] == "Секретарь"
     assert scene["board"][1] == "работают: 1"
 

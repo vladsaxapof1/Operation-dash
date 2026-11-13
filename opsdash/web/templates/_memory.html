@@ -1,0 +1,50 @@
+{#- «Память»: общие куски раздела — вкладки, строка факта с кнопками «Неверно» / «Устарело» / «Забыть» #}
+{% macro tabbar(tabs, tab) -%}
+<nav class="tabs mem-tabs" aria-label="Память">
+  {% for key, title in tabs %}<a href="{{ '/kb' if key == 'kb' else '/memory?tab=' ~ key }}" class="{{ 'active' if tab == key }}"{% if tab == key %} aria-current="page"{% endif %}>{{ title }}</a>{% endfor %}
+</nav>
+{%- endmacro %}
+
+{% macro source(f, msgs) -%}
+{%- if f.source_type == 'meeting' and f.source_ref -%}
+  <a href="/meetings/{{ f.source_ref }}">встреча «{{ (f.meeting.title if f.meeting else f.source_ref) | truncate(48, true, '…') }}»</a>
+{%- elif f.source_type in ('telegram', 'pachca', 'mail', 'ymessenger', 'slack') -%}
+  {%- set m = msgs.get(f.source_ref) if msgs else none -%}
+  {%- if m and m.link %}<a href="{{ m.link }}" target="_blank" rel="noopener">{{ m.chat_title or f.source_type }}</a>{% elif m %}<a href="/chats?q={{ m.chat_title | urlencode }}">{{ m.chat_title or f.source_type }}</a>{% else %}переписка{% endif %}
+{%- elif f.author == 'director' -%}от вас
+{%- elif f.author == 'agent' -%}от агента{{ ' · сессия ' ~ f.agent_session[:8] if f.agent_session }}
+{%- else -%}{{ f.source_type or '' }}{%- endif -%}
+{%- endmacro %}
+
+{% macro fact(f, msgs, show_about=true, actions=true) -%}
+<div class="mem-fact k-{{ f.kind }}{{ ' st-' ~ f.status if f.status != 'active' }}" id="f{{ f.id }}">
+  <div class="mem-fact-top">
+    <span class="mem-kind">{{ f.kind_title }}</span>
+    {% if show_about %}{% for e in f.entities %}<a class="chip ghost" href="/memory/page/{{ e.id }}">{{ e.name }}</a>{% endfor %}{% endif %}
+    {% if f.author == 'director' %}<span class="chip acc" title="Записано вами — Claude такой факт сам не сменяет">от вас</span>{% endif %}
+    {% if f.status != 'active' %}<span class="chip {{ 'warn' if f.status == 'proposed' else '' }}">{{ f.status_title }}</span>{% endif %}
+    <span class="grow"></span>
+    <span class="muted small" title="На какую дату это верно">на {{ f.happened | date }}</span>
+  </div>
+  <div class="mem-text">{{ f.text }}</div>
+  {% if f.prev %}<div class="mem-was"><span class="muted">было:</span> {{ f.prev.text }} <span class="muted">({{ f.prev.happened | date }})</span></div>{% endif %}
+  <div class="mem-foot">
+    <span class="muted small">{{ source(f, msgs) }}{% if f.quote %} · <span class="mem-quote" title="{{ f.quote }}">«{{ f.quote | truncate(90, true, '…') }}»</span>{% endif %}{% if f.key %} · <span title="Ключ: новый факт с тем же ключом сменит этот">{{ f.key }}</span>{% endif %}</span>
+    {% if actions %}
+    <span class="actions mem-acts">
+      {% if f.status == 'active' %}
+      <details class="mem-wrong"><summary class="btn sm ghost">Неверно</summary>
+        <form method="post" action="/memory/fact/{{ f.id }}" class="mem-why"><input type="hidden" name="status" value="wrong">
+          <input type="text" name="reason" placeholder="Почему — урок для Claude: «это не так», «мелочь», «личное»…" aria-label="Почему неверно">
+          <button class="btn sm">Убрать</button></form>
+      </details>
+      <form class="inline" method="post" action="/memory/fact/{{ f.id }}"><input type="hidden" name="status" value="outdated"><button class="btn sm ghost" title="Было верно, но больше не так">Устарело</button></form>
+      {% else %}
+      <form class="inline" method="post" action="/memory/fact/{{ f.id }}"><input type="hidden" name="status" value="active"><button class="btn sm ghost">Вернуть</button></form>
+      {% endif %}
+      <form class="inline" method="post" action="/memory/fact/{{ f.id }}" data-confirm="Забыть факт совсем? Он удалится из памяти, поиска и страниц."><input type="hidden" name="status" value="forget"><button class="btn sm ghost danger-text">Забыть</button></form>
+    </span>
+    {% endif %}
+  </div>
+</div>
+{%- endmacro %}

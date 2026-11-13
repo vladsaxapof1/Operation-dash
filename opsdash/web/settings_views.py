@@ -21,7 +21,8 @@ TABS = [
     ("imap", "Другая почта"), ("caldav", "Другой календарь"), ("ics_calendar", "Календарь по ссылке"),
     ("kaiten", "Kaiten"), ("recordings", "Записи встреч"), ("knowledge", "Документы"), ("docs", "Документы"),
     ("office", "Офис"),
-    ("autonomy", "Автономия"), ("schedule", "Расписание"), ("day", "День"), ("claude", "Claude"), ("chatgpt", "ChatGPT"),
+    ("autonomy", "Автономия"), ("schedule", "Расписание"), ("day", "День"), ("memory", "Память"), ("claude", "Claude"),
+    ("chatgpt", "ChatGPT"),
     ("data", "Ваши данные"), ("archive", "Архивные разделы"),
 ]
 
@@ -36,6 +37,7 @@ def settings_menu(settings: dict, catalog: dict) -> list[dict]:
             {"tab": "connections", "title": "Подключения", "note": f"{catalog['on']} из {catalog['total']}",
              "warn": bool(catalog["problems"])},
             {"tab": "schedule", "title": "Расписание"}, {"tab": "day", "title": "День"},
+            {"tab": "memory", "title": "Память"},
             {"tab": "autonomy", "title": "Автономия"},
             # папки с документами — своим пунктом: в архиве раздела карточки в каталоге нет, а папки нужны Claude
             {"tab": "docs", "title": "Документы", "note": "" if config.section_on("docs", settings) else "в архиве"},
@@ -212,6 +214,21 @@ def register(app: FastAPI, render, back) -> None:
             ctx["docs_on"] = config.section_on("docs", settings)
         if tab == "data":
             ctx["data"] = connectors.data_overview(settings)
+        if tab == "memory":
+            from opsdash import memory
+            from opsdash.web import memory_views
+
+            ctx["mem"] = settings["memory"]
+            ctx["mem_chats"] = memory_views.chat_rows()
+            ctx["mem_stats"] = memory.stats()
+            ctx["mem_agents_auto"] = settings["autonomy"].get("memory_agents") == "auto"
+            ctx["mem_pages"] = memory.page_list(300)
+            try:
+                from opsdash import embed
+
+                ctx["mem_model"] = embed.status()
+            except ImportError:
+                ctx["mem_model"] = None
         if tab == "claude":
             from opsdash import chat
 

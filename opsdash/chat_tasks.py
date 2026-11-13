@@ -27,6 +27,7 @@ _MENTION = re.compile(r"(?<![\w@])@([A-Za-zА-Яа-яЁё][\w.]*(?:[  ][A-ZА-�
 _ORDER = {"chat": 0, "peer": 1, "mention": 2, "sender": 3, "named": 4, "topic": 5}
 TOPIC_PER_CHAT = 3  # задач «по теме» под одним чатом: связь слабая, больше — шум
 TOPIC_HINT = "связь не наверняка: относится — propose log"
+ENTITY_RARE = 3  # сущность памяти связывает чат с задачей «по теме», только если она есть не больше чем в 3 задачах
 
 
 def _topic(c: dict, msgs: list[dict]) -> tuple[int, str] | None:
@@ -153,7 +154,7 @@ def _history(source: str, chat_id: str) -> dict[int, str]:
 
 def related(source: str, chat_id: str, title: str | None, kind: str | None, msgs: list[dict], *,
             tasks: list[dict], people: list[dict], owner: str = "", username: str | None = None,
-            topics: bool = False) -> list[dict]:
+            topics: bool = False, entities=None) -> list[dict]:
     """Открытые задачи для чата — [{"task", "why"}], сильные связи первыми (ход из чата, собеседник, упомянутый,
     автор сообщения, собеседник или автор назван в тексте задачи), внутри — в порядке tasks (обычно по приоритету). topics — ещё и задачи по теме сообщений
     (слова заголовка), не больше TOPIC_PER_CHAT, последними: задача директора «Демо и макеты CRM» обещана одному
@@ -201,6 +202,13 @@ def related(source: str, chat_id: str, title: str | None, kind: str | None, msgs
     topic: dict[int, tuple[int, str]] = {}  # id → (сколько слов заголовка в сообщении, какие)
     if topics:
         topic = {c["id"]: t for c in tasks if (t := _topic(c, msgs))}
+        if entities:  # «Память»: общие редкие сущности (клиент, проект, система) в сообщениях и в задаче. Одна —
+            # только подтверждает совпадение слов заголовка (поднимает задачу выше), две и больше — связь сама по себе
+            for cid, (n, names) in entities(msgs).items():
+                have = topic.get(cid)
+                if have or n >= 2:
+                    have = have or (0, "")
+                    topic[cid] = (n * 2 + have[0], ", ".join(x for x in (names, have[1]) if x))
         for cid, (n, words) in topic.items():
             if cid in by_task:  # связь по людям есть, тема её подтверждает — такая задача выше остальных той же силы
                 by_task[cid] = (by_task[cid][0], f"{by_task[cid][1]}, и по теме ({words})")
@@ -220,10 +228,47 @@ def _matcher(tasks: list[dict], topics: bool = False):
     people = records.list_people()
     owner = (config.load_settings().get("owner") or {}).get("name") or ""
 
+    entities = _entity_topics(tasks) if topics else None
+
     def match(key: tuple, msgs: list[dict], ch: dict) -> list[dict]:
         return related(*key, ch.get("kind"), msgs, tasks=tasks, people=people, owner=owner,
-                       username=ch.get("username"), topics=topics)
+                       username=ch.get("username"), topics=topics, entities=entities)
     return match
+
+
+def _entity_topics(tasks: list[dict]):
+    """Сущности памяти (не люди — их связывают имена выше) в тексте задач; вернуть функцию: сообщения чата →
+    {id задачи: (сколько общих сущностей, их имена)}. Нет памяти — None."""
+    try:
+        from opsdash import memory
+
+        rx = memory._matcher()
+        if not rx[0]:
+            return None
+        kinds = {r["id"]: (r["kind"], r["name"]) for r in store.rows(
+            "SELECT id, kind, name FROM entities WHERE merged_into IS NULL AND kind != 'person'")}
+        by_task = {c["id"]: {e for e in memory.entities_in(c.get("title"), c.get("what"), matcher=rx) if e in kinds}
+                   for c in tasks}
+        # общая сущность связывает, только если она редкая: «МСБ» или «Альфа-банк» есть в половине задач — это не тема
+        count: dict[int, int] = {}
+        for ents in by_task.values():
+            for e in ents:
+                count[e] = count.get(e, 0) + 1
+        kinds = {e: v for e, v in kinds.items() if count.get(e, 0) <= ENTITY_RARE}
+        by_task = {cid: {e for e in ents if e in kinds} for cid, ents in by_task.items()}
+    except Exception as e:  # noqa: BLE001 — без памяти задачи по теме подбираются по словам заголовка
+        store.log("triage", f"сущности для задач по теме: {e}", "warning")
+        return None
+
+    def found(msgs: list[dict]) -> dict[int, tuple[int, str]]:
+        ents = {e for e in memory.entities_in(*(m.get("text") for m in msgs), matcher=rx) if e in kinds}
+        out = {}
+        for cid, have in by_task.items():
+            common = have & ents
+            if common:
+                out[cid] = (len(common), ", ".join(f"«{kinds[e][1]}»" for e in sorted(common)))
+        return out
+    return found
 
 
 def _chat_row(source: str, chat_id: str) -> dict:

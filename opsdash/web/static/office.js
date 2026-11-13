@@ -26,6 +26,7 @@
     briefs: { shirt: "#3c64c8", hair: 3, skin: 2, prop: "folders" },
     digests: { shirt: "#e8903a", hair: 4, skin: 0, prop: "paper" },
     kb: { shirt: "#9a6a3c", hair: 3, skin: 1, prop: "books" },
+    memory: { shirt: "#6c5ce7", hair: 2, skin: 2, prop: "folders" },
     bot: { shirt: "#4caf50", hair: 1, skin: 2, prop: "phone" },
     chat: { shirt: "#4fb3e8", hair: 0, skin: 1, prop: "mugs" },
     courier: { shirt: "#d9534f", hair: 4, skin: 2, prop: "parcels", cap: true }

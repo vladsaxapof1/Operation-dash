@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/day.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/agents.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/memory.css?v={{ static_v }}">
   {% if theme not in ('light', 'graphite-light') %}<link rel="stylesheet" href="/static/dark.css?v={{ static_v }}"{% if theme not in ('dark', 'graphite') %} media="(prefers-color-scheme: dark)"{% endif %}>{% endif %}
   {#- «Графит» — своё оформление: та же разметка, другой вид (graphite.css); светлый вариант — те же
       правила с другими значениями токенов (graphite-light.css) #}
@@ -19,15 +20,14 @@
 {% from "_macros.html" import transcription_all %}
 {#- меню 2.0: группы «Сегодня · Память · Claude» и системные пункты. Счётчик синий у выбранного раздела,
     красный — если в «Нужно от вас» есть срочное; остальные — серые #}
-{% set active_key = {'tasks': 'commitments', 'project': 'commitments'}.get(nav, nav) %}
+{% set active_key = {'tasks': 'commitments', 'project': 'commitments', 'kb': 'memory'}.get(nav, nav) %}
 {% set nav_groups = [
   ("Сегодня", [("home", "/", "Сводка", feed_count), ("commitments", "/commitments", "Задачи", tasks_count),
                ("calendar", "/calendar", "Календарь", 0)]),
-  ("Память", [("meetings", "/meetings", "Встречи", 0), ("chats", "/chats", "Переписка", 0),
+  ("Память", [("memory", "/memory", "Память", 0), ("meetings", "/meetings", "Встречи", 0), ("chats", "/chats", "Переписка", 0),
               ("decisions", "/decisions", "Решения", decisions_attention),
               ("digests", "/digests", "Дайджесты", 0), ("people", "/people", "Люди", 0)]
-             + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])
-             + ([("kb", "/kb", "База знаний", 0)] if sections_on.kb else [])),
+             + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])),
   (ai_name or "Claude", [("ask", "/ask", "Спросить " ~ (ai_name or "Claude"), 0), ("skills", "/skills", "Навыки", 0),
                          ("office", "/office", "Офис", 0)]),
 ] %}
@@ -118,5 +118,6 @@
 <script src="/static/app.js?v={{ static_v }}"></script>
 <script src="/static/day.js?v={{ static_v }}"></script>
 <script src="/static/agents.js?v={{ static_v }}"></script>
+<script src="/static/memory.js?v={{ static_v }}"></script>
 </body>
 </html>

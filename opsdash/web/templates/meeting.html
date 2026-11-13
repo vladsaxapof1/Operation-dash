@@ -199,6 +199,19 @@
       {% endfor %}
     </section>
     {% endif %}
+    {% if mem_facts %}
+    <section class="card side-card">
+      <div class="side-h"><h2>Запомнено из встречи <span class="col-n">{{ mem_facts | selectattr('status', 'equalto', 'active') | list | length }}</span></h2><a class="small" href="/memory?source=meeting&days=0">память →</a></div>
+      {% for f in mem_facts %}
+      {% if loop.index == 6 %}<details class="side-more"><summary class="small">ещё {{ mem_facts | length - 5 }}</summary>{% endif %}
+      <div class="side-row{{ ' done' if f.status != 'active' }}"><div class="grow">
+        <span class="side-t" title="{{ f.quote or '' }}">{{ f.text }}</span>
+        <div class="side-x">{{ f.kind_title }}{% for e in f.entities %} · <a href="/memory/page/{{ e.id }}">{{ e.name }}</a>{% endfor %}{% if f.status != 'active' %} · {{ f.status_title }}{% endif %}{% if f.prev %} · было: {{ f.prev.text | truncate(50, true, '…') }}{% endif %}</div>
+      </div></div>
+      {% if loop.last and loop.length > 5 %}</details>{% endif %}
+      {% endfor %}
+    </section>
+    {% endif %}
   </aside>
 </div>
 {% endblock %}

@@ -57,8 +57,8 @@ def test_protocol_and_read_only(data):
     init = replies[0]["result"]
     assert init["serverInfo"]["name"] == "pulse" and "Только чтение" in init["instructions"]
     tools = replies[1]["result"]["tools"]
-    assert {t["name"] for t in tools} == {"recall", "search", "meeting", "meetings", "task", "tasks", "decisions",
-                                          "projects"}
+    assert {t["name"] for t in tools} == {"recall", "page", "facts", "search", "meeting", "meetings", "task", "tasks",
+                                          "decisions", "projects"}
     assert all(t["annotations"]["readOnlyHint"] for t in tools)
     task = replies[2]["result"]
     assert not task["isError"] and "Бюджет склада" in task["content"][0]["text"]
@@ -179,9 +179,42 @@ def test_block_on_top_of_connections(monkeypatch, tmp_path):
     r = client.post("/settings/pulse-mcp", data={"on": "1"}, follow_redirects=False, headers={"referer": conn})
     assert r.headers["location"].startswith("/settings?tab=connections&msg=")
     page = client.get("/settings?tab=connections").text
-    assert "conn-pulse is-on" in page and "У Claude есть инструменты PULSE: recall, search" in page and ">Отключить<" in page
+    assert "conn-pulse is-on" in page and "У Claude есть инструменты PULSE: recall, page, facts, search" in page and ">Отключить<" in page
     client.post("/settings/pulse-mcp", data={}, headers={"referer": conn})
     assert not mcp_server.status()["on"]
     monkeypatch.setattr(brain, "find_claude", lambda *a, **k: None)
     r = client.post("/settings/pulse-mcp", data={"on": "1"}, follow_redirects=False, headers={"referer": conn})
     assert "err=" in r.headers["location"]  # без Claude Code — понятная ошибка, а не падение
+
+
+def test_page_and_facts_tools(data):
+    from opsdash import memory
+
+    store.add_message({"source": "telegram", "chat_id": "5", "chat_title": "Олег Петров", "msg_id": "1",
+                       "text": "Склад переедет в марте", "ts": "2026-11-03T08:00:00+00:00"})
+    mid = store.scalar("SELECT id FROM messages")
+    memory.import_facts({"source": "meeting:m1", "entities": [{"name": "Склад", "kind": "project"}], "facts": [
+        {"kind": "metric", "text": "Бюджет склада на декабрь — 1,2 млн", "key": "бюджет склада", "about": ["Склад"],
+         "quote": "[00:03:10] бюджет 1,2"},
+        {"kind": "event", "text": "Склад переедет в марте", "about": ["Склад"], "source": f"telegram:{mid}",
+         "quote": "Склад переедет в марте"}]})
+    text, err = mcp_server.call("page", {"name": "склад"})
+    assert not err and text.startswith("# Склад (проект)") and "1,2 млн" in text and "Олег Петров" not in text
+    assert "переписка, 03.11" in text
+    lst, _ = mcp_server.call("page", {})
+    assert "«Склад»" in lst and 'page("<имя>")' in lst
+    facts, err = mcp_server.call("facts", {"about": "Склад", "kind": "metric"})
+    assert not err and "1,2 млн" in facts and "переедет" not in facts
+    assert mcp_server.call("page", {"name": "Ромашка"})[1] is True
+
+
+def test_server_cannot_write_even_through_memory(data):
+    from opsdash import memory
+
+    store.read_only()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            memory.add_fact(text="Склад закрыт", about="Склад", source="manual", by="director")
+        assert memory.absorb_inbox() == {} and memory.link_chunks() == 0
+    finally:
+        store._query_only = False

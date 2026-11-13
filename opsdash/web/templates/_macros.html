@@ -897,6 +897,7 @@
         {% endif %}
       </div>
       {{ task_items(c) }}
+      <details class="dlg-known" data-mem-known="{{ c.id }}"><summary class="small">Что известно по теме</summary><div class="dlg-known-b muted small">Загружаю…</div></details>
       {{ agent_block(c) }}
       {% if c.status == 'open' and c.direction == 'mine' and not c.archived %}
       {#- «Моя часть готова — жду…»: мяч у коллеги (records.hand_off) — его часть становится задачей «вам должны» #}

@@ -39,7 +39,7 @@ INSTRUCTIONS = (
     "PULSE — личный рабочий пульт на этом компьютере: встречи (расшифровки и разборы), задачи и договорённости с ходом "
     "(что спросили, ответили, перенесли — по датам), решения по темам, проекты. Обращайся, когда для работы нужен "
     "контекст: что решили, кто что обещал, что обсуждали на встрече, на чём остановились. Начинай с recall по "
-    "2–5 словам темы, дальше — meeting, task, decisions. Ссылайся на источник: встреча (id и [чч:мм:сс]), задача [id]. "
+    "2–5 словам темы; о человеке, клиенте, проекте — page(имя); дальше — meeting, task, decisions. Ссылайся на источник: встреча (id и [чч:мм:сс]), задача [id]. "
     "Только чтение: изменить что-то в PULSE отсюда нельзя — скажи пользователю, что сделать в PULSE. "
     "Самих чатов и писем здесь нет — только то, что PULSE записал из них в ход задач."
 )
@@ -150,6 +150,34 @@ def recall(query: str, about: str = "", since: str = "", budget: str = "mid") ->
         raise ToolError(str(e)) from e
 
 
+def page(name: str = "") -> str:
+    """Страница знаний: всё о человеке, клиенте, проекте — факты с историей, задачи, решения, встречи. Без имени —
+    список страниц. Переписки нет."""
+    from opsdash import memory
+
+    if not (name or "").strip():
+        return memory.page_list_text(40, mcp=True)
+    text = memory.page_text(name, mcp=True)
+    if not text:
+        similar = memory.similar_entities(name)
+        raise ToolError(f"нет страницы «{name}»" + (f"; похожие: {', '.join(e['name'] for e in similar)}"
+                                                   if similar else " — page() без имени покажет список"))
+    return text
+
+
+def facts(about: str = "", kind: str = "", since: str = "", query: str = "", limit: int = 50) -> str:
+    """Факты памяти списком: о ком, какого вида, с какой даты. Факт из переписки — без цитаты и названия чата."""
+    from opsdash import memory
+
+    if kind and kind not in memory.FACT_KINDS:
+        raise ToolError(f"kind — один из: {', '.join(memory.FACT_KINDS)}")
+    rows = memory.facts(about=about or None, kind=kind or None, since=since or None, q=query or None,
+                        limit=max(1, min(int(limit or 50), 200)))
+    if not rows:
+        return "Фактов нет." + (f" О «{about}» PULSE пока ничего не записал." if about else "")
+    return "\n".join(memory.fact_line(f, mcp=True) for f in rows)
+
+
 def search(query: str, limit: int = 10) -> str:
     """Короткое имя для recall — прежние сессии зовут его по привычке."""
     return recall(query, budget="high" if int(limit or 10) > 10 else "mid")
@@ -237,6 +265,17 @@ TOOLS: dict[str, tuple[Any, str, dict]] = {
                         "budget": {"type": "string", "enum": ["low", "mid", "high"],
                                    "description": "длина ответа: low ≈ 3 КБ, mid ≈ 6 КБ, high ≈ 18 КБ"}},
                        ("query",))),
+    "page": (page, "Страница знаний PULSE о человеке, клиенте, проекте, системе: главное, факты с датами и историей "
+             "«было → стало», открытые задачи, решения, встречи. 2–3 тыс. токенов вместо расшифровок. Без имени — "
+             "список страниц.",
+             _schema({"name": {"type": "string", "description": "имя или другое написание: «Ромашка», «РМШ»"}})),
+    "facts": (facts, "Факты памяти PULSE списком: цифры, состояния, кто за что отвечает, как работают люди и клиенты, "
+              "события, как устроено. У каждого — дата и источник.",
+              _schema({"about": {"type": "string", "description": "о ком или о чём"},
+                       "kind": {"type": "string", "enum": ["metric", "state", "role", "trait", "event", "how"]},
+                       "since": {"type": "string", "description": "YYYY-MM-DD"},
+                       "query": {"type": "string", "description": "слова"},
+                       "limit": {"type": "integer"}})),
     "search": (search, "То же, что recall (короткое имя): найти в PULSE по словам темы.",
                _schema({"query": {"type": "string", "description": "слова темы"},
                         "limit": {"type": "integer", "description": "больше 10 — длинный ответ"}},

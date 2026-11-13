@@ -38,11 +38,13 @@
 {% endmacro %}
 
 {% block content %}
+{% import "_memory.html" as mm %}
 <div class="topline">
-  <div><h1>База знаний</h1><div class="muted">Что решили, на чём обожглись и что сработало — из заметок, встреч и недельных обзоров Claude. Claude опирается на неё в ответах.</div></div>
+  <div><h1>Уроки и удачи</h1><div class="muted">Что решили, на чём обожглись и что сработало — из заметок, встреч и недельных обзоров Claude. Claude опирается на неё в ответах.</div></div>
   <div class="actions"><a class="btn" href="/kb/context">Что знает Claude</a><a class="btn primary" href="#add">+ Добавить</a></div>
 </div>
 
+{{ mm.tabbar(tabs, tab) }}
 <section class="card add-panel" id="add">
   <div class="card-h"><h2>Новая запись</h2><a class="small" href="#">свернуть</a></div>
   <div class="card-b">

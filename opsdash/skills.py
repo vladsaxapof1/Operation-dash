@@ -260,6 +260,12 @@ def rejected(days: int = 14) -> list[dict]:
     since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat()
     rows = store.rows("SELECT id, kind, title, reason, source_ref, reject_reason, reject_note, decided_at FROM proposals "
                       "WHERE status='rejected' AND decided_at >= ? ORDER BY decided_at DESC", (since,))
+    # «Неверно» у факта памяти — тоже урок: навыку, который его записал (process-meeting или memory)
+    rows += [{"id": f"ф{f['id']}", "kind": "memory.fact", "title": f["text"], "reason": None,
+              "source_ref": f"{f['source_type'] or ''}:{f['source_ref'] or ''}", "reject_reason": "other",
+              "reject_note": f["reason"], "decided_at": f["decided_at"]}
+             for f in store.rows("SELECT * FROM facts WHERE status='wrong' AND author != 'director' AND decided_at >= ? "
+                                 "ORDER BY decided_at DESC", (since,))]
     for r in rows:
         r["reject_reason_text"] = REASONS.get(r["reject_reason"] or "", "")
     return rows

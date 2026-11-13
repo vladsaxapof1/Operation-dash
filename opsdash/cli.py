@@ -268,6 +268,33 @@ def _chat_tasks(found: list[dict], shown: set[int]) -> None:
         out(f"  …и ещё {len(found) - chat_tasks.PER_CHAT}: ./ops commitments list --brief --person \"<имя>\"")
 
 
+KNOWN_PER_CHAT = 2   # «→ Что известно» под одним чатом
+KNOWN_TOTAL = 15     # и на всю выдачу «новых сообщений»: она и так длинная
+
+
+def _chat_known(msgs: list[dict], peer: str | None, shown: set[int]) -> None:
+    """«→ Что известно» под чатом: до 5 фактов памяти о собеседнике и упомянутых в сообщениях — черновик ответа
+    опирается на них (opsdash.memory). Факт, показанный под другим чатом, не повторяем."""
+    from opsdash import memory
+
+    try:
+        if not store.scalar("SELECT 1 FROM facts WHERE status='active' LIMIT 1"):
+            return
+        names = [peer] if peer else []
+        names += [m["sender_name"] for m in msgs if m.get("sender_name") and not m.get("is_outgoing")]
+        if len(shown) >= KNOWN_TOTAL:  # на всю выдачу — не больше KNOWN_TOTAL фактов: она и так длинная
+            return
+        lines = memory.known_lines([m["text"] or "" for m in msgs], list(dict.fromkeys(names)),
+                                   limit=min(KNOWN_PER_CHAT, KNOWN_TOTAL - len(shown)), shown=shown)
+    except Exception as e:  # noqa: BLE001 — разбор сообщений важнее подсказки
+        store.log("triage", f"«Что известно»: {e}", "warning")
+        return
+    if lines:
+        out("→ Что известно (факты памяти — на их дату; опирайся в черновике ответа):")
+        for ln in lines:
+            out(f"  {ln}")
+
+
 def _messages_found(a) -> list[dict]:
     """Поиск по переписке на индексе «Вспомнить» (opsdash.recall): слова в любой форме, лучшее сверху. Внутри окна
     переписки — сообщения, где есть слова запроса. Не нашлось по словам (ссылка, @имя, кусок кода) — точная подстрока."""
@@ -328,6 +355,7 @@ def cmd_messages(a) -> None:
             chats.setdefault((m["source"], m["chat_id"], m["chat_title"]), []).append(m)
         related = chat_tasks.for_pending(chats)
         shown: set[int] = set()
+        known_shown: set[int] = set()
         for (source, chat_id, title), msgs in chats.items():
             kind = store.scalar("SELECT kind FROM chats WHERE source=? AND chat_id=?", (source, chat_id)) or ""
             out(f"\n## {source} · «{title}» ({kind}, chat_id={chat_id}) — новых: {len(msgs)}")
@@ -341,6 +369,7 @@ def cmd_messages(a) -> None:
             for m in msgs:
                 out(_msg_line(m))
             _chat_tasks(related.get((source, chat_id, title)) or [], shown)
+            _chat_known(msgs, title if kind == "private" else None, known_shown)
     elif a.action == "done":
         ids = []
         if a.shown:
@@ -550,6 +579,85 @@ def cmd_recall(a) -> None:
         fail(str(e))
 
 
+def cmd_facts(a) -> None:
+    from opsdash import memory
+
+    try:
+        if a.action == "import":
+            path = Path(a.file)
+            if not path.is_absolute():
+                path = (config.ROOT / path) if (config.ROOT / path).exists() else path.resolve()
+            if not path.exists():
+                fail(f"нет файла {path}")
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError as e:
+                fail(f"файл не JSON: {e}")
+            rep = memory.import_facts(data, source=a.source, cap=a.cap, by=a.by)
+            out(memory.report_text(rep))
+        elif a.action == "add":
+            rep = memory._new_report()
+            fid = memory.add_fact(text=a.text, kind=a.kind, about=a.about, key=a.key, when=a.when,
+                                  source=a.source or ("manual" if a.by == "director" else None), quote=a.quote,
+                                  replaces=a.replaces, by=a.by, report=rep)
+            out(memory.report_text(rep) if not fid or rep["errors"] or rep["secrets"] or rep["private"]
+                else f"Запомнено: [ф{fid}]" + (" — сменил прежний" if rep["replaced"] else "")
+                + (" (уже было известно)" if rep["known"] else ""))
+        elif a.action == "list":
+            items = memory.facts(about=a.about, kind=a.kind, since=a.since, status=a.status, q=a.search,
+                                 limit=a.limit)
+            if a.json:
+                return as_json(items)
+            if not items:
+                return out("Фактов нет.")
+            for f in items:
+                out(memory.fact_line(f) + (f" · {f['status_title']}" if f["status"] != "active" else ""))
+        elif a.action == "show":
+            f = memory.fact(a.id)
+            if not f:
+                fail(f"нет факта [ф{a.id}]")
+            if a.json:
+                return as_json(f)
+            out(memory.fact_line(f) + f" · {f['status_title']}")
+            if f.get("key"):
+                out(f"Ключ: {f['key']}")
+            if f.get("quote"):
+                out(f"Цитата: {f['quote']}")
+            for h in f["history"]:
+                out(f"Было: [ф{h['id']}] {memory._ddmm(h['happened'])} — {h['text']}")
+            if f.get("next"):
+                out(f"Сменён: [ф{f['next']['id']}] {memory._ddmm(f['next']['happened'])} — {f['next']['text']}")
+            if f.get("because"):
+                out(f"Потому что: [ф{f['because']['id']}] {f['because']['text']}")
+            if f.get("reason"):
+                out(f"Почему не действует: {f['reason']}")
+        elif a.action == "set":
+            if a.replaces:
+                memory.set_replaces(a.id, a.replaces)
+            if a.status:
+                memory.set_status(a.id, a.status, a.reason)
+            if a.forget:
+                memory.forget_fact(a.id)
+                return out(f"Забыто: [ф{a.id}]")
+            out("Сохранено")
+    except memory.MemoryError as e:
+        fail(str(e))
+
+
+def cmd_page(a) -> None:
+    from opsdash import memory
+
+    if not a.name:
+        return out(memory.page_list_text(a.limit))
+    text = memory.page_text(a.name)
+    if not text:
+        similar = memory.similar_entities(a.name)
+        fail(f"нет страницы «{a.name}»" + (f"; похожие: {', '.join('«' + e['name'] + '»' for e in similar)}"
+                                           if similar else " — ./ops page (список)"))
+    memory.write_page(a.name)
+    out(text)
+
+
 def cmd_memory(a) -> None:
     from opsdash import memory, recall
 
@@ -562,7 +670,79 @@ def cmd_memory(a) -> None:
             + (f"; из приёмника: {absorbed}" if absorbed else ""))
         out("В индексе: " + ", ".join(f"{recall.CHUNK_KINDS.get(k, k)} — {v['n']}" for k, v in st.items()))
         return
-    getattr(memory, "cli_" + a.action.replace("-", "_"))(a, out, fail)
+    try:
+        if a.action == "entities":
+            rows = memory.page_list(a.limit, q=a.search, kind=a.kind)
+            if a.json:
+                return as_json(rows)
+            for r in rows:
+                out(f"[{r['id']}] {r['name']} ({r['kind_title']}) · фактов {r['facts'] or 0} · упоминаний "
+                    f"{r['mentions'] or 0}" + (f" · также: {', '.join(r['aliases'][:5])}" if r["aliases"] else ""))
+            if not rows:
+                out("Сущностей нет.")
+        elif a.action == "entity":
+            e = memory.entity(a.ref)
+            if not e:
+                fail(f"нет сущности «{a.ref}»")
+            if a.name:
+                memory.rename_entity(e["id"], a.name)
+            if a.alias:
+                memory.add_aliases(e["id"], a.alias)
+            if a.kind:
+                store.execute("UPDATE entities SET kind=?, updated=? WHERE id=?", (a.kind, store.utcnow(), e["id"]))
+            out("Сохранено")
+        elif a.action == "merge":
+            into = memory.entity(a.into)
+            if not into:
+                fail(f"нет сущности «{a.into}»")
+            if a.propose:
+                from opsdash import proposals
+
+                p = proposals.propose_memory_merge(entity_id=memory.entity(a.ref)["id"], into=into["id"],
+                                                   reason=a.reason or "")
+                return out(f"Предложено: {p['title']} — ждёт «Да» директора")
+            res = memory.merge_entities(memory.entity(a.ref)["id"] if memory.entity(a.ref) else int(a.ref), into["id"])
+            out(f"Объединено: «{res['from']}» → «{res['into']}»")
+        elif a.action == "forget":
+            e = memory.entity(a.ref)
+            if not e:
+                fail(f"нет сущности «{a.ref}»")
+            n = memory.forget_entity(e["id"])
+            out(f"Забыто всё о «{e['name']}»: фактов {n}")
+        elif a.action == "stats":
+            st = memory.stats()
+            if a.json:
+                return as_json(st)
+            out(f"Фактов: {st['facts']} (за неделю +{st['week']}), сущностей: {st['entities']}, источников: "
+                f"{st['sources']}, связей: {st['links_total']}, фрагментов: {st['chunks']}, векторов: {st['vectors']}")
+            out("По видам: " + ", ".join(f"{memory.FACT_KINDS[k]} — {v}" for k, v in st["by_kind"].items()))
+        elif a.action == "day":
+            out(memory.day_text(a.date or config.now().date().isoformat(), a.part))
+        elif a.action == "leads":
+            if a.set:
+                done = memory.set_leads(json.loads(Path(a.set).read_text(encoding="utf-8")))
+                return out(f"Выжимки сохранены: {', '.join(done) or 'ни одной — имена не совпали со страницами'}")
+            due = memory.leads_due()
+            if not due:
+                return out("Выжимки не нужны: нигде не набралось 10 новых фактов.")
+            out("Нужна выжимка (новых фактов с прошлой):")
+            for r in due:
+                out(f"- «{r['name']}» ({r['kind_title']}) · фактов {r['facts']} — ./ops page \"{r['name']}\"")
+        elif a.action == "backfill":
+            if a.done:
+                n = memory.backfill_done([x.strip() for x in a.done.split(",") if x.strip()])
+                st = memory.backfill_state()
+                return out(f"Отмечено. Разобрано {n} из {st['total']}, осталось {len(st['todo'])}.")
+            st = memory.backfill_state()
+            nxt = memory.backfill_next(a.next)
+            out(f"Разовое наполнение из разборов: готово {st['done']} из {st['total']}, осталось {len(st['todo'])}.")
+            for m in nxt:
+                out(f"- {m['id']} · {store.local(m['started_at'], '%d.%m.%Y')} · {m['title']} · "
+                    f"data/meetings/{m['id']}/summary.md")
+            if not nxt:
+                out("Все разборы пройдены.")
+    except memory.MemoryError as e:
+        fail(str(e))
 
 
 def cmd_kb(a) -> None:
@@ -2045,11 +2225,75 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--limit", type=int, help="строк каждого вида")
     s.set_defaults(fn=cmd_recall)
 
-    s = sub.add_parser("memory", help="память: индекс «Вспомнить», сущности, объединение, «Забыть»")
+    s = sub.add_parser("memory", help="память: индекс «Вспомнить», сущности, объединение, «Забыть», память дня")
     ms = s.add_subparsers(dest="action", required=True)
     x = ms.add_parser("index", help="дочитать новое в индекс «Вспомнить» (--full — собрать заново)")
     x.add_argument("--full", action="store_true")
+    x = ms.add_parser("entities", help="сущности (страницы знаний): по свежим фактам")
+    x.add_argument("--search")
+    x.add_argument("--kind", choices=["person", "company", "product", "project", "metric", "system", "team", "other"])
+    x.add_argument("--limit", type=int, default=60)
+    x = ms.add_parser("entity", help="переименовать сущность, добавить псевдоним, поменять вид")
+    x.add_argument("ref", help="id, имя или псевдоним")
+    x.add_argument("--name")
+    x.add_argument("--alias", action="append")
+    x.add_argument("--kind", choices=["person", "company", "product", "project", "metric", "system", "team", "other"])
+    x = ms.add_parser("merge", help="дубль сущности влить в основную (--propose — предложить директору)")
+    x.add_argument("ref")
+    x.add_argument("--into", required=True)
+    x.add_argument("--propose", action="store_true")
+    x.add_argument("--reason")
+    x = ms.add_parser("forget", help="«Забыть всё о …»: сущность и её факты — совсем (только по просьбе директора)")
+    x.add_argument("ref")
+    ms.add_parser("stats", help="память в цифрах")
+    x = ms.add_parser("day", help="переписка рабочих чатов за день — для «Памяти дня» (по частям до 17 КБ)")
+    x.add_argument("--date", help="YYYY-MM-DD, по умолчанию сегодня")
+    x.add_argument("--part", type=int, default=1)
+    x = ms.add_parser("leads", help="страницы, которым нужна выжимка; --set <файл JSON> — сохранить выжимки")
+    x.add_argument("--set")
+    x = ms.add_parser("backfill", help="разовое наполнение памяти из готовых разборов встреч")
+    x.add_argument("--next", type=int, default=10, help="сколько следующих разборов показать")
+    x.add_argument("--done", help="id встреч через запятую: пройдены")
     s.set_defaults(fn=cmd_memory)
+
+    s = sub.add_parser("facts", help="факты памяти: записать пачкой из файла, добавить, найти, поправить")
+    ms = s.add_subparsers(dest="action", required=True)
+    x = ms.add_parser("import", help="пачка фактов из JSON-файла — один раз за запуск")
+    x.add_argument("file")
+    x.add_argument("--source", help="источник по умолчанию: meeting:<id>, telegram:<id>…")
+    x.add_argument("--cap", type=int, help="потолок фактов (по умолчанию — из Настройки → Память)")
+    x.add_argument("--by", choices=["claude", "director", "agent"], default="claude")
+    x = ms.add_parser("add", help="один факт: «Запомни, что …» (--by director)")
+    x.add_argument("--text", required=True)
+    x.add_argument("--kind", choices=["metric", "state", "role", "trait", "event", "how"], default="state")
+    x.add_argument("--about", help="о ком или о чём, через запятую")
+    x.add_argument("--key", help="имя признака у цифр и состояний: «конверсия в оплату»")
+    x.add_argument("--when", help="YYYY-MM-DD — на какую дату верно")
+    x.add_argument("--source")
+    x.add_argument("--quote")
+    x.add_argument("--replaces", type=int)
+    x.add_argument("--by", choices=["claude", "director", "agent"], default="claude")
+    x = ms.add_parser("list", help="факты: о ком, какого вида, с какой даты")
+    x.add_argument("--about")
+    x.add_argument("--kind", choices=["metric", "state", "role", "trait", "event", "how"])
+    x.add_argument("--since")
+    x.add_argument("--status", default="active", choices=["active", "replaced", "outdated", "wrong", "proposed", "all"])
+    x.add_argument("--search")
+    x.add_argument("--limit", type=int, default=50)
+    x = ms.add_parser("show", help="факт: источник, цитата, история «было → стало»")
+    x.add_argument("id", type=int)
+    x = ms.add_parser("set", help="поправить факт: --status wrong --reason …, outdated, active; --replaces <id>; --forget")
+    x.add_argument("id", type=int)
+    x.add_argument("--status", choices=["active", "outdated", "wrong"])
+    x.add_argument("--reason")
+    x.add_argument("--replaces", type=int)
+    x.add_argument("--forget", action="store_true")
+    s.set_defaults(fn=cmd_facts)
+
+    s = sub.add_parser("page", help="страница знаний: всё о человеке, клиенте, проекте; без имени — список")
+    s.add_argument("name", nargs="?")
+    s.add_argument("--limit", type=int, default=40)
+    s.set_defaults(fn=cmd_page)
 
     s = sub.add_parser("kb", help="база знаний: решения, уроки, удачи (антология)")
     ms = s.add_subparsers(dest="action", required=True)

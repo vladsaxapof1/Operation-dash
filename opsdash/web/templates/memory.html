@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% import "_memory.html" as mm %}
+{% block title %}Память{% endblock %}
+{#- «Память»: лента фактов, страницы знаний, карта, «От агентов». Логика — opsdash.memory, web/memory_views.py #}
+{% block content %}
+<div class="topline"><div><h1>Память</h1>
+  <p class="sub">Что PULSE узнал из встреч и переписки: цифры, состояния, кто за что отвечает, как работают люди и клиенты. У каждого факта есть дата и источник. Неверное поправьте здесь, и Claude перестанет на него опираться.</p></div>
+  <details class="mem-add"><summary class="btn lg">{{ icons.icon('plus', 16) }}Запомнить</summary>
+    <form method="post" action="/memory/fact" class="card mem-add-form">
+      <label>Что запомнить</label><input type="text" name="text" required placeholder="Олег согласует договоры только письменно">
+      <div class="form-row">
+        <div><label>О ком или о чём</label><input type="text" name="about" placeholder="Олег Петров, Ромашка"></div>
+        <div><label>Вид</label><select name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == 'state' }}>{{ t }}</option>{% endfor %}</select></div>
+      </div>
+      <p class="muted small">Записанное вами Claude сам не меняет: только предложит, если узнает другое.</p>
+      <div class="form-actions"><button class="btn primary">Запомнить</button></div>
+    </form>
+  </details>
+</div>
+{{ mm.tabbar(tabs, tab) }}
+
+{% if tab == 'feed' %}
+<div class="mem-stats">
+  <span><b>{{ st.today }}</b> узнал сегодня</span><span><b>{{ st.week }}</b> за неделю</span>
+  <span><b>{{ st.facts }}</b> фактов в памяти</span><span><b>{{ st.entities }}</b> страниц</span>
+  {% if recall.total %}<span title="Сколько раз Claude, бот и агенты вспоминали за неделю"><b>{{ recall.total }}</b> поисков за неделю{% if recall.empty %} · пустых {{ recall.empty }}{% endif %}</span>{% endif %}
+</div>
+{% if backfill.total and backfill.state != 'done' %}
+<div class="card mem-backfill"><div class="card-b">
+  <div><b>Наполнение памяти из разборов встреч</b>: {{ backfill.done }} из {{ backfill.total }}
+    <div class="bar"><i style="width: {{ (100 * backfill.done / backfill.total) | round | int }}%"></i></div>
+    <span class="muted small">По 10 разборов за запуск. Старую переписку PULSE не перечитывает.</span></div>
+  <form method="post" action="/memory/backfill">
+    {% if backfill.state == 'running' %}<input type="hidden" name="action" value="stop"><button class="btn">Остановить</button>
+    {% else %}<input type="hidden" name="action" value="start"><button class="btn">{{ 'Продолжить' if backfill.done else 'Начать' }}</button>{% endif %}
+  </form>
+</div></div>
+{% endif %}
+
+<form method="get" class="filters mem-filters">
+  <input type="hidden" name="tab" value="feed">
+  <label class="sk-search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Найти факт…" aria-label="Найти факт"></label>
+  <select name="kind" data-autosubmit aria-label="Вид факта"><option value="">Все виды</option>{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ t }}</option>{% endfor %}</select>
+  <select name="source" data-autosubmit aria-label="Источник">{% for k, t in sources.items() %}<option value="{{ k }}" {{ 'selected' if k == source }}>{{ t }}</option>{% endfor %}</select>
+  <select name="days" data-autosubmit aria-label="За какой срок"><option value="1" {{ 'selected' if days == 1 }}>Сегодня</option><option value="7" {{ 'selected' if days == 7 }}>Неделя</option><option value="30" {{ 'selected' if days == 30 }}>Месяц</option><option value="0" {{ 'selected' if days == 0 }}>Всё время</option></select>
+  <select name="status" data-autosubmit aria-label="Статус"><option value="active" {{ 'selected' if status == 'active' }}>Действуют</option><option value="replaced" {{ 'selected' if status == 'replaced' }}>Сменённые</option><option value="outdated" {{ 'selected' if status == 'outdated' }}>Устаревшие</option><option value="wrong" {{ 'selected' if status == 'wrong' }}>Неверные</option></select>
+  {% if q or kind or source or status != 'active' or days != 7 %}<a class="small" href="/memory">× сбросить</a>{% endif %}
+</form>
+
+{% for day, items in groups %}
+<section class="card mem-day">
+  <div class="card-h"><h2>{{ day }}</h2><span class="muted small">{{ items | length }}</span></div>
+  {% for f in items %}{{ mm.fact(f, msgs) }}{% endfor %}
+</section>
+{% else %}
+<section class="card"><p class="empty">{% if q or kind or source %}Ничего не нашлось.{% elif st.facts %}За этот срок новых фактов нет, выберите «Всё время».{% else %}Фактов пока нет. Они появятся из разборов встреч и вечерней «Памяти дня»; первые — из уже готовых разборов.{% endif %}</p></section>
+{% endfor %}
+
+{% elif tab == 'pages' %}
+<form method="get" class="filters mem-filters">
+  <input type="hidden" name="tab" value="pages">
+  <label class="sk-search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Человек, клиент, проект…" aria-label="Найти страницу"></label>
+  <select name="ek" data-autosubmit aria-label="Вид"><option value="">Все виды</option>{% for k, t in ekinds.items() %}<option value="{{ k }}" {{ 'selected' if k == ek }}>{{ t }}</option>{% endfor %}</select>
+</form>
+<section class="card mem-pages">
+  {% if pages %}
+  <div class="mem-thead"><span>Страница</span><span>Вид</span><span class="num">Фактов за 30 дней</span><span class="num">Всего</span><span class="num">Упоминаний</span></div>
+  {% for p in pages %}
+  <a class="mem-trow" href="/memory/page/{{ p.id }}">
+    <span class="mem-tname">{{ p.name }}{% if p.aliases %}<span class="muted small"> · {{ p.aliases[:3] | join(', ') }}</span>{% endif %}</span>
+    <span class="muted">{{ p.kind_title }}</span>
+    <span class="num">{{ p.fresh or '—' }}</span><span class="num">{{ p.facts or '—' }}</span><span class="num">{{ p.mentions or '—' }}</span>
+  </a>
+  {% endfor %}
+  {% else %}<p class="empty">{{ 'Ничего не нашлось.' if q or ek else 'Страниц пока нет: они появятся вместе с первыми фактами.' }}</p>{% endif %}
+</section>
+
+{% elif tab == 'map' %}
+{% include "_memory_map.html" %}
+
+{% elif tab == 'agents' %}
+<section class="card">
+  <div class="card-h"><h2>От агентов</h2><span class="muted small">что выяснили сессии Claude Code по ходу работы и прислали в PULSE (remember)</span></div>
+  {% if agents %}
+  <div class="card-b mem-agents-acts">
+    <form class="inline" method="post" action="/memory/agents"><input type="hidden" name="action" value="accept"><button class="btn primary">Принять все ({{ agents | length }})</button></form>
+    <form class="inline" method="post" action="/memory/agents" data-confirm="Отклонить все факты от агентов?"><input type="hidden" name="action" value="reject"><button class="btn ghost">Отклонить все</button></form>
+  </div>
+  {% for a in agents %}
+  <div class="mem-agent">{{ mm.fact(a.f, {}, actions=false) }}
+    <div class="mem-agent-acts"><span class="muted small">{{ a.p.reason or '' }}</span>
+      <form class="inline" method="post" action="/memory/agents"><input type="hidden" name="action" value="accept"><input type="hidden" name="ids" value="{{ a.p.id }}"><button class="btn sm">Принять</button></form>
+      <form class="inline" method="post" action="/memory/agents"><input type="hidden" name="action" value="reject"><input type="hidden" name="ids" value="{{ a.p.id }}"><button class="btn sm ghost">Нет</button></form>
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}<p class="empty">Пока ничего. Агенты в ваших сессиях Claude Code присылают сюда то, что выяснили по ходу работы («таблица обновляется ночью»): PULSE подключён к ним в Настройки → Подключения.</p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}
