@@ -31,7 +31,17 @@ if (Test-Path "$Root\.git") {
 
 Write-Host "==> Обновляю библиотеки" -ForegroundColor Cyan
 # в папке из git (у разработчика) оставляем и инструменты разработки: тесты — как при обновлении кнопкой
-if (Test-Path "$Root\.git") { & $uvPath sync } else { & $uvPath sync --no-dev }
+$sync = @("sync"); if (-not (Test-Path "$Root\.git")) { $sync += "--no-dev" }
+# видеокарта NVIDIA — и её библиотека cuBLAS (~630 МБ); решает PULSE, как при обновлении кнопкой (updates.wants_cuda)
+$wantCuda = ""
+try { $wantCuda = & "$Root\.venv\Scripts\python.exe" -c "from opsdash import updates; print(int(updates.wants_cuda()))" 2>$null } catch { }
+if ($wantCuda -eq "1") {
+    & $uvPath @sync --extra cuda
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Библиотека видеокарты NVIDIA не скачалась — расшифровка пойдёт на процессоре" -ForegroundColor Yellow
+        & $uvPath @sync
+    }
+} else { & $uvPath @sync }
 if ($LASTEXITCODE -ne 0) { throw "uv sync завершился с ошибкой" }
 
 Write-Host "==> Запускаю PULSE" -ForegroundColor Cyan

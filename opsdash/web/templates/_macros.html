@@ -1094,34 +1094,42 @@
 {% endmacro %}
 
 {% macro meeting_status(m) %}
-{% set map = {'new': ('в очереди', ''), 'transcribing': ('расшифровка', 'warn'), 'paused': ('на паузе', ''), 'cancelled': ('отменена', ''), 'transcribed': ('расшифрована', 'acc'), 'processing': ('разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')} %}
+{% set map = {'new': ('в очереди', ''), 'transcribing': ('расшифровка', 'warn'), 'paused': ('на паузе', ''), 'cancelled': ('остановлена', ''), 'transcribed': ('расшифрована', 'acc'), 'processing': ('разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')} %}
 {% set s = map.get(m.status, (m.status, '')) %}
 <span class="chip {{ s[1] }}" data-meeting-status="{{ m.id }}">{{ s[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span>
 {% endmacro %}
 
-{#- пауза / «Продолжить» и отмена расшифровки на странице встречи, пока она ждёт очереди, идёт или стоит на паузе #}
-{% macro transcription_controls(m) %}
+{#- пауза / «Продолжить» и «Остановить» расшифровки одной встречи, пока она ждёт очереди, идёт или стоит на паузе:
+    на странице встречи — крупные кнопки с подписями, в строке списка встреч (row) — «Остановить» иконкой #}
+{% macro transcription_controls(m, row=False) %}
 {%- set paused = m.status == 'paused' %}
 {%- if m.status in ('new', 'transcribing', 'paused') %}
 <form class="inline" method="post" action="/meetings/{{ m.id }}/transcription"><input type="hidden" name="action" value="{{ 'resume' if paused else 'pause' }}">
-  <button class="btn sm" title="{{ 'Продолжить с того же места' if paused else 'Пауза: компьютер не нагружается, прогресс сохраняется' }}">{{ 'Продолжить' if paused else 'Пауза' }}</button></form>
-<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription" data-confirm="Отменить расшифровку? Встреча останется, расшифровать её можно будет позже — с начала."><input type="hidden" name="action" value="cancel">
-  <button class="btn sm ghost">Отменить</button></form>
+  <button class="btn{{ ' primary' if paused }}{{ ' lg' if not row }}" title="{{ 'Продолжить с того же места' if paused else 'Пауза: компьютер не нагружается, прогресс сохраняется' }}">{{ icons.icon('play' if paused else 'pause', 16) }}{{ 'Продолжить' if paused else 'Пауза' }}</button></form>
+<form class="inline" method="post" action="/meetings/{{ m.id }}/transcription" data-confirm="Остановить расшифровку «{{ m.title or m.id }}»? Встреча останется, расшифровать её можно будет позже — с начала."><input type="hidden" name="action" value="cancel">
+  <button class="btn danger{{ ' icon' if row else ' lg' }}" title="Остановить расшифровку — встреча останется" aria-label="Остановить расшифровку">{{ icons.icon('stop', 16) }}{% if not row %}Остановить{% endif %}</button></form>
 {%- endif %}
 {% endmacro %}
 
-{#- меню «…» у встречи в ленте: расшифровку — на паузу / продолжить / отменить (встреча остаётся), удалить встречу
-    целиком (с файлом записи) — отдельно и красным, чтобы не путать «отменить» с «удалить» #}
+{#- вся расшифровка сразу (q — recordings.queue_state()): пауза / «Продолжить» и «Остановить всё» — в шапке «Встреч»
+    и в углу «Сейчас» на любой странице (corner: кнопки-иконки; подтверждение остановки — app.js, data-tr-confirm:
+    угол обновляется на лету, и обычный data-confirm до новых кнопок не дотянется) #}
+{% macro transcription_all(q, corner=False) %}
+{%- if q %}
+{%- set ask = 'Остановить расшифровку ' ~ ('всех записей в очереди (' ~ q.count ~ ')' if q.count > 1 else 'записи') ~ '? Встречи останутся — любую можно будет расшифровать позже, с начала.' %}
+{%- set stop = 'Остановить всё' if q.count > 1 else 'Остановить' %}
+<form class="inline" method="post" action="/transcription"><input type="hidden" name="action" value="{{ 'resume' if q.paused else 'pause' }}">
+  <button class="btn{{ ' sm icon' if corner }}{{ ' primary' if q.paused and not corner }}" title="{{ 'Продолжить расшифровку' if q.paused else 'Пауза: компьютер не нагружается, прогресс сохраняется' }}" aria-label="{{ 'Продолжить расшифровку' if q.paused else 'Поставить расшифровку на паузу' }}">{{ icons.icon('play' if q.paused else 'pause', 16) }}{% if not corner %}{{ 'Продолжить' if q.paused else 'Пауза' }}{% endif %}</button></form>
+<form class="inline" method="post" action="/transcription" {{ 'data-tr-confirm' if corner else 'data-confirm' }}="{{ ask }}"><input type="hidden" name="action" value="cancel">
+  <button class="btn danger{{ ' sm icon' if corner }}" title="{{ stop }} — встречи останутся" aria-label="{{ stop }}: остановить расшифровку">{{ icons.icon('stop', 16) }}{% if not corner %}{{ stop }}{% endif %}</button></form>
+{%- endif %}
+{% endmacro %}
+
+{#- меню «…» у встречи в ленте: пауза и «Остановить» расшифровки — кнопками в самой строке (transcription_controls),
+    здесь — «Расшифровать заново» после ошибки и удаление встречи целиком (с файлом записи) — отдельно и красным #}
 {% macro meeting_menu(m) %}
-{%- set paused = m.status == 'paused' %}
 {% call menu('Ещё о встрече') %}
-  {% if m.status in ('new', 'transcribing', 'paused') %}
-  <form method="post" action="/meetings/{{ m.id }}/transcription"><input type="hidden" name="action" value="{{ 'resume' if paused else 'pause' }}">
-    <button class="menu-i" title="{{ 'Продолжить с того же места' if paused else 'Компьютер не нагружается, прогресс сохраняется' }}">{{ 'Продолжить расшифровку' if paused else 'Приостановить расшифровку' }}</button></form>
-  <form method="post" action="/meetings/{{ m.id }}/transcription" data-confirm="Отменить расшифровку? Встреча и файл записи останутся — расшифровать можно будет позже, с начала."><input type="hidden" name="action" value="cancel">
-    <button class="menu-i">Отменить расшифровку — встреча останется</button></form>
-  <div class="menu-sep"></div>
-  {% elif m.status in ('cancelled', 'failed') %}
+  {% if m.status == 'failed' %}
   <form method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="transcribe"><button class="menu-i">Расшифровать заново</button></form>
   <div class="menu-sep"></div>
   {% endif %}

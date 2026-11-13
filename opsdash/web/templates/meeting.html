@@ -6,7 +6,7 @@
 {#- встреча (5.10): шапка (название с карандашом, одна строка меты, «Спросить Claude», «Текст для отправки», «…»),
     вкладки Разбор · Расшифровка · Запись; справа — что ждёт вашего «да» и задачи из встречи #}
 {% set in_queue = m.status in ('new', 'transcribing', 'paused') %}
-{% set st = {'new': ('в очереди на расшифровку', 'off'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка отменена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
+{% set st = {'new': ('в очереди на расшифровку', 'off'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка остановлена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
 <div class="mhead">
   <a class="small" href="/meetings">← Встречи</a>
   <h1>{{ m.title or m.id }}<button type="button" class="dlg-pencil" data-reveal="rename" title="Переименовать" aria-label="Переименовать встречу">{{ icons.icon('edit', 18) }}</button></h1>
@@ -35,15 +35,19 @@
   </div>
 </div>
 
-{% if in_queue %}<div class="card"><div class="card-b" style="padding-top:16px">
-  {% if m.status == 'transcribing' %}Идёт расшифровка…{% elif m.status == 'paused' %}Расшифровка на паузе{% else %}Ждёт очереди на расшифровку{% endif %}
-  {% if m.status != 'new' %}<div class="progress{{ ' paused' if m.status == 'paused' }}"><div style="width: {{ ((m.progress or 0) * 100) | round }}%" data-meeting-progress="{{ m.id }}"></div></div>{% endif %}
-  <div class="actions" style="margin-top:10px">{{ ui.transcription_controls(m) }}</div>
-  <div class="hint">{% if m.status == 'paused' %}Компьютер не нагружается, следующие записи ждут. Продолжится с того же места; если PULSE перезапустить, расшифровка начнётся сначала.
-    {%- elif m.status == 'new' %}Начнётся, когда закончится расшифровка перед ней.
-    {%- else %}Страница обновится сама. Расшифровка идёт на этом компьютере — можно закрыть браузер. «Пауза» освобождает компьютер, прогресс сохраняется.{% endif %}</div>
+{#- расшифровка: что с ней и кнопки «Пауза» / «Продолжить» / «Остановить» — крупно, сразу под шапкой #}
+{% if in_queue %}<div class="card tr-panel {{ m.status }}"><div class="card-b">
+  <div class="tr-state">
+    <div class="tr-title">{% if m.status == 'transcribing' %}<span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>Идёт расшифровка{% elif m.status == 'paused' %}{{ icons.icon('pause', 18) }}Расшифровка на паузе{% else %}{{ icons.icon('hourglass', 18) }}Ждёт очереди на расшифровку{% endif %}
+      {%- if m.status != 'new' %} <span class="tr-pct">{{ ((m.progress or 0) * 100) | round | int }}%</span>{% endif %}</div>
+    {% if m.status != 'new' %}<div class="progress{{ ' paused' if m.status == 'paused' }}"><div style="width: {{ ((m.progress or 0) * 100) | round }}%" data-meeting-progress="{{ m.id }}"></div></div>{% endif %}
+    <div class="hint">{% if m.status == 'paused' %}Компьютер не нагружается, следующие записи ждут. Продолжится с того же места; если PULSE перезапустить, расшифровка начнётся сначала.
+      {%- elif m.status == 'new' %}{{ (queue_note[:1] | upper) ~ queue_note[1:] if queue_note else 'Начнётся, когда закончится расшифровка перед ней' }}. «Пауза» — не начинать, пока не нажмёте «Продолжить».
+      {%- else %}Страница обновится сама. Расшифровка идёт на этом компьютере — можно закрыть браузер. «Пауза» освобождает компьютер, прогресс сохраняется.{% endif %}</div>
+  </div>
+  <div class="tr-btns">{{ ui.transcription_controls(m) }}</div>
 </div></div>{% endif %}
-{% if m.status == 'cancelled' %}<div class="alert info">Расшифровка отменена.{% if recording.size is not none %} <form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="transcribe"><button class="btn sm">Расшифровать</button></form>{% endif %}</div>{% endif %}
+{% if m.status == 'cancelled' %}<div class="alert info tr-off"><span>Расшифровка остановлена — встреча и запись остались.{% if recording.size is none %} Файла записи больше нет, расшифровать не из чего.{% endif %}</span>{% if recording.size is not none %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="transcribe"><button class="btn primary">{{ icons.icon('play', 16) }}Расшифровать</button></form>{% endif %}</div>{% endif %}
 {% if m.status == 'processing' %}<div class="alert info">Claude разбирает встречу — обычно это 2–5 минут. Итог придёт в Telegram.</div>{% endif %}
 {% if m.status == 'failed' %}<div class="alert bad">Ошибка: {{ m.error }}</div>{% endif %}
 

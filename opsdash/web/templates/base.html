@@ -16,6 +16,7 @@
 </head>
 <body class="{{ 'nav-collapsed' if nav_collapsed }} page-{{ nav or 'other' }}">
 {% import "_icons.html" as icons %}
+{% from "_macros.html" import transcription_all %}
 {#- меню 2.0: группы «Сегодня · Память · Claude» и системные пункты. Счётчик синий у выбранного раздела,
     красный — если в «Нужно от вас» есть срочное; остальные — серые #}
 {% set active_key = {'tasks': 'commitments', 'project': 'commitments'}.get(nav, nav) %}
@@ -58,9 +59,12 @@
 </div>
 {#- угол экрана: что PULSE делает сейчас и что сделал (opsdash.notices); обновляется сам (app.js) #}
 <div class="notices" data-notices data-last="{{ notices[0].id if notices else 0 }}">
-  <div class="notice-now" data-notice-now role="status"{% if not running_now %} hidden{% endif %}>
+  {#- идёт расшифровка — рядом пауза и «Остановить», а ссылка ведёт в «Встречи» (там видно всю очередь) #}
+  {%- set tr_only = running_now and running_now | rejectattr('tr') | list | length == 0 %}
+  <div class="notice-now{{ ' tr-paused' if tr_corner and tr_corner.paused }}" data-notice-now role="status"{% if not running_now %} hidden{% endif %}>
     <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-    <a class="notice-now-t" href="/office" title="Открыть «Офис»: что делает Claude по шагам"><span data-notice-now-text>{% for r in running_now %}{{ r.title }}{% if r.detail %} — {{ r.detail }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}</span></a>
+    <a class="notice-now-t" href="{{ '/meetings' if tr_only else '/office' }}" title="{{ 'Открыть «Встречи»: вся очередь расшифровки' if tr_only else 'Открыть «Офис»: что делает Claude по шагам' }}" data-notice-now-link><span data-notice-now-text>{% for r in running_now %}{{ r.title }}{% if r.detail %} — {{ r.detail }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}</span></a>
+    <span class="notice-now-act" data-notice-now-act>{{ transcription_all(tr_corner, corner=True) }}</span>
   </div>
   <div class="notice-head" data-notice-head{% if notices | length < 2 %} hidden{% endif %}>
     <button type="button" class="notice-clear" data-notice-clear>Скрыть все</button>

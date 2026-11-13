@@ -51,9 +51,49 @@ def fmt_ts(seconds: float) -> str:
 
 # --- Whisper ------------------------------------------------------------------
 
+def cuda_lib_dirs() -> list[Path]:
+    """Windows: папки с библиотеками NVIDIA из пакетов nvidia-cublas-cu12 и nvidia-cuda-nvrtc-cu12 (дополнение cuda,
+    его ставят установщик и обновление, если есть видеокарта NVIDIA — updates.wants_cuda)."""
+    import sysconfig
+
+    base = Path(sysconfig.get_paths()["purelib"]) / "nvidia"
+    return [d for d in (base / "cublas" / "bin", base / "cuda_nvrtc" / "bin") if d.is_dir()]
+
+
+_cuda_libs_ready = False
+
+
+def _use_cuda_libs() -> None:
+    """До первого импорта ctranslate2 (faster_whisper): его cublas_stub ищет cublas64_12.dll через LoadLibrary — по PATH.
+    Кладём папки библиотек NVIDIA в PATH (их увидят и процессы расшифровки) и загружаем cuBLAS заранее: уже
+    загруженную библиотеку Windows отдаёт по имени, где бы она ни лежала."""
+    global _cuda_libs_ready
+    if _cuda_libs_ready or os.name != "nt":
+        return
+    _cuda_libs_ready = True
+    dirs = cuda_lib_dirs()
+    if not dirs:
+        return
+    import ctypes
+
+    os.environ["PATH"] = os.pathsep.join(str(d) for d in dirs) + os.pathsep + os.environ.get("PATH", "")
+    for d in dirs:
+        try:
+            os.add_dll_directory(str(d))
+        except OSError:
+            pass
+    for name in ("cublasLt64_12.dll", "cublas64_12.dll"):
+        try:
+            ctypes.WinDLL(str(dirs[0] / name))
+        except OSError as e:  # не загрузилась — видеокарта не заведётся, причину покажет _note_device
+            store.log("transcribe", f"библиотека видеокарты {name} не загрузилась: {e}", "warning")
+            break
+
+
 def _prepare_env(settings: dict) -> None:
     """Зеркало HuggingFace — до первой загрузки модели. Если библиотека уже загружена,
-    подменяем адрес и в ней (она читает его один раз при импорте)."""
+    подменяем адрес и в ней (она читает его один раз при импорте). Там же — библиотеки видеокарты NVIDIA."""
+    _use_cuda_libs()
     endpoint = (settings["recordings"].get("hf_endpoint") or "").rstrip("/")
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     if not endpoint:
@@ -79,6 +119,56 @@ def models_dir() -> Path:
     return path
 
 
+# Почему расшифровка не на видеокарте — простыми словами (журнал, «Настройки → Записи встреч»).
+# faster-whisper (ctranslate2) считает на видеокарте только NVIDIA и только с библиотекой NVIDIA cuBLAS (CUDA 12;
+# cuDNN ctranslate2 4.6+ не нужен). В колесе ctranslate2 для Windows её нет — он ищет cublas64_12.dll в системе
+# (CUDA_PATH\bin, PATH) и без неё падает на первой же фразе. PULSE ставит её сам — дополнение cuda (_use_cuda_libs).
+NO_NVIDIA = "видеокарты NVIDIA не нашлось — на видеокарте расшифровка работает только с NVIDIA"
+NO_CUDA_LIBS = "видеокарта NVIDIA есть, но её библиотека cuBLAS (CUDA 12) не установлена"
+CPU_CHOSEN = "в настройках выбран процессор"
+
+
+def _gpu_why(error: BaseException) -> str:
+    text = str(error)
+    if re.search(r"cublas|cudnn|cudart|\.dll", text, re.IGNORECASE):
+        return NO_CUDA_LIBS
+    return f"видеокарта не сработала: {text[:300]}"
+
+
+def _cuda_libs_missing() -> bool:
+    """Windows: найдёт ли ctranslate2 cuBLAS — так же, как ищет он сам: CUDA_PATH\\bin, затем обычный поиск Windows
+    (PATH; уже загруженная библиотека — например, положенная в папку ctranslate2). Вызывать после import ctranslate2."""
+    if os.name != "nt":
+        return False
+    import ctypes
+
+    name = "cublas64_12.dll"
+    tries = [(name, 0)]
+    if os.environ.get("CUDA_PATH"):  # зависимости (cublasLt) — из той же папки
+        tries.insert(0, (os.path.join(os.environ["CUDA_PATH"], "bin", name), 0x8))  # LOAD_WITH_ALTERED_SEARCH_PATH
+    for path, mode in tries:
+        try:
+            ctypes.WinDLL(path, winmode=mode)
+            return False
+        except OSError:
+            continue
+    return True
+
+
+def _note_device(device: str, why: str) -> None:
+    """Запомнить, где считает расшифровка и почему не на видеокарте; в журнал — когда это поменялось."""
+    try:
+        last = store.get_state("transcribe_device") or {}
+        if (last.get("device"), last.get("why")) != (device, why):
+            if device == "cuda":
+                store.log("transcribe", "расшифровка на видеокарте NVIDIA")
+            elif why and why != CPU_CHOSEN and os.name == "nt":
+                store.log("transcribe", f"расшифровка на процессоре: {why}", "warning")
+        store.set_state("transcribe_device", {"device": device, "why": why, "at": store.utcnow()})
+    except Exception:  # noqa: BLE001 — подсказка в настройках не должна мешать расшифровке
+        pass
+
+
 def get_model(settings: dict):
     global _model, _model_key, _model_used, _model_device
     rs = settings["recordings"]
@@ -94,32 +184,37 @@ def get_model(settings: dict):
 
         root = str(models_dir() / "whisper")
         threads = max(2, (os.cpu_count() or 4) - 2)
-        model = None
-        if device in ("auto", "cuda") and not _cuda_failed:
+        model, why = None, _cuda_failed or (CPU_CHOSEN if device == "cpu" else "")
+        if not why:
             try:
                 import ctranslate2
 
-                if ctranslate2.get_cuda_device_count() > 0:
-                    model = WhisperModel(name, device="cuda", compute_type="float16", download_root=root)
-            except Exception as e:  # noqa: BLE001 — нет CUDA-библиотек: работаем на процессоре
-                if device == "cuda":
-                    store.log("transcribe", f"видеокарта недоступна, перехожу на процессор: {e}", "warning")
+                if ctranslate2.get_cuda_device_count() <= 0:
+                    why = NO_NVIDIA
+                elif device == "auto" and _cuda_libs_missing():  # «cuda» в настройках — пробуем всё равно
+                    why = NO_CUDA_LIBS
+                else:
+                    # float16 — только где он быстрый (GeForce 10xx и старше его не умеют: там «auto» выберет int8)
+                    compute = "float16" if "float16" in ctranslate2.get_supported_compute_types("cuda") else "auto"
+                    model = WhisperModel(name, device="cuda", compute_type=compute, download_root=root)
+            except Exception as e:  # noqa: BLE001 — видеокарта не завелась: работаем на процессоре
+                why = _gpu_why(e)
         _model_device = "cuda" if model is not None else "cpu"
         if model is None:
             model = WhisperModel(name, device="cpu", compute_type="int8", download_root=root, cpu_threads=threads)
+        _note_device(_model_device, why)
         _model, _model_key, _model_used = model, key, time.time()
         return model
 
 
-_cuda_failed = False
+_cuda_failed = ""  # почему видеокарта не сработала посреди расшифровки — дальше в этом процессе не пробуем
 
 
 def _cpu_fallback(settings: dict, error: Exception):
-    """Видеокарта есть, но библиотек CUDA нет — дальше считаем на процессоре."""
+    """Видеокарта нашлась, но упала на первой же фразе (чаще всего нет библиотек CUDA) — дальше считаем на процессоре."""
     global _model, _model_key, _cuda_failed
-    store.log("transcribe", f"видеокарта не сработала, считаю на процессоре: {error}", "warning")
     with _model_lock:
-        _cuda_failed = True
+        _cuda_failed = _gpu_why(error)
         _model, _model_key = None, None
     return get_model(settings)
 

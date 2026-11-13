@@ -197,8 +197,53 @@ def find_uv() -> str | None:
     return None
 
 
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def nvidia_present() -> bool:
+    """Windows: есть ли видеокарта NVIDIA — по nvidia-smi (ставится вместе с драйвером) или по списку видеоадаптеров."""
+    if not _windows():
+        return False
+    if shutil.which("nvidia-smi") or (Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "nvidia-smi.exe").exists():
+        return True
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController).Name"],
+                             capture_output=True, text=True, timeout=30, creationflags=0x08000000).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "nvidia" in (out or "").lower()
+
+
+def wants_cuda(root: Path | None = None) -> bool:
+    """Ставить ли библиотеку видеокарты NVIDIA (дополнение cuda, cuBLAS ~630 МБ): Windows, видеокарта NVIDIA есть, а в
+    настройках не выбран «процессор». Уже стоит — оставляем: без дополнения uv sync её удалит, а потом скачает заново.
+    Этим же решением пользуются установщик и UPDATE.bat (scripts/install.ps1, update.ps1)."""
+    if not _windows():
+        return False
+    if ((root or config.APP_DIR) / ".venv" / "Lib" / "site-packages" / "nvidia" / "cublas").is_dir():
+        return True
+    # настроек ещё нет (установка, шаг 3) — будет «видеокарта, если получится» из settings.example.yaml
+    try:
+        if config.SETTINGS_FILE.exists() and config.load_settings()["recordings"].get("device") == "cpu":
+            return False
+    except Exception:  # noqa: BLE001 — настройки не читаются: решаем по видеокарте
+        pass
+    return nvidia_present()
+
+
+CUDA_EXTRA = ["--extra", "cuda"]
+
+
+def _without_cuda(cmd: list[str]) -> list[str]:
+    """Та же команда uv sync, но без библиотеки видеокарты — если она не скачалась, PULSE всё равно обновляется."""
+    i = next((i for i in range(len(cmd) - 1) if cmd[i:i + 2] == CUDA_EXTRA), None)
+    return cmd if i is None else cmd[:i] + cmd[i + 2:]
+
+
 def _sync_command(root: Path) -> list[str]:
-    """uv sync — как в установщике (на Apple Silicon с macOS 14+ — с ускорением MLX)."""
+    """uv sync — как в установщике (на Apple Silicon с macOS 14+ — с ускорением MLX, на Windows с видеокартой
+    NVIDIA — с её библиотекой cuBLAS)."""
     uv = find_uv()
     if not uv:
         raise UpdateError("не найден uv — запустите установку (INSTALL) заново")
@@ -207,12 +252,20 @@ def _sync_command(root: Path) -> list[str]:
     mac = platform.mac_ver()[0]
     if sys.platform == "darwin" and platform.machine() == "arm64" and mac and int(mac.split(".")[0]) >= 14:
         cmd += ["--extra", "mlx"]
+    if wants_cuda(root):
+        cmd += CUDA_EXTRA
     return cmd
 
 
 def sync_libraries(root: Path) -> None:
-    """Библиотеки под новую версию."""
-    res = subprocess.run(_sync_command(root), cwd=str(root), capture_output=True, text=True, timeout=1800)
+    """Библиотеки под новую версию. Библиотека видеокарты NVIDIA не скачалась — обновляемся без неё
+    (расшифровка пойдёт на процессоре), попробуем при следующем обновлении."""
+    cmd = _sync_command(root)
+    res = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=3600 if cmd != _without_cuda(cmd) else 1800)
+    if res.returncode and cmd != _without_cuda(cmd):
+        store.log("update", "библиотека видеокарты NVIDIA не скачалась — расшифровка пойдёт на процессоре: "
+                            + (res.stderr or res.stdout).strip()[-300:], "warning")
+        res = subprocess.run(_without_cuda(cmd), cwd=str(root), capture_output=True, text=True, timeout=1800)
     if res.returncode:
         raise UpdateError("библиотеки не обновились: " + (res.stderr or res.stdout).strip()[-400:])
 
@@ -228,6 +281,7 @@ def libraries_busy() -> bool:
 # Windows, перезапуск после обновления: дождаться, пока старый PULSE закроется (освободит data/pult.lock), обновить
 # библиотеки и запустить новый. Только стандартная библиотека Python: импорт opsdash открыл бы файлы тех самых
 # библиотек (PyYAML, pydantic), которые uv sync должен заменить. Аргументы: файл блокировки, журнал, папка, uv sync…
+# Библиотека видеокарты NVIDIA (--extra cuda) не скачалась — ещё раз без неё: PULSE обновится, расшифровка — на процессоре.
 _WINDOWS_RESTART = """
 import msvcrt, subprocess, sys, time
 lock, log, root, cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
@@ -243,7 +297,12 @@ for _ in range(180):
 with open(log, "a", encoding="utf-8") as out:
     out.write(time.strftime("%Y-%m-%d %H:%M:%S") + " uv sync\\n")
     out.flush()
-    subprocess.run(cmd, cwd=root, stdout=out, stderr=out, creationflags=0x08000000)
+    done = subprocess.run(cmd, cwd=root, stdout=out, stderr=out, creationflags=0x08000000)
+    if done.returncode and "cuda" in cmd:
+        i = cmd.index("cuda")
+        out.write(time.strftime("%Y-%m-%d %H:%M:%S") + " uv sync без библиотеки видеокарты\\n")
+        out.flush()
+        subprocess.run(cmd[:i - 1] + cmd[i + 1:], cwd=root, stdout=out, stderr=out, creationflags=0x08000000)
 from opsdash import cli
 cli.start_background()
 """

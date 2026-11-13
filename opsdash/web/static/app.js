@@ -1733,7 +1733,14 @@
   if (nbox) {
     var nlist = nbox.querySelector("[data-notice-list]"), nfoot = nbox.querySelector("[data-notice-foot]"),
         nhead = nbox.querySelector("[data-notice-head]"), nmore = nbox.querySelector("[data-notice-more]"), nnow = nbox.querySelector("[data-notice-now]"),
-        nnowText = nbox.querySelector("[data-notice-now-text]");
+        nnowText = nbox.querySelector("[data-notice-now-text]"), nnowAct = nbox.querySelector("[data-notice-now-act]"),
+        nnowLink = nbox.querySelector("[data-notice-now-link]");
+    nnowAct.dataset.html = nnowAct.innerHTML.trim().replace(/\s+/g, " ");
+    // «Остановить» расшифровку в углу: кнопки приходят с сервером на лету — подтверждение ловим здесь, а не data-confirm
+    nbox.addEventListener("submit", function (e) {
+      var ask = e.target.dataset && e.target.dataset.trConfirm;
+      if (ask && !window.confirm(ask)) e.preventDefault();
+    });
     // на телефоне и в «Спросить Claude» (там внизу строка вопроса) — одно последнее, на остальных страницах — три
     var SHOWN = document.body.classList.contains("page-ask") || window.innerWidth <= 760 ? 1 : 3;
     var ago = function (iso) {
@@ -1838,6 +1845,12 @@
         var now = res.running || [];
         nnow.hidden = !now.length;
         nnowText.textContent = now.map(function (r) { return r.title + (r.detail ? " — " + r.detail : ""); }).join("; ");
+        // идёт расшифровка — рядом кнопки паузы и остановки (разметку присылает сервер), ссылка — во «Встречи»
+        var trHtml = (res.tr_html || "").replace(/\s+/g, " ");  // те же кнопки — не пересоздаём (курсор, фокус)
+        if (nnowAct.dataset.html !== trHtml) { nnowAct.innerHTML = res.tr_html || ""; nnowAct.dataset.html = trHtml; }
+        nnow.classList.toggle("tr-paused", !!(res.tr && res.tr.paused));
+        nnowLink.href = res.tr_only ? "/meetings" : "/office";
+        nnowLink.title = res.tr_only ? "Открыть «Встречи»: вся очередь расшифровки" : "Открыть «Офис»: что делает Claude по шагам";
         Array.prototype.forEach.call(nlist.querySelectorAll("[data-ts]"), function (el) { el.textContent = ago(el.dataset.ts); });
         layout();
         setTimeout(refreshNotices, now.length ? 5000 : 15000);

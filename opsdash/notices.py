@@ -61,10 +61,17 @@ def running() -> list[dict]:
         if j["name"] not in BUSY:
             continue
         item = {"name": j["name"], "title": jobs.TITLES.get(j["name"], j["name"]), "detail": ""}
-        if j["name"] == "transcribe":
-            m = store.row("SELECT title, progress FROM meetings WHERE status='transcribing' ORDER BY updated DESC LIMIT 1")
+        if j["name"] == "transcribe":  # рядом с текстом — пауза и «Остановить» (app.transcription_corner)
+            from opsdash import recordings
+
+            q = recordings.queue_state()
+            m = q and q["current"]
             if m:
-                item["detail"] = f"«{m['title']}» · {round((m['progress'] or 0) * 100)}%"
+                pct = round((m["progress"] or 0) * 100)
+                item["detail"] = f"«{m['title'] or m['id']}» · " + (f"на паузе, {pct}%" if m["status"] == "paused" else f"{pct}%")
+                if q["waiting"]:
+                    item["detail"] += f" · ещё {q['waiting']} в очереди"
+            item["tr"] = q
         elif j["name"] == "triage":
             n = store.scalar("SELECT COUNT(*) FROM messages WHERE processed=0") or 0
             item["detail"] = f"{n} новых" if n else ""

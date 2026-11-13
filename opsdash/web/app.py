@@ -271,6 +271,12 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
 
     ctx["notices"] = notices.recent()  # угол экрана: что PULSE сделал и что делает сейчас
     ctx["running_now"] = notices.running()
+    # расшифровка целиком: шапка «Встреч» и кнопки в углу «Сейчас» (пока идёт задание расшифровки)
+    ctx["tr_corner"] = ctx["tr_queue"] = next((r["tr"] for r in ctx["running_now"] if r.get("tr")), None)
+    if ctx["tr_queue"] is None and ctx["nav"] == "meetings":  # на паузе после перезапуска: задание не идёт, а встречи ждут
+        from opsdash import recordings
+
+        ctx["tr_queue"] = recordings.queue_state()
     from opsdash import brain
 
     why = request.query_params.get("why", "")  # только что «Нет» — спросить почему (MOD-3)
@@ -285,7 +291,14 @@ def notices_api(after: int = 0):
     """Для угла экрана на любой странице: новые уведомления (id больше after) и что PULSE делает сейчас."""
     from opsdash import notices
 
-    return {"items": [{**n, "ago": f_ago(n["created"])} for n in notices.recent(after)], "running": notices.running()}
+    running = notices.running()
+    tr = next((r["tr"] for r in running if r.get("tr")), None)
+    # кнопки расшифровки в углу — той же разметкой, что при загрузке страницы (_macros.transcription_all)
+    tr_html = str(templates.env.get_template("_macros.html").module.transcription_all(tr, corner=True)).strip()
+    return {"items": [{**n, "ago": f_ago(n["created"])} for n in notices.recent(after)],
+            "running": [{k: v for k, v in r.items() if k != "tr"} for r in running],
+            "tr": {"paused": tr["paused"]} if tr else None, "tr_html": tr_html,
+            "tr_only": bool(running) and all(r.get("tr") for r in running)}
 
 
 @app.post("/api/notices/dismiss-all")
@@ -2289,6 +2302,25 @@ def meeting_transcription(request: Request, mid: str, action: str = Form(...)):
     if not fn(mid):
         return back(request, err="Сейчас это сделать нельзя — обновите страницу")
     return back(request, msg)
+
+
+@app.post("/transcription")
+def transcription_all(request: Request, action: str = Form(...)):
+    """Вся расшифровка сразу — из угла «Сейчас» и шапки «Встреч»: пауза, «Продолжить», остановить все записи."""
+    from opsdash import recordings
+
+    fn = {"pause": recordings.pause_all, "resume": recordings.resume_all, "cancel": recordings.cancel_all}.get(action)
+    if not fn:
+        return back(request, err="Не понял, что сделать с расшифровкой")
+    n = fn()
+    if not n:
+        return back(request, err="Сейчас это сделать нельзя — обновите страницу")
+    if action == "pause":
+        return back(request, "Расшифровка на паузе — компьютер не нагружается, прогресс сохраняется")
+    if action == "resume":
+        return back(request, "Расшифровка продолжается")
+    return back(request, f"Расшифровка остановлена: {n} {f_plural(n, 'запись', 'записи', 'записей')}. Встречи остались — "
+                         "расшифровать любую можно кнопкой «Расшифровать» в списке встреч")
 
 
 @app.post("/meetings/{mid}/delete")

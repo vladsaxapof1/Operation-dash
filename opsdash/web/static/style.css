@@ -807,6 +807,10 @@ a.notice-t:hover { color: var(--accent); text-decoration: none; }
 }
 
 a.notice-now-t { color: inherit; flex: 1; min-width: 0; }  /* «Сейчас» в углу ведёт в «Офис» */
+.notice-now-act { display: inline-flex; gap: 4px; flex: none; }  /* расшифровка: пауза и «Остановить» прямо в углу */
+.notice-now-act:empty { display: none; }
+.notice-now-act .btn { width: 30px; height: 30px; }
+.notice-now.tr-paused .ask-dots i { animation: none; background: var(--muted); }  /* на паузе точки не бегут */
 a.notice-now-t:hover { color: var(--accent); text-decoration: none; }
 
 /* --- «Офис»: рабочие места PULSE карточками; сессии Claude Code в папке — по проектам --- */
@@ -1526,7 +1530,7 @@ a.task:hover { text-decoration: none; }
   color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .mday:not(:first-child) { border-top: 1px solid var(--line); }
 /* время — узкой колонкой (название ближе), статус, справа — одно действие и «…» (расшифровка, удаление) */
-.mrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) 210px 196px; gap: 16px; align-items: center; padding: 14px 20px;
+.mrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) 210px 216px; gap: 16px; align-items: center; padding: 14px 20px;
   border-top: 1px solid var(--line); }
 .mday + .mrow { border-top: 0; }
 .mrow-time { font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -1542,6 +1546,24 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
   color: var(--muted); font-size: 14px; font-weight: 400; cursor: pointer; text-align: center; justify-content: center; }
 .drop-in:hover, .drop.over .drop-in { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .drop-in input { display: none; }
+/* расшифровка: крупно — что с ней и кнопки «Пауза» / «Продолжить» / «Остановить». tr-panel — на странице встречи,
+   tr-bar — вся очередь в шапке «Встреч» (кнопки угла «Сейчас» — .notice-now-act) */
+.tr-panel .card-b, .tr-bar { display: flex; align-items: center; gap: 20px; padding: 16px 20px; }
+.tr-panel, .tr-bar { border-left: 3px solid var(--accent); }
+.tr-panel.paused, .tr-panel.new, .tr-bar.paused { border-left-color: var(--muted); }
+.tr-state { flex: 1; min-width: 0; }
+.tr-title { font-size: 16px; font-weight: 600; line-height: 1.4; }
+.tr-title .ico { color: var(--muted); vertical-align: -3px; margin-right: 8px; }
+.tr-title .ask-dots { margin-right: 8px; vertical-align: 2px; }
+.tr-title a { color: var(--text); }
+.tr-title a:hover { color: var(--accent); text-decoration: none; }
+.tr-pct { font-variant-numeric: tabular-nums; color: var(--accent); }
+.paused .tr-pct { color: var(--muted); }
+.tr-state .progress { max-width: none; height: 8px; border-radius: 4px; margin-top: 10px; }
+.tr-btns { display: flex; gap: 8px; flex: none; }
+.btn.danger:hover { border-color: var(--bad); }
+.alert.tr-off { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+@media (max-width: 760px) { .tr-panel .card-b, .tr-bar { flex-direction: column; align-items: stretch; gap: 12px; } }
 @media (max-width: 1000px) { .mrow { grid-template-columns: 56px minmax(0, 1fr) auto; } .mrow-act { grid-column: 2 / -1; justify-content: flex-start; } }
 @media (max-width: 760px) { .mrow { grid-template-columns: 56px minmax(0, 1fr); } .mrow .st { grid-column: 2; } }
 

@@ -304,6 +304,43 @@ def cancel(meeting_id: str) -> bool:
     return True
 
 
+def queue_state() -> dict | None:
+    """Расшифровка целиком — для угла «Сейчас» и шапки «Встреч»: какая встреча считается (или замерла на паузе),
+    сколько записей в очереди всего и стоит ли на паузе всё. None — расшифровывать нечего."""
+    rows = store.rows("SELECT id, title, status, progress FROM meetings WHERE status IN ('new', 'transcribing', 'paused') "
+                      "ORDER BY created, id")
+    if not rows:
+        return None
+    live = set(transcribe.live_tags())
+    current = (next((r for r in rows if r["status"] == "transcribing"), None)
+               or next((r for r in rows if r["status"] == "paused" and r["id"] in live), None))
+    return {"current": current, "count": len(rows), "waiting": len(rows) - (current is not None),
+            "paused": all(r["status"] == "paused" for r in rows)}
+
+
+def pause_all() -> int:
+    """Пауза всей расшифровки: идущая замирает, ждущие не начинаются. Вернуть, сколько встреч поставлено на паузу."""
+    rows = store.rows("SELECT id, status FROM meetings WHERE status IN ('new', 'transcribing') ORDER BY created, id")
+    rows.sort(key=lambda r: r["status"] != "transcribing")  # сначала идущую — она грузит компьютер
+    return sum(pause(r["id"]) for r in rows)
+
+
+def resume_all() -> int:
+    """Продолжить всё, что стоит на паузе: замершую — с того же места, остальные — в очередь за ней."""
+    live = set(transcribe.live_tags())
+    rows = store.rows("SELECT id FROM meetings WHERE status='paused' ORDER BY created, id")
+    rows.sort(key=lambda r: r["id"] not in live)
+    return sum(resume(r["id"]) for r in rows)
+
+
+def cancel_all() -> int:
+    """Остановить расшифровку всех записей: и идущей, и ждущих очереди. Встречи остаются — каждую можно
+    расшифровать позже кнопкой «Расшифровать»."""
+    rows = store.rows("SELECT id, status FROM meetings WHERE status IN ('new', 'transcribing', 'paused') ORDER BY created, id")
+    rows.sort(key=lambda r: r["status"] == "transcribing")  # сначала ждущие: иначе на место остановленной встанет следующая
+    return sum(cancel(r["id"]) for r in rows)
+
+
 def memory(meeting_id: str) -> dict:
     """Что PULSE помнит по встрече, кроме её папки: для предупреждения перед удалением."""
     batch = f"meeting:{meeting_id}"

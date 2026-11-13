@@ -21,10 +21,14 @@
       {% elif is_mac %}
       <input type="hidden" name="device" value="cpu">
       {% else %}
-      <div><label>Где считать</label><select name="device"><option value="auto" {{ 'selected' if settings.recordings.device == 'auto' }}>видеокарта, если получится</option><option value="cpu" {{ 'selected' if settings.recordings.device == 'cpu' }}>процессор</option><option value="cuda" {{ 'selected' if settings.recordings.device == 'cuda' }}>видеокарта NVIDIA (нужны библиотеки CUDA)</option></select></div>
+      <div><label>Где считать</label><select name="device"><option value="auto" {{ 'selected' if settings.recordings.device == 'auto' }}>видеокарта, если получится</option><option value="cpu" {{ 'selected' if settings.recordings.device == 'cpu' }}>процессор</option><option value="cuda" {{ 'selected' if settings.recordings.device == 'cuda' }}>только видеокарта NVIDIA</option></select></div>
       {% endif %}
       <div><label>Язык</label><input type="text" name="language" value="{{ settings.recordings.language }}"></div>
     </div>
+    {% if not is_mac and tr_device %}
+    {#- где шла последняя расшифровка и почему не на видеокарте (transcribe._note_device) #}
+    <div class="hint">Последняя расшифровка ({{ tr_device.at | local('%d.%m, %H:%M') }}) шла {{ 'на видеокарте NVIDIA' if tr_device.device == 'cuda' else 'на процессоре' }}{% if tr_device.device != 'cuda' and tr_device.why %}: {{ tr_device.why }}{% endif %}.</div>
+    {% endif %}
     <label class="check"><input type="checkbox" name="diarization" {{ 'checked' if settings.recordings.diarization }}> Размечать, кто говорит (Спикер 1, 2…; имена подставит Claude)</label>
     <label>Чувствительность разметки спикеров</label><input type="number" step="0.05" min="0.5" max="1.2" name="diarization_threshold" value="{{ settings.recordings.diarization_threshold }}" style="max-width:120px">
     <div class="hint">Больше — меньше спикеров. Если один человек делится на двух — увеличьте до 1.0; если двое сливаются — уменьшите до 0.8.</div>
@@ -32,6 +36,12 @@
     <label>Зеркало HuggingFace (если модели не скачиваются)</label><input type="text" name="hf_endpoint" value="{{ settings.recordings.hf_endpoint }}" placeholder="например https://hf-mirror.com">
     <div class="form-actions"><button class="btn primary">Сохранить</button></div>
   </form>
+  {% if gpu_offer and not is_mac %}
+  {#- библиотека видеокарты NVIDIA: при обновлении PULSE ставит её сам, а сейчас — перезапуском, как после обновления:
+      на Windows библиотеки меняются, только когда PULSE закрыт (updates.restart → uv sync --extra cuda) #}
+  <div class="alert info tr-off" style="margin-top:16px"><span>Видеокарта NVIDIA есть, но её библиотеки нет — расшифровка идёт на процессоре. PULSE скачает библиотеку (около 630 МБ) и перезапустится; дальше встречи будут расшифровываться на видеокарте, в разы быстрее.</span>
+    <form class="inline" method="post" action="/updates/restart" data-confirm="Скачать библиотеку видеокарты NVIDIA (около 630 МБ) и перезапустить PULSE? Несколько минут PULSE будет недоступен; идущая расшифровка начнётся заново."><button class="btn primary">Скачать и перезапустить</button></form></div>
+  {% endif %}
 </div></section>
 
 <section class="card"><div class="card-h"><h2>Ваш голос</h2></div><div class="card-b">

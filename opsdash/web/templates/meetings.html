@@ -22,6 +22,20 @@
   {% if q %}<a class="small" href="/meetings">× снять поиск «{{ q }}»</a>{% endif %}
 </div>
 
+{#- вся расшифровка сразу: что считается, сколько ждёт, пауза и «Остановить всё» — чтобы не искать по строкам #}
+{% if tr_queue %}{% set cur = tr_queue.current %}
+<div class="card tr-bar{{ ' paused' if tr_queue.paused }}">
+  <div class="tr-state">
+    <div class="tr-title">{% if tr_queue.paused %}{{ icons.icon('pause', 18) }}Расшифровка на паузе{% elif cur and cur.status == 'transcribing' %}<span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>Идёт расшифровка{% else %}{{ icons.icon('hourglass', 18) }}Расшифровка начинается{% endif %}
+      {%- if cur %} · <a href="/meetings/{{ cur.id }}">{{ cur.title or cur.id }}</a> <span class="tr-pct">{{ ((cur.progress or 0) * 100) | round | int }}%</span>{% endif %}</div>
+    {%- set n = tr_queue.waiting %}{% set recs = n ~ ' ' ~ plural(n, 'запись', 'записи', 'записей') %}
+    <div class="hint">{% if n and cur %}Ещё {{ recs }} {{ 'ждёт' if n == 1 else 'ждут' }} очереди. {% elif n %}{{ 'На паузе' if tr_queue.paused else 'В очереди' }} {{ recs }}. {% endif %}
+      {%- if tr_queue.paused %}Компьютер не нагружается.{% else %}«Пауза» освобождает компьютер, прогресс сохраняется.{% endif %} «{{ 'Остановить всё' if tr_queue.count > 1 else 'Остановить' }}» — встречи останутся, расшифровать любую можно позже.</div>
+  </div>
+  <div class="tr-btns">{{ ui.transcription_all(tr_queue) }}</div>
+</div>
+{% endif %}
+
 <section class="card mlist">
   {% if waiting %}
   <div class="mday">Сейчас</div>
@@ -38,7 +52,7 @@
   <div class="mday">{{ d.label }}</div>
   {% for r in d.rows %}
   {% if r.kind == 'rec' %}{% set m = r.m %}
-  {% set st = {'new': ('ждёт расшифровки', 'warn'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка отменена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
+  {% set st = {'new': ('ждёт расшифровки', 'warn'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'off'), 'cancelled': ('расшифровка остановлена', 'off'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'off')) %}
   <div class="mrow">
     <div class="mrow-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if m.duration_sec %}<div class="mrow-x">{{ (m.duration_sec / 60) | round | int }} мин</div>{% endif %}</div>
     <div class="mrow-main"><a class="mrow-title" href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>
@@ -46,7 +60,9 @@
       {% if m.status == 'failed' and m.error %}<div class="mrow-x bad-text">{{ m.error[:200] }}</div>{% endif %}</div>
     <div class="st {{ st[1] if st[1] in ('ok', 'bad', 'warn', 'acc') }}" data-meeting-status="{{ m.id }}"><span class="dot {{ st[1] }}"></span>{{ r.queue or st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}{% if r.pending %} · {{ r.pending }} {{ plural(r.pending, 'ждёт', 'ждут', 'ждут') }} «да»{% endif %}</div>
     <div class="mrow-act">
-      {% if m.status == 'transcribed' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn">Разобрать</button></form>
+      {% if m.status in ('new', 'transcribing', 'paused') %}{{ ui.transcription_controls(m, row=True) }}
+      {% elif m.status == 'cancelled' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="transcribe"><button class="btn" title="Расшифровать запись с начала">{{ icons.icon('play', 16) }}Расшифровать</button></form>
+      {% elif m.status == 'transcribed' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn">Разобрать</button></form>
       {% elif m.status == 'processed' %}<a class="btn" href="/meetings/{{ m.id }}">Открыть разбор</a>
       {% else %}<a class="btn" href="/meetings/{{ m.id }}">Открыть</a>{% endif %}
       {{ ui.meeting_menu(m) }}

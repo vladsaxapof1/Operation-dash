@@ -71,6 +71,19 @@ Ok $uvPath
 Step "3/7 Python и библиотеки (первый раз — 3-10 минут)"
 Native $uvPath sync --no-dev
 if ($LASTEXITCODE -ne 0) { throw "Не удалось установить библиотеки (uv sync). Подробности выше." }
+# видеокарта NVIDIA: её библиотека cuBLAS (~630 МБ) — расшифровка на видеокарте в разы быстрее, чем на процессоре.
+# Решает PULSE (updates.wants_cuda) — так же, как при обновлении: иначе обновление удалило бы её или скачало заново
+$wantCuda = Native "$Root\.venv\Scripts\python.exe" -c "from opsdash import updates; print(int(updates.wants_cuda()))"
+if ($wantCuda -eq "1") {
+    Write-Host "    Нашлась видеокарта NVIDIA — скачиваю её библиотеку для расшифровки встреч (около 630 МБ)..."
+    Native $uvPath sync --no-dev --extra cuda
+    if ($LASTEXITCODE -eq 0) { Ok "расшифровка пойдёт на видеокарте NVIDIA" }
+    else {
+        Warn "Библиотека видеокарты не скачалась — расшифровка пойдёт на процессоре. PULSE попробует ещё раз при обновлении."
+        Native $uvPath sync --no-dev
+        if ($LASTEXITCODE -ne 0) { throw "Не удалось установить библиотеки (uv sync). Подробности выше." }
+    }
+}
 # расшифровке и разметке спикеров нужны библиотеки Microsoft Visual C++ — на чистой Windows их может не быть
 Native "$Root\.venv\Scripts\python.exe" -c "import ctranslate2, onnxruntime, sherpa_onnx, av"
 if ($LASTEXITCODE -ne 0) {

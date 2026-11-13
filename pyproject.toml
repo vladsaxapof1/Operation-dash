@@ -30,6 +30,10 @@ dependencies = [
 [project.optional-dependencies]
 # ускоренная расшифровка на видеоядрах Apple Silicon (macOS 14+); ставится установщиком для Mac
 mlx = ["mlx-whisper>=0.4; sys_platform == 'darwin' and platform_machine == 'arm64'"]
+# расшифровка на видеокарте NVIDIA под Windows: ctranslate2 ищет cuBLAS (CUDA 12) в системе, а в его пакете его нет.
+# Ставится установщиком и обновлением, если на компьютере есть NVIDIA (updates.wants_cuda); ~630 МБ с nvrtc.
+# cuDNN не нужен: ctranslate2 4.6+ собран без него. 12.9.3+ — без колеса для Windows
+cuda = ["nvidia-cublas-cu12>=12.8,<12.9.3; sys_platform == 'win32'"]
 
 [project.scripts]
 ops = "opsdash.cli:main"

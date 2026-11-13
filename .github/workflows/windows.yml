@@ -85,3 +85,27 @@ jobs:
           Set-Location "$env:USERPROFILE\Pult"
           & "$env:USERPROFILE\.local\bin\uv.exe" sync
           .\.venv\Scripts\python.exe -m pytest -q
+
+  # Библиотека видеокарты NVIDIA (дополнение cuda, ставится при установке и обновлении, если есть NVIDIA): пакет
+  # встаёт на Windows, и PULSE кладёт cuBLAS туда, где его ищет ctranslate2. Видеокарты у машины GitHub нет —
+  # проверяем установку и загрузку библиотек, не саму расшифровку на видеокарте.
+  cuda-libs:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uv
+        shell: powershell
+        run: irm https://astral.sh/uv/install.ps1 | iex
+
+      - name: Библиотеки с дополнением cuda
+        shell: powershell
+        run: |
+          & "$env:USERPROFILE\.local\bin\uv.exe" sync --no-dev --extra cuda
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: cuBLAS находится так, как его ищет ctranslate2
+        shell: powershell
+        run: |
+          .\.venv\Scripts\python.exe -c "from opsdash import transcribe as t, updates as u; t._use_cuda_libs(); import ctranslate2; print(t.cuda_lib_dirs(), ctranslate2.get_cuda_device_count()); assert t.cuda_lib_dirs() and not t._cuda_libs_missing() and u.wants_cuda() and not u.nvidia_present()"

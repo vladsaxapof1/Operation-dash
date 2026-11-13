@@ -173,6 +173,12 @@ def panel_context(tab: str, settings: dict, sort: str = "recent") -> dict:
 
         out["existing"] = [str(p) for p in recordings.watch_folders(settings)]
         out["voice_samples"] = len(voice.samples())
+        out["tr_device"] = store.get_state("transcribe_device")  # где шла последняя расшифровка и почему (transcribe)
+        from opsdash import transcribe
+
+        # видеокарта NVIDIA есть, а её библиотеки нет (поставили PULSE до 2.0.44 или загрузка не удалась) — «Скачать»
+        out["gpu_offer"] = (bool(out["tr_device"]) and out["tr_device"].get("why") == transcribe.NO_CUDA_LIBS
+                            and settings["recordings"].get("device") != "cpu" and not transcribe.cuda_lib_dirs())
     return out
 
 

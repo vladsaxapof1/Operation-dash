@@ -240,6 +240,119 @@ def test_cancel_running_transcription_keeps_meeting(tmp_path, settings_with, mon
     assert not _outbox()
 
 
+def test_whole_queue_pause_resume_and_stop(tmp_path, settings_with, monkeypatch):
+    """Кнопки угла «Сейчас» и шапки «Встреч»: пауза всей расшифровки (идущая замирает, ждущие не начинаются),
+    «Продолжить» и «Остановить всё» — встречи остаются, PULSE их сам в очередь не возвращает."""
+    from fastapi.testclient import TestClient
+
+    from opsdash import notices
+    from opsdash.web.app import app
+
+    settings_with(recordings={"auto_process": False})
+    submitted = []
+    rec, mid, worker, result = _start_long(tmp_path, monkeypatch, "2026-10-27 11-00-00 счётчик долгая.m4a", progress=0.1)
+    monkeypatch.setattr(jobs, "submit", lambda *a, **k: submitted.append(k.get("args") or a[2]) or True)
+    _, waiting = _meeting(tmp_path, "2026-10-27 12-00-00 следом.m4a")
+    q = recordings.queue_state()
+    assert q["current"]["id"] == mid and q["waiting"] == 1 and q["count"] == 2 and not q["paused"]
+
+    assert recordings.pause_all() == 2
+    assert {records.get_meeting(m)["status"] for m in (mid, waiting)} == {"paused"}
+    frozen = records.get_meeting(mid)["progress"]
+    time.sleep(0.6)
+    assert records.get_meeting(mid)["progress"] == frozen  # замерла
+    q = recordings.queue_state()
+    assert q["paused"] and q["current"]["id"] == mid  # замороженная — по-прежнему «текущая»
+
+    store.execute("INSERT OR REPLACE INTO jobs(name, running) VALUES('transcribe', 1)")
+    [now] = [r for r in notices.running() if r["name"] == "transcribe"]
+    assert "на паузе" in now["detail"] and "ещё 1 в очереди" in now["detail"] and now["tr"]["paused"]
+    client = TestClient(app, base_url="http://localhost:8765")
+    api = client.get("/api/notices").json()
+    assert api["tr_only"] and api["tr"] == {"paused": True} and 'value="resume"' in api["tr_html"]
+    assert "data-tr-confirm" in api["tr_html"] and "tr" not in api["running"][0]  # в угол — только разметка кнопок
+    page = client.get("/meetings").text
+    assert "tr-bar paused" in page and "Остановить всё</button>" in page and 'data-notice-now-act' in page
+
+    assert recordings.resume_all() == 2
+    assert records.get_meeting(mid)["status"] == "transcribing" and records.get_meeting(waiting)["status"] == "new"
+    assert submitted == [{"meeting_id": waiting}]  # замершая — с того же места, ждущая — снова в очередь
+
+    location = unquote(client.post("/transcription", data={"action": "cancel"}, follow_redirects=False,
+                                   headers={"referer": "http://localhost:8765/meetings"}).headers["location"])
+    assert location.startswith("/meetings?msg=Расшифровка остановлена: 2 записи")
+    worker.join(15)
+    assert not worker.is_alive() and result == ["остановлено: расшифровку отменили"] and not transcribe._children
+    assert {records.get_meeting(m)["status"] for m in (mid, waiting)} == {"cancelled"} and rec.exists()
+    assert recordings.queue_state() is None and recordings.cancel_all() == 0
+    assert "err=" in client.post("/transcription", data={"action": "pause"}, follow_redirects=False).headers["location"]
+
+
+def test_gpu_reason_is_explained(settings_with, monkeypatch):
+    """Почему расшифровка не на видеокарте — простыми словами, в журнал (на Windows) и в «Записи встреч»."""
+    import sys
+    import types
+
+    calls = []
+
+    class FakeWhisper:
+        def __init__(self, name, device, compute_type, **_):
+            calls.append((device, compute_type))
+
+    fake_ct2 = types.SimpleNamespace(get_cuda_device_count=lambda: 1, get_supported_compute_types=lambda d: {"int8", "float32"})
+    monkeypatch.setitem(sys.modules, "ctranslate2", fake_ct2)
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeWhisper))
+    monkeypatch.setattr(transcribe, "_model", None)
+    monkeypatch.setattr(transcribe, "_cuda_failed", "")
+    monkeypatch.setattr(transcribe, "_cuda_libs_ready", True)  # папок NVIDIA на Mac нет — и путей Windows не строим
+    real_os = os.name
+    monkeypatch.setattr(transcribe.os, "name", "nt")  # журнал пишем только на Windows
+    settings = config.load_settings()
+    settings["recordings"]["device"] = "auto"
+
+    monkeypatch.setattr(transcribe, "_cuda_libs_missing", lambda: True)
+    transcribe.get_model(settings)
+    assert calls == [("cpu", "int8")] and store.get_state("transcribe_device")["why"] == transcribe.NO_CUDA_LIBS
+    assert store.row("SELECT 1 FROM log WHERE job='transcribe' AND message LIKE '%библиотека cuBLAS (CUDA 12) не установлена%'")
+
+    # библиотеки есть: GeForce 10xx не умеет быстрый float16 — пусть ctranslate2 выберет сам
+    monkeypatch.setattr(transcribe, "_model", None)
+    monkeypatch.setattr(transcribe, "_cuda_libs_missing", lambda: False)
+    transcribe.get_model(settings)
+    assert calls[-1] == ("cuda", "auto") and store.get_state("transcribe_device")["device"] == "cuda"
+    # видеокарта упала на первой фразе — dll не нашлась: дальше процессор, причина та же
+    transcribe._cpu_fallback(settings, RuntimeError("Library cublas64_12.dll is not found or cannot be loaded"))
+    assert calls[-1] == ("cpu", "int8") and store.get_state("transcribe_device")["why"] == transcribe.NO_CUDA_LIBS
+
+    monkeypatch.setattr(transcribe, "_cuda_failed", "")
+    monkeypatch.setattr(transcribe, "_model", None)
+    monkeypatch.setattr(fake_ct2, "get_cuda_device_count", lambda: 0)
+    transcribe.get_model(settings)
+    assert store.get_state("transcribe_device")["why"] == transcribe.NO_NVIDIA
+    monkeypatch.setattr(transcribe.os, "name", real_os)
+    from fastapi.testclient import TestClient
+
+    from opsdash.web.app import app, templates
+
+    client = TestClient(app, base_url="http://localhost:8765")
+    monkeypatch.setitem(templates.env.globals, "is_mac", True)
+    monkeypatch.setitem(templates.env.globals, "is_apple_silicon", False)
+    assert "шла на процессоре" not in client.get("/settings?tab=recordings").text  # на Mac выбора «Где считать» нет
+    monkeypatch.setitem(templates.env.globals, "is_mac", False)  # Windows
+    page = client.get("/settings?tab=recordings").text
+    assert "Где считать" in page and "шла на процессоре: видеокарты NVIDIA не нашлось" in page
+    assert "Скачать и перезапустить" not in page  # видеокарты нет — и качать нечего
+    # видеокарта есть, библиотеки нет (PULSE ставили до 2.0.44) — скачать перезапуском, как после обновления
+    store.set_state("transcribe_device", {"device": "cpu", "why": transcribe.NO_CUDA_LIBS, "at": store.utcnow()})
+    settings_with(recordings={"device": "cpu"})
+    assert "Скачать и перезапустить" not in client.get("/settings?tab=recordings").text  # выбран процессор
+    settings_with(recordings={"device": "auto"})
+    page = client.get("/settings?tab=recordings").text
+    assert "Скачать и перезапустить" in page and 'action="/updates/restart"' in page
+    monkeypatch.setattr(transcribe, "cuda_lib_dirs", lambda: ["C:/nvidia/cublas/bin"])
+    assert "Скачать и перезапустить" not in client.get("/settings?tab=recordings").text  # скачана, ждёт перезапуска
+
+
 def test_pause_and_cancel_meeting_waiting_in_queue(tmp_path, settings_with, monkeypatch):
     submitted = []
     monkeypatch.setattr(jobs, "submit", lambda *a, **k: submitted.append(a) or True)
@@ -358,7 +471,8 @@ def test_meeting_page_controls_and_delete(tmp_path, settings_with, monkeypatch):
     assert "err=" in post("delete", what="recording") and rec.exists()
     assert "err=" in post("delete", what="что-то") and records.get_meeting(mid)  # целиком — только по явному «all»
     post("transcription", action="cancel")
-    assert "Расшифровка отменена" in client.get(f"/meetings/{mid}").text
+    page = client.get(f"/meetings/{mid}").text
+    assert "Расшифровка остановлена" in page and 'value="transcribe"' in page  # «Расшифровать» — снова с начала
 
     (records.meeting_dir(mid) / "transcript.md").write_text("# Расшифровка", encoding="utf-8")
     records.update_meeting(mid, status="transcribed")

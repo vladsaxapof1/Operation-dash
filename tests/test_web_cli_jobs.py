@@ -816,7 +816,7 @@ def test_recording_links_to_calendar_at_once_and_queue_notes(client, tmp_path, m
 
 def test_meetings_feed_briefs_and_menu(client):
     """Встречи впереди — с брифом («Открыть бриф» / «Собрать бриф»), прошедшие — «Загрузить запись»;
-    пауза, отмена и удаление записи — в меню «…», удаление отдельно от «отменить»."""
+    пауза и «Остановить» расшифровки — кнопками в строке, удаление записи — в меню «…»."""
     now = datetime.now(timezone.utc).replace(microsecond=0)
     _cal("ev-brief", "Обзор с брифом", now + timedelta(minutes=30))
     _cal("ev-nobrief", "Без брифа", now + timedelta(minutes=50))
@@ -832,5 +832,6 @@ def test_meetings_feed_briefs_and_menu(client):
     assert "Собрать бриф" in rows["Без брифа"] and "запланирована" in rows["Без брифа"]
     assert "Загрузить запись" in rows["Прошедшая"] and 'data-upload-uid="ev-past"' in rows["Прошедшая"]
     new = rows[">Встреча<"]
-    assert "Приостановить расшифровку" in new and "Отменить расшифровку — встреча останется" in new
+    assert 'value="pause"' in new and 'aria-label="Остановить расшифровку"' in new
     assert "Удалить встречу и запись" in new and "tr-actions" not in new
+    assert "tr-bar" in page and "Остановить</button>" in page  # вся очередь — в шапке (одна запись — без «всё»)

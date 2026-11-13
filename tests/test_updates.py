@@ -263,3 +263,45 @@ def test_restart_job_syncs_libraries_then_restarts(monkeypatch):
     monkeypatch.setattr(updates, "sync_libraries", lambda root: calls.append("sync"))
     monkeypatch.setattr(updates, "restart", lambda in_daemon: calls.append("restart"))
     assert jobs.job_restart() == "перезапуск" and calls == ["sync", "restart"]
+
+
+def test_cuda_library_only_on_windows_with_nvidia(tmp_path, settings_with, monkeypatch):
+    """Библиотека видеокарты NVIDIA (дополнение cuda): только Windows с NVIDIA и без «процессора» в настройках;
+    уже стоит — не удаляем; uv sync в обновлении и перезапуске — с ней."""
+    monkeypatch.setattr(updates, "nvidia_present", lambda: True)
+    monkeypatch.setattr(updates, "find_uv", lambda: "uv")
+    assert not updates.wants_cuda(tmp_path)  # Mac и Linux — никогда
+    monkeypatch.setattr(updates, "_windows", lambda: True)
+    with monkeypatch.context() as m:
+        m.setattr(config, "SETTINGS_FILE", tmp_path / "нет.yaml")
+        assert updates.wants_cuda(tmp_path)  # установка: настроек ещё нет — будет «видеокарта, если получится»
+    settings_with(recordings={"device": "auto"})
+    assert updates.wants_cuda(tmp_path)
+    assert updates._sync_command(tmp_path)[-2:] == ["--extra", "cuda"]
+    settings_with(recordings={"device": "cpu"})
+    assert not updates.wants_cuda(tmp_path)  # выбрали процессор — 630 МБ не качаем
+    (tmp_path / ".venv" / "Lib" / "site-packages" / "nvidia" / "cublas").mkdir(parents=True)
+    assert updates.wants_cuda(tmp_path)  # уже скачана — иначе uv sync удалит её, а потом скачает снова
+    settings_with(recordings={"device": "auto"})
+    monkeypatch.setattr(updates, "_windows", lambda: False)
+    assert "cuda" not in updates._sync_command(tmp_path)
+
+
+def test_update_goes_on_without_cuda_library(tmp_path, monkeypatch):
+    """Библиотека видеокарты не скачалась (сеть, место на диске) — PULSE всё равно обновляется, без неё."""
+    import subprocess
+
+    monkeypatch.setattr(updates, "_sync_command", lambda root: ["uv", "sync", "--no-dev", "--extra", "cuda"])
+    runs = []
+
+    def run(cmd, **kw):
+        runs.append((cmd, kw["timeout"]))
+        return subprocess.CompletedProcess(cmd, 1 if "cuda" in cmd else 0, "", "нет места на диске")
+
+    monkeypatch.setattr(updates.subprocess, "run", run)
+    updates.sync_libraries(tmp_path)
+    assert runs == [(["uv", "sync", "--no-dev", "--extra", "cuda"], 3600), (["uv", "sync", "--no-dev"], 1800)]
+    assert store.row("SELECT 1 FROM log WHERE job='update' AND level='warning' AND message LIKE '%видеокарты NVIDIA%'")
+    monkeypatch.setattr(updates.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "сломалось"))
+    with pytest.raises(updates.UpdateError, match="сломалось"):
+        updates.sync_libraries(tmp_path)
