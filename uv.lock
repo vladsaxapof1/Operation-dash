@@ -811,7 +811,7 @@ wheels = [
 
 [[package]]
 name = "opsdash"
-version = "2.0.45"
+version = "2.0.46"
 source = { editable = "." }
 dependencies = [
     { name = "av" },
@@ -821,6 +821,7 @@ dependencies = [
     { name = "httpx" },
     { name = "jinja2" },
     { name = "markdown" },
+    { name = "numpy" },
     { name = "onnxruntime" },
     { name = "pypdf" },
     { name = "python-multipart" },
@@ -829,6 +830,7 @@ dependencies = [
     { name = "segno" },
     { name = "sherpa-onnx" },
     { name = "telethon" },
+    { name = "tokenizers" },
     { name = "tzdata" },
     { name = "uvicorn" },
 ]
@@ -856,6 +858,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1" },
     { name = "markdown", specifier = ">=3.7" },
     { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'mlx'", specifier = ">=0.4" },
+    { name = "numpy", specifier = ">=1.24" },
     { name = "nvidia-cublas-cu12", marker = "sys_platform == 'win32' and extra == 'cuda'", specifier = ">=12.8,<12.9.3" },
     { name = "onnxruntime", specifier = ">=1.17,<1.24" },
     { name = "pypdf", specifier = ">=4" },
@@ -865,6 +868,7 @@ requires-dist = [
     { name = "segno", specifier = ">=1.6" },
     { name = "sherpa-onnx", specifier = ">=1.10" },
     { name = "telethon", specifier = ">=1.37" },
+    { name = "tokenizers", specifier = ">=0.15" },
     { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn", specifier = ">=0.32" },
 ]

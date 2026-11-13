@@ -188,6 +188,7 @@
   (просьба директора — без предложения; `--text` — что произошло, словами директора).
 - «Без X не сделать Y», «Y ждёт X» → `./ops commitments wait <id Y> --for <id X>`; «это дубль», «это одно и то же» →
   `./ops commitments merge <дубль> --into <основная>` (просьба директора — без предложения).
+- «Что узнал за день» → `./ops memory today` (строка «Узнал за день: N · изменилось: …»); память в цифрах — `./ops memory stats`.
 - «Запомни, что …» → `./ops facts add --text "<факт целиком>" --about "<о ком>" --kind state|metric|role|trait|event|how --by director`
   («от вас»: Claude такой факт сам не сменяет). «Забудь …» → `./ops facts set <id> --forget`; «уже не так» → `--status outdated`;
   «неверно» → `--status wrong --reason "…"`. «Что известно о …?» → `./ops page "<имя>"`.

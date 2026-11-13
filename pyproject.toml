@@ -1,6 +1,6 @@
 [project]
 name = "opsdash"
-version = "2.0.45"
+version = "2.0.46"
 description = "PULSE — личный рабочий пульт: встречи, мессенджеры, почта, календарь и Kaiten под управлением Claude"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -25,6 +25,9 @@ dependencies = [
     # 1.24+ собирается только под macOS 14 на Apple Silicon — держим версию с Intel-маками и macOS 13
     "onnxruntime>=1.17,<1.24",
     "sherpa-onnx>=1.10",
+    # «Память»: токенизатор и векторы модели эмбеддингов (opsdash.embed); раньше приходили вместе с расшифровкой
+    "tokenizers>=0.15",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
