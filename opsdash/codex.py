@@ -280,7 +280,7 @@ def stream(prompt: str, *, settings: dict, model: str | None = None, resume: str
     store.log(job, f"запуск ChatGPT ({settings['chatgpt'].get('model') or 'модель по умолчанию'}, рассуждение: {level})")
     started = time.monotonic()
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            cwd=str(config.APP_DIR), env=_env(settings), text=True, encoding="utf-8",
+                            cwd=str(config.APP_DIR), env={**_env(settings), "OPSDASH_JOB": job}, text=True, encoding="utf-8",
                             errors="replace", **kwargs)
     if on_start:
         on_start(proc)

@@ -57,7 +57,8 @@ def test_protocol_and_read_only(data):
     init = replies[0]["result"]
     assert init["serverInfo"]["name"] == "pulse" and "Только чтение" in init["instructions"]
     tools = replies[1]["result"]["tools"]
-    assert {t["name"] for t in tools} == {"search", "meeting", "meetings", "task", "tasks", "decisions", "projects"}
+    assert {t["name"] for t in tools} == {"recall", "search", "meeting", "meetings", "task", "tasks", "decisions",
+                                          "projects"}
     assert all(t["annotations"]["readOnlyHint"] for t in tools)
     task = replies[2]["result"]
     assert not task["isError"] and "Бюджет склада" in task["content"][0]["text"]
@@ -66,17 +67,41 @@ def test_protocol_and_read_only(data):
         store.set_state("probe", 1)
 
 
-def test_search_finds_meetings_tasks_decisions_by_word_forms(data):
-    text, err = mcp_server.call("search", {"query": "бюджет склада"})
+def test_recall_finds_meetings_tasks_decisions_by_word_forms(data):
+    text, err = mcp_server.call("recall", {"query": "бюджета складов"})
     assert not err
-    meetings, tasks = text.split("## Задачи и договорённости")
-    assert "встреча m1" in meetings and "нашлось в: разбор" in meetings and "[00:03:10]" in meetings
-    assert "встреча m2" in meetings and "нашлось в: расшифровка" in meetings  # в разборе нет — нашлось в расшифровке
+    head, meetings = text.split("Встречи (")
+    assert f"[{data}]" in head and "Решения (1)" in head and "режем на 10%" in head
+    assert "m1 ·" in meetings and "разбор" in meetings and "[00:03:10]" in meetings
+    assert "m2 ·" in meetings and "расшифровка [00:01:00]" in meetings  # в разборе нет — нашлось в расшифровке
     assert "отпуск" not in meetings  # показаны только строки со словами запроса
-    assert f"[{data}]" in tasks and "## Решения" in tasks and "режем на 10%" in tasks
-    text, err = mcp_server.call("search", {"query": "логистика"})
-    assert not err and "ничего нет" in text
-    assert mcp_server.call("search", {"query": "по и"}) == ("нужны слова для поиска — например, «бюджет склада»", True)
+    assert mcp_server.call("search", {"query": "бюджет склада"})[0] == text.replace("бюджета складов", "бюджет склада") \
+        or "m1 ·" in mcp_server.call("search", {"query": "бюджет склада"})[0]  # search — короткое имя recall
+    text, err = mcp_server.call("recall", {"query": "логистика"})
+    assert not err and "ничего не нашлось" in text
+    assert mcp_server.call("recall", {"query": "по и"}) == ("нужны слова для поиска — например, «переезд склада»", True)
+
+
+def test_private_meeting_hidden_from_agents(data):
+    records.set_private("m1", True)
+    text, _ = mcp_server.call("recall", {"query": "бюджет склада"})
+    assert "m1 ·" not in text and "m2 ·" in text
+    assert mcp_server.call("meeting", {"id": "m1"}) == ("Это личная встреча — PULSE её агентам не отдаёт.", True)
+    assert "m1" not in mcp_server.call("meetings", {})[0] and "m2" in mcp_server.call("meetings", {})[0]
+
+
+def test_recall_from_mcp_logged_through_inbox_not_db(data):
+    from opsdash import memory
+
+    store.read_only()
+    try:
+        mcp_server.call("recall", {"query": "бюджет склада"})
+    finally:
+        store._query_only = False
+    assert not store.scalar("SELECT COUNT(*) FROM recall_log")
+    assert memory.absorb_inbox() == {"recall": 1}
+    row = store.row("SELECT who, query FROM recall_log")
+    assert row == {"who": "mcp", "query": "бюджет склада"}
 
 
 def test_meeting_transcript_in_chunks_and_errors(data):
@@ -154,7 +179,7 @@ def test_block_on_top_of_connections(monkeypatch, tmp_path):
     r = client.post("/settings/pulse-mcp", data={"on": "1"}, follow_redirects=False, headers={"referer": conn})
     assert r.headers["location"].startswith("/settings?tab=connections&msg=")
     page = client.get("/settings?tab=connections").text
-    assert "conn-pulse is-on" in page and "У Claude есть инструменты PULSE: search" in page and ">Отключить<" in page
+    assert "conn-pulse is-on" in page and "У Claude есть инструменты PULSE: recall, search" in page and ">Отключить<" in page
     client.post("/settings/pulse-mcp", data={}, headers={"referer": conn})
     assert not mcp_server.status()["on"]
     monkeypatch.setattr(brain, "find_claude", lambda *a, **k: None)

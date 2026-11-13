@@ -1682,6 +1682,22 @@ def update_meeting(meeting_id: str, **fields) -> None:
     store.execute(f"UPDATE meetings SET {', '.join(sets)} WHERE id=?", [*params, meeting_id])
 
 
+def set_private(meeting_id: str, private: bool) -> None:
+    """Личная (нерабочая) встреча: не даёт фактов, не находится ни в «Вспомнить», ни через MCP — фрагменты и факты
+    уходят сразу (opsdash.recall, opsdash.memory)."""
+    store.execute("UPDATE meetings SET private=?, updated=? WHERE id=?", (1 if private else 0, store.utcnow(), meeting_id))
+    if private:
+        from opsdash import recall
+
+        recall.forget_meeting(meeting_id)
+        try:
+            from opsdash import memory
+
+            memory.forget_source("meeting", meeting_id)
+        except AttributeError:
+            pass
+
+
 def read_meeting_file(meeting_id: str, name: str) -> str:
     path = meeting_dir(meeting_id) / name
     return path.read_text(encoding="utf-8") if path.exists() else ""

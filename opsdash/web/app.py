@@ -2366,6 +2366,14 @@ def meeting_title(request: Request, mid: str, title: str = Form(...)):
     return back(request, "Название сохранено")
 
 
+@app.post("/meetings/{mid}/private")
+def meeting_private(request: Request, mid: str, on: str = Form("1")):
+    """«Личная встреча»: не находится в «Вспомнить», не даёт фактов, не видна агентам через MCP (records.set_private)."""
+    records.set_private(mid, on == "1")
+    return back(request, "Встреча личная: из поиска, памяти и MCP убрана" if on == "1"
+                else "Встреча снова рабочая: появится в поиске за пару минут")
+
+
 # --- задачи Kaiten ------------------------------------------------------------------
 
 @app.get("/tasks")

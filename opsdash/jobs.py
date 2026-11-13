@@ -54,6 +54,19 @@ def job_agents_index(**_) -> str:
     return agents.index()
 
 
+def job_memory_index(**_) -> str:
+    """«Память»: приёмник от MCP и агентов, новые сообщения и встречи — в индекс «Вспомнить» (opsdash.recall)."""
+    from opsdash import memory, recall
+
+    absorbed = memory.absorb_inbox()
+    res = recall.refresh()
+    parts = [f"+{res.get('added', 0)} / −{res.get('removed', 0)} фрагментов"] if res.get("added") or res.get("removed") \
+        else ["без изменений"]
+    if absorbed:
+        parts.append("из приёмника: " + ", ".join(f"{k} — {v}" for k, v in absorbed.items()))
+    return " · ".join(parts)
+
+
 def job_agent_brief(brief_id: int, **_) -> str:
     from opsdash import agents
 
@@ -125,6 +138,7 @@ def job_transcribe(meeting_id: str, **_) -> str:
         records.update_meeting(meeting_id, status="failed", error=str(e)[:1000])
         bot.notify(f"❌ Не получилось расшифровать запись <b>{bot.e(meeting_id)}</b>: {bot.e(e)}")
         raise
+    submit("memory-index")  # расшифровка находится в «Вспомнить» сразу, не дожидаясь разбора
     if settings["recordings"].get("auto_process", True):
         submit("process-meeting", kind="heavy", args={"meeting_id": meeting_id})
     return meta["title"] + (f": {meta['duration_min']} мин" if meta.get("duration_min") else "")
@@ -157,6 +171,7 @@ def job_process_meeting(meeting_id: str, **_) -> str:
             raise RuntimeError("Claude не создал summary.md")
     m = records.get_meeting(meeting_id) or {}
     worklog.announce(log_from, "process-meeting", f"— встреча «{m.get('title') or meeting_id}»")
+    submit("memory-index")  # разбор — в индекс «Вспомнить»; личная встреча из него уйдёт
     return "готово"
 
 
@@ -558,6 +573,7 @@ REGISTRY = {
     "docs-index": job_docs_index,
     "agents-index": job_agents_index,
     "agents-watch": job_agents_watch,
+    "memory-index": job_memory_index,
     "transcribe": job_transcribe,
     "process-meeting": job_process_meeting,
     "triage": job_triage,
@@ -594,6 +610,7 @@ TITLES = {
     "docs-index": "Индекс документов",
     "agents-index": "Опыт агентов: индекс сессий",
     "agents-watch": "Поручения агентам: сессии и готовность",
+    "memory-index": "Память: индекс «Вспомнить»",
     "transcribe": "Расшифровка встречи",
     "process-meeting": "Разбор встречи (Claude)",
     "triage": "Разбор сообщений (Claude)",
@@ -824,6 +841,8 @@ def tick(settings: dict | None = None) -> list[str]:
         go("docs-index")
     if _due("housekeeping", 5):
         go("housekeeping")
+    if _due("memory-index", 5):  # новые сообщения и встречи — в «Вспомнить»; без новых — миллисекунды
+        go("memory-index")
     if settings["office"].get("folders") and _due("agents-index", 60):  # опыт агентов — до того, как Claude Code удалит журналы
         go("agents-index")
     if _due("agents-watch", 1):  # поручение открыли в Claude — найти сессию, следить, не готова ли

@@ -38,8 +38,8 @@ TRANSCRIPT_CHUNK = 25_000
 INSTRUCTIONS = (
     "PULSE — личный рабочий пульт на этом компьютере: встречи (расшифровки и разборы), задачи и договорённости с ходом "
     "(что спросили, ответили, перенесли — по датам), решения по темам, проекты. Обращайся, когда для работы нужен "
-    "контекст: что решили, кто что обещал, что обсуждали на встрече, на чём остановились. Начинай с search по "
-    "2–4 словам темы, дальше — meeting, task, decisions. Ссылайся на источник: встреча (id и [чч:мм:сс]), задача [id]. "
+    "контекст: что решили, кто что обещал, что обсуждали на встрече, на чём остановились. Начинай с recall по "
+    "2–5 словам темы, дальше — meeting, task, decisions. Ссылайся на источник: встреча (id и [чч:мм:сс]), задача [id]. "
     "Только чтение: изменить что-то в PULSE отсюда нельзя — скажи пользователю, что сделать в PULSE. "
     "Самих чатов и писем здесь нет — только то, что PULSE записал из них в ход задач."
 )
@@ -89,6 +89,8 @@ def _found_meetings(stems: list[str], limit: int) -> list[str]:
 
     out = []
     for m in records.list_meetings(limit=1000):
+        if m.get("private"):
+            continue
         summary = records.read_meeting_file(m["id"], "summary.md")
         head = f"{m['title']} {m.get('headline') or ''}"
         where = "разбор"
@@ -137,7 +139,23 @@ def _found_decisions(stems: list[str], limit: int) -> list[str]:
     return out
 
 
+def recall(query: str, about: str = "", since: str = "", budget: str = "mid") -> str:
+    """«Вспомнить» (opsdash.recall): факты, страница знаний, задачи с ходом, решения, встречи, документы, сессии —
+    одним вызовом. Переписки здесь нет; личные встречи не находятся."""
+    from opsdash import recall as rc
+
+    try:
+        return rc.recall(query, about=about or None, since=since or None, budget=budget or "mid", mcp=True)
+    except rc.RecallError as e:
+        raise ToolError(str(e)) from e
+
+
 def search(query: str, limit: int = 10) -> str:
+    """Короткое имя для recall — прежние сессии зовут его по привычке."""
+    return recall(query, budget="high" if int(limit or 10) > 10 else "mid")
+
+
+def _search_old(query: str, limit: int = 10) -> str:
     stems = _stems(query)
     if not stems:
         raise ToolError("нужны слова для поиска — например, «бюджет склада»")
@@ -155,13 +173,20 @@ def search(query: str, limit: int = 10) -> str:
 
 
 def meetings(days: int | None = None, limit: int = 30) -> str:
-    return _ops("meetings", "list", "--limit", str(max(1, min(int(limit or 30), 200))),
-                *(["--days", str(int(days))] if days else []))
+    from opsdash import records, store
+
+    items = [m for m in records.list_meetings(limit=max(1, min(int(limit or 30), 200)) + 50, days=days or None)
+             if not m.get("private")][:max(1, min(int(limit or 30), 200))]
+    return "\n".join(f"{m['id']} · {store.local(m['started_at'])} · {m['title']} · {m['status']}"
+                     + (f" — {m['headline']}" if m.get("headline") else "") for m in items) or "Встреч нет."
 
 
 def meeting(id: str, transcript: bool = False, offset: int = 0) -> str:
     from opsdash import records
 
+    m = records.get_meeting(str(id))
+    if m and m.get("private"):
+        raise ToolError("Это личная встреча — PULSE её агентам не отдаёт.")
     if not transcript:
         return _ops("meetings", "show", str(id))
     if not records.get_meeting(str(id)):
@@ -203,10 +228,18 @@ def _schema(props: dict, required: tuple = ()) -> dict:
 
 
 TOOLS: dict[str, tuple[Any, str, dict]] = {
-    "search": (search, "Найти в PULSE по словам: встречи (разборы и расшифровки), задачи и договорённости, решения. "
-               "С этого начинай — 2–4 слова темы: «бюджет склада», «KPI ноябрь».",
+    "recall": (recall, "Вспомнить: один поиск по всему, что знает PULSE, — факты и страница знаний о теме, задачи "
+               "с ходом, решения, встречи (разборы и расшифровки), документы, прошлые сессии агентов. С этого "
+               "начинай — 2–5 слов темы: «переезд склада», «KPI ноябрь». Слова — в любой форме.",
                _schema({"query": {"type": "string", "description": "слова темы"},
-                        "limit": {"type": "integer", "description": "сколько показать в каждом разделе, до 30"}},
+                        "about": {"type": "string", "description": "о ком или о чём: только где он упоминается"},
+                        "since": {"type": "string", "description": "YYYY-MM-DD — не раньше"},
+                        "budget": {"type": "string", "enum": ["low", "mid", "high"],
+                                   "description": "длина ответа: low ≈ 3 КБ, mid ≈ 6 КБ, high ≈ 18 КБ"}},
+                       ("query",))),
+    "search": (search, "То же, что recall (короткое имя): найти в PULSE по словам темы.",
+               _schema({"query": {"type": "string", "description": "слова темы"},
+                        "limit": {"type": "integer", "description": "больше 10 — длинный ответ"}},
                        ("query",))),
     "meeting": (meeting, "Встреча: разбор — главное, решения, задачи. transcript=true — расшифровка с метками "
                 "[чч:мм:сс] (длинная — частями, offset из конца ответа).",

@@ -268,6 +268,44 @@ def _chat_tasks(found: list[dict], shown: set[int]) -> None:
         out(f"  …и ещё {len(found) - chat_tasks.PER_CHAT}: ./ops commitments list --brief --person \"<имя>\"")
 
 
+def _messages_found(a) -> list[dict]:
+    """Поиск по переписке на индексе «Вспомнить» (opsdash.recall): слова в любой форме, лучшее сверху. Внутри окна
+    переписки — сообщения, где есть слова запроса. Не нашлось по словам (ссылка, @имя, кусок кода) — точная подстрока."""
+    from opsdash import recall
+
+    since = store.to_utc_iso(config.now() - timedelta(days=a.days))
+    recall.refresh()
+    want = recall.stems(a.query)
+    ids = recall.fts_chunks(a.query, kinds=("msg",), k=max(a.limit, 20) * 2, since=since,
+                            src=f"{a.source}:" if a.source else None, chat=a.chat)
+    items: list[dict] = []
+    seen: set[int] = set()
+    for c in recall.chunks(ids):
+        msg_ids = store.loads(c["msg_ids"], [])
+        if not msg_ids:
+            continue
+        marks = ",".join("?" for _ in msg_ids)
+        msgs = store.rows(f"SELECT * FROM messages WHERE id IN ({marks})", msg_ids)
+        msgs = sorted((m for m in msgs if recall.score(m["text"], want) and m["id"] not in seen),
+                      key=lambda m: (-recall.score(m["text"], want), m["ts"]))
+        for m in msgs[:3]:
+            seen.add(m["id"])
+            items.append(m)
+        if len(items) >= a.limit:
+            break
+    if items:
+        return items[:a.limit]
+    sql = "SELECT * FROM messages WHERE text LIKE ? AND ts >= ?"
+    params: list = [f"%{a.query}%", since]
+    if a.source:
+        sql += " AND source=?"
+        params.append(a.source)
+    if a.chat:
+        sql += " AND (chat_title LIKE ? OR topic LIKE ?)"
+        params += [f"%{a.chat}%"] * 2
+    return store.rows(sql + " ORDER BY ts DESC LIMIT ?", [*params, a.limit])
+
+
 def cmd_messages(a) -> None:
     if a.action == "pending":
         sql = "SELECT * FROM messages WHERE processed=0"
@@ -318,6 +356,14 @@ def cmd_messages(a) -> None:
         n = store.execute(f"UPDATE messages SET processed=1 WHERE id IN ({marks})", ids)
         out(f"Отмечено разобранными: {n}")
     elif a.action == "search":
+        items = _messages_found(a)
+        if a.json:
+            return as_json(items)
+        if not items:
+            return out("Ничего не нашлось.")
+        for m in items:
+            out(f"{m['source']} · «{m['chat_title']}» " + _msg_line(m))
+    elif a.action == "search-exact":  # прежний поиск: точная подстрока, свежие сверху
         sql = "SELECT * FROM messages WHERE text LIKE ? AND ts >= ?"
         params = [f"%{a.query}%", store.to_utc_iso(config.now() - timedelta(days=a.days))]
         if a.source:
@@ -489,6 +535,34 @@ def cmd_docs(a) -> None:
             out(f"Ошибка последнего обновления: {s['last_error']}")
     elif a.action == "index":
         out(jobs.run_job("docs-index"))
+
+
+def cmd_recall(a) -> None:
+    from opsdash import recall
+
+    kinds = [k.strip() for k in (a.kind or "").split(",") if k.strip()] or None
+    bad = [k for k in kinds or [] if k not in recall.KINDS]
+    if bad:
+        fail(f"--kind: {', '.join(bad)}? Можно: {', '.join(recall.KINDS)}")
+    try:
+        out(recall.recall(a.query, about=a.about, since=a.since, kinds=kinds, budget=a.budget, limit=a.limit))
+    except recall.RecallError as e:
+        fail(str(e))
+
+
+def cmd_memory(a) -> None:
+    from opsdash import memory, recall
+
+    if a.action == "index":
+        absorbed = memory.absorb_inbox()
+        res = recall.refresh(full=a.full)
+        st = recall.index_stats()
+        out(f"Индекс «Вспомнить»: +{res.get('added', 0)} / −{res.get('removed', 0)} фрагментов за {res.get('ms', 0)} мс"
+            f" (чатов: {res.get('chats', 0)}, встреч: {res.get('meetings', 0)})"
+            + (f"; из приёмника: {absorbed}" if absorbed else ""))
+        out("В индексе: " + ", ".join(f"{recall.CHUNK_KINDS.get(k, k)} — {v['n']}" for k, v in st.items()))
+        return
+    getattr(memory, "cli_" + a.action.replace("-", "_"))(a, out, fail)
 
 
 def cmd_kb(a) -> None:
@@ -728,7 +802,10 @@ def cmd_meetings(a) -> None:
             fail(f"нет встречи {a.id}")
         participants = [p.strip() for p in a.participants.split(",")] if a.participants else None
         records.update_meeting(a.id, title=a.title, status=a.status, headline=a.headline, participants=participants)
-        out("Сохранено")
+        if a.private is not None:
+            records.set_private(a.id, a.private == "yes")
+        out("Сохранено" + (" — встреча личная: не попадёт ни в поиск, ни в память, ни агентам" if a.private == "yes"
+                            else ""))
     elif a.action == "add":
         from opsdash import recordings
 
@@ -738,9 +815,27 @@ def cmd_meetings(a) -> None:
         mid = recordings.add_file(p, a.title)
         out(f"Встреча создана: {mid}. Расшифровка: ./ops run transcribe --meeting {mid}")
     elif a.action == "search":
-        q = a.query.lower()
+        from opsdash import recall
+
+        recall.refresh()
+        want = recall.stems(a.query)
+        private = recall._private_meetings()
         hits = 0
+        for c in recall.chunks(recall.fts_chunks(a.query, kinds=("meet", "sum"), k=a.limit * 2)):
+            if c["src"] in private:
+                continue
+            name = "summary.md" if c["kind"] == "sum" else "transcript.md"
+            where = f"«{c['pos']}»" if c["kind"] == "sum" else c["pos"]
+            out(f"{c['src']}/{name} {where}: {recall.snippet(c['text'], want, 300)}")
+            hits += 1
+            if hits >= a.limit:
+                return
+        if hits:
+            return
+        q = a.query.lower()  # по словам не нашлось — точная подстрока, как раньше
         for m in records.list_meetings(limit=1000):
+            if m.get("private"):
+                continue
             for name in ("summary.md", "transcript.md"):
                 text = records.read_meeting_file(m["id"], name)
                 for line in text.splitlines():
@@ -1872,7 +1967,13 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--shown", action="store_true", help="все, что показала последняя команда pending")
     x.add_argument("--ids", help="через запятую")
     x.add_argument("--upto", type=int)
-    x = ms.add_parser("search", help="поиск по тексту")
+    x = ms.add_parser("search", help="поиск по словам в любой форме, лучшее сверху")
+    x.add_argument("query")
+    x.add_argument("--days", type=int, default=60)
+    x.add_argument("--source")
+    x.add_argument("--chat", help="часть названия чата или темы")
+    x.add_argument("--limit", type=int, default=50)
+    x = ms.add_parser("search-exact", help="точная подстрока, свежие сверху (ссылки, @имена, номера)")
     x.add_argument("query")
     x.add_argument("--days", type=int, default=60)
     x.add_argument("--source")
@@ -1933,6 +2034,23 @@ def build_parser() -> argparse.ArgumentParser:
     ms.add_parser("index", help="обновить индекс сейчас")
     s.set_defaults(fn=cmd_docs)
 
+    s = sub.add_parser("recall", help="вспомнить: один поиск по всему — факты, задачи с ходом, решения, встречи, "
+                                      "переписка, документы, сессии агентов")
+    s.add_argument("query")
+    s.add_argument("--about", help="о ком или о чём: только то, где он упоминается")
+    s.add_argument("--since", help="YYYY-MM-DD — не раньше")
+    s.add_argument("--kind", help="через запятую: facts,tasks,decisions,meetings,messages,docs,sessions")
+    s.add_argument("--budget", choices=["low", "mid", "high"], default="mid",
+                   help="длина выдачи: low ≈ 3 КБ, mid ≈ 6 КБ (по умолчанию), high ≈ 18 КБ")
+    s.add_argument("--limit", type=int, help="строк каждого вида")
+    s.set_defaults(fn=cmd_recall)
+
+    s = sub.add_parser("memory", help="память: индекс «Вспомнить», сущности, объединение, «Забыть»")
+    ms = s.add_subparsers(dest="action", required=True)
+    x = ms.add_parser("index", help="дочитать новое в индекс «Вспомнить» (--full — собрать заново)")
+    x.add_argument("--full", action="store_true")
+    s.set_defaults(fn=cmd_memory)
+
     s = sub.add_parser("kb", help="база знаний: решения, уроки, удачи (антология)")
     ms = s.add_subparsers(dest="action", required=True)
     x = ms.add_parser("add", help="добавить решение, урок или удачу")
@@ -1992,10 +2110,12 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--status", choices=["new", "transcribed", "processed", "failed"])
     x.add_argument("--headline", help="одна строка: главное по встрече")
     x.add_argument("--participants", help="через запятую")
+    x.add_argument("--private", choices=["yes", "no"],
+                   help="yes — личная (нерабочая) встреча: без фактов, не находится поиском и не видна агентам")
     x = ms.add_parser("add", help="добавить файл записи вручную")
     x.add_argument("file")
     x.add_argument("--title")
-    x = ms.add_parser("search", help="поиск по разборам и расшифровкам")
+    x = ms.add_parser("search", help="поиск по словам в любой форме по разборам и расшифровкам, лучшее сверху")
     x.add_argument("query")
     x.add_argument("--limit", type=int, default=40)
     x = ms.add_parser("messages", help="переписка с начала встречи в чатах по её задачам — не выполнены ли они уже")

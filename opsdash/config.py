@@ -306,6 +306,11 @@ _cache: dict = {"key": None, "value": None}
 
 def load_settings() -> dict:
     """Настройки с подстановкой значений по умолчанию. Файл перечитывается, только если изменился."""
+    return copy.deepcopy(_settings_shared())
+
+
+def _settings_shared() -> dict:
+    """Те же настройки без копии — только читать (часовой пояс на каждой строке выдачи не должен копировать всё)."""
     with _lock:
         try:
             st = SETTINGS_FILE.stat()
@@ -317,7 +322,7 @@ def load_settings() -> dict:
             if key[1] is not None:
                 user = yaml.safe_load(SETTINGS_FILE.read_text(encoding="utf-8")) or {}
             _cache["key"], _cache["value"] = key, deep_merge(DEFAULTS, user)
-        return copy.deepcopy(_cache["value"])
+        return _cache["value"]
 
 
 def _replace(tmp: Path, target: Path) -> None:
@@ -420,7 +425,7 @@ def mask(value: str) -> str:
 # --- время -----------------------------------------------------------------
 
 def tz(settings: dict | None = None) -> ZoneInfo:
-    name = (settings or load_settings())["owner"].get("timezone") or "Europe/Moscow"
+    name = (settings or _settings_shared())["owner"].get("timezone") or "Europe/Moscow"
     return _zone(name)
 
 

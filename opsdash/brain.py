@@ -356,7 +356,7 @@ def _stream(prompt: str, *, settings: dict, model: str | None, resume: str | Non
         kwargs["creationflags"] = 0x08000000
     store.log(job, f"запуск Claude ({model or 'модель по умолчанию'})")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            cwd=str(config.APP_DIR), env=_env(settings), text=True, encoding="utf-8",
+                            cwd=str(config.APP_DIR), env={**_env(settings), "OPSDASH_JOB": job}, text=True, encoding="utf-8",
                             errors="replace", **kwargs)
     if on_start:
         on_start(proc)

@@ -36,6 +36,37 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
     tokenize='unicode61 remove_diacritics 2', prefix='3 4'
 );
 
+CREATE TABLE IF NOT EXISTS memory_chunks (    -- «Вспомнить»: фрагменты сырого текста для поиска (opsdash.recall)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,              -- msg — окно переписки | meet — окно расшифровки | sum — раздел разбора встречи
+    src TEXT NOT NULL,               -- msg: <источник>:<chat_id>; meet, sum: id встречи
+    title TEXT,                      -- чат или встреча
+    ts TEXT,                         -- UTC: первое сообщение окна или начало встречи
+    pos TEXT,                        -- [id первого сообщения] | [чч:мм:сс] | раздел разбора
+    text TEXT NOT NULL,
+    msg_ids TEXT,                    -- JSON: сообщения окна
+    hash TEXT                        -- неизменный фрагмент при переиндексации остаётся (и его вектор тоже)
+);
+CREATE INDEX IF NOT EXISTS ix_memory_chunks_src ON memory_chunks(src, kind);
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(   -- rowid = memory_chunks.id; текст — без регистра и «ё»
+    body, title, tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TABLE IF NOT EXISTS chunk_entities (   -- о ком или о чём фрагмент: по словарю псевдонимов (opsdash.memory)
+    chunk_id INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    PRIMARY KEY (chunk_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS ix_chunk_entities_entity ON chunk_entities(entity_id);
+CREATE TABLE IF NOT EXISTS recall_log (       -- журнал «Вспомнить»: кто спросил, что, сколько нашлось и каким способом
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    who TEXT,                        -- навык (chat, ask, triage…), mcp, cli
+    query TEXT, about TEXT, kinds TEXT,
+    found TEXT,                      -- JSON {вид: сколько}
+    mode TEXT,                       -- слова | слова + смысл
+    ms REAL
+);
+
 CREATE TABLE IF NOT EXISTS anthology (      -- решения, уроки, удачи (opsdash.anthology)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,              -- decision | lesson | win
@@ -545,6 +576,10 @@ MIGRATIONS = [
      "WHERE status='open' AND direction IN ('mine', 'to_me') AND due IS NOT NULL AND EXISTS(SELECT 1 FROM task_links l "
      "WHERE l.task_id=commitments.id AND l.waits_for IS NULL AND l.done_at IS NULL AND l.until > commitments.due)"),
     ("commitments", "due_hint_no", "TEXT"),
+    # «Память» (2.0.46): личная встреча не даёт фактов и не находится ни поиском, ни через MCP; чат «не запоминать»
+    # не уходит в «Память дня»
+    ("meetings", "private", "INTEGER DEFAULT 0"),
+    ("chats", "memory_off", "INTEGER DEFAULT 0"),
 ]
 
 
