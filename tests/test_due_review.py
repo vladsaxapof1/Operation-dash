@@ -163,3 +163,72 @@ def test_wait_mark_says_waits(client):
     records.add_wait(mine, waits_for=to_me)
     page = client.get("/commitments").text
     assert 'class="task-wait"' in page and "ждёт</span>" in page
+
+
+def test_due_moved_by_task_log(client, capsys):
+    """Срок сдвинулся по ходу задачи: в переписке назвали новую дату (commitments log --new-due) или задача ждёт событие
+    позже срока — PULSE срок не меняет, а предлагает новый: «Уточнить срок» на Сводке, окно задачи, отметка на доске.
+    Перенести — одной кнопкой; «оставить прежний» — эту дату больше не предлагать."""
+    from opsdash import cli, day
+
+    cid = records.add_commitment(direction="to_me", who="Пётр", title="Сообщить о подписании",
+                                 what="После ответа поставщика написать, когда подписываем", due="2026-11-13")
+    # задача ждёт событие позже срока — подсказка сама
+    records.add_wait(cid, event="ответ поставщика", until="2026-11-20", by="claude")
+    c = records.get_commitment(cid)
+    assert c["due"] == "2026-11-13" and c["due_hint"] == "2026-11-20" and c["due_hint_from"] == "wait"
+    assert c["due_moved"] and "ждёт: ответ поставщика — к 20.11" in c["due_hint_why"]
+    assert [t["id"] for t in records.due_queue()] == [cid]
+    cli.main(["commitments", "show", str(cid)])
+    assert "предложен новый срок 2026-11-20 (ждёт: ответ поставщика — к 20.11), ждёт директора" in capsys.readouterr().out
+    # проверка окон подсказку из хода не снимает
+    day.check_due(cid)
+    assert records.get_commitment(cid)["due_hint"] == "2026-11-20"
+    # событие случилось — подсказка ожидания уходит
+    link = records.find_waits(cid, event="поставщика")[0]
+    records.set_event_done(link["id"])
+    assert not records.get_commitment(cid)["due_hint"] and records.due_queue() == []
+
+    # в ходе назвали новую дату
+    cli.main(["commitments", "log", str(cid), "--text", "Пётр: поставщик ответил, подписываем 18.11",
+              "--new-due", "2026-11-18"])
+    out = capsys.readouterr().out
+    assert "Новый срок 18.11 предложен директору" in out and "отметь: ./ops commitments wait" not in out
+    c = records.get_commitment(cid)
+    assert (c["due_hint"], c["due_hint_from"]) == ("2026-11-18", "log") and c["due"] == "2026-11-13"
+    assert c["due_hint_why"] == "Пётр: поставщик ответил, подписываем 18.11"
+
+    # окно задачи: «Похоже, срок сдвинулся» с кнопками; доска — отметка; Сводка — строка «Уточнить срок»
+    page = client.get(f"/commitments?task={cid}").text
+    assert "Похоже, срок сдвинулся.</b> Пётр: поставщик ответил, подписываем 18.11. Новый срок" in page
+    assert ">Перенести на 18.11</button>" in page and ">Оставить 13.11</button>" in page
+    assert ">срок → 18.11?</span>" in page
+    home = client.get("/").text
+    assert "Уточнить срок · 1 задача</div>" in home and "срок сдвинулся — 1" in home and "срок под угрозой —" not in home
+    assert "Похоже, срок 13.11 сдвинулся: Пётр: поставщик ответил, подписываем 18.11" in home and ">Новый срок<span>" in home
+
+    # «Оставить 13.11» — дату больше не предлагаем
+    client.post(f"/commitments/{cid}/due", data={"act": "skip"}, headers={"Accept": "application/json"})
+    c = records.get_commitment(cid)
+    assert c["due"] == "2026-11-13" and not c["due_hint"] and c["due_hint_no"] == "2026-11-18" and not c["no_due_at"]
+    assert records.suggest_due(cid, "2026-11-18", "снова 18.11") == "declined"
+    assert records.suggest_due(cid, "2026-11-12", "раньше") == "same"
+    # другая дата — снова предложение; «Перенести» — срок новый, подсказки нет, в ходе — событие переноса
+    assert records.suggest_due(cid, "2026-11-25", "Пётр: юристы просят ещё неделю") == "set"
+    client.post(f"/commitments/{cid}/due", data={"due": "2026-11-25"}, headers={"Accept": "application/json"})
+    c = records.get_commitment(cid)
+    assert c["due"] == "2026-11-25" and not c["due_hint"] and not c["due_moved"]
+    assert c["log"][-1]["text"] == "Срок: 13.11 → 25.11"
+    # срок перенесли сами (редактирование) не раньше подсказки — подсказка выполнена
+    records.suggest_due(cid, "2026-11-27", "ещё два дня")
+    records.update_commitment(cid, due="2026-11-28")
+    assert not records.get_commitment(cid)["due_hint"]
+
+    # без срока, между коллегами, закрытая — не предложение
+    no_due = records.add_commitment(direction="to_me", who="Олег", title="Прайс", what="Прислать прайс")
+    other = records.add_commitment(direction="other", who="Олег", whom="Мария", title="Графики", what="Графики",
+                                   due="2026-11-13")
+    assert records.suggest_due(no_due, "2026-11-20", "…") == "no_due"
+    assert records.suggest_due(other, "2026-11-20", "…") == "other"
+    cli.main(["commitments", "log", str(no_due), "--text", "Олег пришлёт 20.11", "--new-due", "2026-11-20"])
+    assert f"./ops commitments set {no_due} --due 2026-11-20" in capsys.readouterr().out

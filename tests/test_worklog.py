@@ -263,25 +263,73 @@ def test_triage_announces_task_log(monkeypatch, client):
     assert n["title"] == "Обновил ход задачи «Договор с поставщиком упаковки»"
     assert n["text"] == "Олег вернётся в среду 11.11" and n["link"] == f"/commitments?task={cid}"
 
-    # две задачи — список и ссылка на доску, где только они
+    # две задачи — два уведомления, у каждого ссылка на окно своей задачи; свежая — сверху
     since = worklog.last_id()
     worklog.add(other, "Олег прислал прайс", by="claude")
     worklog.add(cid, "Пётр: договор на подписи", by="claude")
     assert worklog.announce(since, "process-meeting", "— встреча «Закупки»") == 2
-    n = store.row("SELECT * FROM notices ORDER BY id DESC")
-    assert n["title"] == "Обновил ход задач: 2 — встреча «Закупки»" and n["link"] == f"/commitments?updated={cid},{other}"
-    assert "«Договор с поставщиком упаковки» — Пётр: договор на подписи" in n["text"]
+    top, second = notices.recent()[:2]
+    assert top["title"] == "Обновил ход задачи «Договор с поставщиком упаковки» — встреча «Закупки»"
+    assert top["text"] == "Пётр: договор на подписи" and top["link"] == f"/commitments?task={cid}"
+    assert second["title"] == "Обновил ход задачи «Новые цены» — встреча «Закупки»"
+    assert second["link"] == f"/commitments?task={other}"
     assert worklog.announce(worklog.last_id(), "triage") == 0
+    # тот же разбор снова двинул ту же задачу — уведомление о ней заменяется, а не копится
+    since = worklog.last_id()
+    worklog.add(other, "Олег: прайс действует до 30.11", by="claude")
+    worklog.announce(since, "process-meeting", "— встреча «Закупки»")
+    same = [n for n in notices.recent() if n["link"] == f"/commitments?task={other}"]
+    assert len(same) == 1 and same[0]["text"] == "Олег: прайс действует до 30.11"
+
+    # задач больше четырёх — три свежие по отдельности, остальные одним «ещё N» на доску, где только они
+    extra = [records.add_commitment(direction="to_me", who="Олег", title=f"Задача {i}", what=f"Задача {i}")
+             for i in range(4)]
+    since = worklog.last_id()
+    for t in [cid, other, *extra]:
+        worklog.add(t, f"Шаг по задаче {t}", by="claude")
+    assert worklog.announce(since, "triage") == 6
+    top = notices.recent()[:4]
+    assert [n["link"] for n in top[:3]] == [f"/commitments?task={t}" for t in reversed(extra[1:])]
+    assert top[3]["title"] == "Обновил ход ещё 3 задач"
+    assert top[3]["link"] == f"/commitments?updated={extra[0]},{other},{cid}"
+    n = {"link": f"/commitments?updated={cid},{other}"}
 
     # по ссылке: только эти задачи, подробные карточки с новым «Сейчас», «× снять» возвращает все
     stray = records.add_commitment(direction="mine", whom="Тимур", title="Посторонняя задача", what="Посторонняя задача")
     page = client.get(n["link"]).text
     assert f'data-task="{cid}"' in page and f'data-task="{other}"' in page and f'data-task="{stray}"' not in page
-    assert '<span>Олег прислал прайс <span class="muted">' in page and 'class="task full' in page  # новое «Сейчас»
+    assert '<span>Шаг по задаче' in page and 'class="task full' in page  # новое «Сейчас»
     assert "обновился ход: 2 задачи" in page and f'name="updated" value="{cid},{other}"' in page
     assert f'data-task="{stray}"' in client.get("/commitments").text
     listing = client.get(f"/commitments?view=list&updated={other}").text
     assert f'<tr data-task="{other}"' in listing and f'<tr data-task="{cid}"' not in listing
+    # задача из уведомления видна, даже если её уже убрали в архив
+    records.set_archived(other, True)
+    assert f'data-task="{other}"' in client.get(n["link"]).text
+    assert f'data-task="{other}"' not in client.get("/commitments").text
+
+
+def test_log_hints_wait_when_timing_moves(capsys, monkeypatch):
+    """Ход говорит «до 16.11 не успеваем, дату напишу после ответа поставщика», а у задачи срок сегодня и она ничего
+    не ждёт — команда напоминает отметить «ждёт»: ход записали, а задача весь день оставалась «Срочно»."""
+    monkeypatch.setattr(config, "now", lambda settings=None: datetime(2026, 11, 13, 15, 0, tzinfo=config.tz()))
+    cid = records.add_commitment(direction="to_me", who="Пётр", title="Сообщить о подписании договора",
+                                 what="После ответа поставщика написать, когда подписываем договор", due="2026-11-13")
+    hint = "отметь: ./ops commitments wait"
+    cli.main(["commitments", "log", str(cid), "--text", "Пётр: старую версию пометил устаревшей", "--at", "2026-11-13 11:15"])
+    assert hint not in capsys.readouterr().out  # ни даты позже срока, ни переноса
+    cli.main(["commitments", "log", str(cid), "--at", "2026-11-13 12:14", "--text",
+              "Пётр: поставщик ответил; дату напишет после ответа юристов, до 16.11 не успеваем"])
+    got = capsys.readouterr().out
+    assert hint in got and f"./ops commitments wait {cid} --event" in got and "Срок задачи — 13.11" in got
+    cli.main(["commitments", "log", str(cid), "--at", "2026-11-13 12:20", "--text", "Пётр пришлёт правки 20.11"])
+    assert hint in capsys.readouterr().out  # дата позже срока
+    cli.main(["commitments", "log", str(cid), "--at", "2026-11-13 12:30", "--text", "Пётр: статус на 12.11 прислал"])
+    assert hint not in capsys.readouterr().out  # прошедшая дата — не перенос
+    # уже ждёт — не напоминаем
+    records.add_wait(cid, event="ответ юристов", until="2026-11-20")
+    cli.main(["commitments", "log", str(cid), "--at", "2026-11-13 12:40", "--text", "Пётр: до 16.11 не успеваем"])
+    assert hint not in capsys.readouterr().out
 
 
 def test_collect_progress_edit_and_corner(client, monkeypatch):

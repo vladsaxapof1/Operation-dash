@@ -275,8 +275,8 @@ def due_now_count(others: bool = True) -> int:
 
 def due_queue() -> list[dict]:
     """«Уточнить срок» на Сводке: открытые задачи без срока, про которые директор ещё не решила «пусть без срока»,
-    и её задачи, чей срок под угрозой с самого начала (due_hint — реальнее эта дата, opsdash.day.check_due).
-    Только её задачи и что ей должны (сроки договорённостей между коллегами она не разбирает): сначала её,
+    и её задачи, чей срок под угрозой с самого начала (due_hint — реальнее эта дата, opsdash.day.check_due) или, похоже,
+    сдвинулся по ходу задачи (suggest_due: в переписке назвали новую дату, ждёт событие позже срока). Только её задачи и что ей должны (сроки договорённостей между коллегами она не разбирает): сначала её,
     внутри — последние добавленные сверху."""
     return _mark(store.rows(
         "SELECT * FROM commitments WHERE status='open' AND archived_at IS NULL AND direction IN ('mine', 'to_me') "
@@ -286,14 +286,15 @@ def due_queue() -> list[dict]:
 def set_due(cid: int, due: str | None) -> None:
     """Срок из «Уточнить срок»: дата YYYY-MM-DD или None — оставить как есть: задача без срока так и останется, и PULSE
     больше о ней не спросит; у задачи со сроком под угрозой остаётся её срок. Директор задачу видела — отметка «новая»
-    снимается, подсказка «реальнее …» — тоже."""
+    снимается, подсказка «реальнее …» — тоже; отклонённую дату из хода (suggest_due) PULSE больше не предложит."""
     if due and not _as_date(due):
         raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
     now = store.utcnow()
     was = store.scalar("SELECT due FROM commitments WHERE id=?", (cid,))
     store.execute("UPDATE commitments SET no_due_at=CASE WHEN ? IS NULL AND due IS NULL THEN ? END, due=COALESCE(?, due), "
-                  "due_hint=NULL, due_hint_why=NULL, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
-                  (due or None, now, due or None, now, now, cid))
+                  "due_hint_no=CASE WHEN ? IS NULL AND due_hint_from IS NOT NULL THEN due_hint ELSE due_hint_no END, "
+                  "due_hint=NULL, due_hint_why=NULL, due_hint_from=NULL, seen_at=COALESCE(seen_at, ?), updated=? WHERE id=?",
+                  (due or None, now, due or None, due or None, now, now, cid))
     if due and due != was:
         worklog.event(cid, due_change(was, due))
 
@@ -304,6 +305,44 @@ def due_change(was: str | None, new: str | None) -> str:
     if not new:
         return "Срок снят"
     return f"Срок: {f(was)} → {f(new)}" if was else f"Срок — {f(new)}"
+
+
+DUE_HINT_FROM = ("log", "wait")
+
+
+def suggest_due(cid: int, day: str, why: str, *, src: str = "log") -> str:
+    """Срок, похоже, сдвинулся: в ходе задачи назвали новую дату («до 16.11 не успеваем, сделаем к 20.11») или задача
+    ждёт событие позже своего срока. Срок не меняем — запоминаем подсказку (due_hint, почему — due_hint_why, откуда —
+    src): директору её предложат «Уточнить срок» на Сводке и окно задачи, перенести — одной кнопкой. Вернуть:
+    set — предложено; same — срок и так не раньше; declined — эту дату директор уже отклонил; no_due — у задачи нет
+    срока (его ставят сразу, не предложением); other — договорённость между коллегами (их сроки директор не ведёт);
+    closed — задача закрыта."""
+    d = _as_date(day)
+    if not d:
+        raise ValueError("Срок — дата в виде ГГГГ-ММ-ДД")
+    c = store.row("SELECT status, direction, due, due_hint_no FROM commitments WHERE id=?", (cid,))
+    if not c or c["status"] != "open":
+        return "closed"
+    if c["direction"] == "other":
+        return "other"
+    if not _as_date(c["due"]):
+        return "no_due"
+    if d <= _as_date(c["due"]):
+        return "same"
+    if c["due_hint_no"] == d.isoformat():
+        return "declined"
+    why = " ".join((why or "").split()).rstrip(".")
+    why = why if len(why) <= 300 else why[:299].rsplit(" ", 1)[0] + "…"
+    store.execute("UPDATE commitments SET due_hint=?, due_hint_why=?, due_hint_from=? WHERE id=?",
+                  (d.isoformat(), why or None, src if src in DUE_HINT_FROM else "log", cid))
+    return "set"
+
+
+def _drop_wait_hint(task_id: int, until: str | None) -> None:
+    """Событие случилось или связь убрали — подсказка срока, которую дало это ожидание, больше не к месту."""
+    if until:
+        store.execute("UPDATE commitments SET due_hint=NULL, due_hint_why=NULL, due_hint_from=NULL "
+                      "WHERE id=? AND due_hint_from='wait' AND due_hint=?", (task_id, until))
 
 
 def due_choices(today: date | None = None) -> list[tuple[str, date]]:
@@ -384,6 +423,9 @@ def update_commitment(cid: int, **fields) -> None:
     old = store.row("SELECT status, due, kaiten_card_id FROM commitments WHERE id=?", (cid,)) or {}
     was = old.get("status")
     store.execute(f"UPDATE commitments SET {', '.join(sets)} WHERE id=?", [*params, cid])
+    if fields.get("due"):  # срок перенесли не раньше подсказки — она выполнена
+        store.execute("UPDATE commitments SET due_hint=NULL, due_hint_why=NULL, due_hint_from=NULL "
+                      "WHERE id=? AND due_hint IS NOT NULL AND due_hint <= ?", (cid, fields["due"]))
     _log_changes(cid, old, fields)
     if fields.get("status") in ("done", "cancelled"):
         _settle_done_proposals(cid, fields["status"])
@@ -465,8 +507,11 @@ def add_wait(task_id: int, *, waits_for: int | None = None, event: str | None = 
         old = store.row("SELECT id FROM task_links WHERE task_id=? AND waits_for IS NULL AND lower(event)=lower(?)",
                         (task_id, event))
     if old:
+        was = store.row("SELECT until FROM task_links WHERE id=?", (old["id"],))["until"]
         store.execute("UPDATE task_links SET until=COALESCE(?, until), note=COALESCE(?, note), done_at=NULL WHERE id=?",
                       (until or None, note or None, old["id"]))
+        if until and until != was and not waits_for:
+            _wait_due_hint(task_id, event, until, note)
         return old["id"]
     lid = store.execute(
         "INSERT INTO task_links(task_id, waits_for, event, until, note, source_ref, added_by, created) "
@@ -482,7 +527,17 @@ def add_wait(task_id: int, *, waits_for: int | None = None, event: str | None = 
     if (note or "").strip():
         text += f". {note.strip()}"
     worklog.event(task_id, ("Kaiten: " + text[0].lower() + text[1:]) if by == "kaiten" else text)
+    if until and not waits_for:
+        _wait_due_hint(task_id, event, until, note)
     return lid
+
+
+def _wait_due_hint(task_id: int, event: str | None, until: str, note: str | None) -> None:
+    """Задача ждёт событие позже своего срока — раньше него её не закрыть: предложить директору новый срок."""
+    day = _as_date(until)
+    if day:
+        suggest_due(task_id, day.isoformat(), f"ждёт: {event} — к {day:%d.%m}" + (f". {note.strip()}" if (note or "").strip() else ""),
+                    src="wait")
 
 
 def find_waits(task_id: int, *, waits_for: int | None = None, event: str | None = None) -> list[dict]:
@@ -495,7 +550,10 @@ def find_waits(task_id: int, *, waits_for: int | None = None, event: str | None 
 
 
 def remove_wait(link_id: int) -> None:
+    link = store.row("SELECT task_id, until FROM task_links WHERE id=?", (link_id,))
     store.execute("DELETE FROM task_links WHERE id=?", (link_id,))
+    if link:
+        _drop_wait_hint(link["task_id"], link["until"])
 
 
 def set_event_done(link_id: int, done: bool = True) -> None:
@@ -507,6 +565,7 @@ def set_event_done(link_id: int, done: bool = True) -> None:
     if done != bool(link["done_at"]):
         worklog.event(link["task_id"], f"Случилось: {link['event']}" if done else f"Снова ждёт: {link['event']}")
     if done and not link["done_at"]:
+        _drop_wait_hint(link["task_id"], link["until"])
         _notify_unblocked(None, task_id=link["task_id"], event=link["event"])
 
 
@@ -1269,6 +1328,9 @@ def _mark(items: list[dict]) -> list[dict]:
         c["due_days"] = (due - today).days if due else None
         end_of_day = datetime.combine(today + timedelta(days=1), time.min, now.tzinfo)
         c["due_hours"] = max(1, math.ceil((end_of_day - now).total_seconds() / 3600)) if c["due_days"] == 0 else None
+        # срок, похоже, сдвинулся по ходу задачи (suggest_due): предложен новый, директор ещё не решил
+        c["due_moved"] = bool(c.get("due_hint_from") and c["status"] == "open" and due
+                              and (_as_date(c.get("due_hint")) or due) > due)
     _relations(items)
     return items
 

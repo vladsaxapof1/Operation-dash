@@ -15,7 +15,8 @@ import json
 import os
 import subprocess
 import sys
-from datetime import timedelta
+import re
+from datetime import date, timedelta
 from pathlib import Path
 
 from opsdash import chat_tasks, config, priorities, records, store, worklog
@@ -887,6 +888,8 @@ def _commitment_line(c: dict) -> str:
         line += " · её ждут: " + ", ".join(f"[{h['task']['id']}] «{h['task']['headline']}»" for h in c["holds"])
     if c.get("wait_risk"):
         line += f" · срок под угрозой: {c['wait_risk']}"
+    if c.get("due_moved"):
+        line += f" · предложен новый срок {c['due_hint']} ({c['due_hint_why'] or 'по ходу задачи'}), ждёт директора"
     if c.get("done_hint"):
         line += " · предложено закрыть, ждёт директора"
     if c.get("merge_hint"):
@@ -967,6 +970,9 @@ def cmd_commitments(a) -> None:
         out(f"Задача [{a.id}] ждёт: " + "; ".join(
             (f"[{w['task']['id']}] «{w['task']['headline']}»" if w["task"] else f"событие «{w['event']}»")
             + (" — готово" if w["done"] else "") for w in c["waits"]))
+        if c.get("due_hint_from") == "wait" and a.until and c["due_hint"] == records._as_date(a.until).isoformat():
+            out(f"Это позже срока задачи ({records._as_date(c['due']):%d.%m}) — директору предложен новый срок "
+                f"{records._as_date(c['due_hint']):%d.%m} («Уточнить срок» на Сводке и в окне задачи). Сам срок не меняй.")
     elif a.action == "handoff":
         try:
             kid = records.hand_off(a.id, who=a.who or "", what=a.what or "", due=a.due, part=a.part, text=a.text,
@@ -1027,6 +1033,8 @@ def cmd_commitments(a) -> None:
             out(f"Запись {a.remove} убрана из хода задачи")
             return
         if not a.text:
+            if a.new_due:
+                fail("--new-due — вместе с --text: запись хода, где назвали новый срок")
             for line in worklog.lines(c):
                 out(line)
             return
@@ -1039,7 +1047,10 @@ def cmd_commitments(a) -> None:
             f"запись {lid}")
         if c["status"] != "open":
             out("Задача уже закрыта — если работа продолжается, скажи директору (вернуть — решение директора)")
+        if a.new_due:
+            _new_due(a.id, a.new_due, a.text)
         _no_due_hint(a.id)
+        _timing_hint(a.id, a.text, worklog.get(lid)["at"])
     elif a.action == "merge":
         drop = records.get_commitment(a.id)
         if not drop:
@@ -1148,6 +1159,57 @@ def _no_due_hint(cid: int) -> None:
         "посмотрю», «завтра гляну», «обсудим на встрече в среду»), или срок назвал тот, кто просит, — поставь: "
         f"./ops commitments set {cid} --due YYYY-MM-DD (день считай от даты сообщения или встречи). Не прозвучал — "
         "оставь без срока.")
+
+
+# в записи хода — перенос или «после …»: «до 16.11 не успеваем», «дату напишу после ответа поставщика», «на следующей неделе»
+_TIMING_WORDS = re.compile(r"не успева|не успе[ею]т|перен[её]с\w* (?:срок|на )|перенос (?:срока|на )|перенест\w* (?:срок|на )|"
+                           r"отлож|сдвин|сдвиг|следующ\w* недел|не раньше|после ответа|"
+                           r"дату (?:напиш|скаж|сообщ|назов|пришл)", re.I)
+_DAY_MONTH = re.compile(r"\b(\d{1,2})\.(\d{1,2})\b")
+
+
+def _new_due(cid: int, day: str, why: str) -> None:
+    """commitments log --new-due: в ходе назвали новый срок — предложить его директору (records.suggest_due)."""
+    try:
+        res = records.suggest_due(cid, day, why, src="log")
+    except ValueError as e:
+        fail(str(e))
+    d = records._as_date(day)
+    out({"set": f"Новый срок {d:%d.%m} предложен директору: «Уточнить срок» на Сводке и окно задачи — перенести одной "
+                "кнопкой. Сам срок не меняй.",
+         "same": "Срок задачи и так не раньше — предлагать нечего.",
+         "declined": f"Срок {d:%d.%m} директор уже отклонил («оставить прежний») — не предлагаю снова.",
+         "no_due": f"У задачи нет срока — это не перенос, а срок: ./ops commitments set {cid} --due {d.isoformat()}",
+         "other": "Сроки договорённостей между коллегами директор не ведёт — достаточно записи в ходе.",
+         "closed": "Задача закрыта — срок не предлагаю."}[res])
+
+
+def _timing_hint(cid: int, text: str, at: str | None) -> None:
+    """Запись хода говорит, что задача встала до даты или события («до 16.11 не успеваем», «дату напишу после ответа
+    поставщика»), а у задачи всё ещё прежний срок и она ничего не ждёт — напомнить отметить «ждёт»: иначе до самого срока
+    она «Срочно», в плане дня и в напоминаниях, хотя ход уже знает, что раньше ответа ничего не будет."""
+    c = store.row("SELECT status, due, due_hint, due_hint_from FROM commitments WHERE id=?", (cid,))
+    due = records._as_date(c["due"]) if c and c["status"] == "open" and c["due"] else None
+    if not due or store.row("SELECT 1 FROM task_links WHERE task_id=? AND done_at IS NULL", (cid,)):
+        return
+    if c["due_hint_from"] and (records._as_date(c["due_hint"]) or due) > due:  # новый срок уже предложен
+        return
+    ts = store.parse_ts(at)
+    when = ts.astimezone(config.tz()).date() if ts else records.today_local()
+    later = False
+    for d, m in _DAY_MONTH.findall(text):
+        try:
+            later = later or date(when.year, int(m), int(d)) > max(due, when)
+        except ValueError:
+            pass
+    if not (later or _TIMING_WORDS.search(text)):
+        return
+    out(f"Срок задачи — {due:%d.%m}. Если по этой записи задача встала до даты или события («дату напишу после ответа "
+        "поставщика», «вернусь в среду»), отметь: "
+        f'./ops commitments wait {cid} --event "<чего ждём>" --until YYYY-MM-DD --source <откуда> — до этой даты задача '
+        "не выше «Обычного» и не в плане дня, а новый срок PULSE предложит директору сам. Назвали новую дату "
+        "(«перенесём на 20.11», «к 16.11 не успеем, сделаем к 18.11») — повтори эту команду с тем же --source и "
+        "--new-due YYYY-MM-DD. Сам срок не меняй: переносит директор.")
 
 
 def _estimate(cid: int, value: int) -> None:
@@ -2072,6 +2134,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--at", help="когда случилось, YYYY-MM-DD[ HH:MM]; по умолчанию — время сообщения или встречи")
     x.add_argument("--by", choices=["director", "claude"], help="кто пишет: director — запись по просьбе директора")
     x.add_argument("--remove", type=int, metavar="ЗАПИСЬ", help="убрать запись (номер — из ./ops commitments show)")
+    x.add_argument("--new-due", metavar="YYYY-MM-DD",
+                   help="в записи назвали новый срок задачи (позже нынешнего) — PULSE предложит его директору "
+                        "в «Уточнить срок»; сам срок не меняется")
     x = ms.add_parser("merge", help="задача — дубль другой: закрыть её, источник, связи и подзадачи — в ту")
     x.add_argument("id", type=int, help="дубль: эта задача закроется")
     x.add_argument("--into", type=int, required=True, help="задача, которая остаётся")

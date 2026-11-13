@@ -91,8 +91,9 @@
     {#- задачи без срока — одной строкой: «Разобрать» открывает их по одной (ui.due_dialog) #}
     {% set parts = [] %}
     {% for key, t in [('mine', 'ваших'), ('to_me', 'вам должны')] %}{% set n = due | selectattr('direction', 'equalto', key) | list | length %}{% if n %}{% set _ = parts.append(t ~ ' — ' ~ n) %}{% endif %}{% endfor %}
-    {% set risky = due | selectattr('due_hint') | list | length %}{% if risky %}{% set _ = parts.append('срок под угрозой — ' ~ risky) %}{% endif %}
-    <div class="frow-t">Уточнить срок · {{ due | length }} {{ plural(due | length, 'задача', 'задачи', 'задач') }}{{ ' без срока' if not risky }}</div>
+    {% set moved = due | selectattr('due_moved') | list | length %}{% if moved %}{% set _ = parts.append('срок сдвинулся — ' ~ moved) %}{% endif %}
+    {% set risky = (due | selectattr('due_hint') | list | length) - moved %}{% if risky %}{% set _ = parts.append('срок под угрозой — ' ~ risky) %}{% endif %}
+    <div class="frow-t">Уточнить срок · {{ due | length }} {{ plural(due | length, 'задача', 'задачи', 'задач') }}{{ ' без срока' if not risky and not moved }}</div>
     <ul class="frow-titles">{% for c in due[:3] %}<li>{{ c | headline }}</li>{% endfor %}</ul>
     <p class="frow-x">{{ parts | join(' · ') }}</p>
   </div>

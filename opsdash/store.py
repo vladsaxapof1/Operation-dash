@@ -532,6 +532,19 @@ MIGRATIONS = [
     ("commitments", "quiet_until", "TEXT"),
     # проект, из которого директор убрала задачу (2.0.35): Claude её туда больше не кладёт (records.set_project)
     ("commitments", "project_off", "INTEGER"),
+    # срок, похоже, сдвинулся (records.suggest_due): откуда подсказка due_hint — log (в ходе назвали новую дату),
+    # wait (ждёт событие позже срока); пусто — проверка окон (day.check_due). due_hint_no — дата, которую директор
+    # отклонил («Оставить прежний срок»): её больше не предлагать
+    # уже стоящие «ждёт событие» позже срока — сразу с подсказкой нового срока (как records.add_wait)
+    ("commitments", "due_hint_from", "TEXT",
+     "UPDATE commitments SET due_hint_from='wait', due_hint=(SELECT MAX(l.until) FROM task_links l WHERE "
+     "l.task_id=commitments.id AND l.waits_for IS NULL AND l.done_at IS NULL AND l.until > commitments.due), "
+     "due_hint_why=(SELECT 'ждёт: ' || l.event || ' — к ' || substr(l.until, 9, 2) || '.' || substr(l.until, 6, 2) "
+     "FROM task_links l WHERE l.task_id=commitments.id AND l.waits_for IS NULL AND l.done_at IS NULL "
+     "AND l.until > commitments.due ORDER BY l.until DESC LIMIT 1) "
+     "WHERE status='open' AND direction IN ('mine', 'to_me') AND due IS NOT NULL AND EXISTS(SELECT 1 FROM task_links l "
+     "WHERE l.task_id=commitments.id AND l.waits_for IS NULL AND l.done_at IS NULL AND l.until > commitments.due)"),
+    ("commitments", "due_hint_no", "TEXT"),
 ]
 
 

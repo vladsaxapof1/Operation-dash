@@ -196,10 +196,14 @@ def last_id() -> int:
     return store.scalar("SELECT COALESCE(MAX(id), 0) FROM task_log") or 0
 
 
+ANNOUNCE_EACH = 4  # столько задач — каждая своим уведомлением; больше — последние три и одно «ещё N» на доску
+
+
 def announce(since: int, kind: str, where: str = "") -> int:
-    """После разбора сообщений или встречи — уведомление в углу экрана «Обновил ход задачи»: какие задачи
-    сдвинулись и что по ним теперь (последняя новая запись). Одна задача — ссылка на её окно, несколько — на доску,
-    где только они (?updated=…), подробно: на каждой карточке видно новое «Сейчас».
+    """После разбора сообщений или встречи — уведомления в углу экрана «Обновил ход задачи «…»»: по одному на задачу,
+    что по ней теперь (последняя новая запись), щелчок открывает окно этой задачи. Свежая — сверху; то же уведомление
+    про ту же задачу, ещё не скрытое, заменяется новым, а не копится. Задач больше ANNOUNCE_EACH — последние три
+    по отдельности, остальные одним «Обновил ход ещё N задач» со ссылкой на доску, где только они (?updated=…).
     Объявляем только записи Claude (не события PULSE и не то, что директор попросила записать сама).
     Вернуть, сколько новых записей."""
     from opsdash import notices, records
@@ -212,18 +216,18 @@ def announce(since: int, kind: str, where: str = "") -> int:
     for r in rows:
         last.pop(r["task_id"], None)
         last[r["task_id"]] = r  # последняя по времени — в конце
-    tasks = list(reversed(last.values()))
+    tasks = list(reversed(last.values()))  # свежие сначала
     short = lambda t: t if len(t) <= 120 else t[:119].rsplit(" ", 1)[0] + "…"  # noqa: E731
-    if len(tasks) == 1:
-        t = tasks[0]
-        title = f"Обновил ход задачи «{records.headline(t)}»"
-        text, link = short(t["text"]), f"/commitments?task={t['task_id']}"
-    else:
-        title = f"Обновил ход задач: {len(tasks)}"
-        text = "; ".join(f"«{records.headline(t)}» — {short(t['text'])}" for t in tasks[:3])
-        text += f"; и ещё {len(tasks) - 3}" if len(tasks) > 3 else ""
-        link = "/commitments?updated=" + ",".join(str(t["task_id"]) for t in tasks)
-    notices.add(kind, title + (f" {where}" if where else ""), text, link)
+    tail = f" {where}" if where else ""
+    each, rest = (tasks, []) if len(tasks) <= ANNOUNCE_EACH else (tasks[:ANNOUNCE_EACH - 1], tasks[ANNOUNCE_EACH - 1:])
+    if rest:  # первым — встанет под отдельными
+        text = "; ".join(f"«{records.headline(t)}» — {short(t['text'])}" for t in rest[:3])
+        text += f"; и ещё {len(rest) - 3}" if len(rest) > 3 else ""
+        notices.add(kind, f"Обновил ход ещё {len(rest)} {_plural(len(rest), 'задачи', 'задач', 'задач')}" + tail, text,
+                    "/commitments?updated=" + ",".join(str(t["task_id"]) for t in rest))
+    for t in reversed(each):  # от старых к свежим: свежая встанет наверх
+        notices.add(kind, f"Обновил ход задачи «{records.headline(t)}»" + tail, short(t["text"]),
+                    f"/commitments?task={t['task_id']}", merge_hours=notices.KEEP_HOURS)
     return len(rows)
 
 

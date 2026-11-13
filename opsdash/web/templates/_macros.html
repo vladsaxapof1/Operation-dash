@@ -374,6 +374,7 @@
     {% if c.items_total %} · пункты {{ c.items_done }} из {{ c.items_total }}{% endif %}
     {% if c.duplicate %} · дубль {{ task_ref(c.duplicate) }}{% endif %}
     {% if c.done_hint %} · <span class="chip ok" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif %}
+    {% if c.due_moved %} · <span class="chip warn" title="Похоже, срок сдвинулся: {{ c.due_hint_why }}. Новый срок — {{ c.due_hint | day_text }}: перенести — в окне задачи">срок → {{ c.due_hint | date }}?</span>{% endif %}
     {% if c.source_type == 'meeting' and c.source_ref %} · <a href="/meetings/{{ c.source_ref }}">встреча</a>{% elif c.source_type and c.source_type != 'manual' %} · {{ SOURCE_TITLES.get(c.source_type, c.source_type) }}{% endif %}
     {% if c.status != 'open' %} · <span class="chip ok">{{ 'выполнено' if c.status == 'done' else 'отменено' }}</span>{% endif %}
   </div>
@@ -479,6 +480,7 @@
     {%- if c.items_total and not full %} · {{ c.items_done }} из {{ c.items_total }}{% endif -%}
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}
+    {%- if c.due_moved %} · <span class="warn-text" title="Похоже, срок сдвинулся: {{ c.due_hint_why }}. Новый срок — {{ c.due_hint | day_text }}: перенести — в окне задачи">срок → {{ c.due_hint | date }}?</span>{% endif -%}
     {%- if c.now and c.now.waiting and not full %} · <span class="warn-text" title="{{ c.now.text }}">{{ c.now.waiting_short }}</span>{% endif -%}
     {%- if c.quiet %} · {{ quiet_mark(c) }}{% endif -%}
     {%- if c.archived %} · архив{% endif -%}
@@ -639,9 +641,10 @@
         {%- if c.no_due_at %} · вы уже оставляли её без срока{% endif %}</div>
       {% if c.what and c.what != title %}<p class="dlg-what">{{ c.what | fpaths }}</p>{% endif %}
       {% if c.quote %}<blockquote class="dlg-quote">«{{ c.quote }}»</blockquote>{% endif %}
-      {% if c.due_hint %}<p class="warn-text small">Срок {{ c.due | date }} под угрозой с самого начала: {{ c.due_hint_why }}. Реальнее — {{ c.due_hint | day_text }}.</p>{% endif %}
+      {% if c.due_moved %}<p class="warn-text small">Похоже, срок {{ c.due | date }} сдвинулся: {{ c.due_hint_why }}. Новый срок — {{ c.due_hint | day_text }}.</p>
+      {% elif c.due_hint %}<p class="warn-text small">Срок {{ c.due | date }} под угрозой с самого начала: {{ c.due_hint_why }}. Реальнее — {{ c.due_hint | day_text }}.</p>{% endif %}
       <div class="due-pick" role="group" aria-label="Срок">
-        {% if c.due_hint %}<button type="button" class="due-q" data-due-pick="{{ c.due_hint }}" aria-pressed="false">Реальнее<span>{{ c.due_hint | day_text }}</span></button>{% endif %}
+        {% if c.due_hint %}<button type="button" class="due-q" data-due-pick="{{ c.due_hint }}" aria-pressed="false">{{ 'Новый срок' if c.due_moved else 'Реальнее' }}<span>{{ c.due_hint | day_text }}</span></button>{% endif %}
         {% for ch in (choices | rejectattr('iso', 'equalto', c.due_hint) | list)[:4 if c.due_hint else 5] %}<button type="button" class="due-q" data-due-pick="{{ ch.iso }}" aria-pressed="false">{{ ch.label }}<span>{{ ch.text }}</span></button>{% endfor %}
       </div>
       <label class="due-own">или своя дата <input type="date" name="due" required></label>
@@ -787,6 +790,16 @@
           <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm primary">Да, закрыть</button></form>
           <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Нет, ещё в работе</button></form>
           {% for label, url in proposal_links(h) if label != 'Задача' %}<a class="small" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if c.due_moved %}
+      {#- по ходу задачи срок, похоже, сдвинулся (records.suggest_due): перенести одной кнопкой или оставить прежний #}
+      <div class="dlg-hint" data-due-moved>
+        <div><b>Похоже, срок сдвинулся.</b> {{ (c.due_hint_why or 'по ходу задачи')[:1] | upper }}{{ (c.due_hint_why or 'по ходу задачи')[1:] }}. Новый срок — {{ c.due_hint | day_text }} вместо {{ c.due | date }}.</div>
+        <div class="actions">
+          <form class="inline" method="post" action="/commitments/{{ c.id }}/due"><input type="hidden" name="due" value="{{ c.due_hint }}"><button class="btn sm primary">Перенести на {{ c.due_hint | date }}</button></form>
+          <form class="inline" method="post" action="/commitments/{{ c.id }}/due"><input type="hidden" name="act" value="skip"><button class="btn sm" title="Срок останется прежним, и эту дату PULSE больше не предложит">Оставить {{ c.due | date }}</button></form>
         </div>
       </div>
       {% endif %}

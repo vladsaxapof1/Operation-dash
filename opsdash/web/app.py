@@ -891,13 +891,14 @@ def commitments(request: Request, view: str = "board", status: str = "", directi
     dates = {"created": records.period(created, created_from, created_to) if created else None,
              "due": records.period(due, due_from, due_to, ahead=True) if due and due != "none" else None,
              "no_due": due == "none", "unseen": new == "1"}
-    board = (records.commitments_board(person=person or None, q=q or None, sort=sort, archived=show_archived,
+    # задачи из уведомления видны всегда: и закрытые давно, и убранные в архив — иначе доска по ссылке бывает пустой
+    board = (records.commitments_board(person=person or None, q=q or None, sort=sort, archived=show_archived or bool(upd),
                                        project=project or None, ids=upd or None, quiet=still,
-                                       done_days=None if q else 14, **dates)
+                                       done_days=None if q or upd else 14, **dates)
              if view in ("board", "gantt") else None)
     items = (records.list_commitments(status=status, direction=direction or None, person=person or None, q=q or None,
-                                      sort=sort, archived=show_archived, project=project or None, ids=upd or None,
-                                      quiet=still, **dates)
+                                      sort=sort, archived=show_archived or bool(upd), project=project or None,
+                                      ids=upd or None, quiet=still, **dates)
              if view == "list" else None)
     # «Между коллегами» по умолчанию скрыты: договорённости собираются и закрываются сами, но директор их не ведёт —
     # не видно ни колонки, ни их в «Готово», ни в счётчиках. Ищете сами (поиск, человек, проект, в «Списке» —

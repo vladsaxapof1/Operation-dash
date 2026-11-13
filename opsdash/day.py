@@ -1157,7 +1157,10 @@ def check_due(cid: int, settings: dict | None = None, now: datetime | None = Non
     res = capacity_until(date.fromisoformat(c["due"]), c.get("estimate_min") or DEFAULT_ESTIMATE, exclude=cid,
                          settings=settings, now=now)
     hint = None if res["ok"] or not res["realistic"] else res["realistic"].isoformat()
-    store.execute("UPDATE commitments SET due_hint=?, due_hint_why=? WHERE id=?", (hint, res["why"] if hint else None, cid))
+    if hint:
+        store.execute("UPDATE commitments SET due_hint=?, due_hint_why=?, due_hint_from=NULL WHERE id=?", (hint, res["why"], cid))
+    else:  # подсказку из хода задачи (records.suggest_due) проверка окон не снимает
+        store.execute("UPDATE commitments SET due_hint=NULL, due_hint_why=NULL WHERE id=? AND due_hint_from IS NULL", (cid,))
     return res
 
 
