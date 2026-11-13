@@ -765,7 +765,7 @@ def cmd_meetings(a) -> None:
             return out(f"«{a.speaker}» уже подписан (по голосу или директором) — догадка не нужна")
         meta.setdefault("speaker_guesses", {})[a.speaker] = {"name": a.name.strip(), "why": a.why.strip()}
         (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        out(f"Записала: {a.speaker} — вероятно, {a.name}. Директор подтвердит на странице встречи.")
+        out(f"Записано: {a.speaker} — вероятно, {a.name}. Директор подтвердит на странице встречи.")
 
 
 # --- люди ----------------------------------------------------------------------
@@ -839,9 +839,9 @@ def _commitment_line(c: dict) -> str:
     if c["status"] != "open":
         line += f" · {c['status']}"
     if p := c.get("prio"):
-        line += f" · приоритет {p['title']}" + (" (поставила директор)" if p["manual"] else "") \
+        line += f" · приоритет {p['title']}" + (" (поставлен директором)" if p["manual"] else "") \
             + (f" — {p['why']}" if p["why"] and not p["manual"] else "")
-    # важность — если её нет в «почему» приоритета: обычная (оценена) или уровень поставила директор
+    # важность — если её нет в «почему» приоритета: обычная (оценена) или уровень поставлен директором
     if c.get("importance") and c["status"] == "open" and (c["importance"] == "normal" or (p and p["manual"])):
         line += f" · важность {priorities.IMPORTANCE[c['importance']]}" \
             + (f": {c['importance_why']}" if c.get("importance_why") else "")
@@ -866,7 +866,7 @@ def _commitment_line(c: dict) -> str:
     if c.get("project"):
         line += f" · проект [{c['project']['id']}] «{c['project']['title']}»"
     elif c.get("project_off"):
-        line += f" · директор убрала из проекта [{c['project_off']}] — туда не возвращать"
+        line += f" · убрана директором из проекта [{c['project_off']}] — туда не возвращать"
     if c["source_type"]:
         line += f" · источник {c['source_type']}:{c['source_ref'] or ''}"
     if c.get("parent"):
@@ -1038,14 +1038,14 @@ def cmd_commitments(a) -> None:
         out(f"{'Записано' if new else 'Уже было — запись обновлена'}: ход задачи [{a.id}] «{records.headline(c)}», "
             f"запись {lid}")
         if c["status"] != "open":
-            out("Задача уже закрыта — если работа продолжается, скажи директору (вернуть — её решение)")
+            out("Задача уже закрыта — если работа продолжается, скажи директору (вернуть — решение директора)")
         _no_due_hint(a.id)
     elif a.action == "merge":
         drop = records.get_commitment(a.id)
         if not drop:
             fail(f"нет задачи [{a.id}]")
         if os.environ.get("OPSDASH_AGENT") and drop["seen_at"]:
-            fail("директор эту задачу уже видела — объединять только предложением: "
+            fail("задача уже показана директору — объединять только предложением: "
                  f"./ops propose merge --commitment {a.id} --into {a.into} --reason \"<почему это одно и то же>\"")
         try:
             records.merge_commitments(a.id, a.into, note=a.note)
@@ -1115,7 +1115,7 @@ def _importance(cid: int, value: str, why: str | None) -> None:
     c = records.get_commitment(cid)
     p = c.get("prio") if c else None
     out(f"Важность: {priorities.IMPORTANCE[value]}" + (f" · приоритет сейчас: {p['title']}" if p else "")
-        + (" (директор поставила сама — не меняется)" if p and p["manual"] else ""))
+        + (" (поставлен директором — не меняется)" if p and p["manual"] else ""))
 
 
 def _agent_hint(cid: int, why: str) -> None:
@@ -1139,12 +1139,12 @@ def _due_check(cid: int) -> None:
 
 
 def _no_due_hint(cid: int) -> None:
-    """Задача директора без срока не попадает в план дня и легко теряется. Если в переписке или на встрече она сама
-    сказала, когда займётся («вечером посмотрю», «завтра гляну»), — это и есть срок: напомнить поставить его."""
+    """Задача директора без срока не попадает в план дня и легко теряется. Если в переписке или на встрече директор
+    говорит, когда займётся («вечером посмотрю», «завтра гляну»), — это и есть срок: напомнить поставить его."""
     c = store.row("SELECT direction, status, due, no_due_at, in_work_at FROM commitments WHERE id=?", (cid,))
     if not c or c["direction"] != "mine" or c["status"] != "open" or c["due"] or c["no_due_at"] or c["in_work_at"]:
         return
-    out("У задачи директора нет срока — в план дня она не попадёт. Директор сама сказала, когда займётся («вечером "
+    out("У задачи директора нет срока — в план дня она не попадёт. Директор говорит, когда займётся («вечером "
         "посмотрю», «завтра гляну», «обсудим на встрече в среду»), или срок назвал тот, кто просит, — поставь: "
         f"./ops commitments set {cid} --due YYYY-MM-DD (день считай от даты сообщения или встречи). Не прозвучал — "
         "оставь без срока.")
@@ -1158,7 +1158,7 @@ def _estimate(cid: int, value: int) -> None:
         ok = day.set_estimate(cid, value, by=day.agent_or_user())
     except ValueError as e:
         fail(str(e))
-    out(f"Оценка: {day.est_text(value)}" if ok else "Оценку директор поставила сама — не меняю")
+    out(f"Оценка: {day.est_text(value)}" if ok else "Оценка поставлена директором — не меняю")
     if value > day.BIG:
         out(f"Больше полдня — предложи {day.SPLIT_HINT} (./ops commitments items {cid} --add \"…\")")
 
@@ -1441,7 +1441,7 @@ def cmd_attention(a) -> None:
         for x in items:
             marks = ""
             if x["status"] == "open" and x["reopened_at"]:
-                marks += f" · вернула вручную {store.local(x['reopened_at'])}"
+                marks += f" · возвращён вручную {store.local(x['reopened_at'])}"
             if x["done_hint"]:
                 marks += " · предложено закрыть, ждёт директора"
             for c in x["tasks"]:  # по сообщению уже заведена задача — вторую по нему не заводить
@@ -1664,7 +1664,7 @@ def cmd_proposals(a) -> None:
         for p in items:
             why = p["reject_reason_text"] + (f" — {p['reject_note']}" if p["reject_note"] else "")
             out(f"[{p['id']}] {store.local(p['decided_at'])} · {p['kind']} · {p['title']}"
-                + (f" · почему «Нет»: {why}" if why else " · причину не указала")
+                + (f" · почему «Нет»: {why}" if why else " · причина не указана")
                 + (f" · предлагали потому что: {p['reason']}" if p["reason"] else ""))
         if not items:
             out(f"За {a.days} дн. отклонённых нет.")
@@ -1768,7 +1768,7 @@ def cmd_update(a) -> None:
 # --- разбор аргументов -------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ops", description="PULSE — пульт операционного директора. Флаг --json — вывод в JSON.")
+    p = argparse.ArgumentParser(prog="ops", description="PULSE — личный рабочий пульт. Флаг --json — вывод в JSON.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("daemon", help="запустить PULSE в этом окне")
@@ -1981,7 +1981,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="коротко, одной строкой: кто → кому, заголовок, срок; подробности — ./ops commitments show <id>")
     x = ms.add_parser("add")
     x.add_argument("--direction", required=True, choices=["mine", "to_me", "other"],
-                   help="mine — обещала директор; to_me — обещали директору; other — между коллегами")
+                   help="mine — задача директора; to_me — обещали директору; other — между коллегами")
     x.add_argument("--title", help="короткий заголовок для карточки, 2–6 слов: «Прогноз по ключевым клиентам»")
     x.add_argument("--what", required=True, help="суть: что именно сделать, с подробностями")
     x.add_argument("--who", help="кто должен сделать")
@@ -1992,7 +1992,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--quote", help="дословная цитата")
     x.add_argument("--card", type=int, help="карточка Kaiten")
     x.add_argument("--note")
-    x.add_argument("--parent", type=int, help="часть задачи с этим id: директор передала её работу дальше")
+    x.add_argument("--parent", type=int, help="часть задачи с этим id: её работа передана директором дальше")
     x.add_argument("--force", action="store_true",
                    help="добавить, даже если у этой карточки Kaiten уже есть открытая задача")
     x.add_argument("--project", type=int, help="в проект с этим id (./ops projects list)")
@@ -2016,12 +2016,12 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--in-work", choices=["on", "off"], help="отметка «В работе» (по просьбе директора)")
     x.add_argument("--archived", choices=["on", "off"], help="убрать в архив или вернуть (по просьбе директора)")
     x.add_argument("--remind", metavar="reminded|off|on|YYYY-MM-DD",
-                   help="напоминания по задаче «мне должны» (по просьбе директора): reminded — уже напомнила сама; "
+                   help="напоминания по задаче «мне должны» (по просьбе директора): reminded — напоминание уже отправлено лично директором; "
                         "YYYY-MM-DD — не напоминать до этой даты; off — больше не напоминать (до нового срока); on — снова")
     x.add_argument("--estimate", type=int, help="сколько займёт у директора, мин (оценку директора Claude не меняет)")
     x.add_argument("--agent", help="можно поручить агенту: что он сделает; \"\" — снять пометку")
     x.add_argument("--priority", metavar="urgent|high|normal|low|auto",
-                   help="приоритет, который поставила директор (только по её просьбе): закреплён, расчёт его не меняет; "
+                   help="приоритет от директора (только по прямой просьбе): закреплён, расчёт его не меняет; "
                         "auto — снова по расчёту")
     x.add_argument("--importance", choices=list(priorities.IMPORTANCE),
                    help="оценка важности Claude: high | normal | low (срок PULSE учтёт сам)")
@@ -2063,14 +2063,14 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--text", help="что произошло, одной-двумя фразами: кто, что сказал или сделал, даты; "
                                   "без --text — показать ход")
     x.add_argument("--kind", default="update", choices=["update", "note"],
-                   help="update — что произошло (по умолчанию); note — комментарий директора (по её просьбе)")
+                   help="update — что произошло (по умолчанию); note — комментарий директора (по просьбе директора)")
     x.add_argument("--ask", action="store_true",
                    help="спросили или попросили и ждём ответа: пока нет новой записи — «ответа нет N дней»")
     x.add_argument("--source", help="откуда: telegram:<id> | pachca:<id> | ymessenger:<id> | mail:<id> | "
                                     "meeting:<id> | kaiten:<card> | manual")
     x.add_argument("--quote", help="дословная цитата (у встречи — с [чч:мм:сс])")
     x.add_argument("--at", help="когда случилось, YYYY-MM-DD[ HH:MM]; по умолчанию — время сообщения или встречи")
-    x.add_argument("--by", choices=["director", "claude"], help="кто пишет: director — директор попросила записать")
+    x.add_argument("--by", choices=["director", "claude"], help="кто пишет: director — запись по просьбе директора")
     x.add_argument("--remove", type=int, metavar="ЗАПИСЬ", help="убрать запись (номер — из ./ops commitments show)")
     x = ms.add_parser("merge", help="задача — дубль другой: закрыть её, источник, связи и подзадачи — в ту")
     x.add_argument("id", type=int, help="дубль: эта задача закроется")
@@ -2126,7 +2126,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--all", action="store_true")
     x = ms.add_parser("add")
     x.add_argument("--message", type=int, help="id сообщения из ./ops messages")
-    x.add_argument("--summary", required=True, help="суть: что от неё хотят")
+    x.add_argument("--summary", required=True, help="суть: что от директора хотят")
     x.add_argument("--why", help="почему важно")
     x.add_argument("--draft", help="черновик ответа")
     x.add_argument("--priority", default="normal", choices=["high", "normal", "low"])
@@ -2244,7 +2244,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--text", required=True, help="запись в ход: что произошло, одной-двумя фразами, с датами ДД.ММ")
     x.add_argument("--quote", help="дословно из сообщения")
     x.add_argument("--subtask", help="заголовок подзадачи, 2–6 слов: в сообщении — новое «сделаю» по этой задаче")
-    x.add_argument("--whom", help="подзадача директора: кому она это сказала")
+    x.add_argument("--whom", help="подзадача директора: кому это сказано")
     x.add_argument("--who", help="подзадачу обещал коллега — кто (тогда она «мне должны»)")
     x.add_argument("--due", help="срок подзадачи, YYYY-MM-DD — если прозвучал")
     x = ps.add_parser("kaiten-block", parents=[common],
@@ -2259,9 +2259,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--due", help="срок проекта, YYYY-MM-DD")
     x.add_argument("--tasks", required=True, help="id задач через запятую: 57,69,80")
     x = ps.add_parser("answered", parents=[common],
-                      help="убрать «нужен ответ»: по её сообщению видно, что директор ответила")
+                      help="убрать «нужен ответ»: по сообщению директора видно, что ответ уже дан")
     x.add_argument("--attention", type=int, required=True, help="id пункта (./ops attention list)")
-    x.add_argument("--quote", help="её ответ дословно; --source — это сообщение (telegram:<id>)")
+    x.add_argument("--quote", help="ответ директора дословно; --source — это сообщение (telegram:<id>)")
     s.set_defaults(fn=cmd_propose)
 
     s = sub.add_parser("proposals", help="очередь подтверждений")

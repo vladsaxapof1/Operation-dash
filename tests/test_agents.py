@@ -401,7 +401,7 @@ def test_state_block_chip_and_done_proposal(work, monkeypatch, client):
                                    _tool(_ago(minutes=7), cwd, "t1", "Write", file_path=str(made))])
     app = {"s1": {"id": "local_s1", "archived": False, "status": "", "needs": "", "seen": False}}
     _app(monkeypatch, app)
-    assert agents.check() == "нашла сессий: 1, предложила закрыть: 0"
+    assert agents.check() == "найдено сессий: 1, предложено закрыть: 0"
     st = agents.of(cid)["st"]
     assert st["state"] == "blocked" and st["title"] == "ждёт разрешения?"  # инструмент давно без ответа
     assert st["link"] == "claude://code/continue?session=local_s1"
@@ -421,11 +421,11 @@ def test_state_block_chip_and_done_proposal(work, monkeypatch, client):
 
     # приложение: готово — предложение закрыть задачу с файлами, один раз
     app["s1"].update(status="completed", needs="")
-    assert agents.check() == "нашла сессий: 0, предложила закрыть: 1"
+    assert agents.check() == "найдено сессий: 0, предложено закрыть: 1"
     p = proposals.list_proposals()[0]
     assert p["kind"] == "task.done" and p["title"] == "Закрыть задачу «Сводка KPI за октябрь» — агент сделал: KPI продаж — октябрь.xlsx"
     assert p["source_ref"] == "agent:s1" and ("Сессия агента", "claude://code/continue?session=local_s1") in proposals.links(p)
-    assert agents.check().endswith("предложила закрыть: 0") and not agents.watching()
+    assert agents.check().endswith("предложено закрыть: 0") and not agents.watching()
     agents._marks.clear()
     assert 'class="agent-chip done"' in client.get("/commitments").text
     proposals.approve(p["id"])

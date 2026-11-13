@@ -89,13 +89,13 @@ def register(app: FastAPI, render, templates, back) -> None:
             err = f"Не открылось: {e}"
             return JSONResponse({"ok": False, "error": err}) if request.headers.get("x-agent-panel") \
                 else answer(request, b["commitment_id"], err=err)
-        where = {"claude": "новую сессию в Claude", "chatgpt": "новый тред Codex в приложении ChatGPT"}.get(res["where"])
+        where = {"claude": "новая сессия в Claude", "chatgpt": "новый тред Codex в приложении ChatGPT"}.get(res["where"])
         if where:
-            said = (f"Открыла {where}: промт — в поле ввода. Проверьте и отправьте сами." if res["whole"] else
-                    f"Открыла {where}: промт длинный — в поле ввода короткое поручение со ссылкой на файл брифа. "
+            said = (f"Открыто: {where}. Промт — в поле ввода. Проверьте и отправьте сами." if res["whole"] else
+                    f"Открыто: {where}. Промт длинный — в поле ввода короткое поручение со ссылкой на файл брифа. "
                     "Проверьте и отправьте сами.")
         else:
-            said = ("Открыла Терминал с Codex в папке поручения: промт — в буфере обмена, вставьте его и нажмите Enter."
+            said = ("Открыт Терминал с Codex в папке поручения: промт — в буфере обмена, вставьте его и нажмите Enter."
                     + ("" if res["whole"] else " Промт длинный — в буфере короткое поручение со ссылкой на файл брифа."))
         if request.headers.get("x-agent-panel"):
             return JSONResponse({"ok": True, "said": said})

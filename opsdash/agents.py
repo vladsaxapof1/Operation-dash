@@ -1061,14 +1061,14 @@ def check(settings: dict | None = None) -> str:
                 label=f"Закрыть задачу «{records.headline(c)}» — {made}",
                 reason=f"Сессия «{st['session_title']}» по этой задаче готова"
                        + (" (приложение Claude: на проверку)" if st["status"] == "review_ready" else "")
-                       + (f". Создала: {', '.join(f['name'] for f in st['files'])}" if st["files"] else ""))
+                       + (f". Файлы: {', '.join(f['name'] for f in st['files'])}" if st["files"] else ""))
         except proposals.ProposalError as e:
-            store.log("agents-watch", f"не предложила закрыть задачу [{c['id']}]: {e}", "warning")
+            store.log("agents-watch", f"не удалось предложить закрыть задачу [{c['id']}]: {e}", "warning")
             continue
         store.execute("UPDATE task_agents SET state='proposed' WHERE id=?", (b["id"],))
         proposed += 1
     _marks.clear()
-    return f"нашла сессий: {found}, предложила закрыть: {proposed}"
+    return f"найдено сессий: {found}, предложено закрыть: {proposed}"
 
 
 def marks() -> dict[int, dict]:

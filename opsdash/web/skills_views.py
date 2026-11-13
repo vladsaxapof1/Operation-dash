@@ -63,7 +63,7 @@ def register(app: FastAPI, render, back) -> None:
         if not sk or not sk.get("run"):
             return back(request, err="Этот навык вручную не запускается", to=f"/skills/{sid}")
         jobs.submit(sk["run"]["job"], "heavy")
-        return back(request, f"Запустила «{sk['title']}» — ход виден в «Офисе»", to=f"/skills/{sid}")
+        return back(request, f"Запущено: «{sk['title']}» — ход виден в «Офисе»", to=f"/skills/{sid}")
 
     @app.post("/skills/{sid}/restore")
     def skill_restore(request: Request, sid: str):

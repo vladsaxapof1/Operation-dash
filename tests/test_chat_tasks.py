@@ -184,7 +184,7 @@ def test_topic_tasks_and_propose_log(settings_with, capsys, monkeypatch):
                                     source_ref=f"pachca:{other}")
     assert proposals.action(p2) == "Записать в ход" and p2["title"].endswith("в ход — Пётр: макеты для склада — позже")
     proposals.reject(p2["id"])
-    with pytest.raises(proposals.ProposalError, match="уже ответила «Нет»"):
+    with pytest.raises(proposals.ProposalError, match="есть «Нет» директора: это не про эту задачу"):
         proposals.propose_task_log(commitment_id=crm, text="снова", reason="макеты", source_ref=f"pachca:{other}")
 
 

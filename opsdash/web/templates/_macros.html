@@ -105,7 +105,7 @@
     {% if h.payload.quote %}<div class="dlg-quote">«{{ h.payload.quote }}»</div>{% endif %}
     <div class="actions">
       <form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm">Да, убрать</button></form>
-      <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Нет, ещё не ответила</button></form>
+      <form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm">Нет, ответа ещё не было</button></form>
       {% for label, url in proposal_links(h) if label != 'Нужен ответ' %}<a class="btn sm ghost" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }} {{ '↗' if url.startswith('http') else '→' }}</a>{% endfor %}
     </div>
   </div>
@@ -116,7 +116,7 @@
       {% if a.orig_url %}<a class="btn sm" href="{{ a.orig_url }}" target="_blank" rel="noopener" title="{{ a.orig_url }}">↗ {{ a.orig_label }}</a>{% endif %}
     </span>
     <span class="actions">
-      <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">Ответила</button></form>
+      <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">Отвечено</button></form>
       <form class="inline" method="post" action="/attention/{{ a.id }}/dismiss"><button class="btn sm ghost">Скрыть</button></form>
     </span>
   </div>

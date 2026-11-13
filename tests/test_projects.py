@@ -350,7 +350,7 @@ def test_director_takes_task_out_of_project_and_claude_does_not_return_it(client
     monkeypatch.setenv("OPSDASH_AGENT", "1")  # Claude: ни командой, ни повторной записью той же задачи
     with pytest.raises(SystemExit):
         cli.main(["commitments", "set", str(other), "--project", str(pid)])
-    assert "Директор убрала задачу" in capsys.readouterr().err
+    assert "убрана директором из проекта" in capsys.readouterr().err
     with pytest.raises(SystemExit):
         cli.main(["projects", "set", str(pid), "--tasks", str(other)])
     capsys.readouterr()
@@ -358,7 +358,7 @@ def test_director_takes_task_out_of_project_and_claude_does_not_return_it(client
                            project_id=pid, source_type="meeting")
     assert records.get_commitment(other)["project_id"] is None
     cli.main(["commitments", "list", "--search", "базу"])
-    assert f"директор убрала из проекта [{pid}] — туда не возвращать" in capsys.readouterr().out
+    assert f"убрана директором из проекта [{pid}] — туда не возвращать" in capsys.readouterr().out
     fresh = records.add_commitment(direction="mine", whom="Анна", title="Сверка", what="Сверить базу с отделом")
     cli.main(["commitments", "set", str(fresh), "--project", str(pid)])  # в ходе видно, что проект поставил Claude
     assert store.scalar(log, (fresh,)) == "Claude: в проекте «План продаж 2027»"

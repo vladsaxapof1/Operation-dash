@@ -71,7 +71,7 @@ def test_this_is_me_relabels_cleans_up_and_reprocesses(tmp_path, settings_with, 
     assert "Кто в записи" in page and "«15 минут, по 15 сделаю в каждом канале»" in page
 
     r = client.post(f"/meetings/{mid}/me", data={"speaker": "Спикер 2"}, follow_redirects=False)
-    assert "Голос запомнила" in unquote(r.headers["location"])
+    assert "Голос сохранён" in unquote(r.headers["location"])
     md = (records.meeting_dir(mid) / "transcript.md").read_text(encoding="utf-8")
     assert "] Анна: 15 минут" in md and "] Спикер 1: сколько тебе" in md
     assert "Вы в записи: Анна = Спикер 2 (отмечено вами)" in md
@@ -170,7 +170,7 @@ def test_confirm_person_remembers_voice_and_names_same_voice(tmp_path, settings_
 
     r = client.post(f"/meetings/{mid}/speaker", data={"speaker": "Спикер 2", "name": "Никита"}, follow_redirects=False)
     msg = unquote(r.headers["location"])
-    assert "Добавила в справочник" in msg and "Тот же голос у Спикер 4" in msg
+    assert "добавлено в справочник" in msg and "Тот же голос у Спикер 4" in msg
     nikita = records.find_person("Никита")["id"]
     assert voice.person_samples(nikita)[mid]["speaker"] == "Спикер 2" and voice.voice_counts() == {nikita: 1}
     md = (folder / "transcript.md").read_text(encoding="utf-8")
@@ -197,7 +197,7 @@ def test_guesses_from_summary_and_cli(tmp_path, settings_with, capsys):
     assert voice.guesses(mid, meta) == {"Спикер 2": {"name": "Пётр Иванов", "why": "вероятно: обращаются по имени"}}
     (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
     cli.main(["meetings", "guess", mid, "--speaker", "Спикер 5", "--name", "Олег", "--why", "ведёт встречу"])
-    assert "Записала" in capsys.readouterr().out
+    assert "Записано" in capsys.readouterr().out
     assert voice.guesses(mid) == {"Спикер 5": {"name": "Олег", "why": "ведёт встречу"}}
 
 

@@ -160,7 +160,7 @@ def test_rule_proposal_lifecycle():
         proposals.propose_rule(skill="triage", text="рассылки не разбирай как поручения")
     q = proposals.propose_rule(skill="digest", text="Не больше трёх «ждут ответа»")
     proposals.reject(q["id"])
-    with pytest.raises(proposals.ProposalError, match="уже отклоняла"):
+    with pytest.raises(proposals.ProposalError, match="уже отклоняли"):
         proposals.propose_rule(skill="digest", text="Не больше трёх «ждут ответа»")
     with pytest.raises(proposals.ProposalError, match="Нет навыка"):
         proposals.propose_rule(skill="nope", text="x")

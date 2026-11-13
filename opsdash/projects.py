@@ -75,7 +75,7 @@ def delete(pid: int) -> None:
 
 def assign(pid: int, task_ids: list[int], *, by: str | None = None) -> list[int]:
     """Добавить задачи в проект (вместе с их подзадачами). Возвращает те, что нашлись. by — кто добавляет
-    (records.set_project): Claude не кладёт задачу в проект, из которого директор её убрала, — ValueError."""
+    (records.set_project): Claude не кладёт задачу в проект, из которого она убрана директором, — ValueError."""
     found = []
     for tid in task_ids:
         if store.row("SELECT 1 FROM commitments WHERE id=?", (tid,)):

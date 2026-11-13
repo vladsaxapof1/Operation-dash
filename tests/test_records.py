@@ -102,7 +102,7 @@ def test_reopened_attention_needs_a_newer_answer():
     aid = records.add_attention(message_id=mid, summary="Пётр ждёт согласования")
     records.close_attention(aid, "done")
     records.close_attention(aid, "open")  # «Вернуть»: это был не ответ
-    with pytest.raises(proposals.ProposalError, match="вернула"):
+    with pytest.raises(proposals.ProposalError, match="вернули в работу"):
         proposals.propose_answered(attention_id=aid, reason="ответила «Да»", source_ref=f"telegram:{old}")
     p = proposals.propose_answered(attention_id=aid, reason="ответила", source_ref="manual:")
     records.close_attention(aid, "done")  # закрыла сама — предложение больше не ждёт ответа

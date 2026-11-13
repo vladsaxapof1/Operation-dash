@@ -206,7 +206,7 @@ def set_project(cid: int, project_id: int | None, *, by: str | None = None) -> N
     old = row.get("project_id")
     if by == "claude" and project_id and project_id == row.get("project_off") and project_id != old:
         title = store.scalar("SELECT title FROM projects WHERE id=?", (project_id,))
-        raise ValueError(f"Директор убрала задачу [{cid}] из проекта [{project_id}] «{title}» — туда её не возвращай")
+        raise ValueError(f"Задача [{cid}] убрана директором из проекта [{project_id}] «{title}» — туда её не возвращай")
     now, todo, seen = store.utcnow(), [cid], set()
     while todo:
         tid = todo.pop()

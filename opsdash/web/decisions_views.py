@@ -114,7 +114,7 @@ def register(app: FastAPI, render, back) -> None:
 
         if not decisions.get(did):
             return back(request, err="Нет такого решения")
-        anthology.update(did, status="outdated", note="Устарело — отметила директор в разделе «Решения»")
+        anthology.update(did, status="outdated", note="Устарело — отмечено в разделе «Решения»")
         return back(request, "Решение отмечено устаревшим — из раздела оно ушло, в базе знаний осталось")
 
     @app.post("/decisions-run")
@@ -122,4 +122,4 @@ def register(app: FastAPI, render, back) -> None:
         from opsdash import jobs
 
         jobs.submit("decisions", "heavy")
-        return back(request, "Запустила: помощник сформулирует вопросы и «о чём» тем и свяжет решения — ход в «Офисе»")
+        return back(request, "Запущено: помощник сформулирует вопросы и «о чём» тем и свяжет решения — ход в «Офисе»")

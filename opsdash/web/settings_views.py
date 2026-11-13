@@ -1048,7 +1048,7 @@ def register(app: FastAPI, render, back) -> None:
         except brain.BrainError as e:
             return back(request, err=str(e), to="/settings?tab=chatgpt")
         where = "Терминал" if sys.platform == "darwin" else "окно PowerShell"
-        return back(request, f"Открыла {where}: войдите в ChatGPT в браузере, затем обновите эту страницу",
+        return back(request, f"Открыто: {where}. Войдите в ChatGPT в браузере, затем обновите эту страницу",
                     to="/settings?tab=chatgpt")
 
     @app.post("/settings/claude/login")
@@ -1060,4 +1060,4 @@ def register(app: FastAPI, render, back) -> None:
         except brain.BrainError as e:
             return back(request, err=str(e), to="/settings?tab=claude")
         where = "Терминал" if sys.platform == "darwin" else "окно PowerShell"
-        return back(request, f"Открыла {where}: войдите в браузере, затем обновите эту страницу", to="/settings?tab=claude")
+        return back(request, f"Открыто: {where}. Войдите в браузере, затем обновите эту страницу", to="/settings?tab=claude")

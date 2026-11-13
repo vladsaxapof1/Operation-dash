@@ -663,7 +663,7 @@ def refresh(request: Request):
         if settings[src].get("enabled"):
             jobs.submit(f"collect:{src}")
     jobs.submit("recordings")
-    return back(request, "Запустила сбор данных — обновите страницу через минуту")
+    return back(request, "Сбор данных запущен — обновите страницу через минуту")
 
 
 # --- предложения -----------------------------------------------------------------
@@ -1715,7 +1715,7 @@ def doc_open(request: Request, path: str = Form(...), reveal: str = Form("")):
     if not d or not Path(d["path"]).exists():
         return back(request, err="Файл не найден — возможно, его переместили")
     _open_local(d["path"], bool(reveal))
-    return back(request, "Показала в Finder" if reveal else "Открыла файл")
+    return back(request, "Показано в Finder" if reveal else "Файл открыт")
 
 
 @app.post("/files/reveal")
@@ -1728,7 +1728,7 @@ def file_reveal(path: str = Form(...)):
                             status_code=404)
     filepaths.reveal(found)
     where = "Finder" if sys.platform == "darwin" else "Проводнике" if os.name == "nt" else "папке"
-    return JSONResponse({"ok": True, "msg": f"Открыла в {where}", "path": str(found)})
+    return JSONResponse({"ok": True, "msg": f"Открыто в {where}", "path": str(found)})
 
 
 def _open_local(path: str, reveal: bool) -> None:
@@ -2192,11 +2192,11 @@ async def meeting_speaker(request: Request, mid: str, speaker: str = Form(...), 
     pid = person["id"] if person else records.upsert_person(name)
     res = await run_in_threadpool(voice.mark_person, mid, speaker, pid)
     who = person["name"] if person else name
-    parts = [f"{speaker} — {who}." + (" Добавила в справочник людей." if created else "")]
-    parts.append(f"Голос запомнила — в следующих записях подпишу {who} сама." if res["voice_saved"]
+    parts = [f"{speaker} — {who}." + (" Имя добавлено в справочник людей." if created else "")]
+    parts.append(f"Голос сохранён — в следующих записях он будет подписан «{who}» автоматически." if res["voice_saved"]
                  else "Голос запомнить не получилось (нет файла записи) — имя в расшифровке исправлено.")
     if res["also"]:
-        parts.append(f"Тот же голос у {', '.join(res['also'])} — подписала тоже.")
+        parts.append(f"Тот же голос у {', '.join(res['also'])} — подписано тоже.")
     parts.append("Чтобы разбор учёл имена — «Разобрать заново».")
     return back(request, " ".join(parts), to=f"/meetings/{mid}")
 
@@ -2210,7 +2210,7 @@ async def meeting_speakers_tidy(request: Request, mid: str):
         res = await run_in_threadpool(voice.retidy, mid)
     except ValueError as e:
         return back(request, err=str(e))
-    return back(request, f"Склеила части одних и тех же голосов: заметно говорят {res['main']} "
+    return back(request, f"Части одних и тех же голосов склеены: заметно говорят {res['main']} "
                          f"(было {res['before']} «спикеров», стало {res['after']}, остальное — обрывки реплик)"
                          + (f", узнано по голосу: {res['known']}" if res["known"] else "")
                          + ". Чтобы разбор учёл — «Разобрать заново».", to=f"/meetings/{mid}")
@@ -2224,7 +2224,7 @@ async def meeting_me(request: Request, mid: str, speaker: str = Form(...)):
     res = await run_in_threadpool(voice.mark_me, mid, speaker)
     jobs.submit("process-meeting", "heavy", {"meeting_id": mid})
     parts = [f"Готово: {speaker} — это вы."]
-    parts.append("Голос запомнила — в следующих записях подпишу вас сама." if res["voice_saved"]
+    parts.append("Голос сохранён — в следующих записях вас подпишет сам PULSE." if res["voice_saved"]
                  else "Голос запомнить не получилось (нет файла записи) — имя в расшифровке исправлено.")
     if res["commitments_removed"] or res["proposals_rejected"]:
         parts.append(f"Итоги прошлого разбора убраны (задач: {res['commitments_removed']}, "
@@ -2609,7 +2609,7 @@ def office_open(request: Request, path: str = Form(...), reveal: str = Form(""))
     if not office.can_open(path):  # только файлы из папок офиса
         return back(request, err="Файл не найден — возможно, его переместили")
     _open_local(path, bool(reveal))
-    return back(request, "Показала в Finder" if reveal else "Открыла файл")
+    return back(request, "Показано в Finder" if reveal else "Файл открыт")
 
 
 @app.post("/jobs/run")

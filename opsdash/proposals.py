@@ -30,7 +30,7 @@ KINDS = {
     "task.merge": "Объединить задачу-дубль",
     "task.log": "Дописать в ход задачи",
     "project.create": "Собрать задачи в проект",
-    "attention.done": "Закрыть «нужен ответ» — директор ответила",
+    "attention.done": "Закрыть «нужен ответ» — ответ уже дан",
     "telegram.remind": "Напомнить коллеге в Telegram",
     "skill.rule": "Правило для навыка — урок из ваших «Нет»",
     "mcp.call": "Действие в подключённом сервисе (MCP)",
@@ -303,7 +303,7 @@ def propose_task_meeting(*, commitment_id: int, event_uid: str, batch: str | Non
     if store.row("SELECT id FROM proposals WHERE kind='task.meeting' AND status='rejected' "
                  "AND json_extract(payload, '$.commitment_id')=? AND json_extract(payload, '$.event_uid')=?",
                  (c["id"], e["uid"])):
-        raise ProposalError("Директор уже ответила «Нет» на эту пару — не предлагай её снова")
+        raise ProposalError("На эту пару уже есть «Нет» директора — не предлагай её снова")
     dup = store.row("SELECT id FROM proposals WHERE kind='task.meeting' AND status='pending' "
                     "AND json_extract(payload, '$.commitment_id')=?", (c["id"],))
     if dup:
@@ -338,7 +338,7 @@ def propose_task_wait(*, commitment_id: int, waits_for: int | None = None, event
         same = (pl.get("waits_for") == payload["waits_for"] if waits_for
                 else (pl.get("event") or "").lower() == event.lower())
         if same and p["status"] == "rejected":
-            raise ProposalError("Директор уже ответила «Нет» на эту связь — не предлагай её снова")
+            raise ProposalError("На эту связь уже есть «Нет» директора — не предлагай её снова")
         if same:
             return get(p["id"])
     if waits_for:
@@ -366,7 +366,7 @@ def propose_task_merge(*, commitment_id: int, into: int, quote: str | None = Non
         pl = store.loads(p["payload"], {})
         if {pl.get("commitment_id"), pl.get("into")} == {c["id"], keep["id"]}:
             if p["status"] == "rejected":
-                raise ProposalError("Директор уже ответила «Нет»: это разные задачи — не предлагай снова")
+                raise ProposalError("Уже есть «Нет» директора: это разные задачи — не предлагай снова")
             return get(p["id"])
     payload = {"commitment_id": c["id"], "into": keep["id"], "quote": (quote or "").strip()}
     label = (f"Объединить дубль: «{records.headline(c)}» ({records.route(c)}) → "
@@ -417,7 +417,7 @@ def propose_task_log(*, commitment_id: int, text: str, quote: str | None = None,
     for p in store.rows("SELECT * FROM proposals WHERE kind='task.log' AND status IN ('pending', 'rejected') "
                         "AND source_ref=? AND json_extract(payload, '$.commitment_id')=?", (source_ref, c["id"])):
         if p["status"] == "rejected":
-            raise ProposalError("Директор уже ответила «Нет»: это не про эту задачу — по этому сообщению не предлагай")
+            raise ProposalError("Уже есть «Нет» директора: это не про эту задачу — по этому сообщению не предлагай")
         store.execute("UPDATE proposals SET payload=?, reason=?, title=? WHERE id=?",
                       (store.json_col(payload), reason.strip(), label, p["id"]))
         return get(p["id"])
@@ -449,7 +449,7 @@ def propose_project(*, title: str, tasks: list[int], goal: str | None = None, ow
     rejected = store.row("SELECT 1 FROM proposals WHERE kind='project.create' AND status='rejected' "
                          "AND lower(json_extract(payload, '$.title'))=lower(?)", (title,))
     if rejected:
-        raise ProposalError("Директор уже ответила «Нет» на такой проект — не предлагай его снова")
+        raise ProposalError("На такой проект уже есть «Нет» директора — не предлагай его снова")
     payload = {"title": title, "goal": (goal or "").strip() or None, "owner": (owner or "").strip() or None,
                "due": due or None, "tasks": ids}
     return _create("project.create", f"Проект «{title}»: {len(ids)} {_tasks_word(len(ids))}", payload,
@@ -475,11 +475,11 @@ def propose_answered(*, attention_id: int, quote: str | None = None, batch: str 
     ref = (source_ref or "").partition(":")[2]
     msg = store.row("SELECT ts FROM messages WHERE id=?", (int(ref),)) if ref.isdigit() else None
     if a["reopened_at"] and msg and msg["ts"] <= a["reopened_at"]:
-        raise ProposalError("Директор вернула этот пункт уже после этого сообщения — значит, это не ответ")
+        raise ProposalError("Этот пункт вернули в работу уже после этого сообщения — значит, это не ответ")
     if source_ref and store.row(
             "SELECT id FROM proposals WHERE kind='attention.done' AND status='rejected' AND source_ref=? "
             "AND json_extract(payload, '$.attention_id')=?", (source_ref, a["id"])):
-        raise ProposalError("Директор уже ответила «Нет» на это предложение — по этому сообщению не предлагай")
+        raise ProposalError("На это предложение уже есть «Нет» директора — по этому сообщению не предлагай")
     dup = store.row("SELECT id FROM proposals WHERE kind='attention.done' AND status='pending' "
                     "AND json_extract(payload, '$.attention_id')=?", (a["id"],))
     if dup:
@@ -502,7 +502,7 @@ def propose_reminder(*, commitment_id: int, text: str | None = None, batch: str 
     if c["direction"] != "to_me" or c["status"] != "open":
         raise ProposalError("Напоминать можно только по открытым задачам «мне должны»")
     if not manual and (off := records.remind_off(c)):
-        raise ProposalError(f"Директор попросила по этой задаче: {off} — напоминание не предлагай")
+        raise ProposalError(f"Просьба директора по этой задаче: {off} — напоминание не предлагай")
     to = records.recipient(c)
     if not to:
         raise ProposalError(f"Не нашла чат Telegram с «{c['who']}» — укажите его @username в «Людях»")
@@ -535,7 +535,7 @@ def propose_rule(*, skill: str, text: str, quote: str | None = None, batch: str 
     for p in store.rows("SELECT payload FROM proposals WHERE kind='skill.rule' AND status='rejected'"):
         pl = store.loads(p["payload"], {})
         if pl.get("skill") == skill and (pl.get("text") or "").lower() == text.lower():
-            raise ProposalError("Такое правило директор уже отклоняла — снова не предлагаем")
+            raise ProposalError("Такое правило уже отклоняли — снова не предлагаем")
     return _create("skill.rule", f"Правило для «{sk['title']}»: {text}", {"skill": skill, "text": text, "quote": quote},
                    autonomy_key="skill_rule", reason=reason, source_ref=source_ref, batch=batch)
 
@@ -552,7 +552,7 @@ def propose_mcp_call(*, server_id: str, tool: str, args: dict | None = None, tit
     if not s.get("enabled") or mcp.status(server_id)["kind"] != "ok":
         raise ProposalError(f"Подключение «{s.get('title') or server_id}» выключено или не настроено")
     if not s.get("writes", True):
-        raise ProposalError(f"Изменения в «{s.get('title') or server_id}» директор не разрешила — только чтение")
+        raise ProposalError(f"Изменения в «{s.get('title') or server_id}» не разрешены — только чтение")
     known = {t["name"]: t for t in mcp.tools(server_id)}
     if tool not in known:
         raise ProposalError(f"У «{s.get('title') or server_id}» нет инструмента {tool} — ./ops mcp tools {server_id}")

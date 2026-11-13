@@ -70,7 +70,7 @@ def job_task_log(task_id: int, **_) -> str:
     before = count()
     prompt = (f"Собери ход задачи [{task_id}] «{records.headline(c)}» строго по навыку task-log "
               "(.claude/skills/task-log/SKILL.md). Это фоновый запуск по кнопке «Собрать с Claude»: директор увидит "
-              "результат в окне задачи, писать ей через ./ops notify не нужно.")
+              "результат в окне задачи, писать директору через ./ops notify не нужно.")
     brain.run(prompt, model=settings["claude"]["model_triage"], job="task-log", timeout_min=15)
     added = count() - before
     return f"записей в ходе: +{added}" if added > 0 else "нового по задаче не нашлось"
@@ -281,7 +281,7 @@ def job_briefs(uid: str | None = None, **_) -> str:
                          for e in items)
     prompt = (
         f"Подготовь брифы к встречам строго по навыку meeting-brief (.claude/skills/meeting-brief/SKILL.md):\n{listing}\n"
-        + ("Директор сама попросила бриф к этой встрече — собери его, даже если тема не очевидна. " if uid else "")
+        + ("Бриф к этой встрече запросил директор — собери его, даже если тема не очевидна. " if uid else "")
         + "Это фоновый запуск: директор не видит этот чат."
     )
     try:
@@ -430,7 +430,7 @@ def job_ask(text: str, chat_id: str, reply_to: int | None = None, **_) -> str:
     prompt = (
         f"Директор пишет тебе в Telegram (с телефона): «{text}»\n\n"
         f"Действуй по навыку ask (.claude/skills/ask/SKILL.md). Если создаёшь предложения "
-        f"(./ops propose ...), указывай --batch {batch}. Твой последний ответ целиком уйдёт ей в Telegram — "
+        f"(./ops propose ...), указывай --batch {batch}. Твой последний ответ целиком уйдёт директору в Telegram — "
         "пиши коротко, простым текстом, без Markdown-таблиц."
     )
     b = bot.get_bot()
@@ -471,7 +471,7 @@ def job_voice(path: str, chat_id: str, reply_to: int | None = None, caption: str
     text = transcribe.transcribe_short(Path(path))
     b = bot.get_bot()
     if not text:
-        b.send(chat_id, "Не разобрала слов в голосовом 🤷", reply_to=reply_to)
+        b.send(chat_id, "Слов в голосовом не разобрать 🤷", reply_to=reply_to)
         return "пусто"
     b.send(chat_id, f"🎙 <i>{bot.e(text)}</i>", reply_to=reply_to)
     return job_ask(f"{caption}\n{text}".strip(), chat_id, reply_to)

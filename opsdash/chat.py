@@ -227,7 +227,7 @@ def _context_prompt(items: list[dict]) -> str:
                 lines.append(f"- Файл «{c['name']}» — его текст по частям: {c['text']} (Read).")
             else:
                 lines.append(f"- Файл «{c['name']}»: {c['path']} (Read).")
-    return ("Директор приложила к вопросу:\n" + "\n".join(lines) + "\n\n") if lines else ""
+    return ("К вопросу приложено:\n" + "\n".join(lines) + "\n\n") if lines else ""
 
 
 # --- вопрос и ответ -----------------------------------------------------------------

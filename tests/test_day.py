@@ -241,7 +241,7 @@ def test_estimates_user_wins_over_claude(monkeypatch, capsys):
     cli.main(["day", "estimates", "--set", f"{plain}=15, {cid}=240"])
     assert "Оценки сохранены: 1; оценки директора не менял: 1" in capsys.readouterr().out
     cli.main(["commitments", "set", str(cid), "--estimate", "60"])
-    assert "Оценку директор поставила сама" in capsys.readouterr().out
+    assert "Оценка поставлена директором" in capsys.readouterr().out
     assert day.unestimated() == []
 
 

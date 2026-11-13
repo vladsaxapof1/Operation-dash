@@ -100,7 +100,7 @@
     <p class="muted small" style="margin:0">Что PULSE выносил в Сводку и вы закрыли. «Вернуть» — снова в «Нужно от вас».</p>
     <ul class="list closed-list">
     {% for a in closed %}
-      <li><div class="row"><div class="grow"><b>{{ a.sender_name or a.chat_title }}</b>: {{ a.summary }}<div class="meta">{{ {'done': 'ответила', 'task': 'сделали задачей'}.get(a.status, 'скрыто') }} · {{ a.updated | ago }}</div></div>
+      <li><div class="row"><div class="grow"><b>{{ a.sender_name or a.chat_title }}</b>: {{ a.summary }}<div class="meta">{{ {'done': 'ответ дан', 'task': 'сделали задачей'}.get(a.status, 'скрыто') }} · {{ a.updated | ago }}</div></div>
       <form class="inline" method="post" action="/attention/{{ a.id }}/reopen"><button class="btn sm">Вернуть</button></form></div></li>
     {% else %}<li class="empty">Пока пусто.</li>{% endfor %}
     </ul>

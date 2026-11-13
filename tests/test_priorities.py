@@ -216,7 +216,7 @@ def test_cli_importance_priority_and_list(capsys, tuesday):
     cli.main(["commitments", "set", str(b), "--priority", "срочно"])
     assert "Приоритет: Срочно — закреплён" in capsys.readouterr().out
     cli.main(["commitments", "show", str(b)])
-    assert "приоритет Срочно (поставила директор) · важность низкая" in capsys.readouterr().out
+    assert "приоритет Срочно (поставлен директором) · важность низкая" in capsys.readouterr().out
     cli.main(["commitments", "set", str(b), "--priority", "auto"])
     assert "снова считается сам" in capsys.readouterr().out
     cli.main(["commitments", "add", "--direction", "to_me", "--who", "Пётр", "--title", "Договор клиенту",

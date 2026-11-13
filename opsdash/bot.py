@@ -363,7 +363,7 @@ def handle_media(bot: Bot, msg: dict, chat_id: str) -> None:
         bot.send(chat_id, "Это не похоже на запись встречи. Принимаю аудио, видео и расшифровки (.txt, .vtt, .srt, .docx).")
         return
     meeting_id = recordings.create_meeting(target, title=(msg.get("caption") or None))
-    bot.send(chat_id, f"📥 Получила «{e(name)}». Расшифрую и разберу — пришлю итог сюда.", reply_to=msg["message_id"])
+    bot.send(chat_id, f"📥 Запись «{e(name)}» получена. PULSE расшифрует и разберёт её — итог придёт сюда.", reply_to=msg["message_id"])
     jobs.submit("transcribe", kind="transcribe", args={"meeting_id": meeting_id})
 
 
@@ -524,7 +524,7 @@ def send_attention(bot: Bot, chat_id: str) -> None:
         if a.get("msg_link"):
             text += f"\n<a href=\"{e(a['msg_link'])}\">Открыть сообщение</a>"
         bot.send(chat_id, text, [[
-            {"text": "✔ Ответила", "callback_data": f"att:d:{a['id']}"},
+            {"text": "✔ Отвечено", "callback_data": f"att:d:{a['id']}"},
             {"text": "Скрыть", "callback_data": f"att:x:{a['id']}"},
         ]])
 

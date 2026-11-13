@@ -22,11 +22,11 @@
       {% if a.msg_text %}<blockquote class="dlg-quote">{{ a.msg_text[:400] }}{% if a.msg_text | length > 400 %}…{% endif %}</blockquote>{% endif %}
       {% if a.draft %}<div class="draft" data-copy>{{ a.draft }}</div>{% endif %}
       {% if a.done_hint %}{% set h = a.done_hint %}<div class="dlg-hint"><div><b>Похоже, вы уже ответили.</b> {{ h.reason }}</div>
-        <div class="actions"><form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm">Да, убрать</button></form><form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm ghost">Нет, ещё не ответила</button></form></div></div>{% endif %}
+        <div class="actions"><form class="inline" method="post" action="/proposals/{{ h.id }}/approve"><button class="btn sm">Да, убрать</button></form><form class="inline" method="post" action="/proposals/{{ h.id }}/reject"><button class="btn sm ghost">Нет, ответа ещё не было</button></form></div></div>{% endif %}
       <div class="actions">
         {% if a.draft %}<button type="button" class="btn sm" data-copy-btn>Копировать ответ</button>{% endif %}
         {% if a.orig_url %}<a class="btn sm" href="{{ a.orig_url }}" target="_blank" rel="noopener">↗ {{ a.orig_label }}</a>{% endif %}
-        <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">{{ icons.icon('check', 14) }} Ответила</button></form>
+        <form class="inline" method="post" action="/attention/{{ a.id }}/done"><button class="btn sm ok">{{ icons.icon('check', 14) }} Отвечено</button></form>
         {% if a.my_task %}<a class="btn sm" href="/commitments?task={{ a.my_task.id }}">Открыть задачу</a>
         {% else %}<button type="button" class="btn sm" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">{{ icons.icon('plus', 14) }} Сделать задачей</button>{% endif %}
       </div>
@@ -38,7 +38,7 @@
     {% else %}<button type="button" class="btn" data-reveal="att-{{ a.id }}">Подробнее</button>{% endif %}
     {% call ui.menu() %}
       <button type="button" class="menu-i" data-reveal="att-{{ a.id }}">Показать сообщение</button>
-      <form method="post" action="/attention/{{ a.id }}/done"><button class="menu-i">Ответила</button></form>
+      <form method="post" action="/attention/{{ a.id }}/done"><button class="menu-i">Отвечено</button></form>
       {% if a.my_task %}<a class="menu-i" href="/commitments?task={{ a.my_task.id }}">Открыть задачу</a>
       {% else %}<button type="button" class="menu-i" data-dlg-open="att-task-{{ a.id }}" title="Ответа мало — нужна работа: задача на доске, сообщение останется в ней">Сделать задачей</button>{% endif %}
       <form method="post" action="/attention/{{ a.id }}/dismiss"><button class="menu-i">Скрыть</button></form>
