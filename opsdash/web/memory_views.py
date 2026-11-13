@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from opsdash import config, memory, store
 
-TABS = [("feed", "Лента"), ("pages", "Страницы"), ("kb", "Уроки и удачи")]
+TABS = [("feed", "Лента"), ("pages", "Страницы"), ("map", "Карта"), ("agents", "От агентов"), ("kb", "Уроки и удачи")]
 MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября",
               "декабря"]
 SOURCES = {"": "Все источники", "meeting": "Встречи", "messages": "Переписка", "director": "От вас", "agent": "От агентов"}
@@ -84,7 +84,8 @@ def register(app: FastAPI, render, back) -> None:
 
             ctx.update(model=embed.status(), periods=[("7", "Неделя"), ("30", "Месяц"), ("90", "3 месяца"),
                                                       ("0", "Всё время")],
-                       live=memory.page_list(12), recent=_recent_sources())
+                       live=memory.page_list(12), recent=_recent_sources(), nums=memory.numbers(),
+                       entities=memory.page_list(200), link_kinds=memory.LINK_KINDS)
         elif tab == "agents":
             ctx.update(agents=_agent_facts())
         return render(request, "memory.html", **ctx)
@@ -210,18 +211,38 @@ def register(app: FastAPI, render, back) -> None:
     @app.get("/api/memory/graph")
     def memory_graph(view: str = "facts", days: int = 30, kind: str = "", entity: str = "", source: str = "",
                      limit: int = 300):
-        from opsdash import links_map
-
         if view == "entities":
-            return JSONResponse(links_map.entity_graph(kind=kind or None, limit=min(max(limit, 10), 600)))
-        return JSONResponse(links_map.fact_graph(days=days, kind=kind or None, entity=entity or None,
-                                                 source=source or None, limit=min(max(limit, 10), 2000)))
+            return JSONResponse(memory.entity_graph(kind=kind or None, limit=min(max(limit, 10), 600)))
+        return JSONResponse(memory.fact_graph(days=days, kind=kind or None, about=entity or None,
+                                              source=source or None, limit=min(max(limit, 10), 2000)))
 
     @app.get("/api/memory/fact/{fid}")
     def memory_fact_api(fid: int):
-        from opsdash import links_map
+        return JSONResponse(memory.fact_card(fid) or {"error": "нет факта"})
 
-        return JSONResponse(links_map.fact_card(fid) or {"error": "нет факта"})
+    @app.get("/api/memory/entity/{eid}")
+    def memory_entity_api(eid: int):
+        d = memory.page_data(eid)
+        if not d:
+            return JSONResponse({"error": "нет страницы"})
+        return JSONResponse({"id": d["entity"]["id"], "name": d["entity"]["name"], "kind": d["kind_title"],
+                             "aliases": d["entity"]["aliases"], "lead": (d["lead"] or {}).get("lead") or "",
+                             "facts": [{"id": f["id"], "text": f["text"], "day": memory._ddmm(f["happened"]),
+                                        "kind": f["kind_title"]} for f in d["facts"][:12]],
+                             "tasks": [{"id": c["id"], "title": c["title"] or c["what"][:80]} for c in d["tasks"][:6]],
+                             "meetings": [{"id": m["id"], "title": m["title"]} for m in d["meetings"][:5]]})
+
+    @app.get("/api/memory/near")
+    def memory_near(q: str = "", k: int = 50):
+        """Ближайшие по смыслу — для ./ops recall и MCP: модель держит только работающий PULSE (opsdash.embed)."""
+        from opsdash import embed
+
+        if not q.strip() or not embed.enabled() or not embed.ready():
+            return JSONResponse({"ok": False})
+        try:
+            return JSONResponse({"ok": True, **embed.near_local(q, min(max(k, 1), 200))})
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": str(e)[:200]})
 
     @app.post("/settings/memory")
     def memory_settings(request: Request, day: str = Form(""), day_time: str = Form("18:00"),

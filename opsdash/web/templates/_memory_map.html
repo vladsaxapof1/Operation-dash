@@ -1,0 +1,66 @@
+{#- Карта памяти: «Созвездие» фактов и «Сущности» (static/memory-map.js рисует на canvas, данные — /api/memory/graph),
+    под картой «Память в цифрах». Цвета — токены темы: карта читается в светлой, тёмной и обеих «Графит» #}
+<div class="mem-map-tools" data-map-tools>
+  <div class="seg" role="group" aria-label="Что на карте">
+    <button type="button" class="active" data-view="facts" aria-pressed="true">Созвездие</button>
+    <button type="button" data-view="entities" aria-pressed="false">Сущности</button>
+  </div>
+  <span data-for="facts">
+    <select data-f="days" aria-label="Период">{% for v, t in periods %}<option value="{{ v }}" {{ 'selected' if v == '30' }}>{{ t }}</option>{% endfor %}</select>
+    <select data-f="kind" aria-label="Вид факта"><option value="">Все виды</option>{% for k, t in kinds.items() %}<option value="{{ k }}">{{ t }}</option>{% endfor %}</select>
+    <select data-f="entity" aria-label="О ком или о чём"><option value="">Все сущности</option>{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select>
+    <select data-f="source" aria-label="Источник"><option value="">Все источники</option><option value="meeting">Встречи</option><option value="messages">Переписка</option><option value="director">От вас</option><option value="agent">От агентов</option></select>
+  </span>
+  <span data-for="entities" hidden>
+    <select data-f="ekind" aria-label="Вид сущности"><option value="">Все виды</option>{% for k, t in ekinds.items() %}<option value="{{ k }}">{{ t }}</option>{% endfor %}</select>
+    <span class="seg" role="group" aria-label="Вид списка"><button type="button" class="active" data-emode="graph" aria-pressed="true">Связи</button><button type="button" data-emode="list" aria-pressed="false">Список</button></span>
+  </span>
+  <span class="grow"></span>
+</div>
+{% if not model.ready %}
+<form class="mem-note" method="post" action="/settings/memory/model">Связей по смыслу нет: модель для поиска по смыслу не скачана{% if model.downloading %} (скачивается: {{ model.progress }}){% endif %}.
+  {% if not model.downloading %}<input type="hidden" name="action" value="download"><button class="btn sm">Скачать, 135 МБ</button>{% endif %}</form>
+{% endif %}
+
+<div class="mem-map-wrap" data-mem-map>
+  <div class="mem-map-stage">
+    <canvas aria-label="Карта памяти: точки обозначают факты, линии обозначают связи" role="img"></canvas>
+    <div class="mem-legend" data-legend></div>
+    <div class="mem-map-ctrl">
+      <button type="button" class="btn sm" data-act="pause" aria-pressed="false">Пауза</button>
+      <button type="button" class="btn sm" data-act="fit">Вписать</button>
+      <button type="button" class="btn sm" data-act="full" aria-pressed="false">Во весь экран</button>
+    </div>
+    <div class="mem-map-counter" data-counter aria-live="polite"></div>
+    <div class="mem-tip" data-tip hidden></div>
+    <div class="mem-elist" data-elist hidden></div>
+  </div>
+  <aside class="mem-card" data-card><p class="mem-card-empty">Наведите на точку, и появится подпись. Щёлкните, и здесь откроется карточка: текст, источник, о ком, соседи. Колесо меняет масштаб, перетаскивание сдвигает карту.</p></aside>
+</div>
+
+<div class="mem-numbers">
+  <section class="card">
+    <div class="card-h"><h2>Память в цифрах</h2></div>
+    <div class="mem-tiles">
+      <div class="mem-tile"><div class="n">{{ nums.facts }}</div><div class="l">фактов действует</div></div>
+      <div class="mem-tile"><div class="n">{{ nums.sources }}</div><div class="l">источников</div></div>
+      <div class="mem-tile"><div class="n">{{ nums.links_total }}</div><div class="l">связей</div></div>
+      <div class="mem-tile"><div class="n">{{ nums.entities }}</div><div class="l">страниц</div></div>
+      <div class="mem-tile"><div class="n">{{ nums.chunks }}</div><div class="l">фрагментов для поиска</div></div>
+      <div class="mem-tile"><div class="n">{{ nums.vectors }}</div><div class="l">векторов по смыслу</div></div>
+    </div>
+    <div class="mem-bars"><div class="muted small">По видам фактов</div>
+      {% for t, n in nums.kind_rows %}<div class="mem-bar"><span>{{ t }}</span><span class="track"><i style="width: {{ (100 * n / nums.kind_max) | round | int }}%"></i></span><span class="num">{{ n }}</span></div>{% endfor %}
+    </div>
+    <div class="mem-bars"><div class="muted small">По видам связей</div>
+      {% for t, n in nums.link_rows %}<div class="mem-bar"><span>{{ t }}</span><span class="track"><i style="width: {{ (100 * n / nums.link_max) | round | int }}%"></i></span><span class="num">{{ n }}</span></div>{% endfor %}
+    </div>
+  </section>
+  <aside>
+    <section class="card"><div class="card-h"><h2>Живые страницы</h2></div><ul class="list mem-list">
+      {% for p in live %}<li><a href="/memory/page/{{ p.id }}">{{ p.name }}</a> <span class="muted small">{{ p.kind_title }} · {{ p.fresh or 0 }} за 30 дней</span></li>{% else %}<li class="muted">Пока нет</li>{% endfor %}</ul></section>
+    <section class="card"><div class="card-h"><h2>Последние источники</h2></div><ul class="list mem-list">
+      {% for r in recent %}<li>{% if r.source_type == 'meeting' %}<a href="/meetings/{{ r.source_ref }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %} <span class="muted small">{{ r.n }} · {{ r.at | local('%d.%m') }}</span></li>{% else %}<li class="muted">Пока нет</li>{% endfor %}</ul></section>
+  </aside>
+</div>
+<script src="/static/memory-map.js?v={{ static_v }}"></script>

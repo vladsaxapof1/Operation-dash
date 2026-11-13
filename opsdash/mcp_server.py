@@ -6,7 +6,9 @@
 у Claude появляются инструменты pulse: найти по словам, встреча, задача и её ход, решения по теме, проекты.
 
 - **Только чтение.** Процесс открывает базу с PRAGMA query_only (store.read_only): запись падает на уровне SQLite,
-  а не по честному слову в описании. Изменить что-то в PULSE из сессии нельзя.
+  а не по честному слову в описании. Изменить что-то в PULSE из сессии нельзя: `remember` и `task_note` («Память»,
+  этап 3) не пишут в базу, а кладут строку в файл-приёмник data/memory/inbox.jsonl — её разбирает сам PULSE и
+  показывает пользователю («Память → От агентов», предложение «Дописать в ход задачи»).
 - **Без переписки.** Чаты и письма (Telegram, почта, мессенджеры) сервер не отдаёт — там бывает личное. Из переписки
   видно только то, что PULSE сам записал в ход задач (task: «сейчас», записи хода).
 - Ответы — тем же текстом, что `./ops` (те же функции CLI), с потолком размера: длинная выдача MCP обрезается
@@ -40,7 +42,8 @@ INSTRUCTIONS = (
     "(что спросили, ответили, перенесли — по датам), решения по темам, проекты. Обращайся, когда для работы нужен "
     "контекст: что решили, кто что обещал, что обсуждали на встрече, на чём остановились. Начинай с recall по "
     "2–5 словам темы; о человеке, клиенте, проекте — page(имя); дальше — meeting, task, decisions. Ссылайся на источник: встреча (id и [чч:мм:сс]), задача [id]. "
-    "Только чтение: изменить что-то в PULSE отсюда нельзя — скажи пользователю, что сделать в PULSE. "
+    "Изменить что-то в PULSE отсюда нельзя — скажи пользователю, что сделать в PULSE; выяснил по ходу работы то, что "
+    "пригодится потом, — remember, сделал что-то по задаче — task_note (оба ждут «Да» пользователя). "
     "Самих чатов и писем здесь нет — только то, что PULSE записал из них в ход задач."
 )
 
@@ -178,6 +181,44 @@ def facts(about: str = "", kind: str = "", since: str = "", query: str = "", lim
     return "\n".join(memory.fact_line(f, mcp=True) for f in rows)
 
 
+def _session() -> str:
+    """Откуда пишет агент: папка сессии Claude Code (MCP-сервер запускается в ней)."""
+    return os.path.basename(os.getcwd().rstrip("/\\")) or "сессия"
+
+
+def remember(text: str, about: list | None = None, why: str = "", kind: str = "how") -> str:
+    """Записать, что агент выяснил по ходу работы. В базу сервер не пишет: строка уходит в приёмник
+    data/memory/inbox.jsonl, PULSE разберёт её сам — в «Память → От агентов» (или сразу, если так в «Автономии»)."""
+    from opsdash import memory
+
+    text = " ".join((text or "").split())
+    if len(text) < 8:
+        raise ToolError("напишите факт целиком: «таблица остатков обновляется ночью, в 03:00»")
+    if why_secret := memory.looks_secret(text, why):
+        raise ToolError(f"не записываю: {why_secret}")
+    if kind not in memory.FACT_KINDS:
+        raise ToolError(f"kind — один из: {', '.join(memory.FACT_KINDS)}")
+    memory.inbox_append({"type": "remember", "text": text, "about": [str(a) for a in (about or [])][:6],
+                         "why": " ".join((why or "").split())[:500], "kind": kind, "session": _session()})
+    return "Передано в PULSE: появится в «Память → От агентов» через пару минут. Пользователь примет или отклонит."
+
+
+def task_note(id: int, text: str) -> str:
+    """Сообщить, что агент сделал по задаче: станет предложением «Дописать в ход задачи» (на «Да» пользователя)."""
+    from opsdash import memory, store
+
+    text = " ".join((text or "").split())
+    if not text:
+        raise ToolError("напишите, что сделано по задаче")
+    c = store.row("SELECT id, status FROM commitments WHERE id=?", (int(id),))
+    if not c:
+        raise ToolError(f"нет задачи [{id}]")
+    if c["status"] != "open":
+        raise ToolError(f"задача [{id}] уже закрыта")
+    memory.inbox_append({"type": "task_note", "id": int(id), "text": text[:1500], "session": _session()})
+    return f"Передано в PULSE: в ход задачи [{id}] — после «Да» пользователя."
+
+
 def search(query: str, limit: int = 10) -> str:
     """Короткое имя для recall — прежние сессии зовут его по привычке."""
     return recall(query, budget="high" if int(limit or 10) > 10 else "mid")
@@ -255,7 +296,7 @@ def _schema(props: dict, required: tuple = ()) -> dict:
     return {"type": "object", "properties": props, "required": list(required), "additionalProperties": False}
 
 
-TOOLS: dict[str, tuple[Any, str, dict]] = {
+TOOLS: dict[str, tuple] = {
     "recall": (recall, "Вспомнить: один поиск по всему, что знает PULSE, — факты и страница знаний о теме, задачи "
                "с ходом, решения, встречи (разборы и расшифровки), документы, прошлые сессии агентов. С этого "
                "начинай — 2–5 слов темы: «переезд склада», «KPI ноябрь». Слова — в любой форме.",
@@ -276,6 +317,20 @@ TOOLS: dict[str, tuple[Any, str, dict]] = {
                        "since": {"type": "string", "description": "YYYY-MM-DD"},
                        "query": {"type": "string", "description": "слова"},
                        "limit": {"type": "integer"}})),
+    "remember": (remember, "Сообщить PULSE, что выяснил по ходу работы и что пригодится потом: «таблица остатков "
+                 "обновляется ночью», «в выгрузке нет возвратов». Пользователь примет это в «Память → От агентов». "
+                 "Не для мнений, личного и секретов.",
+                 _schema({"text": {"type": "string", "description": "факт целиком, понятный без этой сессии"},
+                          "about": {"type": "array", "items": {"type": "string"},
+                                    "description": "о ком или о чём: «Склад», «Олег Петров»"},
+                          "why": {"type": "string", "description": "откуда известно: файл, проверка, ответ"},
+                          "kind": {"type": "string", "enum": ["metric", "state", "role", "trait", "event", "how"]}},
+                         ("text",)), False),
+    "task_note": (task_note, "Сообщить PULSE, что сделано по задаче: станет предложением дописать это в ход задачи "
+                  "(пользователь подтвердит).",
+                  _schema({"id": {"type": "integer", "description": "id задачи из task или tasks"},
+                           "text": {"type": "string", "description": "что сделано, с результатом"}}, ("id", "text")),
+                  False),
     "search": (search, "То же, что recall (короткое имя): найти в PULSE по словам темы.",
                _schema({"query": {"type": "string", "description": "слова темы"},
                         "limit": {"type": "integer", "description": "больше 10 — длинный ответ"}},
@@ -306,9 +361,10 @@ TOOLS: dict[str, tuple[Any, str, dict]] = {
 
 
 def tool_list() -> list[dict]:
-    return [{"name": name, "description": desc, "inputSchema": schema,
-             "annotations": {"readOnlyHint": True, "openWorldHint": False}}
-            for name, (_, desc, schema) in TOOLS.items()]
+    """remember и task_note базу не меняют — пишут строку в приёмник, но для Claude Code это запись (readOnly=False)."""
+    return [{"name": name, "description": t[1], "inputSchema": t[2],
+             "annotations": {"readOnlyHint": t[3] if len(t) > 3 else True, "openWorldHint": False}}
+            for name, t in TOOLS.items()]
 
 
 def call(name: str, args: dict | None) -> tuple[str, bool]:

@@ -371,13 +371,42 @@ def fts_chunks(query: str, *, kinds: tuple[str, ...] = ("msg", "meet", "sum"), k
     return [r["id"] for r in rows]
 
 
-def rrf(*arms: list) -> list:
-    """Слияние выдач по рангам: 1 / (k + место) из каждой."""
+def rrf(*arms: list, weights: tuple | None = None) -> list:
+    """Слияние выдач по рангам: вес / (k + место) из каждой."""
     score_: dict = defaultdict(float)
-    for arm in arms:
+    for n, arm in enumerate(arms):
+        w = weights[n] if weights else 1.0
         for rank, key in enumerate(arm or []):
-            score_[key] += 1.0 / (RRF_K + rank + 1)
+            score_[key] += w / (RRF_K + rank + 1)
     return sorted(score_, key=lambda x: -score_[x])
+
+
+# вес поиска по смыслу при слиянии со словами. Встречи слова находят и так (94%): смысл с весом 0,1 только добавляет
+# то, чего слова не нашли, после них; при весе 0,2–1 замер на копии давал 92%, то есть хуже одних слов
+SEMANTIC_WEIGHT = {("msg",): 1.0, ("meet", "sum"): 0.1}
+
+
+def hybrid(words_arm: list[int], sem_arm: list[int], kinds: dict[int, str]) -> list[int]:
+    """Слова + смысл отдельно для переписки и для встреч (расшифровка и разбор — вместе, как у слов), с весами
+    SEMANTIC_WEIGHT. Замер на копии (13.11.2026): переписка 32% → 40%, встречи 94% → 94%."""
+    lists = []
+    for group, weight in SEMANTIC_WEIGHT.items():
+        w = [i for i in words_arm if kinds.get(i) in group]
+        v = [i for i in sem_arm if kinds.get(i) in group]
+        if w or v:
+            lists.append(rrf(w[:ARM_K], v[:ARM_K], weights=(1.0, weight)) + w[ARM_K:])
+    return _interleave(lists)
+
+
+def _interleave(lists: list[list[int]]) -> list[int]:
+    """Списки разных видов — в одну выдачу: место каждого вида сохраняется (render всё равно делит по видам)."""
+    out, seen = [], set()
+    for i in range(max((len(x) for x in lists), default=0)):
+        for lst in lists:
+            if i < len(lst) and lst[i] not in seen:
+                seen.add(lst[i])
+                out.append(lst[i])
+    return out
 
 
 def _semantic(query: str) -> dict | None:
@@ -615,11 +644,11 @@ def collect(query: str, *, about: str | None = None, since: str | None = None, k
         if sem and sem.get("chunks"):
             allowed = set(ck)
             sem_ids = [i for i in sem["chunks"] if i]
-            meta = {c["id"]: c for c in chunks(sem_ids)}
+            meta = {c["id"]: c for c in chunks(list(dict.fromkeys(sem_ids + words_arm)))}
             sem_ids = [i for i in sem_ids if i in meta and meta[i]["kind"] in allowed
                        and (not since or (meta[i]["ts"] or "") >= since)
                        and (not about_s or all(s in norm(meta[i]["text"]) for s in about_s))]
-            ranked = rrf(words_arm[:ARM_K], sem_ids[:ARM_K]) + [i for i in words_arm[ARM_K:]]
+            ranked = hybrid(words_arm, sem_ids, {i: c["kind"] for i, c in meta.items()})
             mode = "слова + смысл"
         private = _private_meetings()
         rows = [c for c in chunks(ranked) if not (c["kind"] != "msg" and c["src"] in private)]

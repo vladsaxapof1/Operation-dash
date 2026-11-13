@@ -119,7 +119,7 @@ def main() -> None:
 
             if a.embed:
                 t0 = time.time()
-                n = embed.fill(chunks=True, facts=False, progress=print)
+                n = embed.fill(chunks=True, facts=False, limit=None, progress=print)
                 print(f"векторы: +{n} за {time.time() - t0:.0f} с")
             vec = embed.LocalSearch()
             if not vec.ready():
@@ -139,8 +139,9 @@ def main() -> None:
     }
     if vec:
         arms["Только эмбеддинги"] = lambda q: vec.chunks(q, 400)
-        arms["FTS5 + эмбеддинги"] = lambda q: recall.rrf(recall.fts_chunks(q, k=recall.ARM_K),
-                                                       vec.chunks(q, recall.ARM_K)) + recall.fts_chunks(q, k=400)
+        kinds = {cid: r["kind"] for cid, r in ix["rows"].items()}
+        arms["FTS5 + эмбеддинги (как в recall)"] = lambda q: recall.hybrid(recall.fts_chunks(q, k=400),
+                                                                          vec.chunks(q, 400), kinds)
     table: dict[str, dict] = {}
     for kind, field, label in (("msg", "title", "Переписка, запрос-название"),
                                ("meet", "what", "Встречи, запрос-формулировка")):

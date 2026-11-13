@@ -55,11 +55,11 @@ def test_protocol_and_read_only(data):
     )
     assert [r["id"] for r in replies] == [1, 2, 3, 4]  # на уведомление ответа нет
     init = replies[0]["result"]
-    assert init["serverInfo"]["name"] == "pulse" and "Только чтение" in init["instructions"]
+    assert init["serverInfo"]["name"] == "pulse" and "Изменить что-то в PULSE отсюда нельзя" in init["instructions"]
     tools = replies[1]["result"]["tools"]
-    assert {t["name"] for t in tools} == {"recall", "page", "facts", "search", "meeting", "meetings", "task", "tasks",
-                                          "decisions", "projects"}
-    assert all(t["annotations"]["readOnlyHint"] for t in tools)
+    assert {t["name"] for t in tools} == {"recall", "page", "facts", "remember", "task_note", "search", "meeting",
+                                          "meetings", "task", "tasks", "decisions", "projects"}
+    assert {t["name"] for t in tools if not t["annotations"]["readOnlyHint"]} == {"remember", "task_note"}
     task = replies[2]["result"]
     assert not task["isError"] and "Бюджет склада" in task["content"][0]["text"]
     assert replies[3]["error"]["code"] == -32601
@@ -179,7 +179,7 @@ def test_block_on_top_of_connections(monkeypatch, tmp_path):
     r = client.post("/settings/pulse-mcp", data={"on": "1"}, follow_redirects=False, headers={"referer": conn})
     assert r.headers["location"].startswith("/settings?tab=connections&msg=")
     page = client.get("/settings?tab=connections").text
-    assert "conn-pulse is-on" in page and "У Claude есть инструменты PULSE: recall, page, facts, search" in page and ">Отключить<" in page
+    assert "conn-pulse is-on" in page and "У Claude есть инструменты PULSE: recall, page, facts, remember, task_note, search" in page and ">Отключить<" in page
     client.post("/settings/pulse-mcp", data={}, headers={"referer": conn})
     assert not mcp_server.status()["on"]
     monkeypatch.setattr(brain, "find_claude", lambda *a, **k: None)
@@ -218,3 +218,29 @@ def test_server_cannot_write_even_through_memory(data):
         assert memory.absorb_inbox() == {} and memory.link_chunks() == 0
     finally:
         store._query_only = False
+
+
+def test_remember_and_task_note_go_through_inbox_only(data):
+    from opsdash import memory, proposals
+
+    store.read_only()
+    try:
+        text, err = mcp_server.call("remember", {"text": "Таблица остатков склада обновляется ночью, в 03:00",
+                                                 "about": ["Склад"], "why": "видно по истории изменений файла"})
+        assert not err and "От агентов" in text
+        assert mcp_server.call("remember", {"text": "Пароль от склада: qwerty12345"})[1] is True
+        text, err = mcp_server.call("task_note", {"id": data, "text": "Собрал бюджет склада в таблицу"})
+        assert not err
+        with pytest.raises(sqlite3.OperationalError):  # сам сервер в базу по-прежнему не пишет
+            store.execute("INSERT INTO facts(kind, text) VALUES('how', 'x')")
+    finally:
+        store._query_only = False
+    assert not store.scalar("SELECT COUNT(*) FROM facts")
+    assert memory.absorb_inbox() == {"remember": 1, "task_note": 1}
+    f = store.row("SELECT * FROM facts")
+    assert f["status"] == "proposed" and f["author"] == "agent" and f["agent_session"]
+    kinds = {p["kind"] for p in proposals.list_proposals("pending")}
+    assert kinds == {"memory.fact", "task.log"}
+    p = next(p for p in proposals.list_proposals("pending") if p["kind"] == "memory.fact")
+    proposals.approve(p["id"])
+    assert store.scalar("SELECT status FROM facts") == "active"

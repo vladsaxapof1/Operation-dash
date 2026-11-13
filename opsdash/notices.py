@@ -17,7 +17,7 @@ KEEP_HOURS = 24
 LIMIT = 20
 # успешное выполнение этих заданий — не новость: они идут постоянно или директор и так видит результат
 QUIET = {"housekeeping", "docs-index", "agents-index", "agents-watch", "ask", "voice", "recordings", "update-check",
-         "memory-index"}
+         "memory-index", "memory-embed"}
 # «Сейчас» в углу: что делает Claude или расшифровка; сбор и обслуживание — секунды, о них не пишем
 BUSY = {"triage", "process-meeting", "transcribe", "digest", "weekly", "groups", "briefs", "followup", "anthology",
         "company-context", "chat", "update", "projects", "agent-brief", "task-log", "first-finds", "lessons", "decisions",

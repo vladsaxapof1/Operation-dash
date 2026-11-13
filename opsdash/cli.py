@@ -718,6 +718,13 @@ def cmd_memory(a) -> None:
             out("По видам: " + ", ".join(f"{memory.FACT_KINDS[k]} — {v}" for k, v in st["by_kind"].items()))
         elif a.action == "day":
             out(memory.day_text(a.date or config.now().date().isoformat(), a.part))
+        elif a.action == "today":
+            res = memory.day_summary(a.date)
+            if not res["n"]:
+                return out("За день новых фактов нет.")
+            changed = " · ".join(f"{c['key'] or memory._short(c['old'], 40)}: {memory._short(c['old'], 40)} → "
+                                 f"{memory._short(c['text'], 60)}" for c in res["changed"])
+            out(f"Узнал за день: {res['n']}" + (f" · изменилось: {changed}" if changed else ""))
         elif a.action == "leads":
             if a.set:
                 done = memory.set_leads(json.loads(Path(a.set).read_text(encoding="utf-8")))
@@ -2249,6 +2256,8 @@ def build_parser() -> argparse.ArgumentParser:
     x = ms.add_parser("day", help="переписка рабочих чатов за день — для «Памяти дня» (по частям до 17 КБ)")
     x.add_argument("--date", help="YYYY-MM-DD, по умолчанию сегодня")
     x.add_argument("--part", type=int, default=1)
+    x = ms.add_parser("today", help="одна строка для дайджеста: сколько узнал за день и что изменилось")
+    x.add_argument("--date")
     x = ms.add_parser("leads", help="страницы, которым нужна выжимка; --set <файл JSON> — сохранить выжимки")
     x.add_argument("--set")
     x = ms.add_parser("backfill", help="разовое наполнение памяти из готовых разборов встреч")

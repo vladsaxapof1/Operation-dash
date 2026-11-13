@@ -64,7 +64,41 @@ def job_memory_index(**_) -> str:
         else ["без изменений"]
     if absorbed:
         parts.append("из приёмника: " + ", ".join(f"{k} — {v}" for k, v in absorbed.items()))
+    if memory.links_stale():  # новые факты или векторы — связи для карты (без ИИ, доли секунды)
+        links = memory.build_links()
+        parts.append("связей: " + (", ".join(f"{memory.LINK_KINDS[k]} — {n}" for k, n in links.items()) or "нет"))
+    from opsdash import embed
+
+    if in_daemon() and embed.enabled() and embed.ready() and embed.missing():
+        submit("memory-embed")  # векторы новых фактов и фрагментов — отдельным заданием, порциями
     return " · ".join(parts)
+
+
+def job_memory_embed(**_) -> str:
+    """Векторы для поиска и связей по смыслу — порцией (embed.FILL_PER_RUN), остальное — следующим заданием."""
+    from opsdash import embed, memory
+
+    n = embed.fill()
+    embed.drop_orphans()
+    if n and embed.missing():
+        submit("memory-embed")
+    elif n:
+        memory.build_links()
+    return f"векторов: +{n}" if n else "векторы на месте"
+
+
+def job_memory_model(**_) -> str:
+    """Скачать модель эмбеддингов (Настройки → Память → «Скачать модель»), затем досчитать векторы."""
+    from opsdash import embed
+
+    store.set_state("embed_error", None)
+    try:
+        res = embed.download()
+    except Exception as e:
+        store.set_state("embed_error", str(e)[:300])
+        raise
+    submit("memory-embed")
+    return res
 
 
 def job_memory_day(day: str | None = None, **_) -> str:
@@ -556,6 +590,12 @@ def job_housekeeping(**_) -> str:
     from opsdash import transcribe
 
     transcribe.release_if_idle()
+    try:  # модель эмбеддингов «Памяти» — тоже: 0,7–1 ГБ, если ей 10 минут не пользовались
+        from opsdash import embed
+
+        embed.release_if_idle()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         bot.flush_outbox()
     except Exception:  # noqa: BLE001
@@ -637,6 +677,8 @@ REGISTRY = {
     "memory-day": job_memory_day,
     "memory-backfill": job_memory_backfill,
     "memory-leads": job_memory_leads,
+    "memory-embed": job_memory_embed,
+    "memory-model": job_memory_model,
     "transcribe": job_transcribe,
     "process-meeting": job_process_meeting,
     "triage": job_triage,
@@ -677,6 +719,8 @@ TITLES = {
     "memory-day": "Память дня: факты из переписки (Claude)",
     "memory-backfill": "Память: наполнение из разборов встреч (Claude)",
     "memory-leads": "Память: выжимки страниц (Claude)",
+    "memory-embed": "Память: векторы для поиска по смыслу",
+    "memory-model": "Память: скачать модель для поиска по смыслу",
     "transcribe": "Расшифровка встречи",
     "process-meeting": "Разбор встречи (Claude)",
     "triage": "Разбор сообщений (Claude)",

@@ -1373,3 +1373,288 @@ def absorb_inbox() -> dict:
         done[kind] = done.get(kind, 0) + 1
     work.unlink(missing_ok=True)
     return done
+
+
+# --- связи фактов (этап 3) ---------------------------------------------------------------------------------------
+
+LINK_KINDS = {"entity": "общая сущность", "temporal": "по времени", "semantic": "по смыслу", "causal": "причина"}
+ENTITY_NEIGHBOURS = 6   # у сущности с сотней фактов каждый связан с 6 ближайшими по времени, а не со всеми
+TEMPORAL_NEIGHBOURS = 6
+TEMPORAL_DAYS = 1
+
+
+def build_links() -> dict:
+    """Пересчитать связи фактов без ИИ: общая сущность, одно время (тот же источник или ±1 день), смысл (по готовым
+    векторам — embed.semantic_pairs), причина (because). Только действующие факты."""
+    if store._query_only:
+        return {}
+    facts_ = {r["id"]: r for r in store.rows(
+        "SELECT id, happened, source_type, source_ref, because_id, created FROM facts WHERE status='active'")}
+    out: dict[tuple[int, int, str], float] = {}
+
+    def add(a: int, b: int, kind: str, w: float) -> None:
+        if a == b or a not in facts_ or b not in facts_:
+            return
+        a, b = sorted((a, b))
+        out[(a, b, kind)] = max(out.get((a, b, kind), 0.0), round(w, 3))
+
+    def day(fid: int) -> int:
+        h = facts_[fid]["happened"] or (facts_[fid]["created"] or "")[:10]
+        try:
+            return date.fromisoformat(h).toordinal()
+        except ValueError:
+            return 0
+
+    by_entity: dict[int, list[int]] = {}
+    for r in store.rows("SELECT fact_id, entity_id FROM fact_entities"):
+        if r["fact_id"] in facts_:
+            by_entity.setdefault(r["entity_id"], []).append(r["fact_id"])
+    shared: dict[tuple[int, int], int] = {}
+    for ids in by_entity.values():
+        ids.sort(key=day)
+        for i, a in enumerate(ids):  # ближайшие по времени соседи в той же сущности
+            for b in ids[max(0, i - ENTITY_NEIGHBOURS // 2): i + ENTITY_NEIGHBOURS // 2 + 1]:
+                if a < b:
+                    shared[(a, b)] = shared.get((a, b), 0) + 1
+    for (a, b), n in shared.items():
+        add(a, b, "entity", min(1.0, 0.5 + 0.25 * n))
+    by_source: dict[str, list[int]] = {}
+    for fid, f in facts_.items():
+        if f["source_type"] and f["source_ref"]:
+            key = f"{f['source_type']}:{f['source_ref']}" if f["source_type"] == "meeting" else f"day:{f['happened']}"
+            by_source.setdefault(key, []).append(fid)
+    for ids in by_source.values():  # один источник: встреча — все со всеми ближайшими; переписка — тот же день
+        ids.sort()
+        for i, a in enumerate(ids):
+            for b in ids[i + 1: i + 1 + TEMPORAL_NEIGHBOURS]:
+                add(a, b, "temporal", 1.0)
+    ordered = sorted(facts_, key=day)
+    for i, a in enumerate(ordered):  # разные источники в пределах суток — чем ближе, тем сильнее
+        for b in ordered[i + 1: i + 1 + TEMPORAL_NEIGHBOURS]:
+            gap = abs(day(b) - day(a))
+            if gap > TEMPORAL_DAYS:
+                break
+            add(a, b, "temporal", 1.0 / (1 + gap))
+    for fid, f in facts_.items():
+        if f["because_id"]:
+            add(fid, f["because_id"], "causal", 1.0)
+    semantic = 0
+    try:
+        from opsdash import embed
+
+        if embed.enabled():
+            for a, b, s in embed.semantic_pairs():
+                add(a, b, "semantic", s)
+                semantic += 1
+    except Exception as e:  # noqa: BLE001 — без модели и векторов связей по смыслу просто нет
+        store.log("memory", f"связи по смыслу: {e}", "warning")
+    with store.db() as conn:
+        conn.execute("DELETE FROM fact_links")
+        conn.executemany("INSERT INTO fact_links(a, b, kind, weight) VALUES(?,?,?,?)",
+                         [(a, b, k, w) for (a, b, k), w in out.items()])
+    store.set_state("memory_links_at", store.utcnow())
+    counts: dict[str, int] = {}
+    for (_, _, k) in out:
+        counts[k] = counts.get(k, 0) + 1
+    return counts
+
+
+def links_stale() -> bool:
+    return (store.get_state("memory_facts_changed") or "") > (store.get_state("memory_links_at") or "") \
+        or (store.get_state("memory_vectors_at") or "") > (store.get_state("memory_links_at") or "")
+
+
+# --- карта ------------------------------------------------------------------------------------------------------
+
+def fact_graph(*, days: int = 30, kind: str | None = None, about: str | int | None = None,
+               source: str | None = None, limit: int = 300) -> dict:
+    """«Созвездие»: факты-точки и связи. По умолчанию — limit самых свежих и связанных; фильтры — период, вид, сущность,
+    источник (meeting / messages / director / agent)."""
+    where, params = ["f.status='active'"], []
+    if days:
+        where.append("f.happened >= ?")
+        params.append((config.now().date() - timedelta(days=days)).isoformat())
+    if kind:
+        where.append("f.kind=?")
+        params.append(kind)
+    if about:
+        e = entity(about)
+        if not e:
+            return {"nodes": [], "links": [], "total": 0}
+        where.append("f.id IN (SELECT fact_id FROM fact_entities WHERE entity_id=?)")
+        params.append(e["id"])
+    if source == "meeting":
+        where.append("f.source_type='meeting'")
+    elif source == "messages":
+        where.append(f"f.source_type IN ({','.join('?' * len(MESSAGE_SOURCES))})")
+        params += list(MESSAGE_SOURCES)
+    elif source in ("director", "agent"):
+        where.append("f.author=?")
+        params.append(source)
+    rows = store.rows(
+        "SELECT f.id, f.kind, f.text, f.happened, f.created, f.source_type, f.author, "
+        "(SELECT COUNT(*) FROM fact_links l WHERE l.a=f.id OR l.b=f.id) AS deg FROM facts f WHERE "
+        + " AND ".join(where), params)
+    total = len(rows)
+    today = config.now().date().toordinal()
+
+    def rank(r: dict) -> float:
+        try:
+            age = today - date.fromisoformat(r["happened"] or r["created"][:10]).toordinal()
+        except ValueError:
+            age = 365
+        return r["deg"] * 1.0 - age * 0.6
+
+    rows.sort(key=rank, reverse=True)
+    rows = rows[:limit]
+    ids = {r["id"] for r in rows}
+    names: dict[int, list[str]] = {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for r in store.rows(f"SELECT fe.fact_id, e.name FROM fact_entities fe JOIN entities e ON e.id=fe.entity_id "
+                            f"WHERE fe.fact_id IN ({marks})", list(ids)):
+            names.setdefault(r["fact_id"], []).append(r["name"])
+        links = store.rows(f"SELECT a, b, kind, weight FROM fact_links WHERE a IN ({marks}) AND b IN ({marks})",
+                           [*ids, *ids])
+    else:
+        links = []
+    fresh = store.to_utc_iso(datetime.now().astimezone() - timedelta(hours=24))
+    nodes = [{"id": r["id"], "kind": r["kind"], "text": _short(r["text"], 160), "label": _short(r["text"], 46),
+              "deg": r["deg"], "day": _ddmm(r["happened"]), "about": names.get(r["id"], [])[:3],
+              "new": (r["created"] or "") >= fresh, "src": r["source_type"] or "", "me": r["author"] == "director"}
+             for r in rows]
+    return {"nodes": nodes, "links": [[l["a"], l["b"], l["kind"], l["weight"]] for l in links], "total": total,
+            "kinds": LINK_KINDS}
+
+
+def fact_card(fid: int) -> dict | None:
+    f = fact(fid)
+    if not f:
+        return None
+    nb = store.rows("SELECT CASE WHEN l.a=? THEN l.b ELSE l.a END AS other, l.kind, l.weight FROM fact_links l "
+                    "WHERE l.a=? OR l.b=? ORDER BY l.weight DESC LIMIT 40", (fid, fid, fid))
+    texts = {r["id"]: r["text"] for r in store.rows(
+        f"SELECT id, text FROM facts WHERE id IN ({','.join('?' * len(nb)) or 'NULL'})", [n["other"] for n in nb])}
+    return {"id": f["id"], "text": f["text"], "kind": f["kind_title"], "day": _ddmm(f["happened"]),
+            "status": f["status_title"], "key": f.get("key"), "quote": f.get("quote") or "",
+            "source": source_label(f), "source_link": f"/meetings/{f['source_ref']}" if f["source_type"] == "meeting" else "",
+            "entities": f["entities"], "prev": f["prev"]["text"] if f.get("prev") else "",
+            "because": f["because"]["text"] if f.get("because") else "",
+            "neighbours": [{"id": n["other"], "kind": n["kind"], "kind_title": LINK_KINDS.get(n["kind"], n["kind"]),
+                            "text": _short(texts.get(n["other"], ""), 120)} for n in nb if n["other"] in texts]}
+
+
+def entity_graph(*, kind: str | None = None, limit: int = 300) -> dict:
+    """«Сущности»: точки — сущности, линии — совместные упоминания в фактах, задачах, встречах и решениях; толщина —
+    сколько раз, свежесть — когда в последний раз."""
+    from opsdash import decisions
+
+    ents = page_list(limit * 2, kind=kind)
+    ents = sorted(ents, key=lambda r: -((r["facts"] or 0) * 3 + (r["mentions"] or 0)))[:limit]
+    ids = {e["id"] for e in ents}
+    pair: dict[tuple[int, int], dict] = {}
+
+    def bump(group: set[int], when: str | None) -> None:
+        group = sorted(group & ids)
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
+                p = pair.setdefault((a, b), {"n": 0, "last": ""})
+                p["n"] += 1
+                p["last"] = max(p["last"], when or "")
+
+    by_fact: dict[int, set[int]] = {}
+    for r in store.rows("SELECT fe.fact_id, fe.entity_id, f.happened FROM fact_entities fe JOIN facts f "
+                        "ON f.id=fe.fact_id WHERE f.status='active'"):
+        by_fact.setdefault(r["fact_id"], set()).add(r["entity_id"])
+        by_fact.setdefault(-r["fact_id"], set()).add(r["happened"] or "")
+    for fid, group in by_fact.items():
+        if fid > 0:
+            bump(group, next(iter(by_fact.get(-fid, {""}))))
+    by_meeting: dict[str, set[int]] = {}
+    when: dict[str, str] = {}
+    for r in store.rows("SELECT c.src, c.ts, ce.entity_id FROM chunk_entities ce JOIN memory_chunks c "
+                        "ON c.id=ce.chunk_id WHERE c.kind IN ('meet','sum')"):
+        by_meeting.setdefault(r["src"], set()).add(r["entity_id"])
+        when[r["src"]] = (r["ts"] or "")[:10]
+    for src, group in by_meeting.items():
+        bump(group, when.get(src))
+    rx = _matcher()
+    if rx[0]:
+        for c in store.rows("SELECT title, what, updated FROM commitments WHERE archived_at IS NULL"):
+            bump(entities_in(c["title"], c["what"], matcher=rx), (c["updated"] or "")[:10])
+        for d in decisions.items(current=True, limit=1000):
+            bump(entities_in(d["title"], d.get("details"), matcher=rx), d.get("when"))
+    # у каждой сущности — её 6 самых частых соседей (и все пары, что встречались 3 раза и больше): иначе «Склад» и
+    # «Олег» связаны со всеми и карта превращается в клубок
+    edges_all = sorted(pair.items(), key=lambda x: -x[1]["n"])
+    per: dict[int, int] = {}
+    edges = []
+    for (a, b), p in edges_all:
+        if p["n"] >= 3 or per.get(a, 0) < 6 or per.get(b, 0) < 6:
+            edges.append(((a, b), p))
+            per[a] = per.get(a, 0) + 1
+            per[b] = per.get(b, 0) + 1
+        if len(edges) >= 2500:
+            break
+    nodes = [{"id": e["id"], "name": e["name"], "kind": e["kind"], "kind_title": e["kind_title"],
+              "facts": e["facts"] or 0, "mentions": e["mentions"] or 0} for e in ents]
+    return {"nodes": nodes, "links": [[a, b, p["n"], _ddmm(p["last"]), p["last"]] for (a, b), p in edges],
+            "kinds": ENTITY_KINDS}
+
+
+def numbers() -> dict:
+    """«Память в цифрах»: фактов, источников, связей; состав по видам фактов и связей."""
+    st = stats()
+    by_kind = [(FACT_KINDS[k], st["by_kind"].get(k, 0)) for k in FACT_KINDS]
+    by_link = [(LINK_KINDS[k], st["links"].get(k, 0)) for k in LINK_KINDS]
+    return {**st, "kind_rows": by_kind, "link_rows": by_link,
+            "kind_max": max([n for _, n in by_kind] or [1]) or 1, "link_max": max([n for _, n in by_link] or [1]) or 1}
+
+
+# --- от агентов: remember и task_note через приёмник --------------------------------------------------------------
+
+def _remember(rec: dict) -> str:
+    """Агент выяснил по ходу работы — факт «от агента»: в «От агентов» на «Да» или сразу (Автономия)."""
+    from opsdash import proposals
+
+    text = " ".join(str(rec.get("text") or "").split())
+    if not text:
+        raise MemoryError("пустой факт")
+    if why := looks_secret(text, rec.get("why")):
+        store.log("memory", f"от агента не записано — {why}", "warning")
+        return "secret"
+    about = rec.get("about") or []
+    rep = _new_report()
+    kind = rec.get("kind") if rec.get("kind") in FACT_KINDS else "how"
+    session = str(rec.get("session") or "")[:80] or None
+    auto = config.load_settings()["autonomy"].get("memory_agents") == "auto"
+    fid = add_fact(text=text, kind=kind, about=about, source="agent", quote=(rec.get("why") or "")[:500] or None,
+                   by="agent", session=session, report=rep)
+    if not fid:
+        return "skipped"
+    if fid in rep["added"] and not auto:
+        store.execute("UPDATE facts SET status='proposed' WHERE id=?", (fid,))
+        proposals.propose_memory_fact(fact_id=fid, reason=(rec.get("why") or "прислал агент")[:300],
+                                      batch=f"agents:{store.utcnow()[:10]}")
+    return "remember"
+
+
+def _task_note(rec: dict) -> str:
+    """Агент сообщил, что сделал по задаче — предложение «Дописать в ход задачи» (директор подтверждает)."""
+    from opsdash import proposals
+
+    tid = int(rec.get("id") or 0)
+    text = " ".join(str(rec.get("text") or "").split())
+    if not tid or not text:
+        raise MemoryError("нужны id задачи и текст")
+    c = store.row("SELECT id, status FROM commitments WHERE id=?", (tid,))
+    if not c or c["status"] != "open":
+        return "skipped"
+    session = str(rec.get("session") or "")[:80]
+    proposals.propose_task_log(commitment_id=tid, text=f"Агент: {text}", source_ref=f"agent:{session or 'mcp'}",
+                               reason="прислал агент из сессии Claude Code", batch=f"agents:{store.utcnow()[:10]}")
+    return "task_note"
+
+
+HANDLERS["remember"] = _remember
+HANDLERS["task_note"] = _task_note

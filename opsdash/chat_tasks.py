@@ -249,7 +249,8 @@ def _entity_topics(tasks: list[dict]):
             "SELECT id, kind, name FROM entities WHERE merged_into IS NULL AND kind != 'person'")}
         by_task = {c["id"]: {e for e in memory.entities_in(c.get("title"), c.get("what"), matcher=rx) if e in kinds}
                    for c in tasks}
-        # общая сущность связывает, только если она редкая: «МСБ» или «Альфа-банк» есть в половине задач — это не тема
+        # общая сущность связывает, только если она редкая: «Склад» или название своей компании есть в половине задач —
+        # это не тема
         count: dict[int, int] = {}
         for ents in by_task.values():
             for e in ents:
