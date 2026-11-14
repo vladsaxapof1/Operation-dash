@@ -360,8 +360,20 @@ def register(app: FastAPI, render, back) -> None:
         if design not in DESIGNS:
             return back(request, err="Неизвестный дизайн")
         config.update_settings("web", {"design": design})
+        from opsdash import store
+
+        store.set_state(store.DESIGN3_INTRO, "seen")  # выбрали сами — окно «У PULSE новый дизайн» уже не нужно
         return back(request, "Включён новый дизайн. Экраны переезжают в него по одному — остальные пока прежние"
                     if design == "v3" else "Вернули классический дизайн", to="/settings?tab=general#design")
+
+    @app.post("/settings/motion")
+    def save_motion(request: Request, motion: str = Form("normal")):
+        from opsdash.web.app import MOTIONS
+
+        if motion not in MOTIONS:
+            return back(request, err="Неизвестная настройка анимаций")
+        config.update_settings("web", {"motion": motion})
+        return back(request, to="/settings?tab=general#motion")
 
     @app.post("/settings/updates")
     def save_updates(request: Request, repo: str = Form(""), branch: str = Form(""), token: str = Form(""),

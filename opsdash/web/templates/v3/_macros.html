@@ -449,7 +449,7 @@
         </div>
       </details>
 
-      <details class="t3-tb dlg-known" data-mem-known="{{ c.id }}"><summary><b>Что известно по теме</b><span class="s">факты и решения из памяти PULSE</span>{{ icons.icon('chevron', 18) }}</summary><div class="t3-bb dlg-known-b muted small">Загружаю…</div></details>
+      <details class="t3-tb dlg-known" data-mem-known="{{ c.id }}"><summary><b>Что известно по теме</b><span class="s">факты и решения из памяти PULSE</span>{{ icons.icon('chevron', 18) }}</summary><div class="t3-bb dlg-known-b muted small"><div class="d3-skel" role="status" aria-label="Загружаю"><i class="sk w-80"></i><i class="sk w-60"></i><i class="sk w-70"></i></div></div></details>
 
       {% if is_open and c.direction == 'mine' and not c.archived %}
       {#- «Моя часть готова»: мяч у коллеги (records.hand_off), его часть становится задачей «вам должны» #}

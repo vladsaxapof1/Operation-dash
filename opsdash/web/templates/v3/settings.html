@@ -56,11 +56,16 @@
     {% call row('Дизайн', 'Новый дизайн в бете: тёмный, экраны переезжают в него по одному. Вернуться в классический можно в любой момент, данные общие') %}
     <div class="sy-ct"><form method="post" action="/settings/design" class="sy-seg2 btns" aria-label="Дизайн">{% for key, title in designs.items() %}<button name="design" value="{{ key }}" class="{{ 'active' if design == key }}"{% if design == key %} aria-pressed="true"{% endif %}>{{ title }}</button>{% endfor %}</form></div>
     {% endcall %}
+    {#- анимации нового дизайна (static/v3-motion.css): не выбирали — обычные, при «уменьшить движение» в системе выключены #}
+    <div class="sy-row" id="motion">
+      <div class="sy-lb"><b>Анимации</b><span>Быстрые — вдвое короче. При «уменьшить движение» в системе PULSE их выключает сам</span></div>
+      <div class="sy-ct"><form method="post" action="/settings/motion" class="sy-seg2 btns" aria-label="Анимации">{% for key, title in MOTIONS.items() %}{% set on = (motion or 'normal') == key %}<button name="motion" value="{{ key }}" class="{{ 'active' if on }}"{% if on %} aria-pressed="true"{% endif %}>{{ title }}</button>{% endfor %}</form></div>
+    </div>
     <div class="sy-row top" id="theme">
-      <div class="sy-lb"><b>Тема классического дизайна</b><span>«Как в системе»: PULSE повторяет светлое или тёмное оформление компьютера</span></div>
+      <div class="sy-lb"><b>Тема</b><span>«Как в системе»: PULSE повторяет светлое или тёмное оформление компьютера</span></div>
       <div class="sy-ct">
-        <details class="sy-pick"><summary><span class="sy-val">{{ themes.get(theme, theme) }}</span><span class="btn">Изменить</span></summary>
-          <form method="post" action="/settings/theme" class="sy-lst" aria-label="Тема оформления">{% for key, title in themes.items() %}<button name="theme" value="{{ key }}" class="sy-opt{{ ' on' if theme == key }}"{% if theme == key %} aria-pressed="true"{% endif %}><span>{{ title }}</span>{% if theme == key %}{{ icons.icon('check', 16) }}{% endif %}</button>{% endfor %}</form>
+        <details class="sy-pick"><summary>{% set cur = {'graphite-light': 'light', 'graphite': 'dark'}.get(theme, theme) %}<span class="sy-val">{{ THEMES_V3.get(cur, cur) }}</span><span class="btn">Изменить</span></summary>
+          <form method="post" action="/settings/theme" class="sy-lst" aria-label="Тема оформления">{% for key, title in THEMES_V3.items() %}<button name="theme" value="{{ key }}" class="sy-opt{{ ' on' if cur == key }}"{% if cur == key %} aria-pressed="true"{% endif %}><span>{{ title }}</span>{% if cur == key %}{{ icons.icon('check', 16) }}{% endif %}</button>{% endfor %}</form>
         </details>
       </div>
     </div>

@@ -211,6 +211,12 @@
 {#- Итог: колонки собраны из тех же данных, что правая колонка классического вида; разбор целиком — «Текстом» #}
 {% if summary %}
 <article class="m3-doc m3-sum m3-text-v">{{ summary | md | timecodes }}</article>
+{% elif m.status == 'processing' %}
+{#- идёт разбор: на месте итога — скелетон его формы (страница обновится сама, когда разбор закончится) #}
+<div class="d3-card d3-skel m3-skel" role="status" aria-label="Claude разбирает встречу">
+  <i class="sk h w-40"></i><i class="sk w-90"></i><i class="sk w-80"></i><i class="sk w-60"></i>
+  <i class="sk h w-30 gap"></i><i class="sk w-80"></i><i class="sk w-70"></i>
+</div>
 {% else %}
 <div class="m3-ph"><b>Итога ещё нет</b>
   <span class="small">{% if transcript %}Расшифровка готова: <a href="?tab=transcript">открыть</a>. {% endif %}{% if in_queue %}Когда расшифровка закончится, Claude разберёт встречу: решения, задачи, открытые вопросы.{% elif m.status == 'transcribed' %}Разобрать встречу можно в меню «…»: «Разобрать заново».{% endif %}</span></div>

@@ -31,7 +31,7 @@ body.d3 .h3-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 body.d3 .h3-chips .fchip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line-strong);
   border-radius: 999px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 400; white-space: nowrap; cursor: pointer; }
 body.d3 .h3-chips .fchip:hover { background: var(--panel); color: var(--text); }
-body.d3 .h3-chips .fchip.active { background: #26262b; border-color: #26262b; color: var(--text); font-weight: 500; }
+body.d3 .h3-chips .fchip.active { background: var(--panel-3); border-color: var(--panel-3); color: var(--text); font-weight: 500; }
 body.d3 .h3-chips .fchip i { font-style: normal; color: var(--cap); }
 
 body.d3 .h3-feed { background: var(--panel); border: 1px solid var(--line-card); border-radius: 12px; }
@@ -75,14 +75,14 @@ body.d3 .h3-ax > form.wide .btn { width: 100%; }
 body.d3 .h3-ax details.menu { grid-column: 3; }
 body.d3 .h3-ax details.menu > summary { width: 32px; height: 36px; padding: 0; display: grid; place-items: center; box-sizing: border-box;
   border: 1px solid var(--line-strong); border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; }
-body.d3 .h3-ax details.menu[open] > summary, body.d3 .h3-ax details.menu > summary:hover { background: #26262b; color: var(--text); }
+body.d3 .h3-ax details.menu[open] > summary, body.d3 .h3-ax details.menu > summary:hover { background: var(--panel-3); color: var(--text); }
 body.d3 .h3-ax .menu-pop { width: 240px; display: flex; flex-direction: column; }
 body.d3 .h3-ax .menu-i { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* кнопка раскрытия: «Ответить» / «Свернуть» по состоянию панели */
 body.d3 .h3-opened { display: none; align-items: center; gap: 6px; }
 body.d3 .h3-opened .ico { transform: rotate(180deg); }
-body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) .h3-ax .btn[data-reveal] { background: #26262b; border-color: var(--line-strong); color: var(--text); font-weight: 400; }
+body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) .h3-ax .btn[data-reveal] { background: var(--panel-3); border-color: var(--line-strong); color: var(--text); font-weight: 400; }
 body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) .h3-ax .btn[data-reveal] .h3-closed { display: none; }
 body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) .h3-ax .btn[data-reveal] .h3-opened { display: inline-flex; }
 
@@ -143,7 +143,7 @@ body.d3 .h3-tasks .seg > label { height: 30px; padding: 0 12px; border-radius: 7
   color: var(--muted); cursor: pointer; white-space: nowrap; }
 body.d3 .h3-tasks .seg > label:hover { color: var(--text); }
 body.d3 #h3-scope-today:checked ~ .h3-tasks-h label[for=h3-scope-today],
-body.d3 #h3-scope-all:checked ~ .h3-tasks-h label[for=h3-scope-all] { background: #26262b; color: var(--text); font-weight: 500; }
+body.d3 #h3-scope-all:checked ~ .h3-tasks-h label[for=h3-scope-all] { background: var(--panel-3); color: var(--text); font-weight: 500; }
 body.d3 #h3-scope-today:focus-visible ~ .h3-tasks-h label[for=h3-scope-today],
 body.d3 #h3-scope-all:focus-visible ~ .h3-tasks-h label[for=h3-scope-all] { outline: 2px solid var(--g-focus); }
 body.d3 #h3-scope-today:checked ~ * .h3-s-all, body.d3 #h3-scope-today:checked ~ .h3-s-all,
@@ -222,7 +222,7 @@ body.d3 .h3-finds .h3-empty { padding: 28px 18px; }
 /* «„Нет“ — почему?» (полоса из base.html, на Сводке — в тон ленте) */
 body.d3 .why-bar { background: var(--sunken); border: 1px dashed var(--line-strong); border-radius: 12px; }
 body.d3 .why-bar .why-chips .btn.sm { border-radius: 999px; background: transparent; color: var(--text-2); }
-body.d3 .why-bar .why-chips .btn.sm:hover { background: #26262b; color: var(--text); }
+body.d3 .why-bar .why-chips .btn.sm:hover { background: var(--panel-3); color: var(--text); }
 
 /* телефон: действия под текстом во всю ширину, панель тоже */
 @media (max-width: 700px) {

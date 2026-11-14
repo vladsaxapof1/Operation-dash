@@ -2,6 +2,54 @@
 (function () {
   "use strict";
 
+  // новый дизайн: окна закрываются коротким затуханием (v3-motion.css, .m-closing), а не пропадают разом. Работает для
+  // любого dialog.close() и для Esc. Анимации выключены (настройка или «уменьшить движение» в системе) — у .m-closing
+  // нет анимации, и окно закрывается сразу. Классический дизайн не затронут: там body без d3
+  if (document.body.classList.contains("d3") && window.HTMLDialogElement && HTMLDialogElement.prototype.close) {
+    var dlgProto = HTMLDialogElement.prototype, nativeClose = dlgProto.close, nativeModal = dlgProto.showModal;
+    var stopClosing = function (dlg) {
+      clearTimeout(dlg._mClosing);
+      dlg.removeEventListener("animationend", dlg._mEnd);
+      dlg._mClosing = dlg._mEnd = null;
+      dlg.classList.remove("m-closing");
+    };
+    dlgProto.close = function () {
+      var dlg = this, args = arguments;
+      if (!dlg.open) return nativeClose.apply(dlg, args);
+      if (dlg._mClosing) return undefined;  // уже закрывается
+      dlg.classList.add("m-closing");
+      var cs = getComputedStyle(dlg);
+      if (cs.animationName === "none" || !parseFloat(cs.animationDuration)) {
+        dlg.classList.remove("m-closing");
+        return nativeClose.apply(dlg, args);
+      }
+      var finish = function () { stopClosing(dlg); nativeClose.apply(dlg, args); };
+      dlg._mEnd = function (e) { if (e.target === dlg && !e.pseudoElement) finish(); };
+      dlg.addEventListener("animationend", dlg._mEnd);
+      dlg._mClosing = setTimeout(finish, 400);  // анимация не дошла до конца (вкладка в фоне) — всё равно закрываем
+      return undefined;
+    };
+    dlgProto.showModal = function () {
+      if (this._mClosing) { stopClosing(this); return undefined; }  // открыли снова, пока закрывалось, — остаётся открытым
+      return nativeModal.apply(this, arguments);
+    };
+    document.addEventListener("cancel", function (e) {  // Esc: браузер закрыл бы окно сразу — закрываем так же, как ✕
+      var dlg = e.target;
+      if (!(dlg instanceof HTMLDialogElement) || !e.cancelable || !dlg.open) return;
+      e.preventDefault();
+      dlg.close();
+    }, true);
+  }
+  // скелетон на время загрузки (v3-motion.css: .d3-skel): серые полоски по форме будущего содержимого.
+  // shape: "lines" — несколько строк текста, "panel" — заголовок, строки и поле, "card" — карточка
+  window.pulseSkel = function (shape) {
+    var i = function (cls) { return '<i class="sk ' + cls + '"></i>'; };
+    var inner = shape === "panel" ? i("h w-40") + i("w-80") + i("w-60") + i("blk") + '<span class="sk-row">' + i("btn") + i("btn") + "</span>"
+      : shape === "card" ? i("h w-70") + i("w-40") + i("w-90") + i("w-80") + i("w-50")
+      : i("w-80") + i("w-60") + i("w-70");
+    return '<div class="d3-skel" role="status" aria-label="Загружаю">' + inner + "</div>";
+  };
+
   // выпадающие списки фильтров отправляют форму сразу (без inline-скриптов — их запрещает CSP).
   // Дату, которую набирают с клавиатуры, отправляем, только когда год уже введён целиком
   document.querySelectorAll("select[data-autosubmit], input[data-autosubmit]").forEach(function (sel) {
@@ -205,7 +253,14 @@
     fetch("/commitments/" + id + "/seen", { method: "POST" })
       .then(function (r) { return r.json(); })
       .then(function (res) {  // число на «Новые» в «Задачах» — сразу, без перезагрузки
-        document.querySelectorAll("[data-unseen]").forEach(function (b) { b.textContent = res.unseen; b.hidden = !res.unseen; });
+        document.querySelectorAll("[data-unseen]").forEach(function (b) {
+          if (b.textContent.trim() !== String(res.unseen)) {  // число поменялось — короткая подсветка (v3-motion.css)
+            b.classList.remove("m-bump");
+            void b.offsetWidth;
+            b.classList.add("m-bump");
+          }
+          b.textContent = res.unseen; b.hidden = !res.unseen;
+        });
       })
       .catch(function () { /* не получилось — отметка вернётся при следующем открытии страницы */ });
   };
@@ -462,6 +517,7 @@
     var pane = document.getElementById(reveal.dataset.reveal);
     if (!pane) return;
     e.preventDefault();
+    pane.classList.add("m-reveal");  // новый дизайн: панель плавно проявляется (v3-motion.css)
     pane.hidden = !pane.hidden;
     var field = !pane.hidden && pane.querySelector("input[type=text], textarea");
     if (field) field.focus();
@@ -1062,6 +1118,7 @@
       if (liveForm.elements.q.value.trim().length === 1) return;  // одна буква — ещё не запрос
       var url = liveForm.getAttribute("action") + "?" + new URLSearchParams(new FormData(liveForm)).toString();
       var my = ++liveSeq;
+      liveBox.setAttribute("aria-busy", "true");  // прежние результаты бледнеют, пока ищем (v3-motion.css)
       fetch(url).then(function (r) { return r.text(); }).then(function (html) {
         if (my !== liveSeq) return;  // пока ждали ответа, запрос уже поменялся
         var fresh = new DOMParser().parseFromString(html, "text/html").querySelector("[data-live-results]");
@@ -1069,6 +1126,8 @@
         liveBox.replaceWith(fresh);
         liveBox = fresh;
         history.replaceState(null, "", url);
+      }).catch(function () { /* не ответил — оставляем прежние результаты */ }).then(function () {
+        if (my === liveSeq) liveBox.removeAttribute("aria-busy");
       });
     };
     liveForm.elements.q.addEventListener("input", function () { clearTimeout(liveTimer); liveTimer = setTimeout(liveRun, 250); });
@@ -1264,7 +1323,9 @@
   // окно «У PULSE новый дизайн» — один раз: как закрыли («Круто», Esc или клик мимо окна), сервер его больше не отдаёт
   var hello = document.querySelector("[data-design-intro]");
   if (hello && hello.showModal) {
-    hello.addEventListener("close", function () { fetch("/api/design-intro/seen", { method: "POST" }); }, { once: true });
+    hello.addEventListener("close", function () {
+      fetch(hello.getAttribute("data-seen-url") || "/api/design-intro/seen", { method: "POST" });
+    }, { once: true });
     hello.showModal();
   }
 
@@ -1779,7 +1840,7 @@
     };
     var make = function (n) {
       var el = document.createElement("div");
-      el.className = "notice " + (n.level || "info");
+      el.className = "notice m-arrive " + (n.level || "info");  // m-arrive — въезжает сбоку (v3-motion.css)
       el.dataset.notice = n.id;
       el.dataset.key = n.kind + "|" + n.title;
       var body = document.createElement("div");

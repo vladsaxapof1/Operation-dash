@@ -89,6 +89,8 @@
           <div class="a3-step-now"><span class="a3-spin" aria-hidden="true"></span>{{ ai_name }} <span data-live-state>{{ 'пишет ответ' if m.text else 'думает' }}</span>…</div>
         </div>
         <div class="a3-live" data-live-text>{{ m.text }}</div>
+        {#- пока текста ответа нет — скелетон абзаца; появился первый текст — скелетон прячет CSS (.a3-live:not(:empty) + .a3-skel) #}
+        <div class="d3-skel a3-skel" aria-hidden="true"><i class="sk w-90"></i><i class="sk w-80"></i><i class="sk w-50"></i></div>
         <form class="inline" method="post" action="/ask/{{ chat.id }}/stop"><button class="btn sm">
           <svg class="ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>Остановить</button></form>
       </div>

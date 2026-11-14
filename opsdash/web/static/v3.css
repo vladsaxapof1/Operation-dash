@@ -19,6 +19,7 @@ html:has(body.d3), body.d3 {
   --stage: #050506;  /* фон под окном мастера первого запуска */
   --panel: #141416;
   --panel-2: #1c1c20;
+  --panel-3: #26262b;          /* выбранное / нажатое */
   --sunken: #0d0d0f;
   --window: #111113;
   --backdrop: rgba(5, 5, 6, .82);
@@ -101,7 +102,7 @@ html:has(body.d3), body.d3 {
   background: var(--bg);
   color-scheme: dark;
 }
-html:has(body.d3) { background: #09090a; }
+html:has(body.d3) { background: var(--bg); }
 body.d3 a { color: var(--accent); }
 body.d3 .ico { stroke-width: 1.8; }
 
@@ -140,7 +141,7 @@ body.d3 .small { font-size: 13px; }
 /* --- кнопки: 36, в окне 38, маленькая 30; главная — светлая; синих и зелёных заливок нет --- */
 body.d3 .btn { height: 36px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-strong);
   background: var(--panel-2); color: var(--text); font-size: 14px; font-weight: 400; box-shadow: none; }
-body.d3 .btn:hover { background: #26262b; border-color: var(--line-strong); text-decoration: none; }
+body.d3 .btn:hover { background: var(--panel-3); border-color: var(--line-strong); text-decoration: none; }
 body.d3 .btn.primary, body.d3 .btn.primary:hover { background: var(--text); border: 1px solid var(--text); color: var(--bg); font-weight: 500; }
 body.d3 .btn.primary:hover { background: var(--text-2); }
 body.d3 .btn.sm { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px; }
@@ -164,7 +165,7 @@ body.d3 .seg { display: inline-flex; padding: 3px; gap: 0; border-radius: 10px; 
 body.d3 .seg > a, body.d3 .seg > button { height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent;
   color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; white-space: nowrap; box-shadow: none; }
 body.d3 .seg > a.active, body.d3 .seg > button.active, body.d3 .seg > [aria-current=page], body.d3 .seg > [aria-pressed=true] {
-  background: #26262b; color: var(--text); font-weight: 500; }
+  background: var(--panel-3); color: var(--text); font-weight: 500; }
 body.d3 .seg > a:hover { text-decoration: none; color: var(--text); }
 
 /* --- карточки, чипы --- */
@@ -250,3 +251,72 @@ body.d3 .d3-f > label { margin-bottom: 0; font-size: 13px; font-weight: 400; col
   body.d3 .d3-head > .btn, body.d3 .d3-head > form { flex: 1 1 0; min-width: 0; margin: 0; }
   body.d3 .d3-head > form > .btn { width: 100%; }
 }
+
+/* ================= окно «У PULSE новый дизайн» (templates/v3/_design3_intro.html) =================
+   Маленький экран нового PULSE собирается по шагам: окно → меню → заголовок → колонки → карточки,
+   затем по нижней линии пробегает пульс. При «уменьшить движение» — сразу готовая картинка. */
+body.d3 dialog.hello3 { width: min(520px, calc(100vw - 32px)); padding: 0; overflow: hidden; }
+body.d3 dialog.hello3[open] { animation: hi3-in .35s cubic-bezier(.2, .8, .2, 1) both; }
+body.d3 dialog.hello3::backdrop { background: var(--backdrop); animation: hi3-fade .3s ease both; }
+.hello3-box { padding: 28px 28px 24px; display: grid; justify-items: center; gap: 12px; text-align: center; }
+.hello3-box h2 { margin: 6px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.01em; }
+.hello3-box p { margin: 0; color: var(--text-2); max-width: 420px; }
+.hello3-box .hello3-note { color: var(--muted); font-size: 14px; }
+.hello3-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 360px; margin-top: 8px; }
+.hello3-acts .btn { width: 100%; height: 38px; }
+
+.hello3-art { position: relative; width: 320px; max-width: 100%; height: 190px; }
+.hi3-win { position: absolute; inset: 0 0 26px; display: flex; border-radius: 12px; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--line-card); animation: hi3-pop .45s .1s cubic-bezier(.2, .8, .2, 1) both; }
+.hi3-side { width: 74px; flex: none; padding: 9px 7px; display: flex; flex-direction: column; gap: 4px;
+  background: var(--sunken); border-right: 1px solid var(--line); }
+.hi3-side i, .hi3-main i { display: block; border-radius: 4px; }
+.hi3-logo { width: 14px; height: 14px; border-radius: 4px !important; background: var(--text); margin-bottom: 4px; animation: hi3-rise .3s .35s both; }
+.hi3-nav { height: 9px; background: var(--panel-2); animation: hi3-rise .3s both; }
+.hi3-nav.on { background: var(--panel-3); }
+.hi3-cap { height: 5px; width: 60%; margin-top: 5px; background: var(--line-strong); animation: hi3-rise .3s both; }
+.hi3-side i:nth-child(2) { animation-delay: .45s; } .hi3-side i:nth-child(3) { animation-delay: .5s; }
+.hi3-side i:nth-child(4) { animation-delay: .55s; } .hi3-side i:nth-child(5) { animation-delay: .6s; }
+.hi3-side i:nth-child(6) { animation-delay: .65s; } .hi3-side i:nth-child(7) { animation-delay: .7s; }
+.hi3-side i:nth-child(8) { animation-delay: .75s; } .hi3-side i:nth-child(9) { animation-delay: .8s; }
+.hi3-side i:nth-child(10) { animation-delay: .85s; }
+.hi3-main { flex: 1; min-width: 0; padding: 10px 10px 0; display: flex; flex-direction: column; gap: 7px; }
+.hi3-title { width: 46%; height: 11px; background: var(--text); animation: hi3-rise .35s .6s both; }
+.hi3-row { display: flex; justify-content: space-between; gap: 6px; animation: hi3-rise .35s .75s both; }
+.hi3-seg { width: 58%; height: 10px; background: var(--panel); border: 1px solid var(--line); }
+.hi3-btn { width: 22%; height: 10px; background: var(--text-2); }
+.hi3-cols { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.hi3-col { border-radius: 7px 7px 0 0 !important; padding: 6px 5px; display: flex; flex-direction: column; gap: 4px;
+  animation: hi3-rise .4s both; }
+.hi3-col.warn { background: var(--warn-deep); border: 1px solid var(--warn-line); border-bottom: 0; animation-delay: .9s; }
+.hi3-col.acc { background: var(--acc-deep); border: 1px solid var(--acc-line); border-bottom: 0; animation-delay: 1s; }
+.hi3-dot { width: 6px; height: 6px; border-radius: 50% !important; margin-bottom: 2px; }
+.hi3-col.warn .hi3-dot { background: var(--warn); } .hi3-col.acc .hi3-dot { background: var(--acc-dot); }
+.hi3-card { height: 17px; border-radius: 5px !important; background: var(--panel); border: 1px solid var(--line-card);
+  animation: hi3-drop .35s both; }
+.hi3-card.late { box-shadow: inset 2px 0 0 var(--bad); }
+.hi3-card.work { border-color: var(--ok-line); }
+.hi3-col.warn .hi3-card:nth-of-type(2) { animation-delay: 1.15s; } .hi3-col.warn .hi3-card:nth-of-type(3) { animation-delay: 1.3s; }
+.hi3-col.warn .hi3-card:nth-of-type(4) { animation-delay: 1.45s; } .hi3-col.acc .hi3-card:nth-of-type(2) { animation-delay: 1.25s; }
+.hi3-col.acc .hi3-card:nth-of-type(3) { animation-delay: 1.4s; }
+.hi3-pulse { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 26px; fill: none;
+  stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 360; stroke-dashoffset: 360; animation: hi3-draw 1.1s 1.55s ease-out forwards; }
+
+@keyframes hi3-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes hi3-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hi3-pop { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes hi3-rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@keyframes hi3-drop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes hi3-draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  body.d3 dialog.hello3[open], body.d3 dialog.hello3::backdrop, .hello3-art * { animation: none !important; }
+  .hi3-pulse { stroke-dashoffset: 0; }
+}
+
+/* нижняя панель на телефоне: невыбранные пункты серые, выбранный — основным цветом (ссылки иначе синие) */
+body.d3 .tabbar { background: var(--sunken); border-top: 1px solid var(--line); }
+body.d3 .tabbar a, body.d3 .tabbar summary { color: var(--muted); }
+body.d3 .tabbar a.active { color: var(--text); font-weight: 500; }
+body.d3 .tabbar-sheet { background: var(--window); border-color: var(--line-card); }
+body.d3 .tabbar-sheet a { color: var(--text-2); }

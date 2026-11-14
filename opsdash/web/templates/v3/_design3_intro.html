@@ -1,0 +1,35 @@
+{#- Окно «У PULSE новый дизайн» (v3): один раз после обновления тем, кто пользовался PULSE раньше
+    (store.DESIGN3_INTRO). Открывает app.js, закрывают «Круто», Esc или клик мимо окна — сервер запоминает
+    (data-seen-url). Картинка — маленький экран нового PULSE, который собирается по шагам; при «уменьшить
+    движение» в системе показывается сразу готовым. Стили — в v3.css (.hello3) #}
+<dialog class="dlg hello3" data-design-intro data-seen-url="/api/design-intro/seen?v=3" aria-labelledby="hello3-title">
+  <form method="dialog" class="hello3-box">
+    <div class="hello3-art" aria-hidden="true">
+      <div class="hi3-win">
+        <div class="hi3-side">
+          <i class="hi3-logo"></i>
+          <i class="hi3-nav on"></i><i class="hi3-nav"></i>
+          <i class="hi3-cap"></i><i class="hi3-nav"></i><i class="hi3-nav"></i><i class="hi3-nav"></i>
+          <i class="hi3-cap"></i><i class="hi3-nav"></i><i class="hi3-nav"></i>
+        </div>
+        <div class="hi3-main">
+          <i class="hi3-title"></i>
+          <div class="hi3-row"><i class="hi3-seg"></i><i class="hi3-btn"></i></div>
+          <div class="hi3-cols">
+            <div class="hi3-col warn"><i class="hi3-dot"></i><i class="hi3-card"></i><i class="hi3-card"></i><i class="hi3-card late"></i></div>
+            <div class="hi3-col acc"><i class="hi3-dot"></i><i class="hi3-card"></i><i class="hi3-card work"></i></div>
+          </div>
+        </div>
+      </div>
+      <svg class="hi3-pulse" viewBox="0 0 320 40" focusable="false"><path d="M0 20h112l10-14 14 28 12-22 8 8h164"/></svg>
+    </div>
+    <h2 id="hello3-title">У PULSE новый дизайн</h2>
+    <p>Он уже включён: тёмный и спокойный, меню короче, на каждом экране видно главное, а остальное спрятано под «Вид» и «Подробнее». Окно задачи разложено по блокам, у встречи появились вкладки.</p>
+    <p class="hello3-note">Захотите вернуть прежний вид — Настройки → Основное → «Дизайн». Задачи, встречи и память останутся теми же.</p>
+    <div class="hello3-acts">
+      {#- сразу возвращает классический дизайн (POST /settings/design), окно больше не покажется #}
+      <button class="btn" formmethod="post" formaction="/settings/design" name="design" value="classic">Вернуть прежний</button>
+      <button class="btn primary" autofocus>Круто</button>
+    </div>
+  </form>
+</dialog>

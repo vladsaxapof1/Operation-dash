@@ -1,0 +1,168 @@
+/* Анимации и скелетоны нового дизайна PULSE. Подключается в templates/v3/base.html последним, после стилей разделов.
+   Правила: движутся только opacity и transform (свойства translate / scale — не мешают transform самих элементов),
+   самое долгое — до ~300 мс; бесконечные только у скелетона. Ширина меняется плавно лишь у полос прогресса.
+   Скорость — «Настройки → Основное → Анимации»: body.motion-fast — вдвое короче, body.motion-off — без анимаций.
+   Без класса (не выбирали) при «уменьшить движение» в системе анимаций тоже нет. */
+
+body.d3 {
+  --m: 1;
+  --t-fast: calc(120ms * var(--m));
+  --t: calc(180ms * var(--m));
+  --t-slow: calc(260ms * var(--m));
+  --t-page: calc(150ms * var(--m));
+  --step: calc(25ms * var(--m));  /* лесенка у первых элементов списка */
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-in: cubic-bezier(.4, 0, 1, 1);
+}
+body.d3.motion-fast { --m: .5; }
+
+@keyframes m-fade { from { opacity: 0; } }
+@keyframes m-fade-out { to { opacity: 0; } }
+@keyframes m-rise { from { opacity: 0; translate: 0 4px; } }
+@keyframes m-drop { from { opacity: 0; translate: 0 -4px; } }
+@keyframes m-dlg-in { from { opacity: 0; translate: 0 8px; scale: .98; } }
+@keyframes m-dlg-out { to { opacity: 0; translate: 0 4px; scale: .985; } }
+@keyframes m-from-right { from { opacity: 0; translate: 16px 0; } }
+@keyframes m-from-below { from { opacity: 0; translate: 0 10px; } }
+@keyframes m-bump { 40% { scale: 1.18; } }
+@keyframes m-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* ---------- переход между страницами: содержимое мягко проявляется, меню стоит на месте ---------- */
+body.d3 .main { animation: m-fade var(--t-page) ease-out backwards; }
+/* первые элементы лент и сеток — лесенкой, остальные сразу */
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(-n+8),
+body.d3 .frow.h3-row:nth-of-type(-n+8) {
+  animation: m-rise var(--t) var(--ease-out) backwards;
+}
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(2), body.d3 .frow.h3-row:nth-of-type(2) { animation-delay: var(--step); }
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(3), body.d3 .frow.h3-row:nth-of-type(3) { animation-delay: calc(var(--step) * 2); }
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(4), body.d3 .frow.h3-row:nth-of-type(4) { animation-delay: calc(var(--step) * 3); }
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(5), body.d3 .frow.h3-row:nth-of-type(5) { animation-delay: calc(var(--step) * 4); }
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(6), body.d3 .frow.h3-row:nth-of-type(6) { animation-delay: calc(var(--step) * 5); }
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(7), body.d3 .frow.h3-row:nth-of-type(7) { animation-delay: calc(var(--step) * 6); }
+body.d3 :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > :nth-child(8), body.d3 .frow.h3-row:nth-of-type(8) { animation-delay: calc(var(--step) * 7); }
+
+/* ---------- окна: затемнение и окно снизу на место; закрытие — короткое обратное (app.js: .m-closing) ---------- */
+body.d3 dialog[open]:not(.hello3) { animation: m-dlg-in var(--t-slow) var(--ease-out) backwards; }
+body.d3 dialog[open]:not(.hello3)::backdrop { animation: m-fade var(--t) ease-out backwards; }
+body.d3 dialog.m-closing:not(.hello3) { animation: m-dlg-out var(--t-fast) var(--ease-in) forwards; pointer-events: none; }
+body.d3 dialog.m-closing:not(.hello3)::backdrop { animation: m-fade-out var(--t-fast) var(--ease-in) forwards; }
+body.d3 dialog.hello3.m-closing { animation: m-fade-out var(--t-fast) var(--ease-in) forwards; }
+body.d3 dialog.hello3.m-closing::backdrop { animation: m-fade-out var(--t-fast) var(--ease-in) forwards; }
+
+/* ---------- всплывающее: меню «…», панели фильтров, карточка встречи, подсказки ---------- */
+body.d3 details[open] > .menu-pop,
+body.d3 details[open] .d3-pop,
+body.d3 details.sy-pick[open] > .sy-lst,
+body.d3 .ev-pop:not([hidden]),
+body.d3 .fpath-tip,
+body.d3 .mem-tip:not([hidden]) {
+  animation: m-drop var(--t) var(--ease-out) backwards;
+}
+body.d3 .tabbar-more[open] > .tabbar-sheet { animation: m-from-below var(--t) var(--ease-out) backwards; }
+
+/* ---------- раскрывашки: содержимое проявляется со сдвигом 4px, стрелка поворачивается ---------- */
+body.d3 details[open]:not(.menu):not(.sy-pick):not(.tabbar-more) > :not(summary),
+body.d3 .m-reveal:not([hidden]),
+body.d3 .h3-pnl:not([hidden]),
+body.d3 .dlg-pane:not([hidden]) {
+  animation: m-rise var(--t) var(--ease-out) backwards;
+}
+/* «Офис» перерисовывается каждые несколько секунд с теми же раскрытыми блоками — там без анимации */
+body.d3 [data-office] details > :not(summary) { animation: none; }
+body.d3 details > summary .ico, body.d3 details > summary > svg, body.d3 details > summary::before,
+body.d3 .h3-opened .ico, body.d3 .h3-closed .ico {
+  transition: transform var(--t) var(--ease-out);
+}
+
+/* ---------- наведение и нажатие: цвет фона и рамки, нажатая кнопка чуть меньше ---------- */
+body.d3 :is(.btn, .menu-i, .nav a, .side-links a, .seg > a, .seg > button, .seg > label, .sy-seg2 button, .sy-seg2 span,
+  .sy-opt, .sy-tabs a, .m3-tabs a, .d3-card, .task, .chip, .d3-tag, .notice-close, .notice-more, .notice-clear,
+  .tabbar a, .log-collect, .h3-tile) {
+  transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease, color var(--t-fast) ease,
+    opacity var(--t-fast) ease, scale var(--t-fast) ease;
+}
+body.d3 :is(.btn, .menu-i, .seg > a, .seg > button, .sy-seg2 button):active:not(:disabled) { scale: .98; }
+/* тумблеры: ручка едет, подложка меняет цвет */
+body.d3 .sy-sw > span, body.d3 .sy-swb { transition: background-color var(--t) ease, border-color var(--t) ease; }
+body.d3 .sy-sw > span::after, body.d3 .sy-swb::after { transition: left var(--t) var(--ease-out), background-color var(--t) ease; }
+
+/* ---------- угол уведомлений и подсказки: новое въезжает сбоку, подсказка снизу; скрытие — затухание (style.css) ---------- */
+body.d3 .notice.m-arrive { animation: m-from-right var(--t-slow) var(--ease-out) backwards; }
+body.d3 .notices .toast { animation: m-from-below var(--t-slow) var(--ease-out) backwards; }
+body.d3 .why-bar { animation: m-from-below var(--t-slow) var(--ease-out) backwards; }
+body.d3 .notice { transition-duration: calc(220ms * var(--m)), calc(220ms * var(--m)), calc(160ms * var(--m)),
+  calc(160ms * var(--m)), calc(160ms * var(--m)); }
+
+/* ---------- полосы прогресса: ширина меняется плавно, когда её обновляет скрипт ---------- */
+body.d3 :is([data-meeting-progress], .m3-bar span, .m3-track i, .kn-bar i, .sy-prog i, [role=progressbar] > *) {
+  transition: width var(--t-slow) var(--ease-out);
+}
+
+/* ---------- счётчик поменялся без перезагрузки (app.js: .m-bump) ---------- */
+body.d3 .m-bump { animation: m-bump var(--t-slow) var(--ease-out); }
+
+/* ---------- поиск на лету: прежние результаты бледнеют, пока идёт запрос ---------- */
+body.d3 [data-live-results] { transition: opacity var(--t) ease; }
+body.d3 [data-live-results][aria-busy=true] { opacity: .5; }
+
+/* ================= скелетоны: серые полоски по форме будущего содержимого =================
+   .d3-skel — контейнер (столбик), внутри i.sk: строка (по умолчанию), .h — заголовок, .blk — блок, .av — аватар,
+   .btn — кнопка; ширина — .w-30 … .w-90; .sk-row — ряд. Проявляется с задержкой 80 мс: быстрый ответ скелетона не покажет */
+body.d3 .d3-skel { display: flex; flex-direction: column; gap: 10px; min-width: 0; animation: m-fade var(--t) 80ms ease-out backwards; }
+body.d3 .d3-skel .sk, body.d3 .sk-shimmer {
+  display: block; height: 12px; width: 100%; border-radius: 6px; flex: none;
+  background: linear-gradient(90deg, var(--panel-2) 0 35%, var(--line-strong) 50%, var(--panel-2) 65% 100%) 100% 0 / 300% 100%;
+  animation: m-shimmer 1.2s linear infinite;
+}
+body.d3 .d3-skel .sk.h { height: 16px; }
+body.d3 .d3-skel .sk.blk { height: 96px; border-radius: 10px; }
+body.d3 .d3-skel .sk.av { width: 28px; height: 28px; border-radius: 50%; }
+body.d3 .d3-skel .sk.btn { width: 96px; height: 30px; border-radius: 8px; border: 0; padding: 0; }
+body.d3 .d3-skel .sk.gap { margin-top: 8px; }
+body.d3 .d3-skel .sk-row { display: flex; align-items: center; gap: 8px; }
+body.d3 .d3-skel .w-30 { width: 30%; } body.d3 .d3-skel .w-40 { width: 40%; } body.d3 .d3-skel .w-50 { width: 50%; }
+body.d3 .d3-skel .w-60 { width: 60%; } body.d3 .d3-skel .w-70 { width: 70%; } body.d3 .d3-skel .w-80 { width: 80%; }
+body.d3 .d3-skel .w-90 { width: 90%; }
+
+/* «Спросить Claude»: пока текста ответа нет — скелетон абзаца, первый текст его прячет */
+body.d3 .a3-skel { padding-top: 2px; }
+body.d3 .a3-live:not(:empty) + .a3-skel { display: none; }
+/* разбор встречи: скелетон на месте итога */
+body.d3 .m3-skel { padding: 18px; gap: 12px; }
+/* ход задачи: пока Claude собирает (data-log-state), в конце ленты — место под новые записи */
+body.d3 [data-log-task][data-log-state] .log-list::after {
+  content: ""; display: block; height: 40px;
+  background: linear-gradient(90deg, var(--panel-2) 0 35%, var(--line-strong) 50%, var(--panel-2) 65% 100%) 100% 0 / 300% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) 0 0 / 85% 12px no-repeat, linear-gradient(#000 0 0) 0 26px / 55% 12px no-repeat;
+  mask: linear-gradient(#000 0 0) 0 0 / 85% 12px no-repeat, linear-gradient(#000 0 0) 0 26px / 55% 12px no-repeat;
+  animation: m-shimmer 1.2s linear infinite;
+}
+/* карта памяти до первой отрисовки: точки созвездия на месте холста */
+body.d3 [data-mem-map]:not([data-drawn]) .mem-map-stage::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, var(--panel-2) 0 35%, var(--line-strong) 50%, var(--panel-2) 65% 100%) 100% 0 / 300% 100%;
+  --dot: radial-gradient(circle, #000 0 98%, transparent 100%);
+  -webkit-mask: var(--dot) 22% 30% / 14px 14px no-repeat, var(--dot) 34% 58% / 10px 10px no-repeat, var(--dot) 46% 38% / 22px 22px no-repeat,
+    var(--dot) 58% 66% / 12px 12px no-repeat, var(--dot) 63% 26% / 9px 9px no-repeat, var(--dot) 72% 48% / 16px 16px no-repeat,
+    var(--dot) 28% 76% / 8px 8px no-repeat, var(--dot) 82% 72% / 10px 10px no-repeat, var(--dot) 15% 50% / 9px 9px no-repeat,
+    var(--dot) 52% 84% / 11px 11px no-repeat;
+  mask: var(--dot) 22% 30% / 14px 14px no-repeat, var(--dot) 34% 58% / 10px 10px no-repeat, var(--dot) 46% 38% / 22px 22px no-repeat,
+    var(--dot) 58% 66% / 12px 12px no-repeat, var(--dot) 63% 26% / 9px 9px no-repeat, var(--dot) 72% 48% / 16px 16px no-repeat,
+    var(--dot) 28% 76% / 8px 8px no-repeat, var(--dot) 82% 72% / 10px 10px no-repeat, var(--dot) 15% 50% / 9px 9px no-repeat,
+    var(--dot) 52% 84% / 11px 11px no-repeat;
+  animation: m-shimmer 1.2s linear infinite;
+}
+
+/* ================= выключено: настройка «Выключены» или «уменьшить движение» в системе, если не выбирали ================= */
+body.d3.motion-off, body.d3.motion-off *, body.d3.motion-off *::before, body.d3.motion-off *::after, body.d3.motion-off ::backdrop {
+  animation: none !important; transition: none !important;
+}
+body.d3.motion-off .hi3-pulse { stroke-dashoffset: 0; }
+@media (prefers-reduced-motion: reduce) {
+  body.d3:not(.motion-normal):not(.motion-fast), body.d3:not(.motion-normal):not(.motion-fast) *,
+  body.d3:not(.motion-normal):not(.motion-fast) *::before, body.d3:not(.motion-normal):not(.motion-fast) *::after,
+  body.d3:not(.motion-normal):not(.motion-fast) ::backdrop {
+    animation: none !important; transition: none !important;
+  }
+}

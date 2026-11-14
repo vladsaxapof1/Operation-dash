@@ -1,11 +1,11 @@
-"""Новый дизайн (бета): переключатель в настройках, каркас v3 поверх тех же данных и маршрутов."""
+"""Новый дизайн (v3): по умолчанию после обновления, окно «У PULSE новый дизайн», возврат к классическому."""
 
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from opsdash import config
+from opsdash import config, store
 
 PAGES = ["/", "/commitments", "/calendar", "/meetings", "/chats", "/memory", "/decisions", "/digests", "/people",
          "/ask", "/office", "/skills", "/settings", "/journal", "/help"]
@@ -18,9 +18,54 @@ def client():
     return TestClient(app, base_url="http://localhost:8765")
 
 
-def test_classic_by_default(client):
-    page = client.get("/").text
-    assert "/static/v3.css" not in page and 'class="d3' not in page
+def _no_choice():
+    """Установка, где дизайн ещё не выбирали (conftest для остальных тестов ставит классический)."""
+    s = config.load_settings()
+    s["web"].pop("design", None)
+    config.save_settings(s)
+
+
+def test_new_design_by_default(client):
+    _no_choice()
+    page = client.get("/commitments").text
+    assert "/static/v3.css" in page and 'class="d3' in page
+
+
+def _upgrade_from_old_version():
+    """PULSE уже работал, а про окно нового дизайна ещё ничего не решено — запускаем новую версию."""
+    store.log("collect", "Telegram: 3 новых сообщения")
+    store.execute("DELETE FROM state WHERE key IN (?, ?)", (store.DESIGN_INTRO, store.DESIGN3_INTRO))
+    store._initialized.clear()
+
+
+def test_fresh_install_sees_no_intro(client):
+    _no_choice()
+    assert store.get_state(store.DESIGN3_INTRO) == "seen"
+    assert "data-design-intro" not in client.get("/commitments").text
+
+
+def test_intro_after_update_once_with_cool_button(client):
+    _no_choice()
+    _upgrade_from_old_version()
+    page = client.get("/commitments").text
+    assert "/static/v3.css" in page  # новый дизайн уже включён
+    assert "data-design-intro" in page and "У PULSE новый дизайн" in page and ">Круто<" in page
+    assert 'data-seen-url="/api/design-intro/seen?v=3"' in page and "Вернуть прежний" in page
+    assert page.count("data-design-intro") == 1  # прежнее окно 2.0 вместе с ним не показывается
+    assert client.post("/api/design-intro/seen?v=3").json() == {"ok": True}
+    assert "data-design-intro" not in client.get("/commitments").text
+    store._initialized.clear()
+    assert "data-design-intro" not in client.get("/").text
+
+
+def test_intro_return_to_classic_in_one_click(client):
+    _no_choice()
+    _upgrade_from_old_version()
+    client.get("/commitments")
+    client.post("/settings/design", data={"design": "classic"}, headers={"referer": "http://localhost:8765/commitments"})
+    assert config.load_settings()["web"]["design"] == "classic"
+    assert store.get_state(store.DESIGN3_INTRO) == "seen"
+    assert "/static/v3.css" not in client.get("/commitments").text
 
 
 def test_switch_to_new_design_and_back(client):
@@ -62,3 +107,42 @@ def test_calendar_free_time_opens_new_meeting_dialog():
     js = (Path(__file__).parent.parent / "opsdash/web/static/app.js").read_text(encoding="utf-8")
     i = js.index('querySelectorAll(".wk-col")')
     assert 'getElementById("new-dlg")' in js[i:i + 1500] and "openDlg(newDlg)" in js[i:i + 1500]
+
+
+def test_motion_setting_saves_and_marks_body(client):
+    config.update_settings("web", {"design": "v3"})
+    page = client.get("/settings?tab=general").text
+    assert "/static/v3-motion.css" in page and 'action="/settings/motion"' in page
+    # не выбирали — класса нет: при «уменьшить движение» в системе анимации выключает CSS
+    assert "motion-" not in page.split("<body", 1)[1].split(">", 1)[0]
+    assert 'value="normal" class="active"' in page
+    for value, cls in (("fast", "motion-fast"), ("off", "motion-off"), ("normal", "motion-normal")):
+        r = client.post("/settings/motion", data={"motion": value}, headers={"referer": "http://localhost:8765/settings"},
+                        follow_redirects=False)
+        assert r.status_code in (302, 303)
+        assert config.load_settings()["web"]["motion"] == value
+        body = client.get("/commitments").text.split("<body", 1)[1].split(">", 1)[0]
+        assert cls in body
+
+
+def test_unknown_motion_is_refused(client):
+    config.update_settings("web", {"design": "v3", "motion": "fast"})
+    client.post("/settings/motion", data={"motion": "warp"}, headers={"referer": "http://localhost:8765/settings"})
+    assert config.load_settings()["web"]["motion"] == "fast"
+
+
+def test_motion_does_not_touch_classic_design(client):
+    config.update_settings("web", {"design": "classic", "motion": "off"})
+    page = client.get("/commitments").text
+    assert "v3-motion.css" not in page and "motion-off" not in page
+
+
+@pytest.mark.parametrize("theme, cls", [("system", "auto"), ("light", "light"), ("dark", "dark"),
+                                        ("graphite", "dark"), ("graphite-light", "light")])
+def test_new_design_theme(client, theme, cls):
+    """Новый дизайн: «Как в системе» / «Светлая» / «Тёмная»; «Графит» прежних настроек — тёмная или светлая."""
+    config.update_settings("web", {"design": "v3", "theme": theme})
+    page = client.get("/commitments").text
+    assert f'class="d3 {cls}' in page and "/static/v3-light.css" in page
+    s = client.get("/settings").text
+    assert "Как в системе" in s and ">Светлая<" in s and "Графит" not in s

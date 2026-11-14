@@ -641,6 +641,7 @@ MIGRATIONS = [
 
 
 DESIGN_INTRO = "design2_intro"  # окно «У PULSE новый дизайн»: show — показать, seen — уже видели или не нужно
+DESIGN3_INTRO = "design3_intro"  # окно «У PULSE новый дизайн, он уже включён» (v3): так же, свой раз
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -664,6 +665,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         used = conn.execute("SELECT EXISTS(SELECT 1 FROM log) OR EXISTS(SELECT 1 FROM messages) "
                             "OR EXISTS(SELECT 1 FROM meetings)").fetchone()[0]
         conn.execute("INSERT INTO state(key, value) VALUES(?, ?)", (DESIGN_INTRO, json.dumps("show" if used else "seen")))
+    # окно нового дизайна (v3) — тоже только тем, кто пользовался PULSE до него; новой установке — незачем
+    if not conn.execute(f"SELECT 1 FROM state WHERE key='{DESIGN3_INTRO}'").fetchone():
+        used = conn.execute("SELECT EXISTS(SELECT 1 FROM log) OR EXISTS(SELECT 1 FROM messages) "
+                            "OR EXISTS(SELECT 1 FROM meetings)").fetchone()[0]
+        conn.execute("INSERT INTO state(key, value) VALUES(?, ?)", (DESIGN3_INTRO, json.dumps("show" if used else "seen")))
 
 
 def utcnow() -> str:

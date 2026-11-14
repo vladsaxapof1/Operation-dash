@@ -69,7 +69,8 @@
     e.preventDefault();
     var dlg = dialog();
     var box = dlg.querySelector(".dlg-box");
-    box.innerHTML = '<p class="muted">Загружаю…</p>';
+    // новый дизайн — скелетон панели (app.js: pulseSkel), классический — как было
+    box.innerHTML = document.body.classList.contains("d3") && window.pulseSkel ? window.pulseSkel("panel") : '<p class="muted">Загружаю…</p>';
     if (!dlg.open) dlg.showModal();
     load(box, btn.dataset.agentOpen).then(function () { box.focus(); });
   });

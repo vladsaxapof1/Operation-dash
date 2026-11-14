@@ -1,0 +1,61 @@
+/* Светлая тема нового дизайна. Те же правила v3*.css, другие значения токенов: подключается в
+   templates/v3/base.html после v3.css. body.light — выбрана «Светлая»; body.auto — «Как в системе»,
+   тогда светлая включается, только если светлая тема у системы. Правило то же: цвета только токенами. */
+
+html:has(body.d3.light), body.d3.light {
+  /* поверхности */
+  --bg: #f6f6f7; --panel: #ffffff; --panel-2: #f0f0f2; --panel-3: #e6e6ea; --sunken: #efeff1; --window: #ffffff;
+  --backdrop: rgba(20, 20, 24, .32);
+  /* линии */
+  --line: #e6e6ea; --line-card: #e1e1e6; --line-strong: #d4d4da; --dlg-line: #e1e1e6;
+  /* текст */
+  --text: #16161a; --text-2: #2e2e35; --muted: #5c5c66; --cap: #6b6b75; --faint: #a3a3ad;
+  /* смысл: тёмнее, чем в тёмной теме, чтобы мелкий текст держал контраст 4.5:1 на белом */
+  --accent: #2c5bc4; --acc-dot: #3d72e0; --accent-soft: #e8efff; --acc-deep: #f3f6ff; --acc-line: #cddcfb; --acc-line-2: #9db8f3;
+  --warn: #d98a2b; --warn-text: #8f5300; --warn-soft: #fbefdc; --warn-deep: #fdf8ef; --warn-line: #f0dcb8; --warn-fill: #d98a2b;
+  --bad: #d23c34; --bad-text: #b0231c; --bad-soft: #fde8e7;
+  --ok: #2f9e5f; --ok-text: #1b6f3f; --ok-soft: #e3f5ea; --ok-deep: #f2faf5; --ok-line: #b9e2c8;
+  --google: #6f4fd6;
+  --ev-bg: #e8efff; --ev-fg: #2c5bc4; --ev-line: #cddcfb;
+  --evg-bg: #ffffff; --evg-fg: #16161a; --evg-line: #8a6ae6;
+  --today: #f3f6ff; --weekend: #f1f1f3;
+  /* «Графит» под светлыми значениями: экраны и куски, которые рисует классическая разметка */
+  --g-fill: #f0f0f2; --g-fill-hover: #e6e6ea; --g-hair: #e6e6ea; --g-hover: #f0f0f2; --g-active: #ebebee;
+  --g-subtle: #f3f3f5; --g-seg-on: #e6e6ea; --g-strong: #16161a; --g-nav-text: #2e2e35; --g-on-accent: #ffffff;
+  --g-side: #fbfbfc; --g-side-solid: #fbfbfc; --g-card: #ffffff; --g-float: #ffffff; --g-dlg: #ffffff; --g-field: #ffffff;
+  --g-primary: #16161a; --g-primary-hover: #2e2e35; --g-focus: rgba(44, 91, 196, .4); --g-scroll: #d4d4da;
+  --g-mark: #16161a; --g-bar-text: #16161a;
+  --shadow-pop: 0 12px 32px rgba(20, 20, 24, .12);
+  --shadow-dlg: 0 30px 80px rgba(20, 20, 24, .18);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  html:has(body.d3.auto), body.d3.auto {
+    /* поверхности */
+    --bg: #f6f6f7; --panel: #ffffff; --panel-2: #f0f0f2; --panel-3: #e6e6ea; --sunken: #efeff1; --window: #ffffff;
+    --backdrop: rgba(20, 20, 24, .32);
+    /* линии */
+    --line: #e6e6ea; --line-card: #e1e1e6; --line-strong: #d4d4da; --dlg-line: #e1e1e6;
+    /* текст */
+    --text: #16161a; --text-2: #2e2e35; --muted: #5c5c66; --cap: #6b6b75; --faint: #a3a3ad;
+    /* смысл: тёмнее, чем в тёмной теме, чтобы мелкий текст держал контраст 4.5:1 на белом */
+    --accent: #2c5bc4; --acc-dot: #3d72e0; --accent-soft: #e8efff; --acc-deep: #f3f6ff; --acc-line: #cddcfb; --acc-line-2: #9db8f3;
+    --warn: #d98a2b; --warn-text: #8f5300; --warn-soft: #fbefdc; --warn-deep: #fdf8ef; --warn-line: #f0dcb8; --warn-fill: #d98a2b;
+    --bad: #d23c34; --bad-text: #b0231c; --bad-soft: #fde8e7;
+    --ok: #2f9e5f; --ok-text: #1b6f3f; --ok-soft: #e3f5ea; --ok-deep: #f2faf5; --ok-line: #b9e2c8;
+    --google: #6f4fd6;
+    --ev-bg: #e8efff; --ev-fg: #2c5bc4; --ev-line: #cddcfb;
+    --evg-bg: #ffffff; --evg-fg: #16161a; --evg-line: #8a6ae6;
+    --today: #f3f6ff; --weekend: #f1f1f3;
+    /* «Графит» под светлыми значениями: экраны и куски, которые рисует классическая разметка */
+    --g-fill: #f0f0f2; --g-fill-hover: #e6e6ea; --g-hair: #e6e6ea; --g-hover: #f0f0f2; --g-active: #ebebee;
+    --g-subtle: #f3f3f5; --g-seg-on: #e6e6ea; --g-strong: #16161a; --g-nav-text: #2e2e35; --g-on-accent: #ffffff;
+    --g-side: #fbfbfc; --g-side-solid: #fbfbfc; --g-card: #ffffff; --g-float: #ffffff; --g-dlg: #ffffff; --g-field: #ffffff;
+    --g-primary: #16161a; --g-primary-hover: #2e2e35; --g-focus: rgba(44, 91, 196, .4); --g-scroll: #d4d4da;
+    --g-mark: #16161a; --g-bar-text: #16161a;
+    --shadow-pop: 0 12px 32px rgba(20, 20, 24, .12);
+    --shadow-dlg: 0 30px 80px rgba(20, 20, 24, .18);
+    color-scheme: light;
+}
+}

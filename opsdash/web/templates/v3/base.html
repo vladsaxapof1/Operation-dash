@@ -14,12 +14,17 @@
   <link rel="stylesheet" href="/static/dark.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/graphite.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/v3.css?v={{ static_v }}">
+  {#- светлая тема — те же правила, другие значения токенов; body.auto — по системе, body.light — всегда #}
+  <link rel="stylesheet" href="/static/v3-light.css?v={{ static_v }}">
   {#- окно задачи и «Поручить агенту», сетка и вердикт дня открываются на разных экранах — их стили нужны везде #}
   <link rel="stylesheet" href="/static/v3-tasks.css?v={{ static_v }}">
   <link rel="stylesheet" href="/static/v3-calendar.css?v={{ static_v }}">
   {% block head %}{% endblock %}
+  {#- анимации и скелетоны — после стилей разделов: длительности общие, «Настройки → Основное → Анимации» #}
+  <link rel="stylesheet" href="/static/v3-motion.css?v={{ static_v }}">
 </head>
-<body class="d3{{ ' nav-collapsed' if nav_collapsed }} page-{{ nav or 'other' }}{% block body_class %}{% endblock %}">
+{#- motion-normal / motion-fast / motion-off — выбрали в настройках; без класса — «уменьшить движение» системы решает сам #}
+<body class="d3 {{ v3_theme }}{{ (' motion-' ~ motion) if motion }}{{ ' nav-collapsed' if nav_collapsed }} page-{{ nav or 'other' }}{% block body_class %}{% endblock %}">
 {% import "_icons.html" as icons %}
 {% from "_macros.html" import transcription_all %}
 {#- меню нового дизайна: Сводка и «Спросить» без заголовка, дальше «Работа · Память · Система».
@@ -114,7 +119,7 @@
     </div>
   </details>
 </nav>{% endblock %}
-{% if design_intro %}{% include "_design_intro.html" %}{% endif %}
+{% if design3_intro %}{% include "_design3_intro.html" %}{% endif %}
 {% if why_p %}
 {#- «Нет» — почему? (MOD-3): одна строка с причинами; ответ учитывает навык «Уроки из ваших „Нет“». Можно не отвечать #}
 <div class="why-bar" role="dialog" aria-label="Почему «Нет»" data-why="{{ why_p.id }}">

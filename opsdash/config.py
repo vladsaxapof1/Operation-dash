@@ -44,7 +44,8 @@ DEFAULTS: dict = {
         "timezone": "Europe/Moscow",
         "work_hours": {"start": "09:00", "end": "20:00", "days": [1, 2, 3, 4, 5]},
     },
-    "web": {"port": 8765, "theme": "system", "design": "classic"},  # theme: system / light / dark; design: classic / v3
+    "web": {"port": 8765, "theme": "system", "design": "v3"},  # theme: system / light / dark; design: v3 / classic
+    # web.motion (анимации нового дизайна): normal / fast / off; нет ключа — как в системе («уменьшить движение»)
     # архивные разделы (PULSE 2.0): нет в меню, страницы не открываются, их задания не запускаются; данные в data/
     # остаются. Включить — Настройки → Архивные разделы. archived_at — когда выключили кнопкой (пусто — с версии 2.0)
     "sections": {"docs": "archived", "kb": "archived", "archived_at": {}},

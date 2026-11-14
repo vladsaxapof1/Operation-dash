@@ -50,13 +50,18 @@ templates_v3.env.tests = templates.env.tests
 templates_v3.env.loader = jinja2.ChoiceLoader([templates_v3.env.loader, jinja2.PrefixLoader(
     {"classic": jinja2.FileSystemLoader(HERE / "templates")})])
 DESIGNS = {"classic": "Классический", "v3": "Новый · бета"}
+THEMES_V3 = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}  # темы нового дизайна
+templates.env.globals.update(THEMES_V3=THEMES_V3)
+# анимации нового дизайна (static/v3-motion.css): не выбрано — обычные, а при «уменьшить движение» в системе выключены
+MOTIONS = {"normal": "Обычные", "fast": "Быстрые", "off": "Выключены"}
+templates.env.globals.update(MOTIONS=MOTIONS)
 
 
 def design_of(settings: dict | None = None) -> str:
-    """Какой дизайн выбран: classic (по умолчанию) или v3."""
+    """Какой дизайн выбран: v3 (по умолчанию с 14.11.2026) или classic — если пользователь вернул прежний."""
     settings = settings or config.load_settings()
-    d = (settings.get("web") or {}).get("design") or "classic"
-    return d if d in DESIGNS else "classic"
+    d = (settings.get("web") or {}).get("design") or "v3"
+    return d if d in DESIGNS else "v3"
 
 
 def ui(request: Request | None = None, settings: dict | None = None) -> Jinja2Templates:
@@ -293,6 +298,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["update_available"] = bool((store.get_state("update_check") or {}).get("available"))
     ctx["restart_needed"] = restart_needed()
     ctx["design_intro"] = store.get_state(store.DESIGN_INTRO) == "show"  # окно «У PULSE новый дизайн» — один раз
+    ctx["design3_intro"] = store.get_state(store.DESIGN3_INTRO) == "show"  # то же для дизайна v3 — свой раз
     from opsdash import notices
 
     ctx["notices"] = notices.recent()  # угол экрана: что PULSE сделал и что делает сейчас
@@ -310,6 +316,11 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx["why_p"] = p if p and p["status"] == "rejected" and not p.get("reject_reason") else None
     ctx["ai_name"] = brain.name(settings)  # кто работает: «Claude» или «ChatGPT» — в меню и в «Спросить»
     ctx["design"] = design_of(settings)
+    # тема нового дизайна: «Как в системе» (auto), «Светлая» (light) или «Тёмная»; «Графит» в нём — тёмная/светлая
+    ctx["v3_theme"] = ("light" if ctx["theme"] in ("light", "graphite-light")
+                       else "auto" if ctx["theme"] == "system" else "dark")
+    motion = (settings.get("web") or {}).get("motion") or ""
+    ctx["motion"] = motion if motion in MOTIONS else ""  # пусто — не выбирали: решает «уменьшить движение» в системе
     return ui(settings=settings).TemplateResponse(request, name, ctx)
 
 
@@ -345,8 +356,11 @@ def notices_dismiss(notice_id: int):
 
 
 @app.post("/api/design-intro/seen")
-def design_intro_seen():
-    """Окно «У PULSE новый дизайн» закрыли («Круто», Esc или клик мимо) — больше не показываем."""
+def design_intro_seen(v: str = ""):
+    """Окно «У PULSE новый дизайн» закрыли («Круто», Esc или клик мимо) — больше не показываем.
+    v=3 — окно нового дизайна (v3); оно же закрывает и прежнее окно 2.0, чтобы не показывать два подряд."""
+    if v == "3":
+        store.set_state(store.DESIGN3_INTRO, "seen")
     store.set_state(store.DESIGN_INTRO, "seen")
     return {"ok": True}
 

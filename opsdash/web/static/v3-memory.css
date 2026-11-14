@@ -2,14 +2,6 @@
    _memory.html). Подключается только в этих шаблонах; все селекторы начинаются с body.d3.
    Цвета только токенами из v3.css. Карту рисует static/memory-map.js, здесь лишь окружение холста. */
 
-/* карта берёт цвета из токенов корня документа (getComputedStyle(document.documentElement)), а v3.css задаёт их
-   на body.d3: повторяем нужные на html, только когда на странице есть карта нового дизайна */
-html:has(body.d3 [data-mem-map]) {
-  --sunken: #0d0d0f; --panel: #141416; --text: #ededf0; --muted: #a3a3ad; --faint: #5d5d66;
-  --accent: #8fb4ff; --warn: #f0a04b; --ok: #5fcf8b; --bad: #ff8a84; --evg-line: #9a7bf0;
-  --font: "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-}
-
 /* --- раскладка: основная колонка и правая 300–360 --- */
 body.d3 .m3-cols { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px; margin-bottom: 20px; }
 body.d3 .m3-main { flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }

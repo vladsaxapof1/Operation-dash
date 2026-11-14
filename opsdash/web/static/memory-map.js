@@ -91,7 +91,8 @@
     var req = state.req = (state.req || 0) + 1;
     fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); })
       .then(function (data) { if (req === state.req) build(data); })
-      .catch(function () { if (req === state.req) counter.textContent = 'Не получилось загрузить карту'; });
+      .catch(function () { if (req === state.req) counter.textContent = 'Не получилось загрузить карту'; })
+      .then(function () { if (req === state.req) wrap.setAttribute('data-drawn', ''); });  // первая карта есть — скелетон уходит
   }
   function build(data) {
     state.lastData = data;
@@ -538,7 +539,7 @@
   }
   function showCard(n) {
     if (!n) { return; }
-    card.innerHTML = '<p class="mem-card-empty">Загружаю…</p>';
+    card.innerHTML = document.body.classList.contains('d3') && window.pulseSkel ? window.pulseSkel('card') : '<p class="mem-card-empty">Загружаю…</p>';
     var url = state.view === 'facts' ? '/api/memory/fact/' + n.id : '/api/memory/entity/' + n.id;
     fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
       if (d.error) { card.innerHTML = '<p class="mem-card-empty">' + esc(d.error) + '</p>'; return; }
