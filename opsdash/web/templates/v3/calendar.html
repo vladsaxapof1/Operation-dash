@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ev_time, ev_detail, brief_mark, brief_dialog %}
+{% import "_day.html" as dayui %}
+{% block title %}Календарь{% endblock %}
+{#- стили раздела в static/v3-calendar.css: base.html v3 подключает его на всех экранах (сетка и вердикт дня, поповер
+    встречи и бриф открываются и на Сводке) #}
+
+{% block content %}
+{% import "_icons.html" as icons %}
+{#- Календарь, новый дизайн (макеты Calendar, CalendarMonth, CalendarList, CalendarModals). Шапка: заголовок, диапазон
+    и число встреч, «‹ Сегодня ›», вид, «+ Встреча»; под ней — легенда, «обновлён», «Обновить», «Задачи» #}
+{% set unit = 'Месяц' if view == 'month' else 'Неделя' %}
+<div class="cal3">
+<div class="d3-head cal3-head">
+  <h1>Календарь</h1>
+  <span class="cal3-range">{{ title }}{% if view == 'week' %} · неделя {{ week_no }}{% endif %} · {{ count }} {{ plural(count, 'встреча', 'встречи', 'встреч') }}</span>
+  <span class="cal3-nav">
+    <a class="btn cal3-ib" href="?start={{ prev }}&view={{ view }}" title="{{ unit }} назад" aria-label="{{ 'Прошлый месяц' if view == 'month' else 'Прошлая неделя' }}">{{ icons.icon('chevron') }}</a>
+    <a class="btn" href="/calendar?view={{ view }}">Сегодня</a>
+    <a class="btn cal3-ib next" href="?start={{ next }}&view={{ view }}" title="{{ unit }} вперёд" aria-label="{{ 'Следующий месяц' if view == 'month' else 'Следующая неделя' }}">{{ icons.icon('chevron') }}</a>
+  </span>
+  <nav class="seg" aria-label="Вид">
+    <a href="?start={{ first }}&view=week" class="{{ 'active' if view == 'week' }}"{% if view == 'week' %} aria-current="page"{% endif %}>Неделя</a><a href="?start={{ first }}&view=month" class="{{ 'active' if view == 'month' }}"{% if view == 'month' %} aria-current="page"{% endif %}>Месяц</a><a href="?start={{ first }}&view=list" class="{{ 'active' if view == 'list' }}"{% if view == 'list' %} aria-current="page"{% endif %}>Список</a>
+  </nav>
+  {% if dp %}<button type="button" class="btn" data-dlg-open="day-dlg" title="{{ dp.verdict.line or dp.verdict.title }}">Разобрать день</button>{% endif %}
+  <button type="button" class="btn primary" data-dlg-open="new-dlg">{{ icons.icon('plus', 16) }}Встреча</button>
+</div>
+
+<div class="cal3-bar">
+  <span class="cal3-lg"><i class="m"></i>Встреча · Яндекс</span>
+  <span class="cal3-lg"><i class="g"></i>Встреча · Google</span>
+  {% if show_tasks %}
+  {% if view == 'month' %}
+  <span class="cal3-lg" title="Задачи дня, которым не хватает времени или которые ждут других"><span class="warn-text">не влезает · ждут</span>: задачи без окна и ждущие других</span>
+  {% else %}
+  <span class="cal3-lg"><i class="t"></i>{{ 'Задача в свободном окне' if view == 'week' else 'Задача' }}</span>
+  <span class="cal3-lg"><i class="t w"></i>{{ 'Задача в работе' if view == 'week' else 'В работе' }}</span>
+  <span class="cal3-lg"><i class="t q"></i>Ждёт другого</span>
+  {% endif %}
+  {% endif %}
+  <span class="grow"></span>
+  {% if updated %}<span>обновлён {{ updated | ago }}</span>{% endif %}
+  {% if can_refresh %}<form class="inline" method="post" action="/calendar/refresh" data-busy="Обновляю…"><button class="btn cal3-ib" title="Обновить Яндекс и Google Календарь сейчас" aria-label="Обновить календарь"><svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg></button></form>{% endif %}
+  {#- «Задачи»: ваши задачи по свободным окнам дней («Реальность дня»); выбор запоминается #}
+  <span class="seg" role="group" aria-label="Показывать задачи"><a href="?start={{ first }}&view={{ view }}&tasks={{ 0 if show_tasks else 1 }}" aria-pressed="{{ 'true' if show_tasks else 'false' }}"
+     title="{{ 'Скрыть задачи' if show_tasks else 'Показать ваши задачи по свободным окнам дней' }}">Задачи</a></span>
+</div>
+
+{% if not connected and not hide_cal_banner %}
+<div class="cal3-note alert-x-wrap" data-dismiss="hide_cal_banner">
+  <span>Показаны встречи, которые PULSE уже знает. Подключите календарь, чтобы видеть всё расписание:
+  <a href="/settings?tab=calendar">Яндекс</a> (в нём можно и создавать встречи отсюда), <a href="/settings?tab=google_calendar">Google</a>,
+  <a href="/settings?tab=ics_calendar">Outlook и iCloud по ссылке</a> или <a href="/settings?tab=caldav">другой по CalDAV</a>.</span>
+  <button type="button" class="alert-x" data-dismiss-btn aria-label="Скрыть" title="Скрыть">{{ icons.icon('close', 16) }}</button></div>
+{% endif %}
+
+{#- «Новая встреча»: из «+ Встреча», по щелчку на свободное время недели и «Назначить встречу» из задачи (?task=) #}
+<dialog class="dlg cal3-new" id="new-dlg" aria-labelledby="new-title"{% if for_task %} data-open-on-load{% endif %}>
+  <form class="dlg-box dlg-form" method="post" action="/calendar/new" tabindex="-1">
+    <div class="dlg-head"><h2 class="dlg-title" id="new-title">Новая встреча</h2><button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    {% if not settings.calendar.enabled %}
+    <div class="cal3-off">
+      <b>Встречи создаются в Яндекс Календаре</b>
+      <span class="small muted">Подключите его, и PULSE будет ставить встречи сам. Google Календарь PULSE только читает.</span>
+      <div><a class="btn sm" href="/settings?tab=calendar">Подключить календарь</a></div>
+    </div>
+    {% endif %}
+    {#- без Яндекс Календаря поля скрыты, но остаются в разметке: щелчок по свободному времени недели заполняет их (app.js) #}
+    <div class="cal3-fields"{% if not settings.calendar.enabled %} hidden{% endif %}>
+      {% if for_task %}<input type="hidden" name="task" value="{{ for_task.id }}">
+      <div class="cal3-for">{{ icons.icon('check') }}<span class="small">Встреча по задаче «{{ for_task.title }}». Появится на карточке задачи</span></div>{% endif %}
+      <div class="cal3-f"><label for="new-name">Название</label><input type="text" id="new-name" name="title" required placeholder="Например, Планёрка по складу" value="{{ for_task.title if for_task else '' }}" data-new-title></div>
+      <div class="cal3-f3">
+        <div class="cal3-f"><label for="new-day">Дата</label><input type="date" id="new-day" name="day" value="{{ new_day.isoformat() }}" required data-new-day></div>
+        <div class="cal3-f"><label for="new-at">Начало</label><input type="time" id="new-at" lang="ru" name="at" value="{{ new_time }}" required data-new-time></div>
+        <div class="cal3-f"><label for="new-min">Длительность</label><select id="new-min" name="minutes">{% for m in minutes %}<option value="{{ m }}" {{ 'selected' if m == 60 }}>{{ m }} мин</option>{% endfor %}</select></div>
+      </div>
+      {% set names, default = write_calendars %}
+      {% if names or google_calendars %}
+      <div class="cal3-f"><label for="new-cal">Календарь</label>
+      <select id="new-cal" name="calendar">
+        {% for n in names %}<option value="{{ n }}" {{ 'selected' if n == default }}>{{ n }}</option>{% endfor %}
+        {% for n in google_calendars %}<option disabled>{{ n }} — только чтение</option>{% endfor %}
+      </select></div>
+      {% endif %}
+      <div class="cal3-f"><label for="new-att">Участники</label>
+        <textarea id="new-att" name="attendees" rows="2" placeholder="ivanov@company.ru, petrova@company.ru" data-attendees>{{ for_task.attendees if for_task else '' }}</textarea>
+        <span class="small cal3-cap">Адреса почты через запятую или с новой строки. Можно оставить пустым.</span>
+        {% if people %}<div class="cal3-chips">{% for p in people[:20] %}<button type="button" class="cal3-chip" data-add-attendee="{{ p.email }}" title="{{ p.email }}">+ {{ p.name }}</button>{% endfor %}</div>{% endif %}
+      </div>
+      <div class="cal3-f"><label for="new-desc">Описание</label><textarea id="new-desc" name="description" rows="3" placeholder="Повестка, ссылка на звонок">{{ for_task.description if for_task else '' }}</textarea></div>
+    </div>
+    <div class="dlg-actions"><button class="btn primary" {{ 'disabled' if not settings.calendar.enabled }}>Создать встречу</button><button type="button" class="btn" data-dlg-close>Отмена</button>
+      <span class="grow"></span>
+      <span class="small cal3-cap">{% if default %}Календарь по умолчанию — «{{ default }}». {% endif %}В неделе можно нажать на свободное время.</span></div>
+  </form>
+</dialog>
+
+{% if grid %}
+{#- неделя: в шапке дня число, день недели и загрузка (встречи синим, задачи серым, доля от видимых часов) #}
+{% set day_min = (grid.hours | length) * 60 %}
+<div class="cal3-wk wk-wrap">
+  <div class="wk" style="--hour: {{ grid.hour_px }}px">
+    <div class="wk-head">
+      <div class="wk-gutter"></div>
+      {% for d in grid.days %}
+      {% set mm = (d.events | sum(attribute='e')) - (d.events | sum(attribute='s')) %}
+      {% set tm = (d.tasks or []) | rejectattr('done') | sum(attribute='len') %}
+      <div class="wk-day-h{{ ' today' if d.today }}{{ ' we' if d.date.weekday() >= 5 }}">
+        <div class="cal3-dn"><b>{{ d.date.day }}</b><span>{{ d.weekday | lower }}{{ ' · сегодня' if d.today }}</span></div>
+        {% if d.today and dp and dp.verdict %}<button type="button" class="cal3-verdict v-{{ dp.verdict.level }}" data-dlg-open="day-dlg" title="{{ dp.verdict.line or dp.verdict.title }}. Разобрать день"><i aria-hidden="true"></i>{{ dp.verdict.title }}</button>{% endif %}
+        {% if mm or tm %}
+        <div class="cal3-ld" title="встречи {{ mm | int | dur }}{% if tm %} · задачи {{ tm | dur }}{% endif %} из {{ day_min | dur }} на сетке" aria-hidden="true">
+          {% if mm %}<i class="m" style="width: {{ '%.1f' % ([mm * 100 / day_min, 100] | min) }}%"></i>{% endif %}
+          {% if tm %}<i class="t" style="width: {{ '%.1f' % ([tm * 100 / day_min, 100] | min) }}%"></i>{% endif %}
+        </div>
+        <span class="cal3-dl">{% if mm %}встречи {{ mm | int | dur }}{% endif %}{% if mm and tm %} · {% endif %}{% if tm %}задачи {{ tm | dur }}{% endif %}</span>
+        {% else %}<div class="cal3-ld" aria-hidden="true"></div><span class="cal3-dl">свободно</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% if grid.allday or grid.late %}
+    <div class="wk-allday">
+      <div class="wk-gutter wk-allday-label" style="grid-row: 1 / span {{ grid.allday_rows + (grid.late_rows or 0) }}">весь день</div>
+      {% for a in grid.allday %}
+      <button type="button" class="ev ev-allday{{ ' google' if a.ev.google }}{{ ' past' if a.ev.past }}" data-ev="{{ a.ev.n }}"
+              style="grid-column: {{ a.col + 2 }} / span {{ a.span }}; grid-row: {{ a.row + 1 }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>
+      {% endfor %}
+      {% for x in grid.late or [] %}
+      {% if x.kind == 'wait' %}{#- мяч у коллеги: времени не занимает, но не сделано; стоит в день срока, просроченное сегодня #}
+      <a class="ev-wait{{ ' late' if x.late }}" href="/commitments?task={{ x.item.id }}" style="grid-column: {{ x.col + 2 }}; grid-row: {{ x.row + 1 }}"
+         title="{{ dayui.wait_title(x) }}">{{ icons.icon('hourglass', 12) }}<span class="ev-wait-t">{{ x.item.title }}</span><span class="ev-wait-w"> · ждёт {{ x.who or x.why }}</span></a>
+      {% elif x.kind == 'waits' %}{#- таких задач в день много: одна плашка, список по нажатию #}
+      <details class="ev-waits{{ ' end' if x.col >= 4 }}" style="grid-column: {{ x.col + 2 }}; grid-row: {{ x.row + 1 }}">
+        <summary class="ev-wait{{ ' late' if x.late }}" title="Мяч не у вас: задачи ждут коллег или ответа — в план не ставятся">{{ icons.icon('hourglass', 12) }}<span class="ev-wait-t">Ждут других: {{ x['items'] | length }}</span></summary>
+        <div class="ev-waits-list">{% for w in x['items'] %}
+          <a class="ev-wait{{ ' late' if w.late }}" href="/commitments?task={{ w.item.id }}" title="{{ dayui.wait_title(w) }}">{{ icons.icon('hourglass', 12) }}<span class="ev-wait-t">{{ w.item.title }}</span><span class="ev-wait-w"> · {{ w.who or w.why }}</span></a>
+        {%- endfor %}</div>
+      </details>
+      {% else %}{#- срок в этот день, а окон до него не хватило: «срок под угрозой» #}
+      <a class="ev-late" href="/commitments?task={{ x.item.id }}" style="grid-column: {{ x.col + 2 }}; grid-row: {{ x.row + 1 }}"
+         title="«{{ x.item.title }}» (≈{{ x.item.est | dur }}) — {{ x.why }}">{{ x.item.title }} · {{ x.why }}</a>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="wk-body">
+      {% if is_current and grid.now_top is not none %}<div class="wk-now-all" style="top: {{ grid.now_top + 12 }}px" aria-hidden="true"></div>{% endif %}
+      <div class="wk-hours">{% for h in grid.hours %}<div class="wk-hour"><span>{{ '%02d:00' % h }}</span></div>{% endfor %}</div>
+      {% for d in grid.days %}
+      <div class="wk-col{{ ' today' if d.today }}{{ ' we' if d.date.weekday() >= 5 }}" data-day="{{ d.date.isoformat() }}"{{ ' data-past' if d.past }} data-hour-from="{{ grid.hour_from }}" style="height: {{ grid.height }}px">
+        {% for g in d.events %}
+        <button type="button" class="ev{{ ' google' if g.ev.google }}{{ ' past' if g.ev.past }}{{ ' short' if g.short }}" data-ev="{{ g.ev.n }}"
+                style="top: {{ g.top }}px; height: {{ g.height }}px; left: calc({{ '%.4f' % (g.left * 100) }}% + 2px); width: calc({{ '%.4f' % (g.width * 100) }}% - 4px)"
+                title="{{ g.ev.title or 'Без названия' }} · {{ ev_time(g.ev) }}">
+          <span class="ev-t">{{ brief_mark(g.ev) }}{{ g.ev.title or 'Без названия' }}{% if g.short %}<span class="ev-time"> · {{ g.ev.s_local.strftime('%H:%M') }}</span>{% endif %}</span>
+          {% if not g.short %}<span class="ev-time">{{ ev_time(g.ev) }}{% if g.ev.past and g.ev.rec_status == 'processed' %} · разобрана{% elif g.ev.past and g.ev.recorded %} · есть запись{% elif g.ev.brief and g.ev.brief.status == 'ready' %} · бриф готов{% endif %}</span>{% endif %}
+        </button>
+        {% endfor %}
+        {% for b in d.tasks or [] %}{{ dayui.task_block(b, None if d.past else grid, gap=2) }}{% endfor %}
+        {% if d.today and grid.now_top is not none %}<div class="wk-now" style="top: {{ grid.now_top }}px" data-now="{{ grid.now_top }}"><span>{{ grid.now.strftime('%H:%M') if grid.now else '' }}</span></div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% for e in grid.events %}{{ ev_detail(e) }}{{ brief_dialog(e) }}{% endfor %}
+<div class="ev-pop" hidden data-ev-pop></div>
+<datalist id="day-people">{% for name in day_people() %}<option value="{{ name }}">{% endfor %}</datalist>
+
+{% elif view == 'month' %}
+{#- месяц: сетка 6×7, в дне строка задач и до трёх встреч, остальные под «ещё N» (по нажатию список недели) #}
+<section class="cal3-mo" aria-label="{{ title }}">
+  <div class="cal3-mg">
+    {% for wd in ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'] %}<div class="cal3-wd">{{ wd }}</div>{% endfor %}
+    {% for d in days %}
+    {% set t = d.plan %}
+    <div class="mcell{{ ' today' if d.today }}{{ ' other' if d.date.month != month }}{{ ' we' if d.date.weekday() >= 5 }}"{% if d.today %} aria-current="date"{% endif %}>
+      <div class="cal3-mn">
+        <a class="mcell-n" href="?start={{ d.date }}&view=week" title="Открыть неделю">{{ d.date.day }}{% if loop.first or d.date.day == 1 %}.{{ '%02d' % d.date.month }}{% endif %}</a>{% if d.today %}<span class="small">· сегодня</span>{% endif %}
+        {% if t and (t.late or t.waiting) %}<span class="cal3-mx">{% if t.late %}не влезает {{ t.late | length }}{% endif %}{% if t.late and t.waiting %} · {% endif %}{% if t.waiting %}ждут {{ t.waiting | length }}{% endif %}</span>{% endif %}
+      </div>
+      {% if t and t.count %}
+      <a class="mtasks{{ ' work' if t.work }}" href="?start={{ d.date }}&view=week" title="{% for b in t.blocks if b.item.id %}{{ b.s | hm }} {{ b.item.title }}{{ ' (в работе)' if b.item.in_work }}{{ '; ' if not loop.last }}{% endfor %}{% for x in t.late %}; не влезает «{{ x.item.title }}»: {{ x.why }}{% endfor %}{% for x in t.waiting or [] %}; ждёт «{{ x.item.title }}»: {{ x.why }}{% endfor %}">задачи: {{ t.count }}{% if t.minutes %} · {{ t.minutes | dur }}{% endif %}</a>
+      {% endif %}
+      {% for e in d.events[:3] %}<button type="button" class="mev{{ ' past' if e.past }}{{ ' google' if e.uid.startswith(('google:', 'caldav:', 'ics:')) }}" data-ev="{{ e.n }}" title="{{ e.title }} · {{ ev_time(e) }}">{% if not e.all_day %}{{ e.start | local('%H:%M') }} {% endif %}{{ e.title or 'Без названия' }}</button>{% endfor %}
+      {% if d.events | length > 3 %}<a class="mev-more" href="?start={{ d.date }}&view=list">ещё {{ d.events | length - 3 }}</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+<p class="small cal3-cap cal3-foot">Щелчок по числу открывает неделю. Задачи дня считаются по плану: сколько их и сколько часов займут.</p>
+{% set seen = [] %}{% for d in days %}{% for e in d.events if e.n not in seen %}{% set _ = seen.append(e.n) %}{{ ev_detail(e) }}{{ brief_dialog(e) }}{% endfor %}{% endfor %}
+<div class="ev-pop" hidden data-ev-pop></div>
+
+{% else %}
+{#- список: у дня заголовок и счёт, строки встреч и задач (время, знак вида, название с метками, кнопка одной ширины) #}
+{% set ns = namespace(more=[]) %}
+{% for d in days %}
+{% set pl = d.plan or {} %}
+{% set blocks = (pl.blocks or []) | selectattr('item.id') | list %}
+{% set late = pl.late or [] %}{% set waits = pl.waiting or [] %}
+<section class="cal3-day" aria-label="{{ d.weekday }}, {{ d.date.strftime('%d.%m') }}">
+  <div class="cal3-dh">
+    <h2{% if d.today %} class="today"{% endif %}>{{ d.weekday }}, {{ d.date.strftime('%d.%m') }}{% if d.today %} · сегодня{% elif d.tomorrow %} · завтра{% endif %}</h2>
+    {% if d.events or blocks or late or waits %}
+    <span class="cal3-dc">
+      {%- set parts = [] %}
+      {%- if d.events %}{% set _ = parts.append(d.events | length ~ ' ' ~ plural(d.events | length, 'встреча', 'встречи', 'встреч')) %}{% endif %}
+      {%- if blocks %}{% set _ = parts.append(blocks | length ~ ' ' ~ plural(blocks | length, 'задача', 'задачи', 'задач')) %}{% endif %}
+      {%- if late %}{% set _ = parts.append('не влезает ' ~ late | length) %}{% endif %}
+      {%- if waits %}{% set _ = parts.append('ждут ' ~ waits | length) %}{% endif %}
+      {{- parts | join(' · ') }}</span>
+    {% endif %}
+  </div>
+  {% if d.events or blocks or late or waits %}
+  <div class="cal3-lst">
+    {% for e in d.events %}
+    {% set who = e.attendees | people %}
+    {% set g = e.uid.startswith(('google:', 'caldav:', 'ics:')) %}
+    <div class="cal3-r">
+      <span class="cal3-tm{{ ' past' if e.past }}">{{ ev_time(e) }}</span><span class="cal3-k {{ 'g' if g else 'm' }}" aria-hidden="true"></span>
+      <div class="cal3-b">
+        <div class="cal3-t"><b>{{ e.title or 'Без названия' }}</b>
+          {% if e.uid.startswith('google:') %}<span class="d3-tag cal3-gg" title="{{ e.calendar }}">Google</span>{% endif %}
+          {% if e.brief and e.brief.status == 'ready' %}<button type="button" class="d3-tag acc cal3-tagbtn" data-brief-open="{{ e.brief_key }}" title="{{ e.brief.topic or 'Открыть бриф' }}">бриф готов</button>{% endif %}
+          {% if e.past and e.rec_status == 'processed' %}<span class="d3-tag ok">разобрана</span>{% elif e.past and e.recorded %}<span class="d3-tag neu">есть запись</span>{% endif %}
+        </div>
+        {% if e.location or who %}<span class="cal3-s">{% if e.location %}{{ e.location | place }}{% endif %}{% if e.location and who %} · {% endif %}{{ who }}</span>{% endif %}
+      </div>
+      {% if e.recorded %}<a class="btn sm cal3-w" href="/meetings/{{ e.recorded }}">{{ 'Открыть разбор' if e.rec_status == 'processed' else 'Открыть встречу' }}</a>
+      {% else %}<button type="button" class="btn sm cal3-w" data-ev="{{ e.n }}">Подробнее</button>{% endif %}
+    </div>
+    {% endfor %}
+    {% for b in blocks %}
+    <div class="cal3-r">
+      <span class="cal3-tm">{{ b.s | hm }}–{{ b.e | hm }}</span><span class="cal3-k t{{ ' w' if b.item.in_work }}" aria-hidden="true"></span>
+      <div class="cal3-b">
+        <div class="cal3-t"><b>{{ b.item.title }}</b>{% if b.source == 'done' %}<span class="d3-tag ok">сделано</span>{% endif %}{% if b.late %}<span class="d3-tag warn">после срока</span>{% endif %}</div>
+        <span class="cal3-s">задача, ≈{{ b.item.est | dur }}{{ ' · в работе' if b.item.in_work }}</span>
+      </div>
+      <a class="btn sm cal3-w" href="/commitments?task={{ b.item.id }}">Открыть задачу</a>
+    </div>
+    {% endfor %}
+    {% for x in late %}
+    <div class="cal3-r late">
+      <span class="cal3-tm past">срок</span><span class="cal3-k t" aria-hidden="true"></span>
+      <div class="cal3-b">
+        <div class="cal3-t"><b>{{ x.item.title }}</b><span class="d3-tag bad">не влезает</span></div>
+        <span class="cal3-s">{{ x.why }}</span>
+      </div>
+      <a class="btn sm cal3-w" href="/commitments?task={{ x.item.id }}">Открыть задачу</a>
+    </div>
+    {% endfor %}
+    {% for x in waits %}
+    <div class="cal3-r{{ ' late' if x.late }}">
+      <span class="cal3-tm past">ждёт</span><span class="cal3-k t q" aria-hidden="true"></span>
+      <div class="cal3-b">
+        <div class="cal3-t"><b>{{ x.item.title }}</b>{% if x.late %}<span class="d3-tag bad">срок {{ x.item.due.strftime('%d.%m') }} прошёл</span>{% else %}<span class="d3-tag warn">ждёт</span>{% endif %}</div>
+        <span class="cal3-s" title="{{ dayui.wait_title(x) }}">{{ x.why }}{% if x.who and x.what %} · «{{ x.what }}»{% endif %}</span>
+      </div>
+      <a class="btn sm cal3-w" href="/commitments?task={{ x.item.id }}">Открыть задачу</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="cal3-empty">Встреч нет</div>
+  {% endif %}
+</section>
+{% endfor %}
+<p class="small cal3-cap cal3-foot">Список показывает неделю, стрелки в шапке листают на неделю вперёд.</p>
+{% for d in days %}{% for e in d.events %}{{ ev_detail(e) }}{{ brief_dialog(e) }}{% endfor %}{% endfor %}
+<div class="ev-pop" hidden data-ev-pop></div>
+{% endif %}
+</div>
+{% if dp %}{{ dayui.review(dp, due_choices, next_label) }}{% endif %}
+{% endblock %}

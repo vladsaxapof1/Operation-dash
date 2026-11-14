@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% block title %}Люди{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-know.css?v={{ static_v }}">{% endblock %}
+{% block content %}
+{#- Люди, новый дизайн: плитки людей (кто, сколько должен вам и вы ему, последний контакт, загрузка) и окно человека.
+    Окно и форма работают через app.js: dialog.dlg, .dlg-view / .dlg-edit, data-dlg-open / -edit / -view / -close #}
+{% macro initials(name) %}{{ (name.split(' ') | map('first') | join(''))[:2] | upper }}{% endmacro %}
+
+{% macro person_form(p=none) %}
+<form class="dlg-edit dlg-form kn-pform" method="post" action="/people"{% if p %} hidden{% endif %}>
+  <input type="hidden" name="pid" value="{{ p.id if p else 0 }}">
+  <div class="kn-pform-h"><h2 class="dlg-title">{{ 'Изменить: ' ~ p.name if p else 'Новый человек' }}</h2>
+    <button type="button" class="kn-ib" {{ 'data-dlg-view' if p else 'data-dlg-close' }} aria-label="{{ 'Назад к карточке' if p else 'Закрыть' }}">{{ icons.icon('close', 18) }}</button></div>
+  <label class="kn-fl"><span>Имя и фамилия {{ ui.help('Так человек будет называться в задачах, карточках Kaiten и сводках.', below=True) }}</span>
+    <input type="text" name="name" required value="{{ p.name if p else '' }}" placeholder="Пётр Иванов" data-person-name></label>
+  <label class="kn-fl"><span>Роль {{ ui.help('Кто он в компании. Claude учитывает роль, когда разбирает встречи и решает, кому адресована задача.') }}</span>
+    <input type="text" name="role" value="{{ (p.role or '') if p else '' }}" placeholder="например, руководитель продаж"></label>
+  <label class="kn-fl"><span>Другие написания {{ ui.help('Как его называют в расшифровках встреч и в чатах: «Петя», «Иванов», «П. Иванов». По ним Claude понимает, что это один и тот же человек. Через запятую.') }}</span>
+    <input type="text" name="aliases" value="{{ (p.aliases | join(', ')) if p else '' }}" placeholder="Петя, Иванов, П. Иванов"></label>
+  <div class="kn-fg">
+    <label class="kn-fl"><span>Telegram {{ ui.help('@username. По нему Claude узнаёт сообщения этого человека в Telegram и связывает их с его задачами.') }}</span>
+      <input type="text" name="telegram" value="{{ (p.telegram or '') if p else '' }}" placeholder="@username"></label>
+    <label class="kn-fl"><span>Я.Мессенджер {{ ui.help('Логин в Яндекс Мессенджере, чтобы узнавать сообщения этого человека там.') }}</span>
+      <input type="text" name="ymessenger" value="{{ (p.ymessenger or '') if p else '' }}" placeholder="логин"></label>
+    <label class="kn-fl"><span>Почта {{ ui.help('Чтобы узнавать его письма и звать на встречи: в форме новой встречи в «Календаре» он появится кнопкой «+ Имя».') }}</span>
+      <input type="email" name="email" value="{{ (p.email or '') if p else '' }}" placeholder="name@company.ru"></label>
+    <label class="kn-fl"><span>Пользователь Kaiten {{ ui.help('Кого ставить исполнителем, когда Claude предлагает карточку в Kaiten на этого человека.') }}</span>
+      <select name="kaiten_user_id">
+        <option value="">Не выбран</option>
+        {% for u in kusers %}<option value="{{ u.id }}" {{ 'selected' if p and p.kaiten_user_id == u.id }}>{{ u.full_name }} (@{{ u.username }})</option>{% endfor %}
+      </select></label>
+  </div>
+  <label class="kn-fl"><span>Заметки {{ ui.help('Всё, что поможет Claude: зона ответственности, с кем работает, как лучше обращаться.') }}</span>
+    <textarea name="notes" rows="3">{{ (p.notes or '') if p else '' }}</textarea></label>
+  {% if p %}
+  <div class="kn-fl"><span>Голос {{ ui.help('Запоминается, когда вы подтверждаете на странице встречи, какой спикер этот человек. Дальше PULSE подписывает его речь в записях сам.') }}</span>
+    <span class="kn-cap">{% if voices.get(p.id) %}Запомнен по {{ voices[p.id] }} {{ plural(voices[p.id], 'записи', 'записям', 'записям') }}{% else %}Ещё не запомнен: подтвердите его спикера на странице любой встречи.{% endif %}</span></div>
+  {% endif %}
+  <div class="kn-ft kn-ft-end"><button type="button" class="btn" {{ 'data-dlg-view' if p else 'data-dlg-close' }}>Отмена</button><button class="btn primary">{{ 'Сохранить' if p else 'Добавить' }}</button></div>
+</form>
+{% endmacro %}
+
+<div class="d3-head">
+  <div class="t"><h1>Люди</h1>
+    <p class="sub">{{ everyone | length }} {{ plural(everyone | length, 'человек', 'человека', 'человек') }} · Claude связывает одного человека в Telegram, почте и Kaiten и пополняет справочник сам, вы поправляете</p></div>
+  <button type="button" class="btn primary" data-dlg-open="person-new">{{ icons.icon('plus', 16) }}Человек</button>
+</div>
+
+<form method="get" class="d3-bar kn-pbar">
+  <label class="d3-search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Имя, @ник, роль" aria-label="Поиск по людям"></label>
+  <select name="sort" data-autosubmit aria-label="Порядок">{% for key, t in sorts.items() %}<option value="{{ key }}" {{ 'selected' if sort == key }}>{{ t }}</option>{% endfor %}</select>
+  {% if q %}<a class="kn-back" href="/people">{{ icons.icon('close', 14) }}Снять поиск</a>{% endif %}
+</form>
+
+{% set max_load = (everyone | map(attribute='load') | max) if everyone else 0 %}
+{% if items %}
+<div class="kn-pgrid">
+  {% for p in items %}
+  {% set late = (p.owes_me | selectattr('overdue') | list | length) + (p.i_owe | selectattr('overdue') | list | length) %}
+  {% set k_late = p.kaiten | selectattr('overdue') | list | length %}
+  <a class="kn-p" href="?person={{ p.id }}" data-dlg-open="person-{{ p.id }}">
+    <div class="kn-p-top"><span class="kn-av" aria-hidden="true">{{ initials(p.name) }}</span>
+      <div><b>{{ p.name }}</b><span class="kn-cap">{{ p.role or 'роль не указана' }}</span></div>
+      {% if late or k_late %}<span class="d3-tag bad">просрочено {{ late + k_late }}</span>
+      {% elif p.waiting %}<span class="d3-tag warn">ждёт ответа</span>{% endif %}</div>
+    <div class="kn-kv">
+      <div><b>{{ p.owes_me | length }}</b>должен мне</div>
+      <div><b>{{ p.i_owe | length }}</b>вы должны</div>
+      <div><b>{% if p.last %}{{ p.last.ts | local('%d.%m') }}{% else %}—{% endif %}</b>контакт</div>
+    </div>
+    <div><div class="kn-ld"><span>Загрузка</span><span>{% if p.load %}{{ p.load }} {{ plural(p.load, 'задача', 'задачи', 'задач') }}{% if p.kaiten %} · Kaiten {{ p.kaiten | length }}{% endif %}{% else %}задач нет{% endif %}</span></div>
+      <div class="kn-bar"><i class="{{ 'bad' if late or k_late }}" style="width:{{ ((p.load / max_load * 100) if max_load else 0) | round | int }}%"></i></div></div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<section class="d3-sec"><p class="kn-empty">{{ 'Никого не нашлось.' if q else 'Справочник пуст. Он заполнится после первых разборов встреч и чатов.' }}</p></section>
+{% endif %}
+
+{% if fresh %}
+<section class="kn-fresh" aria-label="Новые люди в переписке">
+  <div class="kn-fresh-h">{{ icons.icon('people', 18) }}<h2>Claude заметил новых людей в переписке</h2><span class="d3-n">{{ fresh | length }}</span></div>
+  {% for f in fresh %}
+  <div class="kn-nw"><span class="kn-av dash" aria-hidden="true">?</span>
+    <div><b class="d3-ell">{{ f.sender_name }}</b><span class="kn-cap d3-ell">чат «{{ f.chat_title }}» · {{ f.n }} {{ plural(f.n, 'сообщение', 'сообщения', 'сообщений') }}</span></div>
+    <button type="button" class="btn sm kn-w" data-dlg-open="person-new" data-person-name="{{ f.sender_name }}">Добавить</button></div>
+  {% endfor %}
+  <span class="kn-cap">«Добавить» откроет окно «Новый человек» с именем.</span>
+</section>
+{% endif %}
+
+{% for p in everyone %}
+<dialog class="dlg dlg-person kn-person" id="person-{{ p.id }}" aria-label="{{ p.name }}"{% if current and current.id == p.id %} data-open-on-load{% if editing %} data-edit-on-load{% endif %}{% endif %}>
+  <div class="dlg-box" tabindex="-1">
+    <div class="dlg-view">
+      <div class="kn-pm-head">
+        <span class="kn-av big" aria-hidden="true">{{ initials(p.name) }}</span>
+        <div class="kn-pm-who">
+          <div class="kn-pm-name"><h2 class="dlg-title">{{ p.name }}</h2><button type="button" class="kn-ib" data-dlg-edit title="Изменить" aria-label="Изменить данные человека">{{ icons.icon('edit', 16) }}</button></div>
+          <span class="kn-cap">{{ p.role or 'роль не указана' }}{% if p.aliases %} · также: {{ p.aliases | join(', ') }}{% endif %}</span>
+          <div class="kn-cts">
+            {% if p.telegram %}<a class="kn-ct" href="https://t.me/{{ p.telegram.lstrip('@') }}" target="_blank" rel="noopener">{{ icons.icon('chats', 14) }}Telegram {{ p.telegram }}</a>{% else %}<span class="kn-ct no">Telegram не привязан</span>{% endif %}
+            {% if p.kaiten_user_id %}<span class="kn-ct">Kaiten #{{ p.kaiten_user_id }}</span>{% endif %}
+            {% if p.email %}<a class="kn-ct" href="mailto:{{ p.email }}">{{ p.email }}</a>{% else %}<span class="kn-ct no">почта не привязана</span>{% endif %}
+            {% if p.ymessenger %}<span class="kn-ct">ЯМ {{ p.ymessenger }}</span>{% endif %}
+          </div>
+        </div>
+        <a class="btn" href="/ask?person={{ p.id }}" title="Спросить Claude об этом человеке: задачи, встречи, переписка">{{ icons.icon('ask', 16) }}Спросить Claude</a>
+        <button type="button" class="kn-ib" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>
+      </div>
+      <div class="kn-bl">
+        <section class="kn-bx" aria-label="Должен мне">
+          <div class="kn-hd"><h3>{% if p.owes_me %}<a href="/commitments?view=list&direction=to_me&person={{ p.name | urlencode }}">Должен мне</a>{% else %}Должен мне{% endif %}</h3><span>{{ p.owes_me | length }}</span></div>
+          {% for c in p.owes_me[:4] %}<div class="kn-ln"><a class="d3-ell" href="/commitments?task={{ c.id }}" title="{{ c | headline }}">{{ c | headline }}</a>
+            {% if c.overdue %}<a class="btn sm kn-w" href="/commitments?task={{ c.id }}" data-remind>Напомнить</a>{% else %}<span class="kn-dt">{{ ui.due_text(c) }}{% if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif %}{% if c.merge_hint %} · <span class="warn-text">дубль?</span>{% endif %}</span>{% endif %}</div>
+          {% else %}<span class="kn-cap">Ничего не должен.</span>{% endfor %}
+          {% if p.owes_me | length > 4 %}<a class="kn-more" href="/commitments?view=list&direction=to_me&person={{ p.name | urlencode }}">ещё {{ p.owes_me | length - 4 }}</a>{% endif %}
+        </section>
+        <section class="kn-bx" aria-label="Kaiten">
+          <div class="kn-hd"><h3>Kaiten</h3><span>{{ p.kaiten | length }}</span></div>
+          {% for k in p.kaiten[:4] %}<div class="kn-ln"><a class="d3-ell" href="{{ k.url }}" target="_blank" rel="noopener" title="{{ k.title }}">{{ k.title }}</a>
+            {% if k.overdue %}<span class="d3-tag bad">просрочено {{ k.due_date[:10] | date }}</span>{% elif k.idle_days is not none %}<span class="d3-tag warn">{{ k.idle_days }} дн. без движения</span>{% else %}<span class="d3-tag neu">{{ k.column_title }}</span>{% endif %}</div>
+          {% else %}<span class="kn-cap">{{ 'Карточек в работе нет.' if p.kaiten_user_id else 'Пользователь Kaiten не привязан.' }}</span>{% endfor %}
+          {% if p.kaiten | length > 4 %}<a class="kn-more" href="/commitments?view=kaiten&who={{ p.kaiten[0].responsible_name | urlencode }}">ещё {{ p.kaiten | length - 4 }}</a>{% endif %}
+        </section>
+        <section class="kn-bx" aria-label="Ему должны">
+          <div class="kn-hd"><h3>{% if p.i_owe %}<a href="/commitments?view=list&direction=mine&person={{ p.name | urlencode }}">Ему должны</a>{% else %}Ему должны{% endif %}</h3><span>{{ p.owed_to | length }}</span></div>
+          {% for c in p.owed_to[:4] %}<div class="kn-ln"><a class="d3-ell" href="/commitments?task={{ c.id }}" title="{{ c | headline }}">{{ c | headline }}</a>
+            <span class="kn-dt">{{ 'вы' if c.direction == 'mine' else (c.who or '?') }} · {{ ui.due_text(c) }}</span></div>
+          {% else %}<span class="kn-cap">Никто не должен.</span>{% endfor %}
+        </section>
+        <section class="kn-bx" aria-label="Встречи и переписка">
+          <div class="kn-hd"><h3>Встречи и переписка</h3></div>
+          {% for m in p.meetings %}<div class="kn-ln"><a class="d3-ell" href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a><span class="kn-dt">{{ m.started_at | local('%d.%m') }}</span></div>{% endfor %}
+          {% if p.last %}<div class="kn-ln"><a class="d3-ell" href="/chats?chat={{ (p.last.source ~ '|' ~ p.last.chat_id) | urlencode }}">{{ SOURCE_TITLES.get(p.last.source, p.last.source) }}, {{ p.last.chat_title }}</a>
+            {% if p.waiting %}<span class="d3-tag warn">ждёт ответа</span>{% else %}<span class="kn-dt">{{ p.last.ts | ago }}</span>{% endif %}</div>{% endif %}
+          {% if not p.meetings and not p.last %}<span class="kn-cap">Пока нет.</span>{% endif %}
+          {% if p.notes %}<span class="kn-cap kn-note">Заметка: {{ p.notes }}</span>{% endif %}
+        </section>
+      </div>
+      <div class="kn-ft">
+        {{ icons.icon('meetings', 16) }}
+        <span class="kn-cap kn-grow">{% if voices.get(p.id) %}Голос запомнен по {{ voices[p.id] }} {{ plural(voices[p.id], 'записи', 'записям', 'записям') }}{% else %}Голос ещё не запомнен{% endif %}</span>
+        {% if voices.get(p.id) %}<form method="post" action="/people/{{ p.id }}/voice/forget" data-confirm="Забыть голос {{ p.name }}?"><button class="btn sm">Забыть голос</button></form>{% endif %}
+        <form method="post" action="/people/{{ p.id }}/delete" data-confirm="Удалить {{ p.name }} из справочника?"><button class="btn sm danger">Удалить</button></form>
+      </div>
+    </div>
+    {{ person_form(p) }}
+  </div>
+</dialog>
+{% endfor %}
+<dialog class="dlg dlg-person kn-person kn-person-new" id="person-new" aria-label="Новый человек">
+  <div class="dlg-box" tabindex="-1">{{ person_form() }}</div>
+</dialog>
+{% endblock %}

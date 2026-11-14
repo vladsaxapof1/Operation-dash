@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Документы{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-system.css?v={{ static_v }}">{% endblock %}
+{#- Документы в новом дизайне (макет Docs.dc.html): поиск на лету (app.js: [data-live-search] подменяет
+    [data-live-results], чипы типов — [data-type]), карточки результатов в сетке, «Изменились за неделю» #}
+
+{% macro doc_actions(d) %}
+<form method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><button class="btn sm">Открыть</button></form>
+<form method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><input type="hidden" name="reveal" value="1"><button class="btn sm" title="{{ d.rel }}">{{ 'В Finder' if is_mac else 'В папке' }}</button></form>
+{% endmacro %}
+
+{% macro doc_card(d, q='') %}
+{#- путь к файлу не показываем — он в подсказке кнопки «В Finder» #}
+<article class="sy-dc doc-card">
+  <div class="sy-dc-h"><span class="sy-ty">{{ d.ext | replace('.', '') or d.type }}</span>
+    <a class="tt" href="/docs/view?path={{ d.path | urlencode }}{% if q %}&q={{ q | urlencode }}#r{{ d.rid }}{% endif %}" title="{{ d.title }}">{{ d.title }}</a></div>
+  {% if d.snippet %}
+  <span class="fr">{% if d.part %}{{ d.part }} · {% endif %}{{ d.snippet | hl }}</span>
+  {% if d.more %}<span class="mt">ещё совпадения: {{ d.more | join(', ') }}</span>{% endif %}
+  {% endif %}
+  <span class="mt">Создан {{ d.created | local('%d.%m.%Y') if d.created else '—' }} · изменён {{ d.modified | local('%d.%m.%Y, %H:%M') }}{% if d.size %} · {{ d.size | size }}{% endif %}</span>
+  <div class="ft">{{ doc_actions(d) }}</div>
+</article>
+{% endmacro %}
+
+{% block content %}
+<div class="sy-page" style="gap:20px">
+<div class="sy-head">
+  <div class="t"><h1>Документы</h1>
+    <p class="sub">{% if stats.indexed %}В поиске {{ stats.indexed }} {{ plural(stats.indexed, 'документ', 'документа', 'документов') }}{% if stats.last_ok %} · обновлено {{ stats.last_ok | ago }}{% endif %}{% else %}Индекс ещё пуст{% endif %} · файлы только читаются</p></div>
+  <a class="btn" href="/settings?tab=docs">Папки</a>
+  {% if folders %}<form method="post" action="/docs/index" data-busy="Обновляю…"><button class="btn primary">Обновить индекс</button></form>{% endif %}
+</div>
+
+{% if not folders %}
+<div class="sy-dashnote">Папки с документами не выбраны · <a href="/settings?tab=docs">выбрать</a>. PULSE найдёт в них текст презентаций, таблиц, документов Word, PDF и заметок.</div>
+{% elif stats.last_error %}
+<div class="sy-ban warn" style="max-width:none">{{ icons.icon('bell') }}<div class="t"><b>Индекс не обновился</b><span>{{ stats.last_error }}</span></div></div>
+{% endif %}
+
+{#- поиск на лету (app.js): результаты меняются по мере ввода, Enter не нужен #}
+<form method="get" action="/docs" class="sy-search doc-search" data-live-search style="flex:none;max-width:640px" role="search">
+  {{ icons.icon('search', 16) }}
+  <input type="search" name="q" value="{{ q }}" placeholder="Что найти: «прогноз MAU 2027», «пролонгация конверсия»…" aria-label="Найти в документах" autofocus autocomplete="off">
+  <input type="hidden" name="type" value="{{ type }}">
+</form>
+
+<div data-live-results style="display:flex;flex-direction:column;gap:20px">
+  {% if types %}
+  <nav class="sy-chips" aria-label="Тип документа">
+    <a class="{{ 'active' if not type }}" href="/docs?q={{ q | urlencode }}" data-type="">Все<span>{{ total }}</span></a>
+    {% for ext, title, n in types %}<a class="{{ 'active' if type == ext }}" href="/docs?q={{ q | urlencode }}&type={{ ext | urlencode }}" data-type="{{ ext }}">{{ title }}<span>{{ n }}</span></a>{% endfor %}
+  </nav>
+  {% endif %}
+
+  {% if q or type %}
+  <section class="sy-sec wide" aria-label="Результаты">
+    <div class="sy-gh"><h2>{% if q %}Нашлось: {{ results | length }}{% if results | length == 30 %}+{% endif %}{% else %}{{ type_title }}: {{ results | length }}{% if results | length == 120 %}+{% endif %}{% endif %}</h2>
+      <span>{% if q %}поиск учитывает окончания: «бюджета» найдёт и «бюджет»{% else %}сначала недавно изменённые{% endif %}</span></div>
+    {% if results %}
+    <div class="sy-dgrid">{% for d in results %}{{ doc_card(d, q) }}{% endfor %}</div>
+    {% else %}
+    <div class="sy-empty">{% if q %}Ничего не найдено. Попробуйте меньше слов или другие формулировки{% if type %}, или поищите во всех типах{% endif %}.{% else %}Документов этого типа нет.{% endif %}</div>
+    {% endif %}
+  </section>
+  {% else %}
+  <section class="sy-sec wide" aria-label="Изменились за неделю">
+    <div class="sy-gh"><h2>Изменились за неделю</h2><span>{{ recent | length }}</span></div>
+    {% if recent %}<div class="sy-dgrid">{% for d in recent %}{{ doc_card(d) }}{% endfor %}</div>
+    {% else %}<div class="sy-empty">За неделю документы не менялись.</div>{% endif %}
+  </section>
+  {% if folders %}
+  <p class="sy-hint" style="max-width:none">Ищу в папках: {% for f in folders %}<code class="sy-mono">{{ f }}</code>{{ ', ' if not loop.last }}{% endfor %}.
+    {% if stats.errors %}Не удалось прочитать: {{ stats.errors }} (повреждённые или защищённые паролем файлы).{% endif %}
+    Повторные версии вроде «Отчёт (1).xlsx» не дублируются, в поиске самая свежая. Служебные папки и код пропускаются.</p>
+  {% endif %}
+  {% endif %}
+</div>
+</div>
+{% endblock %}

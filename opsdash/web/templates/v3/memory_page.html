@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% import "_memory.html" as mm %}
+{% block title %}{{ d.entity.name }} · Память{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-memory.css?v={{ static_v }}">{% endblock %}
+{#- Страница знаний, новый дизайн (opsdash.memory.page_data): выжимка Claude, факты по видам с историей, задачи,
+    решения, встречи и переписка. Формы те же: POST /memory/entity/<id> (name, alias, kind; action=merge|forget) #}
+{% block content %}
+{% set e = d.entity %}
+<nav class="m3-crumb" aria-label="Путь"><a href="/memory">Память</a><span aria-hidden="true">/</span><a href="/memory?tab=pages">Страницы</a><span aria-hidden="true">/</span><span aria-current="page">{{ e.name }}</span></nav>
+
+<div class="d3-bar">{{ mm.tabbar(tabs, tab) }}</div>
+
+<header class="m3-phead">
+  {{ mm.avatar(e.name, e.kind, 'xl') }}
+  <div class="m3-grow m3-phead-t">
+    <h1>{{ e.name }}</h1>
+    <div class="m3-tags">
+      <span class="d3-tag neu">{{ d.kind_title }}</span>
+      {% if d.person %}<a class="d3-tag neu" href="/people">{{ d.person.role or 'в справочнике' }}</a>{% endif %}
+      {% if d.project %}<a class="d3-tag neu" href="/projects/{{ d.project.id }}">проект</a>{% endif %}
+      {% if e.aliases %}<span class="m3-hint">также называют</span>{% for a in e.aliases %}<span class="d3-tag neu">{{ a }}</span>{% endfor %}{% endif %}
+      <button type="button" class="d3-tag dash m3-tagbtn" data-reveal="mem-edit" title="Переименовать, псевдонимы, вид">+ псевдоним</button>
+    </div>
+  </div>
+  <button type="button" class="btn primary" data-dlg-open="mem-add">{{ icons.icon('plus', 16) }}Запомнить</button>
+  <button type="button" class="btn" data-dlg-open="mem-merge">Объединить с…</button>
+  <button type="button" class="btn m3-ibb" data-reveal="mem-edit" aria-label="Изменить страницу" title="Переименовать, псевдонимы, вид">{{ icons.icon('edit', 18) }}</button>
+  <button type="button" class="btn m3-ibb" data-dlg-open="mem-forget" aria-label="Забыть всё о «{{ e.name }}»" title="Забыть всё о «{{ e.name }}»">{{ icons.icon('trash', 18) }}</button>
+</header>
+
+<form class="d3-card m3-edit" id="mem-edit" method="post" action="/memory/entity/{{ e.id }}" hidden>
+  <div class="m3-row3">
+    <div class="m3-fld"><label for="pe-name">Название</label><input type="text" id="pe-name" name="name" value="{{ e.name }}"></div>
+    <div class="m3-fld"><label for="pe-alias">Ещё написания, через запятую</label><input type="text" id="pe-alias" name="alias" placeholder="РМШ, ООО «Ромашка»"></div>
+    <div class="m3-fld"><label for="pe-kind">Вид</label><select id="pe-kind" name="kind">{% for k, t in ekinds.items() %}<option value="{{ k }}" {{ 'selected' if k == e.kind }}>{{ t | capitalize }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="m3-formact"><button type="button" class="btn" data-reveal="mem-edit">Отмена</button><button class="btn primary">Сохранить</button></div>
+</form>
+
+{% if d.lead and d.lead.lead %}
+<section class="m3-card m3-leadcard" aria-labelledby="lead-h">
+  <div class="m3-ch"><h2 id="lead-h">Что сейчас важно</h2><span class="d3-n">выжимка Claude · на {{ d.lead.lead_at | date }}</span></div>
+  <div class="m3-md">{{ d.lead.lead | md }}</div>
+</section>
+{% endif %}
+
+{#- строка факта на странице: текст, «было», источник, история; кнопки в меню «…» #}
+{% macro row(f) -%}
+<article class="m3-frow" id="f{{ f.id }}">
+  <div class="m3-fb">
+    <span class="m3-ft">{{ f.text }}</span>
+    {% set hist = d.history.get(f.id) %}
+    {% if f.prev and not hist %}<span class="m3-was">было: <s>{{ f.prev.text }}</s> ({{ f.prev.happened | date }})</span>{% endif %}
+    {% if f.because %}<span class="m3-was">потому что: {{ f.because.text }} ({{ f.because.happened | date }})</span>{% endif %}
+    <div class="m3-fm m3-wrapm"><span>на {{ f.happened | date }}</span>{{ mm.source(f, msgs) }}{% if f.quote %}<span class="m3-qi" title="{{ f.quote }}">«{{ f.quote | truncate(90, true, '…') }}»</span>{% endif %}
+      {% if f.author == 'director' %}<span class="d3-tag acc" title="Записано вами: Claude такой факт сам не сменяет">от вас</span>{% endif %}
+      {% if f.prev %}<span class="d3-tag warn">изменился</span>{% endif %}</div>
+    {% if hist %}
+    <details class="m3-hist"><summary>История: было → стало {{ icons.icon('chevron', 14) }}</summary>
+      <div class="m3-hl">{% for h in hist | sort(attribute='happened', reverse=true) %}<div><span class="m3-d">{{ h.happened | date }}</span><s>{{ h.text }}</s></div>{% endfor %}</div>
+    </details>{% endif %}
+  </div>
+  {{ mm.fact_actions(f, compact=true) }}
+</article>
+{%- endmacro %}
+
+<div class="m3-cols">
+  <section class="d3-sec m3-main m3-facts" aria-labelledby="facts-h">
+    <div class="d3-sec-h"><h2 id="facts-h">Факты</h2><span class="d3-n">{{ d.facts | length }}{% if d.n_messages %} · упоминаний в переписке {{ d.n_messages }}{% endif %}</span></div>
+    {% for k, t in kinds.items() %}{% set items = d.by_kind.get(k) %}{% if items %}
+    <div class="m3-kind">
+      <div class="m3-kh"><h3>{{ t | capitalize }}</h3><span class="d3-n">{{ items | length }}</span></div>
+      <div class="m3-fl">{% for f in items[:3] %}{{ row(f) }}{% endfor %}</div>
+      {% if items | length > 3 %}
+      <details class="m3-more"><summary>Ещё {{ items | length - 3 }}</summary>
+        <div class="m3-fl">{% for f in items[3:] %}{{ row(f) }}{% endfor %}</div></details>
+      {% endif %}
+    </div>
+    {% endif %}{% endfor %}
+    {% if not d.facts %}<p class="m3-empty-t">Фактов о «{{ e.name }}» пока нет: страница собрана из задач, решений и упоминаний.</p>{% endif %}
+  </section>
+
+  <aside class="m3-side" aria-label="Связанное со страницей">
+    {% if d.tasks %}
+    <section class="m3-card m3-tight"><div class="m3-ch"><h2>Открытые задачи</h2><span class="d3-n">{% if d.tasks | length > 10 %}10 из {{ d.tasks | length }}{% else %}{{ d.tasks | length }}{% endif %}</span></div>
+      {% for c in d.tasks[:10] %}<a class="m3-rw" href="/commitments?task={{ c.id }}"><div><b>{{ c.title or c.what }}</b>{% if c.direction == 'mine' %}<span class="m3-s">вы{{ ' → ' ~ c.whom if c.whom }}</span>{% elif c.direction == 'to_me' %}<span class="m3-s">{{ c.who or 'вам должны' }} → вам</span>{% elif c.who %}<span class="m3-s">{{ c.who }}{{ ' → ' ~ c.whom if c.whom }}</span>{% endif %}</div>{% if c.due %}<span class="m3-c">до {{ c.due | date }}</span>{% endif %}</a>{% endfor %}
+    </section>{% endif %}
+    {% if d.decisions %}
+    <section class="m3-card m3-tight"><div class="m3-ch"><h2>Решения</h2><span class="d3-n">{{ d.decisions | length }}</span></div>
+      {% for r in d.decisions %}<a class="m3-rw" href="/decisions?topic={{ r.topic | urlencode }}#d{{ r.id }}"><div><b>{{ r.title }}</b>{% if r.topic %}<span class="m3-s">{{ r.topic }}</span>{% endif %}</div><span class="m3-c">{{ r.when | date }}</span></a>{% endfor %}
+    </section>{% endif %}
+    {% if d.meetings %}
+    <section class="m3-card m3-tight"><div class="m3-ch"><h2>Встречи</h2><span class="d3-n">{{ d.meetings | length }}</span></div>
+      {% for m in d.meetings %}<a class="m3-rw" href="/meetings/{{ m.id }}"><div><b>{{ m.title }}</b><span class="m3-s">{{ m.started_at | local('%d.%m, %H:%M') }}</span></div><span class="m3-c">{{ m.started_at | local('%d.%m') }}</span></a>{% endfor %}
+    </section>{% endif %}
+    {% if d.messages %}
+    <section class="m3-card m3-tight"><div class="m3-ch"><h2>Переписка</h2><span class="d3-n">{{ d.n_messages }}</span></div>
+      {% for c in d.messages %}<div class="m3-rw"><div><b>{{ c.title }}</b><span class="m3-s">{{ (c.text.splitlines()[-1] if c.text else '') }}</span></div><span class="m3-c">{{ c.ts | local('%d.%m') }}</span></div>{% endfor %}
+    </section>{% endif %}
+  </aside>
+</div>
+
+{{ mm.add_dialog(kinds, e.name) }}
+
+<dialog class="dlg m3-dlg" id="mem-merge" aria-labelledby="mem-merge-h">
+  <form method="post" action="/memory/entity/{{ e.id }}" class="m3-dlg-b"><input type="hidden" name="action" value="merge">
+    <div class="m3-dlg-hd"><div class="m3-grow"><h2 id="mem-merge-h">Объединить с…</h2><p class="m3-hint">Страница «{{ e.name }}» · {{ d.kind_title }} · {{ d.facts | length }} {{ plural(d.facts | length, 'факт', 'факта', 'фактов') }}</p></div>
+      <button type="button" class="m3-ib" data-dlg-close aria-label="Закрыть" title="Закрыть (Esc)">{{ icons.icon('close', 18) }}</button></div>
+    <div class="m3-fld"><label for="mg-into">Это одно и то же с…</label>
+      <select id="mg-into" name="into" required><option value="">выберите страницу</option>{% for o in others %}<option value="{{ o.id }}">{{ o.name }} ({{ o.kind_title }}{% if o.facts %}, фактов {{ o.facts }}{% endif %})</option>{% endfor %}</select></div>
+    <div class="m3-box acc">
+      <span><span class="m3-acc">Останется</span> выбранная страница: факты, псевдонимы и упоминания «{{ e.name }}» перейдут на неё</span>
+      <span class="m3-hint">«{{ e.name }}» станет псевдонимом, задачи и встречи привяжутся к общей странице</span>
+    </div>
+    <div class="m3-dlg-ft"><button type="button" class="btn" data-dlg-close>Отмена</button><button class="btn primary">Объединить</button></div>
+  </form>
+</dialog>
+
+<dialog class="dlg m3-dlg" id="mem-forget" role="alertdialog" aria-labelledby="mem-forget-h">
+  <form method="post" action="/memory/entity/{{ e.id }}" class="m3-dlg-b"><input type="hidden" name="action" value="forget">
+    <div class="m3-dlg-hd"><h2 id="mem-forget-h">Забыть всё о «{{ e.name }}»</h2><button type="button" class="m3-ib" data-dlg-close aria-label="Закрыть" title="Закрыть (Esc)">{{ icons.icon('close', 18) }}</button></div>
+    <span class="d3-tag bad m3-self">вернуть будет нельзя</span>
+    <div class="m3-box">
+      <b>Будет удалено</b>
+      <div class="m3-dl"><span class="m3-grow">Страница знаний и точки на карте</span></div>
+      <div class="m3-dl"><span class="m3-grow">Факты только о «{{ e.name }}»</span></div>
+      {% if e.aliases %}<div class="m3-dl"><span class="m3-grow">Псевдонимы: {{ e.aliases | join(', ') }}</span><b>{{ e.aliases | length }}</b></div>{% endif %}
+    </div>
+    <div class="m3-box m3-box-l">
+      <b>Останется</b>
+      <span class="m3-hint">Задачи, встречи и переписка. Новые факты PULSE запомнит, как только они появятся.</span>
+    </div>
+    <div class="m3-dlg-ft"><button type="button" class="btn" data-dlg-close>Отмена</button><button class="btn m3-danger">Забыть всё</button></div>
+  </form>
+</dialog>
+{% endblock %}

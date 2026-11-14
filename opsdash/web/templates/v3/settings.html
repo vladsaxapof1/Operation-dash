@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% block title %}Настройки{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-system.css?v={{ static_v }}">{% endblock %}
+{% from "_settings_macros.html" import secret_input, check_btn, enabled_box, chat_picker with context %}
+{#- Настройки в новом дизайне: вкладки горизонтальным рядом (меню из settings_views.settings_menu), в каждой секции
+    строки «подпись слева, управление справа» (макеты Settings*.dc.html). Формы, адреса и имена полей те же, что в
+    классическом settings.html, и сохраняют те же маршруты settings_views.py #}
+{% macro row(label, hint='', id='', cls='') -%}
+<div class="sy-row{{ ' ' ~ cls if cls }}">
+  <div class="sy-lb">{% if id %}<label for="{{ id }}">{{ label }}</label>{% else %}<b>{{ label }}</b>{% endif %}{% if hint %}<span>{{ hint }}</span>{% endif %}</div>
+  {{ caller() }}
+</div>
+{%- endmacro %}
+{% macro sw(name, checked, label, value='', id='') -%}
+<label class="sy-sw"><input type="checkbox" name="{{ name }}"{% if value %} value="{{ value }}"{% endif %}{% if id %} id="{{ id }}"{% endif %} {{ 'checked' if checked }} aria-label="{{ label }}"><span></span></label>
+{%- endmacro %}
+{% macro gh(title, note='') -%}
+<div class="sy-gh"><h2>{{ title }}</h2>{% if note %}<span>{{ note }}</span>{% endif %}</div>
+{%- endmacro %}
+{% block content %}
+<div class="sy-page">
+<div class="sy-head"><div class="t"><h1>Настройки</h1><p class="sub">Подключения и правила работы. Всё хранится на этом компьютере.</p></div></div>
+
+<nav class="sy-tabs" aria-label="Разделы настроек">
+  {% for m in menu %}
+  {% if m.sep %}<span class="sy-tsep" aria-hidden="true"></span>
+  {% else %}<a href="?tab={{ m.tab }}" class="sy-tab{{ ' on' if menu_tab == m.tab }}"{% if menu_tab == m.tab %} aria-current="page"{% endif %}>{{ m.title }}{% if m.note and (m.warn or m.tab in ('connections', 'archive')) %}<span class="sy-tab-n{{ ' warn' if m.warn }}">{{ m.note }}</span>{% endif %}</a>{% endif %}
+  {% endfor %}
+</nav>
+
+{% if tab == 'general' %}
+{#- ===== Основное ===== #}
+<form method="post" action="/settings/general" class="sy-form general-f">
+  <section class="sy-sec" aria-label="Вы и рабочее время">
+    {{ gh('Вы и рабочее время', 'по ним PULSE считает сроки и план дня') }}
+    <div class="sy-card">
+      {% call row('Как вас зовут', 'Claude будет знать, чьи это задачи и сообщения', 'g-name') %}<div class="sy-ct"><input type="text" id="g-name" name="name" value="{{ settings.owner.name }}" placeholder="Анна Смирнова"></div>{% endcall %}
+      {% call row('Часовой пояс', 'Например Europe/Moscow, Asia/Yekaterinburg', 'g-tz') %}<div class="sy-ct"><input type="text" id="g-tz" name="timezone" value="{{ settings.owner.timezone }}"></div>{% endcall %}
+      {% call row('Рабочий день', 'В рабочее время Claude разбирает сообщения', 'g-from') %}<div class="sy-ct"><span class="sy-u">с</span><input class="t" type="time" lang="ru" id="g-from" name="work_start" value="{{ settings.owner.work_hours.start | hhmm }}" aria-label="Рабочий день с"><span class="sy-u">по</span><input class="t" type="time" lang="ru" name="work_end" value="{{ settings.owner.work_hours.end | hhmm }}" aria-label="Рабочий день до"></div>{% endcall %}
+      {% call row('Рабочие дни', settings.owner.work_hours.days | length ~ ' из 7 · дайджесты и напоминания — только в рабочие дни') %}
+      <div class="sy-ct sy-days" role="group" aria-label="Рабочие дни">{% for d, n in [(1,'Пн'),(2,'Вт'),(3,'Ср'),(4,'Чт'),(5,'Пт'),(6,'Сб'),(7,'Вс')] %}<label class="sy-chip"><input type="checkbox" name="days" value="{{ d }}" {{ 'checked' if d in settings.owner.work_hours.days }}><span>{{ n }}</span></label>{% endfor %}</div>
+      {% endcall %}
+      <details class="sy-more"><summary>Дополнительно · порт админки {{ settings.web.port }}</summary>
+        {% call row('Порт админки', 'Менять, только если 8765 занят другой программой. Вступит в силу после перезапуска PULSE', 'g-port') %}<div class="sy-ct"><input class="n" type="number" id="g-port" name="port" value="{{ settings.web.port }}"></div>{% endcall %}
+      </details>
+    </div>
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+<section class="sy-sec" id="design" aria-label="Оформление">
+  {{ gh('Оформление', 'меняется сразу, без «Сохранить»') }}
+  <div class="sy-card">
+    {% call row('Дизайн', 'Новый дизайн в бете: тёмный, экраны переезжают в него по одному. Вернуться в классический можно в любой момент, данные общие') %}
+    <div class="sy-ct"><form method="post" action="/settings/design" class="sy-seg2 btns" aria-label="Дизайн">{% for key, title in designs.items() %}<button name="design" value="{{ key }}" class="{{ 'active' if design == key }}"{% if design == key %} aria-pressed="true"{% endif %}>{{ title }}</button>{% endfor %}</form></div>
+    {% endcall %}
+    <div class="sy-row top" id="theme">
+      <div class="sy-lb"><b>Тема классического дизайна</b><span>«Как в системе»: PULSE повторяет светлое или тёмное оформление компьютера</span></div>
+      <div class="sy-ct">
+        <details class="sy-pick"><summary><span class="sy-val">{{ themes.get(theme, theme) }}</span><span class="btn">Изменить</span></summary>
+          <form method="post" action="/settings/theme" class="sy-lst" aria-label="Тема оформления">{% for key, title in themes.items() %}<button name="theme" value="{{ key }}" class="sy-opt{{ ' on' if theme == key }}"{% if theme == key %} aria-pressed="true"{% endif %}><span>{{ title }}</span>{% if theme == key %}{{ icons.icon('check', 16) }}{% endif %}</button>{% endfor %}</form>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% elif tab == 'updates' %}
+{#- ===== Обновления ===== #}
+<section class="sy-sec" id="updates" aria-label="Версия PULSE">
+  {{ gh('Версия PULSE', ('проверено ' ~ (upd.checked_at | ago)) if upd.checked_at else '') }}
+  {% if updating == 'restart' %}
+  <div class="sy-ban acc" data-wait-build="{{ build }}" data-wait-job="restart">{{ icons.icon('journal') }}<div class="t"><b>Перезапускаю PULSE с новой версией…</b><span>Обычно 10–30 секунд, страница обновится сама</span></div></div>
+  {% elif updating %}
+  {#- после «Обновить»: страница ждёт, пока PULSE перезапустится с новой версией (app.js), и обновляется сама #}
+  <div class="sy-ban acc" data-wait-build="{{ build }}">{{ icons.icon('journal') }}<div class="t"><b>Обновляю PULSE…</b><span>Скачиваю новую версию и ставлю библиотеки, затем PULSE перезапустится. Обычно это 1–3 минуты, страница обновится сама</span></div></div>
+  {% elif restart_needed and not upd.available %}
+  {#- файлы обновили мимо кнопки «Обновить» (git pull, слияние в приложении Claude), а PULSE не перезапускался #}
+  <div class="sy-ban ok update-restart">{{ icons.icon('check') }}<div class="t"><b>Файлы уже обновлены до {{ restart_needed.version or restart_needed.sha[:7] }}</b><span>Сейчас работает прежняя версия {{ version }} ({{ build }}). Новые разделы и исправления появятся после перезапуска</span></div>
+    <form method="post" action="/updates/restart" data-confirm="Перезапустить PULSE? Это 10–30 секунд; начатые фоновые задания повторятся по расписанию."><button class="btn primary">Перезапустить</button></form></div>
+  {% endif %}
+  <div class="sy-card">
+    <div class="sy-row">
+      <div class="sy-lb"><b>{{ 'Скачана' if restart_needed and not updating else 'Стоит' }} версия {{ version }} · {{ installed.sha[:7] or 'неизвестно' }}</b>
+        <span>{% if installed.date %}от {{ installed.date | local('%d.%m.%Y') }} · {% endif %}{{ 'из git · ' if installed.how == 'git' }}<a class="sy-lnk" href="/help/06-история-изменений">История изменений →</a></span></div>
+      <div class="sy-ct end"><form method="post" action="/updates/check" data-busy="Проверяю…"><button class="btn">Проверить обновления</button></form></div>
+    </div>
+  </div>
+  {% if upd.error %}
+  <div class="sy-ban bad"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>
+    <div class="t"><b>Не удалось проверить</b><span>{{ upd.error }} · проверьте интернет или токен в «Откуда обновлять»</span></div></div>
+  {% elif upd.available and not updating %}
+  <div class="sy-new" aria-label="Доступна новая версия">
+    <div class="sy-ban" style="padding:0;border:0;background:transparent">
+      <div class="t"><b style="font-weight:600;font-size:16px">Доступна новая версия {{ upd.latest.sha[:7] }}</b><span>от {{ upd.latest.date | local('%d.%m %H:%M') }} · PULSE скачает её и перезапустится за 1–3 минуты. Данные, настройки и пароли не меняются</span></div>
+      <form method="post" action="/updates/apply" data-confirm="PULSE скачает новую версию и перезапустится — это 1–3 минуты. Данные, настройки и пароли не меняются. Обновить?"><button class="btn primary">Обновить</button></form>
+    </div>
+    {% if upd.changes %}<ul>{% for c in upd.changes %}<li>{{ c }}</li>{% endfor %}</ul>{% else %}<span class="sy-cap">«{{ upd.latest.message }}»</span>{% endif %}
+  </div>
+  {% elif upd.latest and not updating and not restart_needed %}
+  <div class="sy-ban">{{ icons.icon('check') }}<div class="t"><b>Это последняя версия</b><span>{{ version }}{% if installed.date %} от {{ installed.date | local('%d.%m') }}{% endif %}</span></div></div>
+  {% endif %}
+  <div class="sy-card">
+    <details class="sy-more update-src"{{ ' open' if upd.error }}><summary>Откуда обновлять · {{ settings.updates.repo or 'репозиторий не указан' }}{% if settings.updates.branch %}, ветка {{ settings.updates.branch }}{% endif %}{{ ', раз в день' if settings.updates.auto_check }}</summary>
+      <form method="post" action="/settings/updates">
+        {% call row('Репозиторий GitHub', 'Откуда PULSE берёт новые версии', 'u-repo') %}<div class="sy-ct"><input type="text" id="u-repo" name="repo" value="{{ settings.updates.repo }}" placeholder="владелец/название"></div>{% endcall %}
+        {% call row('Ветка', '', 'u-br') %}<div class="sy-ct"><input type="text" id="u-br" name="branch" value="{{ settings.updates.branch }}"></div>{% endcall %}
+        <div class="sy-row">
+          <div class="sy-lb"><label for="u-tok">Токен GitHub</label><span>Нужен, если репозиторий закрытый. GitHub: Settings → Developer settings → Fine-grained tokens, доступ только к этому репозиторию, Contents: Read-only</span></div>
+          <div class="sy-ct" style="flex-direction:column;align-items:stretch;gap:4px">{{ secret_input('token', 'GITHUB_TOKEN', 'github_pat_…') }}</div>
+        </div>
+        {% call row('Проверять раз в день', 'Обновление всё равно ставите вы') %}<div class="sy-ct">{{ sw('auto_check', settings.updates.auto_check, 'Проверять раз в день') }}</div>{% endcall %}
+        <div class="sy-row"><div class="sy-lb"></div><div class="sy-ct end"><button class="btn">Сохранить</button></div></div>
+      </form>
+    </details>
+  </div>
+</section>
+
+{% elif tab == 'office' %}
+{#- ===== Офис ===== #}
+<form method="post" action="/settings/office" class="sy-form">
+  <section class="sy-sec" aria-label="Папки, где вы работаете с Claude Code">
+    {{ gh('Папки, где вы работаете с Claude Code', (settings.office.folders | length) ~ ' ' ~ plural(settings.office.folders | length, 'папка', 'папки', 'папок') ~ ' · у каждой свой open space в «Офисе»') }}
+    <div class="sy-card">
+      <div class="sy-row top">
+        <div class="sy-lb"><label for="o-folders">Папки, по одной в строке</label><span>PULSE читает журналы сессий Claude Code на этом компьютере (.claude/projects в домашней папке): только читает, в сами папки ничего не ставит. Проекты это папки первого уровня внутри. Фоновые запуски самого PULSE в офис не попадают</span></div>
+        <div class="sy-ct wide"><textarea id="o-folders" class="sy-mono" name="folders" rows="3" placeholder="~/Проекты">{{ settings.office.folders | join('\n') }}</textarea></div>
+      </div>
+    </div>
+  </section>
+  <section class="sy-sec" aria-label="Что показывать в Офисе">
+    {{ gh('Что показывать в Офисе', 'влияет только на раздел «Офис»') }}
+    <div class="sy-card">
+      <div class="sy-row top">
+        <div class="sy-lb"><label for="o-hide">Не показывать проекты</label><span>Имена папок, по одному в строке. Например, личную работу, если показываете офис коллегам</span></div>
+        <div class="sy-ct"><textarea id="o-hide" name="hide" rows="2">{{ settings.office.hide | join('\n') }}</textarea></div>
+      </div>
+      {% call row('Показывать сессии за', 'Сессии старше уходят из «Офиса»', 'o-days') %}<div class="sy-ct"><input class="n" type="number" id="o-days" name="days" value="{{ settings.office.days }}" min="1" max="60"><span class="sy-u">дней</span></div>{% endcall %}
+      {% call row('Папка по умолчанию для поручений агенту', '«Поручить агенту» сначала предложит папку, где вы делали похожие задачи, потом проект с названием проекта задачи, и только потом эту', 'o-agent') %}
+      <div class="sy-ct"><select id="o-agent" name="agent_folder">
+        <option value="">Первая из папок выше</option>
+        {% for f in agent_folders(settings) %}<option value="{{ f.path }}" {{ 'selected' if settings.office.agent_folder == f.path }}>{{ f.label }}</option>{% endfor %}
+      </select></div>
+      {% endcall %}
+    </div>
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+{% elif tab == 'docs' %}
+{#- ===== Документы: папки для поиска (раздел может быть в архиве) ===== #}
+{% if not docs_on %}
+<div class="sy-ban warn arch-docs">{{ icons.icon('stack') }}
+  <div class="t"><b>Раздел «Документы» в архиве</b><span>PULSE не обновляет индекс этих папок: не работает поиск по документам, в промт для агента не попадают найденные файлы, раздел «О компании» не обновляется. Открыть файл из этих папок Claude может и сейчас</span></div>
+  <form method="post" action="/settings/sections/docs"><input type="hidden" name="on" value="1"><button class="btn">Включить раздел</button></form>
+</div>
+{% endif %}
+<form method="post" action="/settings/knowledge" class="sy-form">
+  <section class="sy-sec" aria-label="Документы">
+    {{ gh('Документы', ('раздел в архиве · настройки сохранятся до включения' if not docs_on else 'раз в полчаса PULSE собирает текст для поиска и для Claude')) }}
+    <div class="sy-card{{ ' off' if not docs_on }}">
+      <div class="sy-row top">
+        <div class="sy-lb"><label for="k-folders">Папки с рабочими документами</label><span>По одной в строке. Презентации, Excel, Word, PDF и заметки отсюда попадут в <a href="/docs">поиск</a>. Только чтение, файлы не меняются. Подойдут и папки Яндекс Диска, синхронизированные на компьютер</span></div>
+        <div class="sy-ct wide"><textarea id="k-folders" class="sy-mono" name="folders" rows="3">{{ settings.knowledge.folders | join('\n') }}</textarea></div>
+      </div>
+      <div class="sy-row top">
+        <div class="sy-lb"><label for="k-ex">Не заглядывать в папки</label><span>Имена, по одному в строке. Служебные папки (.git, .obsidian) пропускаются всегда; код, картинки, аудио и видео не индексируются</span></div>
+        <div class="sy-ct wide"><textarea id="k-ex" class="sy-mono" name="exclude" rows="3">{{ settings.knowledge.exclude | join('\n') }}</textarea></div>
+      </div>
+    </div>
+    {% if is_mac %}<p class="sy-hint">Для папок в «Документах», на «Рабочем столе» и в iCloud macOS один раз спросит разрешение — нажмите «Разрешить».</p>{% endif %}
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+{% elif tab == 'autonomy' %}
+{#- ===== Автономия: «сам» или «после подтверждения» — сегментом из двух радиокнопок (поле то же, что select классики) ===== #}
+{% set AUT = [
+  ('Kaiten', [('kaiten_create_for_me', 'Создавать карточки на вас', 'Когда вы говорите «поставлю себе задачу»'),
+              ('kaiten_create_for_others', 'Создавать карточки на коллег', 'Поручения с понятным исполнителем из встреч и переписки'),
+              ('kaiten_comment', 'Писать комментарии в карточки', 'Ход задачи из переписки в её карточку'),
+              ('kaiten_update', 'Менять сроки и исполнителей', 'Когда на встрече договорились о переносе или передаче')]),
+  ('Календарь', [('calendar', 'Создавать и отменять встречи', 'Встречи по задачам, о которых вы просили')]),
+  ('Задачи', [('task_done', 'Закрывать выполненные', 'Задачи PULSE, которые по встречам и переписке выглядят выполненными'),
+              ('attention_done', 'Убирать «Нужен ответ»', 'Когда по вашему сообщению видно, что вы уже ответили'),
+              ('task_meeting', 'Связывать со встречами', 'Встречи в календаре, которые посвящены задаче'),
+              ('task_wait', 'Отмечать «ждёт»', 'Задача ждёт другую задачу или событие, если это не сказано прямо'),
+              ('task_merge', 'Объединять дубли', 'Та же работа, записанная другими словами'),
+              ('task_log', 'Дописывать в ход задачи', 'Переписку, которая относится к задаче по теме, а не по людям'),
+              ('project_create', 'Собирать в новый проект', 'Задачи с общим результатом')]),
+] %}
+{% set ns = namespace(on=0, all=0) %}
+{% for g, items in AUT %}{% for key, t, h in items %}{% set ns.all = ns.all + 1 %}{% if settings.autonomy[key] == 'auto' %}{% set ns.on = ns.on + 1 %}{% endif %}{% endfor %}{% endfor %}
+<form method="post" action="/settings/autonomy" class="sy-form">
+  <div class="sy-sum" role="status">
+    <div style="flex:1 1 280px;min-width:0"><div class="big">Сам: {{ ns.on }} из {{ ns.all }}</div>
+      <div class="sy-cap" style="margin-top:2px">Остальное PULSE предлагает, а делает после вашего «Да» в боте или на сводке. Писать коллегам от вашего имени PULSE не умеет ни в одном режиме, так сделано намеренно</div></div>
+    <div class="sy-bar" aria-hidden="true">{% for i in range(ns.all) %}<i class="{{ 'on' if i < ns.on }}"></i>{% endfor %}</div>
+  </div>
+  {% for g, items in AUT %}
+  {% set gn = namespace(n=0) %}{% for key, t, h in items %}{% if settings.autonomy[key] == 'auto' %}{% set gn.n = gn.n + 1 %}{% endif %}{% endfor %}{% set n_on = gn.n %}
+  <section class="sy-sec" aria-label="{{ g }}">
+    {{ gh(g, 'сам: ' ~ n_on ~ ' из ' ~ (items | length)) }}
+    <div class="sy-card">
+      {% for key, title, hint in items %}
+      {% call row(title, hint) %}
+      <div class="sy-ct"><div class="sy-seg2" role="radiogroup" aria-label="{{ title }}">
+        <label><input type="radio" name="{{ key }}" value="confirm" {{ 'checked' if settings.autonomy[key] != 'auto' }}><span>После подтверждения</span></label>
+        <label><input type="radio" name="{{ key }}" value="auto" {{ 'checked' if settings.autonomy[key] == 'auto' }}><span>Сам</span></label>
+      </div></div>
+      {% endcall %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+{% elif tab == 'schedule' %}
+{#- ===== Расписание: две формы, как в классике (/settings/schedule и /settings/digests) ===== #}
+<form method="post" action="/settings/schedule" class="sy-form">
+  <section class="sy-sec" aria-label="Сбор и разбор">
+    {{ gh('Сбор и разбор', 'как часто PULSE заглядывает в источники') }}
+    <div class="sy-card">
+      {% call row('Собирать сообщения и почту', 'Telegram, Пачка, почта и другие подключения', 's-col') %}<div class="sy-ct"><span class="sy-u">каждые</span><input class="n" type="number" id="s-col" name="collect_minutes" value="{{ settings.schedule.collect_minutes }}" min="5"><span class="sy-u">мин</span></div>{% endcall %}
+      {% call row('Разбирать сообщения (Claude)', 'Ищет, что ждёт вашего ответа и что пообещали', 's-tri') %}<div class="sy-ct"><span class="sy-u">каждые</span><input class="n" type="number" id="s-tri" name="triage_minutes" value="{{ settings.schedule.triage_minutes }}" min="15"><span class="sy-u">мин</span></div>{% endcall %}
+      {% call row('Или сразу, когда накопится', 'Если налетело много сообщений, разбор не ждёт таймера. 0 означает только по таймеру. В рабочие часы', 's-now') %}<div class="sy-ct"><input class="n" type="number" id="s-now" name="triage_batch" value="{{ settings.schedule.triage_batch }}" min="0"><span class="sy-u">новых</span></div>{% endcall %}
+      {% call row('Обновлять Kaiten', 'Карточки, колонки и блокировки', 's-kai') %}<div class="sy-ct"><span class="sy-u">каждые</span><input class="n" type="number" id="s-kai" name="kaiten_minutes" value="{{ settings.schedule.kaiten_minutes }}" min="10"><span class="sy-u">мин</span></div>{% endcall %}
+      {% call row('Обновлять календарь', 'Встречи на сегодня и вперёд', 's-cal') %}<div class="sy-ct"><span class="sy-u">каждые</span><input class="n" type="number" id="s-cal" name="calendar_minutes" value="{{ settings.schedule.calendar_minutes }}" min="10"><span class="sy-u">мин</span></div>{% endcall %}
+    </div>
+  </section>
+  <section class="sy-sec" aria-label="Дайджесты и напоминания">
+    {{ gh('Дайджесты и напоминания', 'пустое время: не отправлять · если компьютер был выключен, придёт после включения, в пределах 4 часов') }}
+    <div class="sy-card">
+      {% call row('Утренний дайджест', 'Встречи дня, кто ждёт ответа, просроченное', 's-am') %}<div class="sy-ct"><input class="t" type="time" lang="ru" id="s-am" name="digest_morning" value="{{ settings.schedule.digest_morning | hhmm }}"></div>{% endcall %}
+      {% call row('Вечерний дайджест', 'Что закрыто за день и что переходит на завтра', 's-pm') %}<div class="sy-ct"><input class="t" type="time" lang="ru" id="s-pm" name="digest_evening" value="{{ settings.schedule.digest_evening | hhmm }}"></div>{% endcall %}
+      {% call row('Итог каждой встречи', 'Сообщение после разбора записи') %}<div class="sy-ct">{{ sw('meeting_processed', settings.notifications.meeting_processed, 'Присылать итог каждой разобранной встречи') }}</div>{% endcall %}
+      {% call row('Срочное — сразу', 'Не дожидаясь дайджеста') %}<div class="sy-ct">{{ sw('urgent_immediately', settings.notifications.urgent_immediately, 'Срочное сразу') }}</div>{% endcall %}
+      {% call row('Напоминать о задачах без движения', 'Раз в день, в указанное время') %}<div class="sy-ct">{{ sw('stale_pings', settings.notifications.stale_pings, 'Напоминать о задачах без движения') }}<span class="sy-u" style="margin-left:8px">в</span><input class="t" type="time" lang="ru" name="stale_check" value="{{ settings.schedule.stale_check | hhmm }}" aria-label="Время напоминания"></div>{% endcall %}
+    </div>
+  </section>
+  <section class="sy-sec" aria-label="Еженедельное">
+    {{ gh('Еженедельное', 'Claude сам собирает и предлагает на «Да» · пустое время: не делать') }}
+    <div class="sy-card">
+      {% call row('База знаний', 'Обзор недели: решения, уроки и удачи · по пятницам', 's-kb') %}<div class="sy-ct"><input class="t" type="time" lang="ru" id="s-kb" name="anthology_weekly" value="{{ settings.schedule.anthology_weekly | hhmm }}"></div>{% endcall %}
+      {% call row('Сводка «О компании» для Claude', 'По понедельникам', 's-co') %}<div class="sy-ct"><input class="t" type="time" lang="ru" id="s-co" name="context_weekly" value="{{ settings.schedule.context_weekly | hhmm }}"></div>{% endcall %}
+      {% call row('Сборка проектов', 'По понедельникам: проекты, связи «ждёт», дубли. В будни ещё раз, если появилось 5 новых задач вне проектов. Пусто: только по кнопке в «Задачи → Проекты»', 's-pr') %}<div class="sy-ct"><input class="t" type="time" lang="ru" id="s-pr" name="projects_weekly" value="{{ settings.schedule.projects_weekly | hhmm }}"></div>{% endcall %}
+    </div>
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+<form method="post" action="/settings/digests" class="sy-form" id="digests">
+  <section class="sy-sec" aria-label="Брифы, итоги недели, напоминания">
+    {{ gh('Брифы, итоги недели, напоминания') }}
+    <div class="sy-card">
+      {% call row('Готовить брифы к встречам', 'Что было по теме, открытые задачи, вопросы к встрече') %}<div class="sy-ct">{{ sw('briefs_enabled', settings.briefs.enabled, 'Готовить брифы к встречам из календаря') }}</div>{% endcall %}
+      {% call row('За сколько часов до встречи', '', 's-bh') %}<div class="sy-ct"><input class="n" type="number" id="s-bh" name="briefs_hours" value="{{ settings.briefs.hours_ahead }}" min="2" max="168"><span class="sy-u">ч</span></div>{% endcall %}
+      {% call row('Не встречи, а занятое время', 'Слова из названия через запятую: такие события брифа не получают', 's-ign') %}<div class="sy-ct"><input type="text" id="s-ign" name="briefs_ignore" value="{{ settings.briefs.ignore | join(', ') }}"></div>{% endcall %}
+      {% call row('Итоги недели', 'Куда ушло время, что закрыто и что просрочено. Пусто: не делать', 's-wd') %}
+      <div class="sy-ct"><select id="s-wd" name="weekly_day" aria-label="Итоги недели: день">{% for d in range(1, 8) %}<option value="{{ d }}" {{ 'selected' if settings.schedule.weekly_day == d }}>{{ ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'][d - 1] }}</option>{% endfor %}</select><input class="t" type="time" lang="ru" name="weekly_time" value="{{ settings.schedule.weekly_time | hhmm }}" aria-label="Итоги недели: время"></div>
+      {% endcall %}
+      {% call row('Сводка рабочих групп Telegram', 'Что решили и что спрашивают у вас · по рабочим дням. Пусто: не делать', 's-gr') %}<div class="sy-ct"><input class="t" type="time" lang="ru" id="s-gr" name="groups_digest" value="{{ settings.schedule.groups_digest | hhmm }}"></div>{% endcall %}
+      {% call row('Присылать сводку групп в Telegram', 'В разделе «Дайджесты» она есть всегда') %}<div class="sy-ct">{{ sw('groups_to_telegram', settings.notifications.groups_digest, 'Присылать сводку групп в Telegram') }}</div>{% endcall %}
+      <details class="sy-more"><summary>Текст напоминания коллеге</summary>
+        <div class="sy-row top" style="border-top:0">
+          <div class="sy-lb"><label for="s-rem">Шаблон</label><span>{имя}: имя исполнителя, {задача}: заголовок задачи, {срок}: «договаривались до 06.11», «срок был 05.11» и т. п. Перед отправкой текст можно поправить</span></div>
+          <div class="sy-ct wide"><input type="text" id="s-rem" name="reminder_template" value="{{ settings.reminders.template }}"></div>
+        </div>
+      </details>
+    </div>
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+{% elif tab == 'day' %}
+{#- ===== День: как PULSE считает время на задачи между встречами; «Без движения» ===== #}
+{% set d = settings.day %}{% set lunch = (d.lunch or '13:00-14:00').split('-') %}
+<form method="post" action="/settings/day" class="sy-form">
+  <section class="sy-sec" aria-label="День">
+    <div class="sy-gh"><h2>День</h2><span>сколько времени на задачи реально есть между встречами · рабочие часы в <a href="/settings?tab=general">«Основном»</a>: {{ settings.owner.work_hours.start | hhmm }}–{{ settings.owner.work_hours.end | hhmm }}</span></div>
+    <div class="sy-card">
+      {% call row('Фокус-блоки', 'Слова из названия события через запятую. Такое событие без других участников считается лучшим окном: задачи PULSE ставит туда в первую очередь', 'd-focus') %}<div class="sy-ct"><input type="text" id="d-focus" name="focus_titles" value="{{ d.focus_titles | join(', ') }}" placeholder="тайм-аут, фокус"></div>{% endcall %}
+      {% call row('Буфер после встречи с участниками', 'На хвосты: записать договорённости, ответить', 'd-after') %}<div class="sy-ct"><input class="n" type="number" id="d-after" name="buffer_after_min" value="{{ d.buffer_after_min }}" min="0" max="120"><span class="sy-u">мин</span></div>{% endcall %}
+      {% call row('Буфер перед встречей с брифом', 'Прочитать бриф до начала', 'd-brief') %}<div class="sy-ct"><input class="n" type="number" id="d-brief" name="buffer_before_min" value="{{ d.buffer_before_min }}" min="0" max="120"><span class="sy-u">мин</span></div>{% endcall %}
+      {% call row('Минимальное окно', 'Окно короче не рабочее: видно на сетке серым, в свободное время не входит', 'd-min') %}<div class="sy-ct"><input class="n" type="number" id="d-min" name="min_window_min" value="{{ d.min_window_min }}" min="0" max="120"><span class="sy-u">мин</span></div>{% endcall %}
+      {% call row('Минут на каждый «нужен ответ»', 'Сколько закладывать на ответ коллеге в плане дня', 'd-reply') %}<div class="sy-ct"><input class="n" type="number" id="d-reply" name="reply_min" value="{{ d.reply_min }}" min="0" max="120"><span class="sy-u">мин</span></div>{% endcall %}
+      {% call row('Обед — не время для задач', 'Интервал не считается свободным') %}<div class="sy-ct wrap">{{ sw('lunch_on', d.lunch, 'Обед не время для задач') }}<input class="t" type="time" lang="ru" name="lunch_start" value="{{ lunch[0] | hhmm }}" aria-label="Обед с" style="margin-left:8px"><span class="sy-u">до</span><input class="t" type="time" lang="ru" name="lunch_end" value="{{ (lunch[1] if lunch | length > 1 else '14:00') | hhmm }}" aria-label="Обед до"></div>{% endcall %}
+    </div>
+    <p class="sy-hint">План дня живёт только в PULSE: в Яндекс и Google Календарь ничего не пишется.</p>
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+{% set t = settings.tasks %}
+<form method="post" action="/settings/quiet" class="sy-form">
+  <section class="sy-sec" aria-label="Задачи без движения">
+    {{ gh('Задачи без движения', 'через сколько рабочих дней тишины задача попадает в «Без движения» · 0: не отмечать') }}
+    <div class="sy-card">
+      {% call row('Ваши задачи', 'Ни записи в ходе, ни «в работе», ни готового пункта, ни напоминания. Срок при этом может быть впереди, это не просрочка', 'q-mine') %}<div class="sy-ct"><input class="n" type="number" id="q-mine" name="quiet_mine" value="{{ t.quiet_mine }}" min="0" max="60"><span class="sy-u">рабочих дней</span></div>{% endcall %}
+      {% call row('Вам должны', 'Коллега молчит о том, что обещал', 'q-tome') %}<div class="sy-ct"><input class="n" type="number" id="q-tome" name="quiet_to_me" value="{{ t.quiet_to_me }}" min="0" max="60"><span class="sy-u">рабочих дней</span></div>{% endcall %}
+    </div>
+    <p class="sy-hint">Перенос срока движением не считается. Договорённости между коллегами и задачи, которые ждут другую задачу или ответа, не отмечаются. Где это видно: метка на карточке, кнопка «Без движения» в «Задачах», строка на Сводке и в утреннем дайджесте.</p>
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+{% elif menu_tab == 'connections' %}
+{% include "_connections.html" %}
+
+{% elif tab == 'data' %}
+{#- ===== Ваши данные: где лежит, что уходит помощнику, что читает каждое подключение, как отключить и удалить ===== #}
+{% set d = data %}
+<section class="sy-sec" aria-label="Что PULSE делает с данными">
+  {{ gh('Что PULSE делает с данными', 'всё хранится на этом компьютере') }}
+  <div class="sy-pts">
+    <div class="sy-pt"><span class="h">{{ icons.icon('lock') }}Хранит у вас</span><span>У PULSE нет своего облака и сервера: переписка, письма, встречи, задачи, пароли и ключи лежат в папке PULSE и никуда не копируются.</span></div>
+    <div class="sy-pt"><span class="h">{{ icons.icon('ask') }}Отдаёт помощнику</span><span>Только текст для разбора: в {{ d.engine }} по вашей подписке: новые сообщения из подключённых чатов, расшифровки встреч, задачи для дайджестов и ответов. Как {{ d.engine }} хранит этот текст, определяют условия подписки {{ 'OpenAI' if d.engine == 'ChatGPT' else 'Anthropic' }}.</span></div>
+    <div class="sy-pt"><span class="h">{{ icons.icon('close') }}Не отправляет</span><span>Пароли и ключи, чаты и папки, которые вы не отметили, звук встреч: расшифровка идёт здесь, на компьютере.</span></div>
+    <div class="sy-pt"><span class="h">{{ icons.icon('check') }}Во внешние системы — после «Да»</span><span>Карточки Kaiten, встречи в календаре, напоминания коллегам: PULSE предлагает, вы подтверждаете кнопкой. Сам он никому не пишет.</span></div>
+  </div>
+</section>
+
+<section class="sy-sec" aria-label="Где лежит">
+  <div class="sy-gh"><h2>Где лежит</h2><span>папка PULSE: <code class="sy-mono">{{ d.root }}</code></span></div>
+  <div class="sy-tbox"><table>
+    <thead><tr><th>Что</th><th>Где</th><th class="num">Занимает</th></tr></thead>
+    <tbody>{% for p in d.places %}<tr><td><b>{{ p.what }}</b></td><td class="code">{{ p.where }}</td><td class="num">{{ p.size }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="sy-sec" aria-label="Что получал помощник за 7 дней">
+  {{ gh('Что получал помощник за 7 дней', ('запусков: ' ~ d.runs_total ~ ' · ' if d.runs_total else '') ~ d.engine) }}
+  {% if d.runs %}
+  <div class="sy-tbox"><table>
+    <thead><tr><th>Задание</th><th class="num">Запусков</th></tr></thead>
+    <tbody>{% for r in d.runs %}<tr><td><b>{{ r.title }}</b></td><td class="num">{{ r.n }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="sy-hint">Каждый запуск получает только то, что нужно для этой работы: разбор сообщений получает новые сообщения, разбор встречи её расшифровку, ответ на вопрос то, что помощник нашёл командами PULSE. Сколько это стоило бы по ценам API, видно в <a href="/settings?tab=claude#usage">окне Claude</a>.</p>
+  {% else %}<div class="sy-empty">За неделю помощник не запускался.</div>{% endif %}
+</section>
+
+<section class="sy-sec" aria-label="Что читает каждое подключение">
+  {{ gh('Что читает каждое подключение') }}
+  <div class="sy-tbox"><table class="data-conn">
+    <thead><tr><th>Подключение</th><th>Читает</th><th>Не читает</th><th>Никогда</th></tr></thead>
+    <tbody>
+      {% for g in catalog.groups %}{% for c in g.cards if not g.mcp or c.id.startswith('mcp:') %}
+      <tr>
+        <td><a href="{{ c.href or ('/settings?tab=' ~ c.id) }}"><b>{{ c.title_now }}</b></a><div class="sy-cap">{{ c.label }}</div></td>
+        <td>{{ c.reads }}</td><td>{{ c.skips }}</td><td class="nv">{{ c.never }}</td>
+      </tr>
+      {% endfor %}{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="sy-sec" aria-label="Как отключить и удалить">
+  {{ gh('Как отключить и удалить', 'от мягкого к полному') }}
+  <div class="sy-card">
+    {% call row('Отключить источник', 'Откройте его окно в «Подключениях» и снимите галочку «Читать …»: новые данные перестанут собираться, собранные останутся. У Telegram там же «Выйти»: сессия удалится с компьютера') %}<div class="sy-ct end"><a class="btn" href="/settings?tab=connections" style="width:150px">Подключения</a></div>{% endcall %}
+    {% call row('Забыть пароль или ключ', 'В окне источника — «Забыть сохранённые адреса» у календарей; для остальных удалите строку из secrets/.env или отзовите токен в самом сервисе') %}<div class="sy-ct end"></div>{% endcall %}
+    {% call row('Забыть человека или тему', 'Факты и страница знаний уходят из памяти') %}<div class="sy-ct end"><a class="btn" href="/settings?tab=memory" style="width:150px">Память</a></div>{% endcall %}
+    <details class="sy-more"><summary>Удалить всё, что собрал PULSE</summary>
+      <div class="sy-row" style="border-top:0">
+        <div class="sy-lb"><b>Удалить данные PULSE</b><span>Остановите PULSE (STOP) и удалите папки data (собранное), secrets (ключи) и config (настройки). Программа останется и при запуске начнёт с нуля. Вернуть нельзя</span></div>
+        <div class="sy-ct end"><code class="sy-mono" style="color:var(--bad-text)">data/ secrets/ config/</code></div>
+      </div>
+    </details>
+  </div>
+</section>
+
+{% elif tab == 'memory' %}
+{#- ===== Память: «Память дня», потолки фактов, записи агентов, модель для поиска по смыслу, «Не запоминать», «Забыть всё о …» ===== #}
+<form method="post" action="/settings/memory" class="sy-form">
+  <section class="sy-sec" aria-label="Память">
+    <div class="sy-gh"><h2>Память</h2><span>фактов {{ mem_stats.facts }} · страниц {{ mem_stats.entities }} · <a href="/memory">открыть</a></span></div>
+    <div class="sy-card">
+      {% call row('Запоминать факты', 'Цифры, состояния, кто за что отвечает · из встреч и переписки') %}<div class="sy-ct">{{ sw('enabled', mem.enabled, 'Запоминать факты из встреч и переписки', '1') }}</div>{% endcall %}
+      {% call row('Память дня', 'Вечером в рабочие дни: факты из переписки за день') %}<div class="sy-ct">{{ sw('day', mem.day, 'Память дня', '1') }}</div>{% endcall %}
+      {% call row('Во сколько', 'Когда собирать «Память дня»', 'm-at') %}<div class="sy-ct"><input class="t" type="time" id="m-at" name="day_time" value="{{ mem.day_time | hhmm }}"></div>{% endcall %}
+      {% call row('Фактов из одной встречи', 'Не больше, самое важное', 'm-mt') %}<div class="sy-ct"><span class="sy-u">до</span><input class="n" type="number" id="m-mt" name="max_facts_meeting" min="1" max="40" value="{{ mem.max_facts_meeting }}"></div>{% endcall %}
+      {% call row('Фактов из переписки за день', 'Не больше, самое важное', 'm-ms') %}<div class="sy-ct"><span class="sy-u">до</span><input class="n" type="number" id="m-ms" name="max_facts_day" min="1" max="100" value="{{ mem.max_facts_day }}"></div>{% endcall %}
+      {% call row('Что выяснили агенты', 'remember из сессий Claude Code с подключённым PULSE') %}
+      <div class="sy-ct"><div class="sy-seg2 eq" role="radiogroup" aria-label="Что выяснили агенты">
+        <label><input type="radio" name="agents" value="confirm" {{ 'checked' if not mem_agents_auto }}><span>Принимаю я</span></label>
+        <label><input type="radio" name="agents" value="auto" {{ 'checked' if mem_agents_auto }}><span>Запоминать сразу</span></label>
+      </div></div>
+      {% endcall %}
+      {% call row('Поиск и связи по смыслу', 'Находит похожее по смыслу, а не только по словам. Нужна модель ниже') %}<div class="sy-ct">{{ sw('embeddings', mem.embeddings, 'Поиск и связи по смыслу', '1') }}{% if mem_model and not mem_model.ready %}<span class="sy-u" style="margin-left:4px">модель не скачана</span>{% endif %}</div>{% endcall %}
+    </div>
+  </section>
+  <div class="sy-save"><button class="btn primary">Сохранить</button></div>
+</form>
+
+{% if mem_model %}
+<section class="sy-sec" id="model" aria-label="Модель для поиска по смыслу">
+  {{ gh('Модель для поиска по смыслу', 'multilingual-e5-small, 135 МБ, MIT · скачивается один раз, работает без интернета') }}
+  <div class="sy-card{{ ' dash' if not mem_model.ready }}">
+    <div class="sy-row">
+      {% if mem_model.ready %}
+      <div class="sy-lb"><b>Модель на этом компьютере</b><span><span class="sy-st" style="display:inline-flex"><i></i>скачана и проверена</span>{% if mem_model.loaded %} · сейчас в памяти PULSE{% else %} · загружается при первом поиске, выгружается после 10 минут простоя{% endif %} · векторов: {{ mem_model.vectors }}</span></div>
+      <div class="sy-ct end"><form method="post" action="/settings/memory/model" data-confirm="Удалить модель? Поиск останется по словам, связи по смыслу на карте пропадут."><input type="hidden" name="action" value="remove"><button class="btn bad">Удалить модель</button></form></div>
+      {% elif mem_model.downloading %}
+      <div class="sy-lb"><b>Модель скачивается</b><span><span class="sy-st wr" style="display:inline-flex"><i></i>{{ mem_model.progress }}</span></span></div>
+      <div class="sy-ct end"></div>
+      {% else %}
+      <div class="sy-lb"><b>Модель не скачана</b><span>Без неё поиск идёт по словам в любой форме, а связи на карте — по общим людям и клиентам, по времени и причинам. С моделью добавятся поиск и связи по смыслу. В памяти PULSE она занимает 0,7–1 ГБ, пока ею пользуются</span>
+        {% if mem_model.error %}<span style="color:var(--bad-text)">{{ mem_model.error }}</span>{% endif %}</div>
+      <div class="sy-ct end"><form method="post" action="/settings/memory/model"><input type="hidden" name="action" value="download"><button class="btn">Скачать модель</button></form></div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<form method="post" action="/settings/memory/chats" class="sy-form">
+  <section class="sy-sec" aria-label="Не запоминать">
+    {{ gh('Не запоминать', ((mem_chats | selectattr('off') | list | length) ~ ' из ' ~ (mem_chats | length) ~ ' чатов · переписка этих чатов не уходит в «Память дня»') if mem_chats else 'переписка этих чатов не уходит в «Память дня»') }}
+    {% if mem_chats %}
+    <div class="sy-card">
+      {% for c in mem_chats %}
+      <div class="sy-row">
+        <div class="sy-lb"><b class="nm">{{ c.title or c.chat_id }}</b><span>{{ c.source }}{{ ' · личный' if c.kind == 'private' }} · {{ c.n }}</span></div>
+        <div class="sy-ct">{{ sw('off', c.off, 'Не запоминать: ' ~ (c.title or c.chat_id), c.source ~ ':' ~ c.chat_id) }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="sy-empty">Чатов пока нет.</div>{% endif %}
+  </section>
+  {% if mem_chats %}<div class="sy-save"><button class="btn primary">Сохранить</button></div>{% endif %}
+</form>
+
+<section class="sy-sec" aria-label="Забыть всё о …">
+  {{ gh('Забыть всё о …', 'сразу, без «Сохранить»') }}
+  <div class="sy-card">
+    {% if mem_pages %}
+    <form method="post" action="/memory/forget" class="mem-merge" data-confirm="Забыть всё о выбранной странице? Вернуть будет нельзя.">
+      {% call row('Страница знаний', 'Страница и все факты только о ней удалятся совсем: из памяти, поиска и ответов. Встречи, задачи и переписка останутся. Это не отменить', 'm-forget') %}
+      <div class="sy-ct"><select id="m-forget" name="eid" aria-label="О ком или о чём забыть">{% for p in mem_pages %}<option value="{{ p.id }}">{{ p.name }} ({{ p.kind_title }}, фактов {{ p.facts or 0 }})</option>{% endfor %}</select><button class="btn bad">Забыть</button></div>
+      {% endcall %}
+    </form>
+    {% else %}<div class="sy-row"><div class="sy-lb"><span>Страниц пока нет.</span></div></div>{% endif %}
+  </div>
+</section>
+
+{% elif tab == 'archive' %}
+{#- ===== Архивные разделы: выключены целиком — нет в меню, страницы не открываются, задания не запускаются ===== #}
+{% set AR_ICON = {'docs': 'docs', 'kb': 'kb'} %}
+<section class="sy-sec" aria-label="Архивные разделы">
+  {{ gh('Архивные разделы', (sections | selectattr('on') | list | length) ~ ' из ' ~ (sections | length) ~ ' включено · в архиве раздела нет в меню, данные в папке data/ не удаляются') }}
+  <div class="sy-card" style="overflow-x:auto">
+    {% for s in sections %}
+    <div class="sy-ar">
+      <span class="sy-lg">{{ icons.icon(AR_ICON.get(s.name, 'stack')) }}</span>
+      <div style="min-width:0"><b>{{ s.title }}</b><div class="d" title="{{ s.what }}. Осталось: {{ s.data }}">{{ s.what }} · осталось: {{ s.data }}</div></div>
+      {% if s.on %}<span class="sy-st"><i></i>включён</span>{% else %}<span class="sy-st no"><i></i>в архиве {{ ('с ' ~ (s.since | date)) if s.since else 'с версии 2.0' }}</span>{% endif %}
+      <form method="post" action="/settings/sections/{{ s.name }}">
+        {% if s.on %}<button class="btn">Вернуть в архив</button>
+        {% else %}<input type="hidden" name="on" value="1"><button class="btn">Включить</button>{% endif %}
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="sy-hint">Включите раздел, и он вернётся вместе с заданиями и рабочим местом в «Офисе».</p>
+</section>
+{% endif %}
+</div>
+{% endblock %}

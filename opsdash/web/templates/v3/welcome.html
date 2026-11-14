@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% from "_conn_macros.html" import logo %}
+{% block title %}Первый запуск{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-system.css?v={{ static_v }}">{% endblock %}
+{#- Мастер первого запуска в новом дизайне (макеты Welcome.dc.html, WelcomeSources.dc.html): окно с главами слева и
+    текущей главой справа. Главы с источниками: карточки каталога и формы из templates/connectors/ (общие с классикой);
+    «Сохранить» в форме возвращает сюда же (app.back). Логика глав в opsdash.welcome. Классы wiz-nav / wiz-step и
+    data-tz-guess нужны app.js #}
+{% macro st(c) -%}
+{% set cls = {'ok': '', 'pending': 'wr', 'setup': 'wr', 'error': 'wr'}.get(c.kind, 'no') %}
+<span class="sy-st {{ cls }}"><i></i><span>{{ c.label }}</span></span>
+{%- endmacro %}
+{% macro foot(step, can_skip=True, next_label='Дальше') -%}
+<div class="wiz-foot">
+  {% if step != 'about' %}<form method="post" action="/welcome/go"><input type="hidden" name="step" value="{{ step }}"><button class="btn" name="action" value="back">← Назад</button></form>{% endif %}
+  <span class="grow"></span>
+  {% if can_skip %}<form method="post" action="/welcome/go"><input type="hidden" name="step" value="{{ step }}"><button class="btn" name="action" value="skip">Пропустить</button></form>{% endif %}
+  <form method="post" action="/welcome/go"><input type="hidden" name="step" value="{{ step }}"><button class="btn primary" name="action" value="next">{{ next_label }} →</button></form>
+</div>
+{%- endmacro %}
+{#- мастер — окно на тёмном фоне без меню и нижней панели (макет Welcome.dc.html) #}
+{% block body_class %} wz-only{% endblock %}
+{% block shell %}
+<main class="wz-shell">
+  {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+  {% if err %}<div class="alert bad">{{ err }}</div>{% endif %}
+  {{ self.content() }}
+</main>
+{% endblock %}
+{% block tabbar %}{% endblock %}
+{% block content %}
+{% set n_done = chapters | selectattr('status', 'equalto', 'done') | list | length %}
+{% set n_skip = chapters | selectattr('status', 'equalto', 'skipped') | list | length %}
+<section class="sy-wz" aria-labelledby="wz-title">
+  <div class="sy-wz-hd">
+    <div><div class="sy-cap">Первый запуск PULSE</div>
+      <p>Подключим всё нужное: обычно 15–20 минут. Любую главу можно пропустить и вернуться к ней позже из «Подключений».</p></div>
+    <form method="post" action="/welcome/dismiss"><button class="sy-ib" aria-label="Закрыть мастер" title="Закрыть мастер">{{ icons.icon('close') }}</button></form>
+  </div>
+
+  <div class="sy-wz-body">
+    <nav class="wiz-nav" aria-label="Главы">
+      {% for c in chapters %}
+      <a href="/welcome?step={{ c.id }}" class="wiz-step is-{{ c.status }}{{ ' active' if c.id == ch.id }}"{% if c.id == ch.id %} aria-current="step"{% endif %}>
+        <span class="wiz-n">{% if c.status == 'done' and c.id != ch.id %}{{ icons.icon('check', 12) }}{% else %}{{ c.n }}{% endif %}</span>
+        <span class="wiz-t"><span class="sy-ell">{{ c.title }}</span>{% if c.status == 'skipped' %}<span class="wiz-skip">пропущено</span>{% endif %}</span>
+      </a>
+      {% endfor %}
+      <div class="sy-prog-w"><span>Пройдено {{ n_done }} из {{ chapters | length }}{% if n_skip %} · {{ n_skip }} пропущено{% endif %}</span>
+        <div class="sy-prog" aria-hidden="true"><i style="width:{{ (100 * n_done / (chapters | length)) | round(1) }}%"></i></div></div>
+    </nav>
+
+    <div class="sy-wz-pane">
+      <div><div class="sy-cap">Глава {{ ch.n }} из {{ chapters | length }}</div>
+        <h1 id="wz-title">{{ ch.title }}</h1>
+        <p class="what">{{ ch.what }}</p></div>
+      {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+      {% if err %}<div class="alert bad">{{ err }}</div>{% endif %}
+
+      {% if ch.id == 'about' %}
+      {#- О вас — то же, что Настройки → Основное; часовой пояс браузер подставит сам (app.js, data-tz-guess) #}
+      <form method="post" action="/welcome/about" class="general-f" style="display:flex;flex-direction:column;gap:20px">
+        <div class="sy-card">
+          <div class="sy-row"><div class="sy-lb"><label for="w-name">Как вас зовут</label><span>Имя для сводок и брифов: Claude будет знать, чьи это задачи и сообщения</span></div>
+            <div class="sy-ct"><input type="text" id="w-name" name="name" value="{{ settings.owner.name }}" placeholder="Анна Смирнова" autofocus required></div></div>
+          <div class="sy-row"><div class="sy-lb"><label for="w-tz">Часовой пояс</label><span data-tz-hint>Например Europe/Moscow</span></div>
+            <div class="sy-ct"><input type="text" id="w-tz" name="timezone" value="{{ settings.owner.timezone }}" data-tz-guess></div></div>
+          <div class="sy-row"><div class="sy-lb"><label for="w-from">Рабочий день</label><span>В это время PULSE ставит задачи в план</span></div>
+            <div class="sy-ct"><span class="sy-u">с</span><input class="t" type="time" lang="ru" id="w-from" name="work_start" value="{{ settings.owner.work_hours.start | hhmm }}" aria-label="Рабочий день с"><span class="sy-u">по</span><input class="t" type="time" lang="ru" name="work_end" value="{{ settings.owner.work_hours.end | hhmm }}" aria-label="Рабочий день до"></div></div>
+          <div class="sy-row"><div class="sy-lb"><b>Рабочие дни</b><span>В выходные дайджестов и напоминаний нет</span></div>
+            <div class="sy-ct sy-days" role="group" aria-label="Рабочие дни">{% for d, n in [(1,'Пн'),(2,'Вт'),(3,'Ср'),(4,'Чт'),(5,'Пт'),(6,'Сб'),(7,'Вс')] %}<label class="sy-chip"><input type="checkbox" name="days" value="{{ d }}" {{ 'checked' if d in settings.owner.work_hours.days }}><span>{{ n }}</span></label>{% endfor %}</div></div>
+        </div>
+        <div class="sy-dashnote">Дальше: какой помощник разбирает встречи и переписку, Claude или ChatGPT.</div>
+        <div class="wiz-foot"><span class="grow"></span><button class="btn primary">Дальше →</button></div>
+      </form>
+
+      {% elif ch.id == 'assistant' %}
+      {#- Помощник: работает один из двух; вход кнопкой, установка по инструкции #}
+      <div class="sy-wz-asst">
+        {% for a in assistants %}
+        <div class="sy-cn{{ ' on' if a.active else ' off' }}">
+          <div class="sy-cn-top">{{ logo(a) }}<div><b>{{ a.title }}</b>{{ st(a) }}</div></div>
+          {% if a.active %}
+            {% if a.kind == 'ok' %}<p style="color:var(--ok-text)">Готово{% if a.who %}: вход {{ a.who }}{% endif %}.</p>
+            {% elif 'нужен вход' in a.label %}
+            <form method="post" action="/settings/{{ a.id }}/login"><button class="btn primary">Войти в {{ a.title }}</button></form>
+            <p>Откроется {{ 'Терминал' if is_mac else 'окно PowerShell' }}, а за ним браузер: войдите и вернитесь сюда, затем «Проверить».</p>
+            {% else %}
+            <p>{{ a.title }} не найден на этом компьютере.</p>
+            {% if a.id == 'claude' %}
+            <p>Установите Claude Code: {% if is_mac %}Терминал → <code>curl -fsSL https://claude.ai/install.sh | bash</code>{% else %}PowerShell → <code>irm https://claude.ai/install.ps1 | iex</code>{% endif %}</p>
+            {% else %}
+            <p>Установите приложение ChatGPT (chatgpt.com/download) и войдите: Codex входит в него.</p>
+            {% endif %}
+            {% endif %}
+            <div class="sy-cn-ft"><span class="sy-grow"></span><a class="btn sm" href="/welcome?step=assistant">Проверить</a></div>
+          {% else %}
+            <div class="sy-cn-ft"><span class="sy-grow"></span><form method="post" action="/settings/ai"><input type="hidden" name="engine" value="{{ a.id }}"><button class="btn sm">Работать через {{ a.title }}</button></form></div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      <p class="sy-hint">Работает один из двух: оба по одной инструкции и с одними данными. Переключить можно в любой момент в Настройки → Подключения → Помощник.</p>
+      {{ foot('assistant') }}
+
+      {% elif ch.id == 'done' %}
+      {#- Готово: «Здоровье» одним списком и первый разбор (ONB-3) #}
+      {% set rows = health.system + health.sources %}
+      <div class="sy-gh"><h2>Здоровье</h2><span>{{ rows | selectattr('level', 'equalto', 'ok') | list | length }} из {{ rows | length }} в порядке</span></div>
+      <div class="sy-card" style="padding:0">
+        {% for r in rows %}
+        <div class="sy-hl is-{{ r.level }}"><i></i>
+          <div><b>{{ r.title }}</b> <span class="t">{{ r.text }}</span>
+            {% if r.fix and r.level in ('warn', 'bad') %}<div class="fix">{{ r.fix }}{% if r.link %} <a href="{{ r.link }}">Открыть →</a>{% endif %}</div>{% endif %}</div></div>
+        {% endfor %}
+      </div>
+      <div class="sy-first">
+        <p><b>Первый разбор.</b> PULSE соберёт переписку и почту за {{ first_days }} дней и сразу разберёт её, не дожидаясь расписания. Обычно это 5–15 минут; потом на Сводке появится «Что PULSE уже нашёл»{{ ', и то же в Telegram' if settings.telegram_bot.owner_chat_id }}.</p>
+        <form method="post" action="/welcome/finish"><button class="btn primary">Запустить первый разбор и открыть Сводку</button></form>
+      </div>
+      <div class="wiz-foot"><form method="post" action="/welcome/go"><input type="hidden" name="step" value="done"><button class="btn" name="action" value="back">← Назад</button></form></div>
+
+      {% else %}
+      {#- главы с источниками: карточки каталога, под ними форма выбранного #}
+      {% if ch.cards | length > 1 %}
+      <div class="sy-gh"><h2>Что подключить</h2><span>{{ ch.cards | selectattr('kind', 'equalto', 'ok') | list | length }} из {{ ch.cards | length }} подключено</span></div>
+      <div class="sy-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">
+        {% for c in ch.cards %}
+        <a class="sy-cn{{ ' on' if card and card.id == c.id else (' off' if c.kind in ('off', 'standby') else '') }}" href="/welcome?step={{ ch.id }}&open={{ c.id }}#form"{% if card and card.id == c.id %} aria-current="true"{% endif %}>
+          <div class="sy-cn-top">{{ logo(c) }}<div><b>{{ c.title_now }}</b><span class="sm" title="{{ c.catches }}">{{ c.catches }}</span></div></div>
+          <div class="sy-cn-ft">{{ st(c) }}{% if c.minutes %}<span class="sy-cap">около {{ c.minutes }} мин</span>{% endif %}</div>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if card %}
+      <section class="sy-wz-form" id="form" aria-label="Подключение {{ card.title_now }}">
+        <div class="sy-wz-fh">{{ logo(card, 40) }}<div style="flex:1 1 240px;min-width:0"><h3>{{ card.title_now }}</h3><span class="sy-cap">{{ card.how }} · около {{ card.minutes }} мин</span></div>
+          {% if card.help %}<a class="sy-lnk small" href="/help/02-подключения#{{ card.help }}" target="_blank" rel="noopener">Подробная инструкция →</a>{% endif %}</div>
+        <div class="sy-rd3">
+          <div><span>Читает</span>{{ card.reads }}</div>
+          {% if card.skips %}<div><span>Не читает</span>{{ card.skips }}</div>{% endif %}
+          <div><span>Никогда</span>{{ card.never }}</div>
+        </div>
+        {% if card.steps | length > 1 %}
+        <ol class="sy-steps" aria-label="Шаги подключения">{% for s in card.steps %}<li class="{{ 'done' if s.done }}{{ ' now' if card.todo and s.title == card.todo.title }}"><b>{% if s.done %}{{ icons.icon('check', 12) }}{% else %}{{ loop.index }}{% endif %}</b>{{ s.title }}</li>{% endfor %}</ol>
+        {% endif %}
+        <div class="sy-form-src">{% include "connectors/" ~ card.id ~ ".html" %}</div>
+      </section>
+      {% elif ch.cards | length > 1 %}
+      <div class="sy-dashnote">Выберите, чем пользуетесь, и откроется форма подключения. Можно несколько: возвращайтесь к карточкам после каждого.</div>
+      {% endif %}
+      {{ foot(ch.id) }}
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

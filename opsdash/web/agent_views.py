@@ -16,7 +16,7 @@ from opsdash import agents, brain, config, records
 def register(app: FastAPI, render, templates, back) -> None:
     # «можно поручить агенту», поручение задачи и его сессия — в окне задачи и на карточке (_macros.html,
     # _agent_block.html), куда поручать — в Настройки → Офис
-    templates.env.globals.update(agent_hint=agents.agentish, agent_of=agents.of, agent_folders=agents.folders)
+    templates().env.globals.update(agent_hint=agents.agentish, agent_of=agents.of, agent_folders=agents.folders)
 
     def context(cid: int) -> dict | None:
         c = records.get_commitment(cid)
@@ -38,7 +38,7 @@ def register(app: FastAPI, render, templates, back) -> None:
         ctx = context(cid)
         if ctx is None:
             return HTMLResponse("<p class='muted'>Задачи больше нет.</p>", status_code=404)
-        return templates.TemplateResponse(request, "_agent_panel.html", {**ctx, "part": True, "said": msg, "fail": err})
+        return templates().TemplateResponse(request, "_agent_panel.html", {**ctx, "part": True, "said": msg, "fail": err})
 
     def answer(request: Request, cid: int, msg: str = "", err: str = ""):
         """Фоновый запрос из окна — кусочек панели; обычная форма — назад на страницу поручения."""

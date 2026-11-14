@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% block title %}{{ chat.title if chat else 'Спросить ' ~ ai_name }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-ask.css?v={{ static_v }}">{% endblock %}
+{% block content %}
+{#- «Спросить Claude», новый дизайн (макеты Ask, AskStates): слева разговоры по дням, справа разговор колонкой
+    до 760 px; поле вопроса прижато к низу. Пустой чат — подсказка, примеры и поле по центру #}
+{% set spark %}<svg class="ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>{% endset %}
+
+{#- поле вопроса: одно и то же в пустом чате и в разговоре; имена полей и data-* — для app.js и /ask/send #}
+{% macro ask_form() %}
+    <div class="ask-dock a3-dock">
+      <form class="a3-form" method="post" action="/ask/send" enctype="multipart/form-data" data-ask-form>
+        {% if chat %}<input type="hidden" name="chat_id" value="{{ chat.id }}">{% endif %}
+        <div class="a3-box">
+          <div class="a3-ctx" data-ctx-list>{% for c in prefill %}<span class="chip acc ctx-chip">{{ c.label }}<input type="hidden" name="ctx" value="{{ c.type }}:{{ c.ref or c.id or c.path }}"><button type="button" data-ctx-remove aria-label="Убрать">✕</button></span>{% endfor %}</div>
+          <label for="a3-text" class="sr-only">Вопрос</label>
+          <textarea id="a3-text" name="text" rows="2" data-ask-text placeholder="{{ 'Спросите ещё: ' ~ ai_name ~ ' помнит этот разговор' if chat else 'Спросите о встречах, задачах, переписке, документах…' }}"{{ ' autofocus' if not chat or prefill }}></textarea>
+          <div class="a3-bar">
+            <details class="a3-add" data-ask-add>
+              <summary class="a3-ib" title="Приложить встречу, задачу, документ или файл" aria-label="Приложить контекст">{{ icons.icon('plus', 18) }}</summary>
+              <div class="a3-pop d3-pop">
+                <label class="a3-fl"><span>Встреча</span>
+                  <select data-ctx-meeting><option value="">Выберите встречу…</option>{% for m in meetings %}<option value="{{ m.id }}">{{ m.started_at | local('%d.%m') }} · {{ m.title or m.id }}</option>{% endfor %}</select></label>
+                <label class="a3-fl"><span>Задача</span>
+                  <input type="text" list="task-options" data-ctx-task placeholder="Начните вводить название задачи"></label>
+                <label class="a3-fl"><span>Документ из ваших папок</span>
+                  <input type="text" list="ask-docs" data-ctx-doc placeholder="Поиск по документам: начните вводить"></label>
+                <datalist id="ask-docs"></datalist>
+                <label class="btn sm a3-file">{{ icons.icon('upload', 14) }}Файл с компьютера
+                  <input type="file" name="files" multiple data-ctx-files class="sr-only" accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.html,.htm,.png,.jpg,.jpeg,.webp"></label>
+                <span class="a3-hint">Документы, таблицы, презентации, PDF, текст и картинки. Файл сохранится в этом чате.</span>
+              </div>
+            </details>
+            <span class="a3-mic-st" data-mic-status></span>
+            <span class="a3-grow"></span>
+            <select name="model" class="a3-model" title="{{ 'Насколько глубоко думать ChatGPT: «максимум» и «подробно» подходят для разборов и длинных ответов, «быстро» для коротких вопросов' if ai_name == 'ChatGPT' else 'Модель Claude: Fable и Opus подходят для разборов и длинных ответов, Sonnet и Haiku для коротких вопросов' }}" aria-label="Модель">
+              {% for key, title in models.items() %}<option value="{{ key }}" {{ 'selected' if model == key }}>{{ title }}</option>{% endfor %}</select>
+            <button type="button" class="a3-ib" data-mic title="Надиктовать: текст появляется по фразам; распознаёт Whisper на этом компьютере" aria-label="Надиктовать">{{ icons.icon('meetings', 18) }}</button>
+            <button class="a3-ib a3-send" data-ask-send title="Отправить (Ctrl+Enter)" aria-label="Отправить"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+          </div>
+        </div>
+        <input type="hidden" name="effort" value="{{ effort }}">
+        <div class="a3-under" title="Карточки, встречи и сообщения коллегам {{ ai_name }} только предлагает: под ответом будут «Да / Нет»">Ctrl+Enter отправить · {{ ai_name }} отвечает только по вашим данным и называет источник</div>
+      </form>
+    </div>
+{% endmacro %}
+
+<h1 class="sr-only">Спросить {{ ai_name }}</h1>
+<div class="a3">
+  <aside class="a3-side" aria-label="Разговоры">
+    <a class="btn a3-new" href="/ask">{{ icons.icon('plus', 16) }}Новый разговор</a>
+    {% if chats %}<label class="d3-search a3-find">{{ icons.icon('search', 16) }}<input type="search" placeholder="Поиск по разговорам" aria-label="Поиск по разговорам" data-ask-find></label>{% endif %}
+    {% for label, group in chat_days %}
+    <div class="a3-gl" data-ask-day>{{ label }}</div>
+    <ul class="a3-list">
+      {% for c in group %}
+      <li data-ask-item="{{ (c.title or '') | lower }}"><a class="a3-q{{ ' on' if chat and chat.id == c.id }}" href="/ask/{{ c.id }}"{% if chat and chat.id == c.id %} aria-current="page"{% endif %}>
+        <b>{{ c.title or 'Без названия' }}</b>
+        <span>{% if c.n > 1 %}{{ c.n }} {{ plural(c.n, 'вопрос', 'вопроса', 'вопросов') }} · {% endif %}{{ c.time }}</span></a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="a3-side-empty">Здесь будут ваши разговоры: к любому можно вернуться и продолжить.</p>
+    {% endfor %}
+  </aside>
+
+  <section class="a3-main{{ ' is-chat' if chat else ' is-empty' }}" aria-label="Разговор">
+    {% if chat %}
+    <div class="a3-col a3-head">
+      <h2 class="d3-ell">{{ chat.title or 'Без названия' }}</h2>
+      {% call ui.menu('Ещё о разговоре') %}
+        <form method="post" action="/ask/{{ chat.id }}/delete" data-confirm="Удалить разговор «{{ chat.title }}»? Вопросы, ответы и приложенные файлы удалятся."><button class="menu-i danger">Удалить разговор</button></form>
+      {% endcall %}
+    </div>
+    <div class="a3-col a3-thread">
+      {% for m in items %}
+      {% if m.role == 'user' %}
+      <div class="a3-qb">
+        {% if m.text %}<div class="a3-qt">{{ m.text }}</div>{% endif %}
+        {% if m.context %}<div class="a3-qc">контекст: {% for c in m.context %}{% if c.href %}<a href="{{ c.href }}">{{ c.label }}</a>{% else %}{{ c.label }}{% endif %}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+      </div>
+      {% elif m.status == 'running' %}
+      {#- ответ пишется: app.js раз в секунду перезаписывает шаги ([data-live-steps] — по div на шаг) и текст #}
+      <div class="a3-a running" data-ask-live="{{ chat.id }}" aria-live="polite">
+        <div class="a3-steps">
+          <div class="a3-steps-done" data-live-steps>{% for s in m.steps %}<div>{{ s }}</div>{% endfor %}</div>
+          <div class="a3-step-now"><span class="a3-spin" aria-hidden="true"></span>{{ ai_name }} <span data-live-state>{{ 'пишет ответ' if m.text else 'думает' }}</span>…</div>
+        </div>
+        <div class="a3-live" data-live-text>{{ m.text }}</div>
+        <form class="inline" method="post" action="/ask/{{ chat.id }}/stop"><button class="btn sm">
+          <svg class="ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>Остановить</button></form>
+      </div>
+      {% else %}
+      <div class="a3-a" data-copy-scope>
+        {% if m.steps %}<details class="a3-blk"><summary>{{ icons.icon('check', 16) }}<span class="a3-grow">Что делал {{ ai_name }} · {{ m.steps | length }} {{ plural(m.steps | length, 'шаг', 'шага', 'шагов') }}</span>{{ icons.icon('chevron', 16) }}</summary>
+          <div class="a3-blk-b">{% for s in m.steps %}<div>{{ s }}</div>{% endfor %}</div></details>{% endif %}
+        {% if m.text %}<div class="doc a3-text">{{ m.text | md | safe }}</div><textarea hidden data-copy>{{ m.text }}</textarea>{% endif %}
+        {% if m.status == 'failed' %}
+        <div class="a3-fail{{ ' info' if m.error == 'Остановлено' }}"><span class="a3-grow">{{ m.error }}</span>
+          <form class="inline" method="post" action="/ask/{{ chat.id }}/retry"><input type="hidden" name="message_id" value="{{ m.id }}"><button class="btn sm">Спросить ещё раз</button></form></div>
+        {% endif %}
+        {% if m.text and m.status == 'done' %}<div class="a3-tools"><button type="button" class="btn sm" data-copy-btn>
+          <svg class="ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>Копировать</button></div>{% endif %}
+        {#- предложения Claude из ответа: пунктир, «Да / Нет» в колонке одной ширины #}
+        {% for p in m.proposals %}
+        {% if p.status == 'pending' %}
+        <div class="a3-prop">
+          <div class="a3-prop-b"><div class="a3-prop-t">{{ p.title }}</div>
+            {% set d = describe(p).split('\n')[1:] %}
+            {% if d %}<div class="a3-prop-m">{% for line in d %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+            {% set refs = proposal_links(p) %}
+            {% if refs %}<div class="a3-prop-l">{% for label, url in refs %}<a class="a3-src" href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }}</a>{% endfor %}</div>{% endif %}
+          </div>
+          <form class="inline" method="post" action="/proposals/{{ p.id }}/approve"><button class="btn sm primary a3-w" title="{{ proposal_action(p) }}">{{ proposal_action(p) }}</button></form>
+          <form class="inline" method="post" action="/proposals/{{ p.id }}/reject"><button class="btn sm a3-w" title="Отклонить">Нет</button></form>
+        </div>
+        {% else %}
+        <div class="a3-prop done"><div class="a3-prop-b"><div class="a3-prop-t">{{ p.title }}</div></div>
+          {% if p.status == 'done' %}<span class="d3-tag ok">выполнено</span>{% elif p.status == 'rejected' %}<span class="d3-tag neu">отклонено</span>{% else %}<span class="d3-tag bad">{{ p.status }}</span>{% endif %}</div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endfor %}
+      <span id="end"></span>
+    </div>
+    {{ ask_form() }}
+    {% else %}
+    {#- пустой чат: знак, вопрос, подсказка, примеры и поле — одним блоком по центру #}
+    <div class="a3-empty">
+      <span class="a3-eic">{{ spark }}</span>
+      <div class="a3-empty-t">
+        <div class="a3-empty-h">О чём спросить {{ ai_name }}?</div>
+        <p>{{ ai_name }} читает ваши встречи, задачи, переписку и документы. Приложите встречу или файл через «+»: {{ ai_name }} прочитает расшифровку целиком, а не только разбор.</p>
+      </div>
+      <div class="a3-sugs">
+        {% for label, q in [('Решения встречи по каждой метрике', 'Распиши решения этой встречи по каждой метрике: что было, на что поменяли, кто предложил — с отметками времени'),
+                            ('Мои задачи на этой неделе', 'Какие у меня задачи на этой неделе и что из них просрочено?'),
+                            ('О чём договорились с Петром', 'Что обсуждали с Петром за последний месяц и о чём договорились?'),
+                            ('Ответ Олегу про бюджет', 'Подготовь ответ Олегу про бюджет — по переписке и документам')] %}
+        <button type="button" class="a3-sug" data-ask-example="{{ q }}" title="{{ q }}">{{ label }}</button>
+        {% endfor %}
+      </div>
+      {{ ask_form() }}
+    </div>
+    {% endif %}
+  </section>
+</div>
+{{ ui.task_datalist() }}
+{% endblock %}

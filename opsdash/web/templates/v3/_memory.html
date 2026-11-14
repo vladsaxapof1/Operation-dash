@@ -1,0 +1,92 @@
+{#- «Память», новый дизайн: общие куски раздела (вкладки, источник факта, карточка факта, окно «Запомнить»).
+    Формы и поля как в классическом _memory.html: POST /memory/fact/<id>, поля status и reason #}
+{% import "_icons.html" as icons %}
+
+{#- вкладки: по макету «Уроки и удачи» стоят перед «От агентов»; у «От агентов» счётчик фактов, которые ждут «Да» #}
+{% macro tabbar(tabs, tab, agents_n=0) -%}
+{%- set titles = dict(tabs) -%}
+<nav class="seg m3-tabs" aria-label="Память">
+  {% for key in ['feed', 'pages', 'map', 'kb', 'agents'] if key in titles %}<a href="{{ '/kb' if key == 'kb' else '/memory?tab=' ~ key }}" class="{{ 'active' if tab == key }}"{% if tab == key %} aria-current="page"{% endif %}>{{ titles[key] }}{% if key == 'agents' and agents_n %}<i>{{ agents_n }}</i>{% endif %}</a>{% endfor %}
+</nav>
+{%- endmacro %}
+
+{#- кружок с буквами: у человека круглый, у остального квадрат со скруглением #}
+{% macro avatar(name, kind, cls='') -%}
+{%- set w = (name or '?').replace('«', '').replace('»', '').split() -%}
+<span class="m3-av{{ ' sq' if kind != 'person' }} {{ cls }}" aria-hidden="true">{% if kind == 'person' or w | length < 2 %}{{ w[0][:1] | upper }}{% else %}{{ (w[0][:1] ~ w[1][:1]) | upper }}{% endif %}</span>
+{%- endmacro %}
+
+{% macro source(f, msgs) -%}
+{%- if f.source_type == 'meeting' and f.source_ref -%}
+  <a class="m3-src" href="/meetings/{{ f.source_ref }}">встреча «{{ (f.meeting.title if f.meeting else f.source_ref) | truncate(48, true, '…') }}»</a>
+{%- elif f.source_type in ('telegram', 'pachca', 'mail', 'ymessenger', 'slack') -%}
+  {%- set m = msgs.get(f.source_ref) if msgs else none -%}
+  {%- if m and m.link %}<a class="m3-src" href="{{ m.link }}" target="_blank" rel="noopener">{{ m.chat_title or f.source_type }}</a>{% elif m %}<a class="m3-src" href="/chats?q={{ m.chat_title | urlencode }}">{{ m.chat_title or f.source_type }}</a>{% else %}<span>переписка</span>{% endif %}
+{%- elif f.author == 'director' -%}<span>от вас</span>
+{%- elif f.author == 'agent' -%}<span>от агента{{ ' · сессия ' ~ f.agent_session[:8] if f.agent_session }}</span>
+{%- else -%}<span>{{ {'manual': 'вручную', 'kaiten': 'Kaiten', 'document': 'документ', 'agent': 'от агента'}.get(f.source_type, f.source_type or '') }}</span>{%- endif -%}
+{%- endmacro %}
+
+{#- кнопки факта: «Неверно» (причина станет уроком для Claude), «Устарело», «Забыть»; у снятого факта «Вернуть».
+    compact: одна кнопка «…» с меню, для страницы знаний #}
+{% macro fact_actions(f, compact=false) -%}
+{%- set inner -%}
+  {% if f.status == 'active' %}
+  <details class="m3-pop m3-wrong"><summary class="btn sm">Неверно</summary>
+    <form method="post" action="/memory/fact/{{ f.id }}" class="m3-pop-b d3-pop"><input type="hidden" name="status" value="wrong">
+      <label for="why-{{ f.id }}">Что не так</label>
+      <input type="text" id="why-{{ f.id }}" name="reason" placeholder="Например: сказано про другого человека" aria-label="Почему неверно">
+      <span class="m3-hint">Это урок для Claude: причину он учтёт в следующих разборах</span>
+      <button class="btn sm primary">Отметить неверным</button></form>
+  </details>
+  <form class="inline" method="post" action="/memory/fact/{{ f.id }}"><input type="hidden" name="status" value="outdated"><button class="btn sm" title="Было верно, но больше не так">Устарело</button></form>
+  {% else %}
+  <form class="inline" method="post" action="/memory/fact/{{ f.id }}"><input type="hidden" name="status" value="active"><button class="btn sm">Вернуть</button></form>
+  {% endif %}
+  <form class="inline" method="post" action="/memory/fact/{{ f.id }}" data-confirm="Забыть факт совсем? Он удалится из памяти, поиска и страниц."><input type="hidden" name="status" value="forget"><button class="btn sm m3-danger">Забыть</button></form>
+{%- endset -%}
+{% if compact %}
+<details class="m3-pop m3-menu"><summary class="m3-ib" aria-label="Действия с фактом" title="Неверно · Устарело · Забыть">{{ icons.icon('more', 18) }}</summary>
+  <div class="m3-pop-b m3-menu-b d3-pop">{{ inner }}</div></details>
+{% else %}<div class="m3-act">{{ inner }}</div>{% endif %}
+{%- endmacro %}
+
+{#- карточка факта: вид, о ком, текст, «было», «потому что», цитата, источник; кнопки справа #}
+{% macro fact(f, msgs, show_about=true, actions=true) -%}
+<article class="m3-fact k-{{ f.kind }}{{ ' st-' ~ f.status if f.status != 'active' }}{{ ' no-act' if not actions }}" id="f{{ f.id }}">
+  <div class="m3-fb">
+    <div class="m3-fm">
+      <span class="d3-tag neu">{{ f.kind_title | capitalize }}</span>
+      {% if show_about %}{% for e in f.entities %}<a class="m3-who" href="/memory/page/{{ e.id }}">{{ e.name }}</a>{% endfor %}{% endif %}
+      {% if f.author == 'director' %}<span class="d3-tag acc" title="Записано вами: Claude такой факт сам не сменяет">от вас</span>{% endif %}
+      {% if f.prev %}<span class="d3-tag warn">изменился</span>{% endif %}
+      {% if f.status != 'active' %}<span class="d3-tag {{ 'warn' if f.status == 'proposed' else 'neu' }}">{{ f.status_title }}</span>{% endif %}
+    </div>
+    <span class="m3-ft">{{ f.text }}</span>
+    {% if f.prev %}<span class="m3-was">было: <s>{{ f.prev.text }}</s> ({{ f.prev.happened | date }})</span>{% endif %}
+    {% if f.because %}<span class="m3-was">потому что: {{ f.because.text }} ({{ f.because.happened | date }})</span>{% endif %}
+    {% if f.quote %}<span class="m3-q" title="{{ f.quote }}">«{{ f.quote }}»</span>{% endif %}
+    <span class="m3-meta">{{ source(f, msgs) }}<span title="На какую дату это верно">на {{ f.happened | date }}</span>{% if f.key %}<span title="Ключ: новый факт с тем же ключом сменит этот">{{ f.key }}</span>{% endif %}</span>
+  </div>
+  {% if actions %}{{ fact_actions(f) }}{% endif %}
+</article>
+{%- endmacro %}
+
+{#- окно «Запомнить»: POST /memory/fact (text, about, kind) #}
+{% macro add_dialog(kinds, about='') -%}
+<dialog class="dlg m3-dlg" id="mem-add" aria-labelledby="mem-add-h">
+  <form method="post" action="/memory/fact" class="m3-dlg-b">
+    <div class="m3-dlg-hd"><h2 id="mem-add-h">Запомнить</h2><button type="button" class="m3-ib" data-dlg-close aria-label="Закрыть" title="Закрыть (Esc)">{{ icons.icon('close', 18) }}</button></div>
+    <div class="m3-fld"><label for="mem-add-text">Факт целиком</label>
+      <textarea id="mem-add-text" name="text" rows="3" required placeholder="Олег согласует договоры только письменно"></textarea>
+      <span class="m3-hint">Одной фразой, чтобы было понятно без контекста</span></div>
+    <div class="m3-fld"><label for="mem-add-about">О ком или о чём</label>
+      <input type="text" id="mem-add-about" name="about" value="{{ about }}" placeholder="Олег Петров, Ромашка">
+      <span class="m3-hint">Несколько страниц через запятую</span></div>
+    <div class="m3-fld"><label for="mem-add-kind">Вид факта</label>
+      <select id="mem-add-kind" name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == 'state' }}>{{ t | capitalize }}</option>{% endfor %}</select></div>
+    <span class="m3-hint">Факт получит пометку «от вас»: Claude такой факт сам не сменит, только предложит, если узнает другое.</span>
+    <div class="m3-dlg-ft"><button type="button" class="btn" data-dlg-close>Отмена</button><button class="btn primary">Запомнить</button></div>
+  </form>
+</dialog>
+{%- endmacro %}

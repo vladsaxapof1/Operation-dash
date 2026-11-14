@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% import "_decisions.html" as dm %}
+{% block title %}Решения{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-know.css?v={{ static_v }}">{% endblock %}
+{#- Решения, новый дизайн: плитки тем (о чём, последнее решение, сколько ждут решения), сверху «Изменилось за неделю».
+    Поиск и «без следующего шага» показывают строки по темам. Страница темы: decision_topic.html #}
+{% set sum = summary %}
+{% block content %}
+<div class="d3-head">
+  <div class="t"><h1>Решения</h1>
+    <p class="sub">Темы, вопросы и что по ним решено сейчас</p></div>
+  <form class="d3-search kn-search" method="get" role="search">
+    {{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Найти решение" aria-label="Найти решение">
+  </form>
+  <form method="post" action="/decisions-run"><button class="btn">{{ icons.icon('ask', 16) }}Обновить с {{ ai_name or 'помощником' }}</button></form>
+</div>
+
+{% if sum.attention or q or f %}
+<div class="d3-bar kn-filters">
+  {% if sum.attention %}<a class="kn-pill{{ ' on' if f == 'attention' }}" href="?f=attention" title="Ждут решения, а следующего шага нет: кто и что делает дальше"{% if f == 'attention' %} aria-current="page"{% endif %}><b>{{ sum.attention }}</b> без следующего шага</a>{% endif %}
+  {% if q %}<span class="kn-cap">Найдено: {{ total }}</span>{% endif %}
+  {% if q or f %}<a class="kn-back" href="/decisions">{{ icons.icon('close', 14) }}К темам</a>{% endif %}
+</div>
+{% endif %}
+
+{% if mode == 'topics' %}
+{% if changed %}
+<section class="d3-sec kn-sec" aria-label="Изменилось за неделю">
+  <div class="d3-sec-h"><h2>Изменилось за неделю</h2><span class="d3-n">{{ changed | length }}</span><span class="kn-cap">решения, которые поменяли или отменили прежние</span></div>
+  {% for ch in changed %}
+  <a class="kn-ch" href="/decisions?topic={{ ch.topic | urlencode }}#d{{ ch.id }}">
+    <time>{{ ch.when | date }}</time>
+    <span class="kn-ch-q"><span class="d3-ell">{{ ch.question or '—' }}</span><span class="kn-cap d3-ell">{{ ch.topic }}</span></span>
+    <span class="kn-ch-now"><s class="d3-ell">{{ ch.was }}</s><span class="kn-cap" aria-hidden="true">→</span><span class="d3-ell{{ ' kn-bad' if ch.cancelled }}">{{ 'отменили' if ch.cancelled else ch.now }}</span></span>
+  </a>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if topics %}
+<div class="kn-topics">
+  {% for t in topics %}
+  {% set href = '/decisions?topic=' ~ (t.name | urlencode) %}
+  <section class="kn-topic" aria-label="{{ t.name }}">
+    <div class="kn-topic-h"><h2 class="d3-ell"><a href="{{ href }}">{{ t.name }}</a></h2><span class="d3-tag acc">{{ t.questions }} {{ plural(t.questions, 'вопрос', 'вопроса', 'вопросов') }}</span></div>
+    {% if t.about %}<p class="kn-about">{{ t.about }}</p>
+    {% elif t.labels %}<p class="kn-about kn-cap">{{ t.labels | join(' · ') }}</p>{% endif %}
+    <a class="kn-d" href="{{ href }}">
+      {% if t.last.q %}<span class="kn-qq">{{ t.last.q }}</span>{% endif %}
+      <span class="kn-aa">{{ t.last.a }}</span>
+      <span class="kn-src">{{ dm.src_title(t.last, meetings) or 'последнее решение' }}, {{ t.updated | date }}</span>
+    </a>
+    {% if t.open %}
+    <a class="kn-nx{{ ' calm' if not t.no_step }}" href="{{ href }}">{{ icons.icon('hourglass', 16) }}Ждут решения: {{ t.open }}{% if t.no_step %} · без следующего шага: {{ t.no_step }}{% endif %}</a>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<section class="d3-sec"><p class="kn-empty">Решений пока нет. Они появятся из разборов встреч: всё, что решили на встрече, PULSE записывает сюда по темам.</p></section>
+{% endif %}
+{% else %}
+{% for group, rows in groups.items() %}
+<section class="d3-sec kn-sec" aria-label="{{ group }}">
+  <div class="d3-sec-h"><h2><a class="kn-h-link" href="/decisions?topic={{ group | urlencode }}">{{ group }}</a></h2><span class="d3-n">{{ rows | length }}</span></div>
+  <div class="kn-th"><span>Вопрос</span><span>Что решено</span><span>Когда</span><span></span></div>
+  {% for d in rows %}{{ dm.listrow(d) }}{% endfor %}
+</section>
+{% else %}
+<section class="d3-sec"><p class="kn-empty">{% if q %}Ничего не нашлось.{% else %}Всё в порядке: у каждого открытого вопроса есть следующий шаг.{% endif %}</p></section>
+{% endfor %}
+{% endif %}
+{% endblock %}

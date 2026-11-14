@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% import "_memory.html" as mm %}
+{% block title %}Память{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-memory.css?v={{ static_v }}">{% endblock %}
+{#- «Память», новый дизайн: лента фактов, страницы знаний, карта, «От агентов». Данные те же, что у классического
+    шаблона (web/memory_views.py); формы и data-атрибуты те же #}
+{% block content %}
+{% set subs = {
+  'feed': 'Факты из встреч и переписки: с датой, источником и цитатой',
+  'pages': 'Страницы знаний: всё, что известно о человеке, клиенте или проекте',
+  'map': 'Карта фактов и связей между ними',
+  'agents': 'От агентов: что сессии Claude Code выяснили по ходу работы и прислали в PULSE',
+} %}
+<div class="d3-head">
+  <div class="t"><h1>Память</h1><p class="sub">{{ subs.get(tab, subs.feed) }}</p></div>
+  <button type="button" class="btn primary" data-dlg-open="mem-add">{{ icons.icon('plus', 16) }}Запомнить</button>
+</div>
+{{ mm.add_dialog(kinds) }}
+
+{% if tab == 'feed' %}
+{#- ---------------------------------------------------------------- Лента #}
+{% set nfilters = (1 if kind else 0) + (1 if source else 0) + (1 if status != 'active' else 0) %}
+<div class="d3-bar">
+  {{ mm.tabbar(tabs, tab, st.agents) }}
+  <span class="grow"></span>
+  <form method="get" class="d3-search" role="search">
+    {{ icons.icon('search', 16) }}
+    <input type="hidden" name="tab" value="feed"><input type="hidden" name="days" value="{{ days }}">
+    {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}{% if source %}<input type="hidden" name="source" value="{{ source }}">{% endif %}{% if status != 'active' %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    <input type="search" name="q" value="{{ q }}" placeholder="Найти факт" aria-label="Найти факт">
+  </form>
+  <nav class="seg" aria-label="За какой срок">
+    {% for v, t in [(1, 'Сегодня'), (7, 'Неделя'), (30, 'Месяц'), (0, 'Все')] %}<a href="/memory?tab=feed&days={{ v }}{{ '&kind=' ~ kind if kind }}{{ '&source=' ~ source if source }}{{ '&status=' ~ status if status != 'active' }}{{ '&q=' ~ (q | urlencode) if q }}" class="{{ 'active' if days == v }}"{% if days == v %} aria-current="page"{% endif %}>{{ t }}</a>{% endfor %}
+  </nav>
+  <details class="m3-pop m3-filter"><summary class="btn">{{ icons.icon('filter', 16) }}Фильтр{% if nfilters %}<i class="m3-cnt">{{ nfilters }}</i>{% endif %}</summary>
+    <form method="get" class="m3-pop-b d3-pop">
+      <input type="hidden" name="tab" value="feed"><input type="hidden" name="days" value="{{ days }}">{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+      <label for="ff-kind">Вид факта</label>
+      <select id="ff-kind" name="kind" data-autosubmit><option value="">Все виды</option>{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ t | capitalize }}</option>{% endfor %}</select>
+      <label for="ff-source">Источник</label>
+      <select id="ff-source" name="source" data-autosubmit>{% for k, t in sources.items() %}<option value="{{ k }}" {{ 'selected' if k == source }}>{{ t }}</option>{% endfor %}</select>
+      <label for="ff-status">Статус</label>
+      <select id="ff-status" name="status" data-autosubmit><option value="active" {{ 'selected' if status == 'active' }}>Действуют</option><option value="replaced" {{ 'selected' if status == 'replaced' }}>Сменённые</option><option value="outdated" {{ 'selected' if status == 'outdated' }}>Устаревшие</option><option value="wrong" {{ 'selected' if status == 'wrong' }}>Неверные</option></select>
+      {% if q or kind or source or status != 'active' or days != 7 %}<a class="m3-src" href="/memory">Сбросить всё</a>{% endif %}
+    </form>
+  </details>
+</div>
+
+{% if backfill.total and backfill.state != 'done' %}
+<section class="d3-card m3-backfill">
+  <div class="m3-grow"><b>Наполнение памяти из разборов встреч</b>: {{ backfill.done }} из {{ backfill.total }}
+    <div class="m3-track"><i style="width: {{ (100 * backfill.done / backfill.total) | round | int }}%"></i></div>
+    <span class="m3-hint">По 10 разборов за запуск. Старую переписку PULSE не перечитывает.</span></div>
+  <form method="post" action="/memory/backfill">
+    {% if backfill.state == 'running' %}<input type="hidden" name="action" value="stop"><button class="btn">Остановить</button>
+    {% else %}<input type="hidden" name="action" value="start"><button class="btn">{{ 'Продолжить' if backfill.done else 'Начать' }}</button>{% endif %}
+  </form>
+</section>
+{% endif %}
+
+{#- страницы, о которых больше всего фактов в показанной ленте #}
+{% set ns = namespace(cnt={}, ent={}) %}
+{% for day, items in groups %}{% for f in items %}{% for e in f.entities %}{% set _ = ns.cnt.update({e.id: ns.cnt.get(e.id, 0) + 1}) %}{% set _ = ns.ent.update({e.id: e}) %}{% endfor %}{% endfor %}{% endfor %}
+{% set top_pages = ns.cnt.items() | sort(attribute='1', reverse=true) | list %}
+
+<div class="m3-cols">
+  <div class="m3-main">
+    {% for day, items in groups %}
+    <section class="d3-sec" aria-label="{{ day }}">
+      <div class="d3-sec-h"><h2>{{ day }}</h2><span class="d3-n">{{ items | length }} {{ plural(items | length, 'факт', 'факта', 'фактов') }}</span></div>
+      {% for f in items %}{{ mm.fact(f, msgs) }}{% endfor %}
+    </section>
+    {% else %}
+    <section class="d3-sec m3-empty"><p>{% if q or kind or source %}Ничего не нашлось.{% elif st.facts %}За этот срок новых фактов нет, выберите «Все».{% else %}Фактов пока нет. Они появятся из разборов встреч и вечерней «Памяти дня»; первые возьмутся из уже готовых разборов.{% endif %}</p></section>
+    {% endfor %}
+  </div>
+
+  <aside class="m3-side" aria-label="Память в цифрах и страницы">
+    <section class="m3-card">
+      <h2>Память в цифрах</h2>
+      <div class="m3-kv">
+        <div><b>{{ st.today }}</b>узнал сегодня</div><div><b>{{ st.week }}</b>за неделю</div>
+        <div><b>{{ st.facts }}</b>фактов в памяти</div><div><b>{{ st.entities }}</b>страниц знаний</div>
+        {% if recall.total %}<div title="Сколько раз Claude, бот и агенты вспоминали за неделю"><b>{{ recall.total }}</b>поисков за неделю{% if recall.empty %}, пустых {{ recall.empty }}{% endif %}</div>{% endif %}
+      </div>
+    </section>
+
+    {% if top_pages %}
+    <section class="m3-card m3-tight">
+      <div class="m3-ch"><h2>Страницы в ленте</h2><span class="d3-n">фактов</span></div>
+      {% for eid, n in top_pages[:5] %}{% set e = ns.ent[eid] %}
+      <a class="m3-pg" href="/memory/page/{{ e.id }}">{{ mm.avatar(e.name, e.kind) }}<div><b>{{ e.name }}</b></div><span class="m3-c">{{ n }}</span></a>
+      {% endfor %}
+      <a class="m3-src m3-more-l" href="/memory?tab=pages">Все {{ st.entities }} {{ plural(st.entities, 'страница', 'страницы', 'страниц') }}</a>
+    </section>
+    {% endif %}
+
+    {% if st.agents %}
+    <section class="m3-card d3-dash">
+      <div class="m3-ch"><h2>От агентов</h2><span class="d3-tag warn">ждут вас</span></div>
+      <span class="m3-hint">{{ st.agents }} {{ plural(st.agents, 'факт', 'факта', 'фактов') }} прислали сессии Claude Code. В память они попадут после вашего «Да».</span>
+      <a class="btn m3-dashbtn" href="/memory?tab=agents">Разобрать</a>
+    </section>
+    {% endif %}
+
+    <p class="m3-note">Личные встречи и чаты «не запоминать» в память не попадают. <a href="/settings?tab=memory">Настроить</a></p>
+  </aside>
+</div>
+
+{% elif tab == 'pages' %}
+{#- ---------------------------------------------------------------- Страницы #}
+<div class="d3-bar">
+  {{ mm.tabbar(tabs, tab, st.agents) }}
+  <span class="grow"></span>
+  <form method="get" class="d3-search" role="search">
+    {{ icons.icon('search', 16) }}
+    <input type="hidden" name="tab" value="pages">{% if ek %}<input type="hidden" name="ek" value="{{ ek }}">{% endif %}
+    <input type="search" name="q" value="{{ q }}" placeholder="Человек, клиент, проект" aria-label="Найти страницу">
+  </form>
+  <details class="m3-pop m3-filter"><summary class="btn">{{ icons.icon('filter', 16) }}Фильтр{% if ek %}<i class="m3-cnt">1</i>{% endif %}</summary>
+    <form method="get" class="m3-pop-b d3-pop">
+      <input type="hidden" name="tab" value="pages">{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+      <label for="pf-ek">Вид страницы</label>
+      <select id="pf-ek" name="ek" data-autosubmit><option value="">Все виды</option>{% for k, t in ekinds.items() %}<option value="{{ k }}" {{ 'selected' if k == ek }}>{{ t | capitalize }}</option>{% endfor %}</select>
+      {% if q or ek %}<a class="m3-src" href="/memory?tab=pages">Сбросить всё</a>{% endif %}
+    </form>
+  </details>
+</div>
+
+{% macro page_tile(p) -%}
+<a class="m3-tile" href="/memory/page/{{ p.id }}">
+  <div class="m3-th">{{ mm.avatar(p.name, p.kind, 'lg') }}<div><b>{{ p.name }}</b><span class="m3-r">{{ p.kind_title }}</span></div></div>
+  <span class="m3-lead">{% if p.aliases %}также: {{ p.aliases[:4] | join(', ') }}{% elif p.mentions %}упоминаний в переписке: {{ p.mentions }}{% else %}&nbsp;{% endif %}</span>
+  <div class="m3-tm"><span class="m3-m">{{ p.facts or 0 }} {{ plural(p.facts or 0, 'факт', 'факта', 'фактов') }}{% if p.last %} · последний на {{ p.last | date }}{% endif %}</span>{% if p.fresh %}<span class="d3-tag neu" title="Фактов за 30 дней">+{{ p.fresh }} за 30 дней</span>{% endif %}</div>
+</a>
+{%- endmacro %}
+
+{% if pages %}
+{% if ek or q %}
+<section class="m3-group" aria-labelledby="g-one">
+  <div class="m3-gh"><h2 id="g-one">{{ (ekinds.get(ek) | capitalize) if ek else 'Найдено' }}</h2><span class="d3-n">{{ pages | length }}</span>{% if ek %}<span class="grow"></span><a class="m3-src" href="/memory?tab=pages{{ '&q=' ~ (q | urlencode) if q }}">Все виды</a>{% endif %}</div>
+  <div class="m3-tiles">{% for p in pages %}{{ page_tile(p) }}{% endfor %}</div>
+</section>
+{% else %}
+{% for k, t in ekinds.items() %}{% set rows = pages | selectattr('kind', 'equalto', k) | list %}{% if rows %}
+<section class="m3-group" aria-labelledby="g-{{ k }}">
+  <div class="m3-gh"><h2 id="g-{{ k }}">{{ t | capitalize }}</h2><span class="d3-n">{% if rows | length > 8 %}8 из {{ rows | length }} · сначала те, о ком больше свежих фактов{% else %}{{ rows | length }}{% endif %}</span>
+    {% if rows | length > 8 %}<span class="grow"></span><a class="m3-src" href="/memory?tab=pages&ek={{ k }}">Показать все {{ rows | length }}</a>{% endif %}</div>
+  <div class="m3-tiles">{% for p in rows[:8] %}{{ page_tile(p) }}{% endfor %}</div>
+</section>
+{% endif %}{% endfor %}
+{% endif %}
+{% else %}
+<section class="d3-sec m3-empty"><p>{{ 'Ничего не нашлось.' if q or ek else 'Страниц пока нет: они появятся вместе с первыми фактами.' }}</p></section>
+{% endif %}
+
+{% elif tab == 'map' %}
+{#- ---------------------------------------------------------------- Карта. Разметка из _memory_map.html: data-атрибуты
+    и классы mem-map-* те же, холст рисует static/memory-map.js #}
+<div class="d3-bar">{{ mm.tabbar(tabs, tab, st.agents) }}</div>
+
+<div class="mem-map-tools m3-map-tools" data-map-tools>
+  <div class="seg" role="group" aria-label="Что на карте">
+    <button type="button" class="active" data-view="facts" aria-pressed="true">Созвездие</button>
+    <button type="button" data-view="entities" aria-pressed="false">Сущности</button>
+  </div>
+  <span data-for="facts">
+    <select data-f="days" aria-label="Период">{% for v, t in periods %}<option value="{{ v }}" {{ 'selected' if v == '30' }}>{{ t }}</option>{% endfor %}</select>
+    <select data-f="kind" aria-label="Вид факта"><option value="">Все виды</option>{% for k, t in kinds.items() %}<option value="{{ k }}">{{ t | capitalize }}</option>{% endfor %}</select>
+    <select data-f="entity" aria-label="О ком или о чём"><option value="">Все сущности</option>{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select>
+    <select data-f="source" aria-label="Источник"><option value="">Все источники</option><option value="meeting">Встречи</option><option value="messages">Переписка</option><option value="director">От вас</option><option value="agent">От агентов</option></select>
+  </span>
+  <span data-for="entities" hidden>
+    <select data-f="ekind" aria-label="Вид сущности"><option value="">Все виды</option>{% for k, t in ekinds.items() %}<option value="{{ k }}">{{ t | capitalize }}</option>{% endfor %}</select>
+    <span class="seg" role="group" aria-label="Вид списка"><button type="button" class="active" data-emode="graph" aria-pressed="true">Связи</button><button type="button" data-emode="list" aria-pressed="false">Список</button></span>
+  </span>
+  <span class="grow"></span>
+  <span class="m3-hint">Колесо: масштаб · перетаскивание: сдвиг · щелчок: карточка</span>
+</div>
+{% if not model.ready %}
+<form class="mem-note m3-plate" method="post" action="/settings/memory/model"><span class="m3-grow">Связей по смыслу нет: модель для поиска по смыслу не скачана{% if model.downloading %} (скачивается: {{ model.progress }}){% endif %}.</span>
+  {% if not model.downloading %}<input type="hidden" name="action" value="download"><button class="btn sm">Скачать, 135 МБ</button>{% endif %}</form>
+{% endif %}
+
+<div class="mem-map-wrap m3-map" data-mem-map>
+  <div class="mem-map-stage">
+    <canvas aria-label="Карта памяти: точки обозначают факты, линии обозначают связи" role="img"></canvas>
+    <div class="mem-legend" data-legend></div>
+    <div class="mem-map-ctrl">
+      <button type="button" class="btn sm" data-act="pause" aria-pressed="false">Пауза</button>
+      <button type="button" class="btn sm" data-act="fit">Вписать</button>
+      <button type="button" class="btn sm" data-act="full" aria-pressed="false">Во весь экран</button>
+    </div>
+    <div class="mem-map-counter" data-counter aria-live="polite"></div>
+    <div class="mem-tip" data-tip hidden></div>
+    <div class="mem-elist" data-elist hidden></div>
+  </div>
+  <aside class="mem-card" data-card><p class="mem-card-empty">Наведите на точку, и появится подпись. Щёлкните, и здесь откроется карточка: текст, источник, о ком, соседи.</p></aside>
+</div>
+
+<section class="d3-sec m3-numbers" aria-label="Память в цифрах">
+  <div class="d3-sec-h"><h2>Память в цифрах</h2></div>
+  <div class="m3-nums">
+    <div class="m3-num"><b>{{ nums.facts }}</b><span>фактов действует</span></div>
+    <div class="m3-num"><b>{{ nums.entities }}</b><span>страниц знаний</span></div>
+    <div class="m3-num"><b>{{ nums.links_total }}</b><span>связей между фактами</span></div>
+    <div class="m3-num"><b>{{ nums.today }}</b><span>узнал сегодня</span></div>
+    <div class="m3-num"><b>{{ nums.week }}</b><span>узнал за неделю</span></div>
+    <div class="m3-num"><b>{{ nums.sources }}</b><span>источников</span></div>
+  </div>
+  <details class="m3-more">
+    <summary>Подробнее: виды фактов и связей, живые страницы, последние источники</summary>
+    <div class="m3-more-b">
+      <div class="m3-nums">
+        <div class="m3-num"><b>{{ nums.chunks }}</b><span>фрагментов для поиска</span></div>
+        <div class="m3-num"><b>{{ nums.vectors }}</b><span>векторов по смыслу</span></div>
+      </div>
+      <div class="m3-bars-grid">
+        <div class="m3-bars"><div class="m3-hint">По видам фактов</div>
+          {% for t, n in nums.kind_rows %}<div class="m3-bar"><span>{{ t | capitalize }}</span><span class="m3-track"><i style="width: {{ (100 * n / nums.kind_max) | round | int }}%"></i></span><span class="m3-c">{{ n }}</span></div>{% endfor %}
+        </div>
+        <div class="m3-bars"><div class="m3-hint">По видам связей</div>
+          {% for t, n in nums.link_rows %}<div class="m3-bar"><span>{{ t | capitalize }}</span><span class="m3-track"><i style="width: {{ (100 * n / nums.link_max) | round | int }}%"></i></span><span class="m3-c">{{ n }}</span></div>{% endfor %}
+        </div>
+      </div>
+      <div class="m3-bars-grid">
+        <section class="m3-card m3-tight"><div class="m3-ch"><h2>Живые страницы</h2><span class="d3-n">за 30 дней</span></div>
+          {% for p in live %}<a class="m3-pg" href="/memory/page/{{ p.id }}">{{ mm.avatar(p.name, p.kind) }}<div><b>{{ p.name }}</b><span class="m3-s">{{ p.kind_title }}</span></div><span class="m3-c">{{ p.fresh or 0 }}</span></a>{% else %}<span class="m3-hint">Пока нет</span>{% endfor %}
+        </section>
+        <section class="m3-card m3-tight"><div class="m3-ch"><h2>Последние источники</h2><span class="d3-n">фактов</span></div>
+          {% for r in recent %}<div class="m3-pg">{% if r.source_type == 'meeting' %}<div><a href="/meetings/{{ r.source_ref }}"><b>{{ r.label }}</b></a><span class="m3-s">{{ r.at | local('%d.%m') }}</span></div>{% else %}<div><b>{{ r.label }}</b><span class="m3-s">{{ r.at | local('%d.%m') }}</span></div>{% endif %}<span class="m3-c">{{ r.n }}</span></div>{% else %}<span class="m3-hint">Пока нет</span>{% endfor %}
+        </section>
+      </div>
+    </div>
+  </details>
+</section>
+<script src="/static/memory-map.js?v={{ static_v }}"></script>
+
+{% elif tab == 'agents' %}
+{#- ---------------------------------------------------------------- От агентов #}
+<div class="d3-bar">{{ mm.tabbar(tabs, tab, st.agents) }}</div>
+
+<div class="m3-cols">
+  <div class="m3-main">
+    {% if agents %}
+    <section class="d3-sec d3-dash m3-pending" aria-label="Ждут вашего решения">
+      <div class="d3-sec-h"><h2>Ждут вашего решения</h2><span class="d3-n">{{ agents | length }}</span><span class="d3-tag warn">в память попадут после «Да»</span><span class="grow"></span>
+        <form class="inline" method="post" action="/memory/agents"><input type="hidden" name="action" value="accept"><button class="btn sm">Принять все ({{ agents | length }})</button></form>
+        <form class="inline" method="post" action="/memory/agents" data-confirm="Отклонить все факты от агентов?"><input type="hidden" name="action" value="reject"><button class="btn sm">Отклонить все</button></form>
+      </div>
+      {% for a in agents %}{% set f = a.f %}
+      <article class="m3-fact m3-agent" id="f{{ f.id }}">
+        <div class="m3-fb">
+          <div class="m3-fm"><span class="d3-tag neu">{{ f.kind_title | capitalize }}</span>{% if f.entities %}<span>о ком</span>{% for e in f.entities %}<a class="m3-who" href="/memory/page/{{ e.id }}">{{ e.name }}</a>{% endfor %}{% endif %}</div>
+          <span class="m3-ft">{{ f.text }}</span>
+          {% if a.p.reason %}<span class="m3-q m3-wrap">{{ a.p.reason }}</span>{% endif %}
+          <span class="m3-ses">{{ icons.icon('robot', 14) }}<span>Claude Code{{ ' · сессия ' ~ f.agent_session[:8] if f.agent_session }} · {{ f.created | local }}</span></span>
+        </div>
+        <div class="m3-act m3-col">
+          <form class="inline" method="post" action="/memory/agents"><input type="hidden" name="action" value="accept"><input type="hidden" name="ids" value="{{ a.p.id }}"><button class="btn sm">Да, запомнить</button></form>
+          <form class="inline" method="post" action="/memory/agents"><input type="hidden" name="action" value="reject"><input type="hidden" name="ids" value="{{ a.p.id }}"><button class="btn sm">Нет</button></form>
+        </div>
+      </article>
+      {% endfor %}
+    </section>
+    {% else %}
+    <section class="d3-sec d3-dash m3-empty"><p>Пока ничего. Агенты в ваших сессиях Claude Code присылают сюда то, что выяснили по ходу работы («таблица обновляется ночью»): PULSE подключён к ним в Настройки → Подключения.</p></section>
+    {% endif %}
+  </div>
+
+  <aside class="m3-side" aria-label="Как это работает">
+    <section class="m3-card">
+      <h2>Только чтение</h2>
+      <span class="m3-txt">Агенты читают PULSE, но сами в нём ничего не меняют. Всё, что они присылают, сначала видите вы.</span>
+      <div class="m3-li-list">
+        <div class="m3-li">{{ icons.icon('search', 16) }}<span>Получают: «вспомнить», страницу знаний и факты одним вызовом</span></div>
+        <div class="m3-li">{{ icons.icon('upload', 16) }}<span>Присылают: факт сюда, сделанное по задаче предложением в её ход</span></div>
+        <div class="m3-li">{{ icons.icon('lock', 16) }}<span>Личные встречи агентам не видны</span></div>
+      </div>
+      <a class="m3-src" href="/settings?tab=memory">Настройки → Память</a>
+    </section>
+  </aside>
+</div>
+{% endif %}
+{% endblock %}

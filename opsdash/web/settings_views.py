@@ -198,7 +198,7 @@ def register(app: FastAPI, render, back) -> None:
         # «Подключений» с окном этого источника поверх него (CON-3)
         panel = tab if tab in connectors.panel_ids() else ""
         ctx = {"tab": tab, "menu_tab": "connections" if panel else tab, "secrets": {k: config.mask(v) for k, v in secrets.items()},
-               "whisper_models": WHISPER_MODELS, "themes": THEMES, "catalog": catalog,
+               "whisper_models": WHISPER_MODELS, "themes": THEMES, "designs": __import__("opsdash.web.app", fromlist=["DESIGNS"]).DESIGNS, "catalog": catalog,
                "conn": next((c for g in catalog["groups"] for c in g["cards"] if c["id"] == panel), None)}
         if tab == "mcp":  # окно MCP-подключения (opsdash.mcp): подключённый сервер (?id=) или витрина (?preset=)
             from opsdash import brain, mcp
@@ -352,6 +352,16 @@ def register(app: FastAPI, render, back) -> None:
             return back(request, err="Неизвестная тема")
         config.update_settings("web", {"theme": theme})
         return back(request, to="/settings?tab=general#theme")
+
+    @app.post("/settings/design")
+    def save_design(request: Request, design: str = Form("classic")):
+        from opsdash.web.app import DESIGNS
+
+        if design not in DESIGNS:
+            return back(request, err="Неизвестный дизайн")
+        config.update_settings("web", {"design": design})
+        return back(request, "Включён новый дизайн. Экраны переезжают в него по одному — остальные пока прежние"
+                    if design == "v3" else "Вернули классический дизайн", to="/settings?tab=general#design")
 
     @app.post("/settings/updates")
     def save_updates(request: Request, repo: str = Form(""), branch: str = Form(""), token: str = Form(""),

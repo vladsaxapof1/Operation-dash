@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Справка{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-system.css?v={{ static_v }}">{% endblock %}
+{% import "_icons.html" as icons %}
+{% block content %}
+{#- Справка в новом дизайне (макет Help.dc.html): разделы слева, текст карточкой до 820 px, оглавление открытого раздела
+    справа. Тексты docs/ не меняем; поиск — ?q= #}
+<div class="sy-page" style="gap:20px">
+<div class="sy-head">
+  <div class="t"><h1>Справка</h1><p class="sub">Как установить, подключить и пользоваться PULSE</p></div>
+  <form method="get" action="/help" class="sy-search" role="search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Поиск по справке" aria-label="Поиск по справке"></form>
+</div>
+<div class="sy-help">
+  <nav class="sy-sub" aria-label="Разделы справки">
+    {% for d in docs %}
+    {% if loop.last and d.slug.startswith('06') %}<div class="sp" aria-hidden="true"></div>{% endif %}
+    <a href="/help/{{ d.slug }}" class="sy-si{{ ' on' if d.slug == slug and not q }}"{% if d.slug == slug and not q %} aria-current="page"{% endif %}><span>{{ d.title }}</span>{% if d.slug.startswith('06') %}<i>{{ version }}</i>{% endif %}</a>
+    {% endfor %}
+  </nav>
+  {% if q %}
+  <section class="sy-sec" style="flex:999 1 480px;max-width:820px" aria-label="Результаты поиска">
+    <div class="sy-gh"><h2>Поиск «{{ q }}»</h2><span>{{ hits | length }} {{ plural(hits | length, 'совпадение', 'совпадения', 'совпадений') }}</span></div>
+    {% for h in hits %}<a class="sy-res" href="/help/{{ h.slug }}"><span class="r">{{ h.doc }}</span><span class="l">{{ h.line }}</span></a>
+    {% else %}<div class="sy-empty" style="text-align:center">Ничего не нашлось. <a href="/help">Вся справка</a></div>{% endfor %}
+  </section>
+  {% else %}
+  <article class="sy-art"><div class="doc" data-help-doc>{{ body | safe }}</div></article>
+  {% if toc %}
+  <nav class="sy-toc" aria-label="На странице">
+    <span class="gl">На странице</span>
+    {% for t in toc %}<a href="#{{ t.id }}">{{ t.title }}</a>{% endfor %}
+  </nav>
+  {% endif %}
+  {% endif %}
+</div>
+</div>
+{% endblock %}

@@ -41,6 +41,11 @@
   </form>
 </div></section>
 
+<section class="card" id="design"><div class="card-b theme-row">
+  <div><h2>Дизайн</h2><div class="muted small">Новый дизайн — бета: тёмный, экраны переезжают в него по одному. Вернуться можно в любой момент, данные общие.</div></div>
+  <form method="post" action="/settings/design" class="seg">{% for key, title in designs.items() %}<button name="design" value="{{ key }}" class="{{ 'active' if design == key }}">{{ title }}</button>{% endfor %}</form>
+</div></section>
+
 <section class="card" id="theme"><div class="card-b theme-row">
   <div><h2>Оформление</h2><div class="muted small">«Как в системе» — PULSE повторяет светлое или тёмное оформление компьютера.</div></div>
   <form method="post" action="/settings/theme" class="seg">{% for key, title in themes.items() %}<button name="theme" value="{{ key }}" class="{{ 'active' if theme == key }}">{{ title }}</button>{% endfor %}</form>

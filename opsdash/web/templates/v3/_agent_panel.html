@@ -1,0 +1,107 @@
+{#- «Поручить агенту» в новом дизайне: слева где работать и кто, промт, «Что поправить», «Открыть в Claude»; справа
+    файлы галочками и похожие поручения. part: кусочек для окна поверх окна задачи (static/agents.js), иначе страница
+    /agents?task=<id>. Файлы вынесены из формы промта: agents.js ищет их по всей панели ([data-agent-panel]) #}
+{% import "_icons.html" as icons %}
+{% set running = b and b.status == 'running' %}
+{% set ready = b and b.prompt and not running %}
+<div class="agent-panel t3-agent" data-agent-panel data-task="{{ c.id }}"{% if running %} data-agent-live="{{ b.id }}"{% endif %}>
+  <div class="t3-agent-main">
+    <div class="dlg-head">
+      <div class="agent-head">
+        <a class="small muted" href="/commitments?task={{ c.id }}"{% if part %} data-task-open="{{ c.id }}"{% endif %}>← к задаче</a>
+        <h2 class="dlg-title">Поручить агенту</h2>
+        <div class="muted">«{{ c | headline }}» · {{ c | route }}{% if c.due %} · до {{ c.due | date }}{% endif %}{% if hint %} · <span class="d3-tag acc">можно поручить агенту</span>{% endif %}</div>
+      </div>
+      {% if part %}<button type="button" class="dlg-x" data-dlg-close title="Закрыть (Esc)" aria-label="Закрыть">{{ icons.icon('close', 18) }}</button>{% endif %}
+    </div>
+    {% if said %}<div class="alert ok">{{ said }}</div>{% endif %}
+    {% if fail %}<div class="alert bad">{{ fail }}</div>{% endif %}
+
+    <form class="agent-where" method="post" action="/agents/build" data-agent-form>
+      <input type="hidden" name="task" value="{{ c.id }}">
+      <div class="agent-field t3-agent-folder">
+        <span class="agent-k">Где работать</span>
+        {% if folders %}
+        <select name="folder" aria-label="Папка или проект, где будет работать агент"{% if running %} disabled{% endif %}>
+          {% for f in folders %}<option value="{{ f.path }}" {{ 'selected' if f.path == folder }}>{{ f.label }}</option>{% endfor %}
+          <option value="" {{ 'selected' if not folder }}>Без папки — выберу в Claude</option>
+        </select>
+        {% else %}
+        <span class="muted small">Папки, где вы работаете с Claude Code, задаются в <a href="/settings?tab=office">Настройки → Офис</a>. Без них промт тоже соберётся.</span>
+        <input type="hidden" name="folder" value="">
+        {% endif %}
+      </div>
+      <div class="agent-field">
+        <span class="agent-k">Кто</span>
+        <span class="seg agent-seg" role="radiogroup" aria-label="Кто будет делать">
+          {% for key, title in [('claude', 'Claude'), ('codex', 'Codex')] %}<label><input type="radio" name="engine" value="{{ key }}" {{ 'checked' if engine == key }}{% if running %} disabled{% endif %}><span>{{ title }}</span></label>{% endfor %}
+        </span>
+      </div>
+      {% if not running %}<button class="btn {{ 'primary' if not ready }}" title="{{ builder }} соберёт подробный промт: задача, её источник, решения, файлы и как похожее уже делали. Займёт 30–90 секунд">{{ icons.icon('ask', 16) }} {{ 'Собрать заново' if ready else 'Собрать промт' }}</button>{% endif %}
+    </form>
+
+    {% if running %}
+    <div class="agent-live">
+      <div class="ask-steps" data-agent-steps>{% for s in b.steps %}<div>{{ s }}</div>{% endfor %}</div>
+      <div class="ask-thinking"><span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span> {{ builder }} собирает промт…
+        <form class="inline" method="post" action="/agents/{{ b.id }}/stop" data-agent-form><button class="btn sm ghost">Остановить</button></form></div>
+    </div>
+    {% elif b and b.status == 'failed' %}
+    <div class="alert bad">{{ b.error or 'Промт не собрался' }}</div>
+    {% endif %}
+
+    {% if ready %}
+    <form class="agent-prompt" id="agent-prompt-{{ b.id }}" method="post" action="/agents/{{ b.id }}/open" data-agent-prompt="{{ b.id }}">
+      <label class="agent-k" for="agent-text-{{ b.id }}">Промт <span class="muted small">— можно править, сохраняется сам</span></label>
+      <textarea id="agent-text-{{ b.id }}" name="prompt" rows="15" spellcheck="false" data-agent-text>{{ b.prompt }}</textarea>
+      {% if long %}<div class="small muted">Промт длиннее {{ limit }} символов: в поле ввода Claude уйдёт короткое поручение, полный текст пойдёт файлом брифа.</div>{% endif %}
+    </form>
+    <form class="agent-fix" method="post" action="/agents/build" data-agent-form>
+      <input type="hidden" name="task" value="{{ c.id }}">
+      <input type="hidden" name="folder" value="{{ folder }}">
+      <input type="hidden" name="engine" value="{{ engine }}">
+      <input type="text" name="fix" placeholder="Что поправить: «добавь про прогноз Q4», «без расчёта маржи»" aria-label="Что поправить в промте" required>
+      <button class="btn">Пересобрать</button>
+    </form>
+    <div class="dlg-actions agent-actions">
+      <button class="btn primary" form="agent-prompt-{{ b.id }}" data-agent-launch="claude" title="Новая сессия в приложении Claude: промт в поле ввода, папка «{{ folder or 'без папки' }}». Отправляете вы"{% if engine == 'codex' %} hidden{% endif %}>Открыть в Claude</button>
+      <button class="btn primary" form="agent-prompt-{{ b.id }}" data-agent-launch="codex" data-agent-codex title="{{ 'Новый тред Codex в приложении ChatGPT: промт в поле ввода, папка станет проектом треда' if chatgpt else 'Терминал с Codex CLI в папке поручения: промт в буфере обмена' }}. Отправляете вы"{% if engine != 'codex' %} hidden{% endif %}>Открыть в Codex</button>
+      <button type="button" class="btn" data-agent-copy>Копировать промт</button>
+      <button class="btn ghost" form="agent-prompt-{{ b.id }}" formaction="/agents/{{ b.id }}/save" data-agent-save-btn>Сохранить</button>
+      <span class="small muted" data-agent-said role="status"></span>
+    </div>
+    <div class="small cap">Полный промт: <code>{{ b.brief_path and ('data/' ~ b.brief_path) }}</code>{% if b.launched_at %} · открывали в Claude {{ b.launched_at | local }}{% endif %}</div>
+    {% endif %}
+  </div>
+
+  {% if (ready and b.files) or sims %}
+  <aside class="t3-agent-aside" aria-label="Файлы и похожие поручения">
+    {% if ready and b.files %}
+    <section aria-label="Файлы">
+      <div class="t3-agent-h"><b>Файлы</b><span class="small muted">Снятая галочка убирает файл из промта</span></div>
+      <ul class="agent-files">
+        {% for f in b.files %}
+        <li class="{{ 'missing' if not f.exists }}"><label class="check"><input type="checkbox" data-agent-file data-path="{{ f.path }}" data-line="{{ f.line or ('- ' ~ f.path ~ ' — ' ~ f.why) }}" {{ 'checked' if f.on }}>
+          <span><b title="{{ f.path }}">{{ f.name }}</b><span class="small muted">{{ f.why }}{% if not f.exists %} · файла нет{% endif %}</span></span></label></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+    {% if sims %}
+    <section aria-label="Похожие поручения">
+      <div class="t3-agent-h"><b>Похожие поручения</b></div>
+      <ul class="agent-sims">
+        {% for s in sims %}
+        {% set codex = s.engine == 'codex' %}
+        <li><b>{{ s.title }}</b>
+          <span class="small muted">{{ 'Codex' if codex else 'Claude' }} · {{ s.when }}{% if s.room %} · {{ s.room }}{% endif %} · {{ s.n_prompts }} {{ plural(s.n_prompts, 'реплика', 'реплики', 'реплик') }}{% if s.outcome %} · {{ s.outcome }}{% endif %}</span>
+          {% if s.made %}<span class="small">Получилось: {% for f in s.made[:4] %}{{ f.name }}{{ ', ' if not loop.last }}{% endfor %}</span>{% endif %}
+          {% if s.prompts %}<span class="small muted">Пришлось уточнять{% if s.prompts | length > 1 %} ({{ s.prompts | length }}){% endif %}: {% for a in s.prompts[:3] %}«{{ a | truncate(110) }}»{{ '; ' if not loop.last }}{% endfor %}</span>{% endif %}
+          {% if s.link %}<a class="small" href="{{ s.link }}" title="Открыть эту сессию в приложении {{ 'ChatGPT' if codex else 'Claude' }}">{{ 'Открыть в Codex' if codex else 'Открыть в Claude' }}</a>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </aside>
+  {% endif %}
+</div>

@@ -1,0 +1,114 @@
+{% import "_icons.html" as icons %}
+{#- Решения, новый дизайн: строка вопроса (вопрос, что решено сейчас, с какого числа, история), история вопроса
+    событиями, форма «Изменить» под событием и строка поиска. Формы и поля те же, что в классическом _decisions.html.
+    details.dq и id q<id>/d<id> нужны app.js: ссылка #d<id> раскрывает вопрос #}
+
+{% macro source(d, meetings) -%}
+{%- if d.source_type == 'meeting' and d.source_ref %}<a href="/meetings/{{ d.source_ref }}">{{ meetings.get(d.source_ref) or d.source_ref }}, {{ d.when | date }}</a>
+{%- elif d.source_type == 'document' and d.source_ref %}документ «{{ d.source_ref.split('/')[-1] }}», {{ d.when | date }}
+{%- elif d.source_type in ('telegram', 'pachca', 'slack', 'ymessenger', 'mail') %}переписка, {{ d.when | date }}
+{%- else %}{{ d.when | date }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro src_title(d, meetings) -%}
+{%- if d.source_type == 'meeting' and d.source_ref %}{{ meetings.get(d.source_ref) or d.source_ref }}
+{%- elif d.source_type == 'document' and d.source_ref %}документ
+{%- elif d.source_type in ('telegram', 'pachca', 'slack', 'ymessenger', 'mail') %}переписка
+{%- endif %}
+{%- endmacro %}
+
+{% macro verb_class(d) -%}
+{{ {'changes': 'warn', 'cancels': 'bad', 'refines': 'acc', 'follows': 'acc'}.get(d.relation, 'mut' if d.stage == 'discussing' else 'ok') }}
+{%- endmacro %}
+
+{% macro qrow(q, stages, meetings, options, relations, topic_names, open_mode=False) %}
+{#- вопрос свёрнут в строку; по клику видны события по датам, у каждого источник и «Изменить» #}
+<details class="dq kn-q{{ ' is-att' if q.no_step }}{{ ' is-cancelled' if q.cancelled }}{{ ' kn-q-open' if open_mode }}" id="q{{ q.id }}">
+  <summary class="kn-tr">
+    <span class="kn-c kn-qn" title="{{ q.label or '' }}">{% if q.label %}{{ q.label }}{% else %}<span class="kn-cap">без формулировки</span>{% endif %}{% if q.subtopic %} <span class="kn-cap">· {{ q.subtopic }}</span>{% endif %}</span>
+    <span class="kn-c{{ ' kn-mut' if open_mode }}" title="{{ q.now }}">{% if q.cancelled %}<span class="d3-tag bad">отменили</span> {% endif %}{{ q.now }}</span>
+    {% if open_mode %}
+    <span class="kn-c kn-step">{% if q.waiting %}<span class="kn-warn" title="{{ q.waiting }}">{{ q.waiting }}</span>{% else %}<span class="d3-tag warn">шага нет</span>{% endif %}</span>
+    {% else %}
+    <span class="kn-c kn-cap">{{ q.since | date }}{% if q.changes %} · {{ q.changes }} {{ plural(q.changes, 'изменение', 'изменения', 'изменений') }}{% endif %}{% if q.waiting %} · <span class="kn-warn">ждём: {{ q.waiting }}</span>{% endif %}</span>
+    {% endif %}
+    <span class="kn-ib" aria-hidden="true">{{ icons.icon('chevron', 18) }}</span>
+  </summary>
+  <ol class="kn-hist">
+    {% for d in q.nodes %}
+    <li class="kn-ev{{ ' is-gone' if not d.current }}" id="d{{ d.id }}">
+      <time>{{ d.when | date }}</time>
+      <span class="kn-vb {{ verb_class(d) }}">{{ d.verb }}</span>
+      <div class="kn-tx">
+        <span>{{ d.a }}</span>
+        {% if d.metric or d.before_value or d.after_value %}<span class="kn-met">{% if d.metric %}{{ d.metric }}: {% endif %}<s>{{ d.before_value or '—' }}</s><span aria-hidden="true">→</span>{{ d.after_value or '—' }}</span>{% endif %}
+        <span class="kn-m">{{ source(d, meetings) }}{% if d.people %} · {{ d.people | join(', ') }}{% endif %}{% if d.topic != q.topic %} · тема «{{ d.topic }}»{% endif %}</span>
+        {% if d.tasks %}<span class="kn-m">Задачи: {% for t in d.tasks %}<a href="/commitments?task={{ t.id }}">{{ t.title }}</a>{{ ' (готово)' if t.status == 'done' }}{{ ', ' if not loop.last }}{% endfor %}</span>{% endif %}
+      </div>
+      {% if d.current and d.topic == q.topic %}{{ edit(d, stages, options, relations, topic_names) }}{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</details>
+{% endmacro %}
+
+{% macro edit(d, stages, options, relations, topic_names) %}
+{#- «Изменить»: форма раскрывается под событием на всю ширину; summary — кнопка «Изменить» / «Свернуть» #}
+<details class="dec-edit kn-edit">
+  <summary class="btn sm kn-w"><span class="kn-closed">Изменить</span><span class="kn-opened">Свернуть</span></summary>
+  <div class="kn-form">
+    {% if d.title or d.quote %}<span class="kn-cap">Как записано на встрече: {{ d.title }}{% if d.quote %} — «{{ d.quote }}»{% endif %}</span>{% endif %}
+    <form method="post" action="/decisions/{{ d.id }}" class="kn-fg" id="dec-form-{{ d.id }}">
+      <label class="kn-fl wide"><span>Вопрос</span><input type="text" name="question" value="{{ d.question or '' }}" placeholder="{{ d.q or 'Например, кто делает доработку' }}"></label>
+      <label class="kn-fl wide"><span>Что решено, коротко</span><input type="text" name="answer" value="{{ d.answer or '' }}" placeholder="{{ d.a }}"></label>
+      <label class="kn-fl"><span>Статус</span><select name="stage">{% for key, t in stages.items() %}<option value="{{ key }}" {{ 'selected' if d.stage == key }}>{{ t }}</option>{% endfor %}</select></label>
+      <label class="kn-fl"><span>Следующий шаг или чего ждём</span><input type="text" name="waiting" value="{{ d.waiting_for or '' }}" placeholder="Например, новая смета от подрядчика"></label>
+      <div class="kn-fl wide"><span>Прежнее решение по этому вопросу</span>
+        <span class="kn-prev">
+          <select name="relation" aria-label="Как связано с прежним">{% for key, t in relations.items() %}<option value="{{ key }}" {{ 'selected' if (d.relation or 'refines') == key }}>{{ t }}</option>{% endfor %}</select>
+          <select name="prev" aria-label="Прежнее решение">
+            <option value="0">не связано</option>
+            {% set ids = options | map(attribute='id') | list %}
+            {% if d.prev and d.prev.id not in ids %}<option value="{{ d.prev.id }}" selected>{{ d.prev.when | date }} · {{ d.prev.title | truncate(90) }}</option>{% endif %}
+            {% for o in options if o.id != d.id and o.when <= d.when %}<option value="{{ o.id }}" {{ 'selected' if d.prev and d.prev.id == o.id }}>{{ o.when | date }} · {{ o.title | truncate(90) }}</option>{% endfor %}
+          </select>
+        </span></div>
+      <label class="kn-fl"><span>Метрика</span><input type="text" name="metric" value="{{ d.metric or '' }}" placeholder="средний чек"></label>
+      <div class="kn-fl"><span>Было и стало</span>
+        <span class="kn-two"><input type="text" name="before" value="{{ d.before_value or '' }}" placeholder="12 тыс." aria-label="Было"><input type="text" name="after" value="{{ d.after_value or '' }}" placeholder="15 тыс." aria-label="Стало или цель"></span></div>
+      <label class="kn-fl"><span>Тема</span><input type="text" name="project" value="{{ d.project or '' }}" list="dec-topics" placeholder="KPI / Розница"></label>
+    </form>
+    <div class="kn-hr"></div>
+    <div class="kn-fl"><span>Задачи по решению</span>
+      {% if d.tasks %}<div class="kn-rw">{% for t in d.tasks %}<form class="kn-chip" method="post" action="/decisions/unlink/{{ t.id }}"><span class="d3-ell">{{ t.title[:60] }}</span><button class="kn-x" aria-label="Убрать связь с задачей «{{ t.title[:60] }}»" title="Убрать связь">{{ icons.icon('close', 14) }}</button></form>{% endfor %}</div>{% endif %}
+      <form method="post" action="/decisions/{{ d.id }}/link" class="kn-row kn-row-link">
+        <input type="text" name="task" list="task-options" placeholder="Связать с задачей: начните вводить название" aria-label="Задача, которая исполняет решение">
+        <button class="btn kn-w">Связать</button>
+      </form>
+      <form method="post" action="/decisions/{{ d.id }}/task" class="kn-row kn-row-task">
+        <input type="text" name="what" placeholder="Создать задачу: что сделать, чтобы решение заработало" aria-label="Новая задача">
+        <input type="text" name="who" placeholder="кто (пусто — вы)" aria-label="Кто делает">
+        <input type="date" name="due" aria-label="Срок">
+        <button class="btn kn-w">Создать</button>
+      </form>
+    </div>
+    <div class="kn-hr"></div>
+    <div class="kn-rw">
+      <form method="post" action="/decisions/{{ d.id }}/outdated" data-confirm="Отметить решение устаревшим? Из раздела оно уйдёт, в базе знаний останется. Если его заменило другое решение, лучше свяжите их: «меняет» или «отменяет»."><button class="btn danger">Устарело</button></form>
+      <span class="kn-grow"></span>
+      <button class="btn primary" form="dec-form-{{ d.id }}">Сохранить</button>
+    </div>
+  </div>
+</details>
+{% endmacro %}
+
+{% macro listrow(d) %}
+{#- поиск и «без следующего шага»: вопрос, что решено, дата; по клику открывается вопрос в своей теме #}
+<a class="kn-tr kn-l{{ ' is-gone' if not d.current }}" href="/decisions?topic={{ d.topic | urlencode }}#d{{ d.id }}">
+  <span class="kn-c kn-qn" title="{{ d.q or '' }}">{{ d.q or '—' }}</span>
+  <span class="kn-c" title="{{ d.a }}">{{ d.a }}{% if not d.current %} <span class="d3-tag neu">{{ d.state_title }}</span>{% endif %}</span>
+  <span class="kn-c kn-cap">{{ d.when | date }}</span>
+  <span class="kn-ib" aria-hidden="true">{{ icons.icon('chevron', 18) }}</span>
+</a>
+{% endmacro %}

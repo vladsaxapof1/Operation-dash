@@ -1,0 +1,234 @@
+/* Сводка в новом дизайне (templates/v3/home.html). Макеты: Home, HomeFeedOpen, HomeEmpty, Proposals.
+   Все селекторы начинаются с body.d3: классический дизайн этот файл не задевает. Цвета только токенами v3.css. */
+
+body.d3 .h3-head { align-items: flex-end; }
+body.d3 .h3-head .btn .ico { color: inherit; }
+body.d3 .h3-head form { margin: 0; }
+body.d3 .grow { flex: 1 1 auto; min-width: 0; }
+
+/* точки-маркеры секций */
+body.d3 .h3-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+body.d3 .h3-dot.sm { width: 7px; height: 7px; }
+body.d3 .h3-dot.warn { background: var(--warn); }
+body.d3 .h3-dot.acc { background: var(--acc-dot); }
+body.d3 .h3-dot.ok { background: var(--ok); }
+body.d3 .h3-dot.bad { background: var(--bad); }
+
+/* --- две колонки: лента слева, «Сегодня» справа --- */
+body.d3 .h3-cols { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px; }
+body.d3 .h3-main { flex: 3 1 560px; min-width: 0; }
+body.d3 .h3-side { flex: 1 1 320px; max-width: 440px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+@media (max-width: 1000px) { body.d3 .h3-side { max-width: none; } }
+
+/* --- «Нужно от вас» --- */
+body.d3 .h3-need { box-sizing: border-box; padding: 14px; border-radius: 16px; background: var(--warn-deep); border: 1px solid var(--warn-line); }
+body.d3 .h3-need.calm { background: var(--sunken); border-color: var(--line); }
+body.d3 .h3-need-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 2px 6px 12px; }
+body.d3 .h3-need-h h2 { margin: 0; font-size: 15px; }
+body.d3 .h3-n { font-size: 14px; color: var(--muted); }
+body.d3 .h3-need-h .grow { flex: 1 1 0; }
+body.d3 .h3-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+body.d3 .h3-chips .fchip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line-strong);
+  border-radius: 999px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 400; white-space: nowrap; cursor: pointer; }
+body.d3 .h3-chips .fchip:hover { background: var(--panel); color: var(--text); }
+body.d3 .h3-chips .fchip.active { background: #26262b; border-color: #26262b; color: var(--text); font-weight: 500; }
+body.d3 .h3-chips .fchip i { font-style: normal; color: var(--cap); }
+
+body.d3 .h3-feed { background: var(--panel); border: 1px solid var(--line-card); border-radius: 12px; }
+body.d3 .h3-foot { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+body.d3 .h3-foot.bare { border-top: 0; padding: 14px 6px 2px; }
+
+/* строка ленты: плитка 36 · текст · действия 240; панель — вторым рядом под текстом и действиями */
+body.d3 .frow.h3-row { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) 240px; column-gap: 14px; row-gap: 12px;
+  align-items: start; padding: 16px 18px; border: 0; border-top: 1px solid var(--line); background: transparent; }
+body.d3 .h3-feed > .frow.h3-row:first-child, body.d3 .h3-feed > .frow.h3-row[hidden] + .frow.h3-row { border-top: 0; }
+body.d3 .h3-feed > .frow.h3-row:first-child { border-radius: 12px 12px 0 0; }
+body.d3 .frow.h3-row[hidden] { display: none; }
+body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) { background: var(--window); }
+body.d3 .h3-tile { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none; }
+body.d3 .h3-tile.acc { background: var(--accent-soft); color: var(--accent); }
+body.d3 .h3-tile.warn { background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .h3-tile.bad { background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .h3-tile.neu { background: var(--panel-2); color: var(--text-2); }
+body.d3 .h3-tile.h3-k { font-size: 13px; font-weight: 600; }
+body.d3 .h3-b { min-width: 0; }
+body.d3 .h3-kick { margin-bottom: 2px; font-size: 12px; line-height: 20px; color: var(--cap); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .h3-kick a { color: var(--accent); }
+body.d3 .h3-kick .d3-tag { height: 20px; padding: 0 8px; margin-left: 4px; vertical-align: top; }
+body.d3 .h3-ttl { margin: 0; font-size: 15px; font-weight: 500; line-height: 1.4; color: var(--text); letter-spacing: 0; text-transform: none; }
+body.d3 .h3-ttl a { color: var(--text); }
+body.d3 .h3-ttl a:hover { color: var(--accent); text-decoration: none; }
+body.d3 .h3-days { color: var(--cap); font-weight: 400; }
+body.d3 .h3-ctx { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+body.d3 .h3-ctx .linkish { font-size: 13px; }
+body.d3 .h3-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 10px;
+  background: var(--warn-deep); border: 1px solid var(--warn-line); font-size: 13px; color: var(--warn-text); }
+body.d3 .h3-hint-x { color: var(--muted); }
+body.d3 .h3-hint form { margin: 0; }
+
+/* колонка действий: две доли под кнопки и 32 px под «…»; кнопки одной ширины, на одной линии */
+body.d3 .h3-ax { display: grid; grid-template-columns: 1fr 1fr 32px; gap: 8px; align-items: start; }
+body.d3 .h3-ax > .wide { grid-column: span 2; }
+body.d3 .h3-ax > form { margin: 0; min-width: 0; display: block; }
+body.d3 .h3-ax .btn { width: 100%; padding: 0 8px; box-sizing: border-box; justify-content: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .h3-ax > form.wide .btn { width: 100%; }
+body.d3 .h3-ax details.menu { grid-column: 3; }
+body.d3 .h3-ax details.menu > summary { width: 32px; height: 36px; padding: 0; display: grid; place-items: center; box-sizing: border-box;
+  border: 1px solid var(--line-strong); border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; }
+body.d3 .h3-ax details.menu[open] > summary, body.d3 .h3-ax details.menu > summary:hover { background: #26262b; color: var(--text); }
+body.d3 .h3-ax .menu-pop { width: 240px; display: flex; flex-direction: column; }
+body.d3 .h3-ax .menu-i { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* кнопка раскрытия: «Ответить» / «Свернуть» по состоянию панели */
+body.d3 .h3-opened { display: none; align-items: center; gap: 6px; }
+body.d3 .h3-opened .ico { transform: rotate(180deg); }
+body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) .h3-ax .btn[data-reveal] { background: #26262b; border-color: var(--line-strong); color: var(--text); font-weight: 400; }
+body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) .h3-ax .btn[data-reveal] .h3-closed { display: none; }
+body.d3 .frow.h3-row:has(> .h3-pnl:not([hidden])) .h3-ax .btn[data-reveal] .h3-opened { display: inline-flex; }
+
+/* раскрытая панель */
+body.d3 .h3-pnl { grid-column: 2 / span 2; display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 12px;
+  background: var(--sunken); border: 1px solid var(--line); min-width: 0; }
+body.d3 .h3-pnl[hidden] { display: none; }
+body.d3 .h3-pnl p { margin: 0; }
+body.d3 .h3-pnl-why { border-style: dashed; border-color: var(--line-strong); font-size: 13px; color: var(--text-2); }
+body.d3 .h3-why-h { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
+body.d3 .h3-why-h .ico { color: var(--muted); }
+body.d3 .h3-pnl-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+body.d3 .h3-pl { display: block; margin-bottom: 4px; font-size: 12px; color: var(--cap); }
+body.d3 .h3-qt { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line-card); color: var(--text-2);
+  font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+body.d3 textarea.h3-fld { display: block; width: 100%; max-width: none; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--line-strong);
+  border-radius: 10px; background: var(--window); color: var(--text); resize: vertical; font-size: 14px; line-height: 1.45; }
+body.d3 .h3-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.d3 .h3-bar form { margin: 0; }
+body.d3 .h3-bar .btn .ico { color: inherit; }
+body.d3 .h3-remind { display: flex; flex-direction: column; gap: 12px; margin: 0; }
+
+/* --- плашки первого запуска (HomeEmpty) --- */
+body.d3 .h3-setup { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-bottom: 20px; padding: 18px 18px 18px 20px;
+  border-radius: 16px; background: var(--sunken); border: 1px solid var(--line); }
+body.d3 .h3-setup[hidden] { display: none; }
+body.d3 .h3-setup-b { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+body.d3 .h3-setup-b h2 { margin: 0; font-size: 18px; }
+body.d3 .h3-setup-b p { margin: 0; }
+body.d3 .h3-setup-b .h3-bar { padding-top: 4px; }
+body.d3 .h3-x { width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; flex: none; }
+body.d3 .h3-x:hover { background: var(--panel); color: var(--text); }
+body.d3 .h3-eic { width: 44px; height: 44px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); display: grid; place-items: center; color: var(--muted); flex: none; }
+body.d3 .h3-src { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; }
+body.d3 .h3-first { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 20px; padding: 14px 18px; }
+body.d3 .h3-first-b { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+body.d3 .h3-first-t { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+body.d3 .h3-first-t b { font-weight: 500; }
+body.d3 .h3-trk { position: relative; height: 6px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+body.d3 .h3-trk span { position: absolute; top: 0; bottom: 0; width: 35%; border-radius: 999px; background: var(--ok); animation: h3-trk 1.6s ease-in-out infinite; }
+@keyframes h3-trk { from { left: -35%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { body.d3 .h3-trk span { animation: none; left: 0; } }
+
+/* пустые состояния: пунктир = «ещё нет» */
+body.d3 .h3-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 40px 24px;
+  border: 1px dashed var(--line-strong); border-radius: 12px; }
+body.d3 .h3-empty b { font-weight: 500; }
+body.d3 .h3-empty p { margin: 0; max-width: 440px; }
+body.d3 .h3-empty .h3-src { justify-content: center; }
+
+/* --- правая колонка: «Задачи» с переключателем «Сегодня / Все» --- */
+body.d3 .h3-radio { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+body.d3 .h3-tasks { display: flex; flex-direction: column; gap: 12px; }
+body.d3 .h3-tasks-h { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+body.d3 .h3-tasks-h h2 { flex: 1 1 auto; margin: 0; font-size: 15px; }
+body.d3 .h3-note { color: var(--muted); font-weight: 400; }
+body.d3 .h3-tasks .seg > label { height: 30px; padding: 0 12px; border-radius: 7px; display: inline-flex; align-items: center; font-size: 13px;
+  color: var(--muted); cursor: pointer; white-space: nowrap; }
+body.d3 .h3-tasks .seg > label:hover { color: var(--text); }
+body.d3 #h3-scope-today:checked ~ .h3-tasks-h label[for=h3-scope-today],
+body.d3 #h3-scope-all:checked ~ .h3-tasks-h label[for=h3-scope-all] { background: #26262b; color: var(--text); font-weight: 500; }
+body.d3 #h3-scope-today:focus-visible ~ .h3-tasks-h label[for=h3-scope-today],
+body.d3 #h3-scope-all:focus-visible ~ .h3-tasks-h label[for=h3-scope-all] { outline: 2px solid var(--g-focus); }
+body.d3 #h3-scope-today:checked ~ * .h3-s-all, body.d3 #h3-scope-today:checked ~ .h3-s-all,
+body.d3 #h3-scope-all:checked ~ * .h3-s-today, body.d3 #h3-scope-all:checked ~ .h3-s-today { display: none; }
+body.d3 .h3-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+body.d3 .h3-stat { display: flex; flex-direction: column; padding: 14px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card);
+  color: var(--text); min-width: 0; }
+body.d3 .h3-stat:hover { border-color: var(--line-strong); text-decoration: none; }
+body.d3 .h3-stat b { font-size: 26px; font-weight: 600; line-height: 1.15; }
+body.d3 .h3-stat b.bad { color: var(--bad-text); }
+body.d3 .h3-stat span { font-size: 13px; line-height: 1.3; color: var(--muted); }
+
+/* --- «Сегодня»: синяя секция, встречи и окна списком --- */
+body.d3 .h3-today { box-sizing: border-box; padding: 14px; border-radius: 16px; background: var(--acc-deep); border: 1px solid var(--accent-soft);
+  display: flex; flex-direction: column; gap: 8px; }
+body.d3 .h3-today.calm { background: var(--sunken); border-color: var(--line); }
+body.d3 .h3-today-h { display: flex; align-items: center; gap: 8px; padding: 2px 6px 4px; }
+body.d3 .h3-today-h h2 { margin: 0; font-size: 15px; }
+body.d3 .h3-today-h .grow { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .h3-today .dv { padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); }
+body.d3 .h3-today .dv-dot { width: 8px; height: 8px; }
+body.d3 .h3-today .dv-bar { background: var(--panel-2); }
+body.d3 .h3-allday { display: flex; flex-wrap: wrap; gap: 6px; }
+body.d3 .h3-allday .d3-tag { border: 0; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .h3-agenda { display: flex; flex-direction: column; gap: 8px; }
+body.d3 .h3-mt { display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line-card); color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+body.d3 button.h3-mt:hover { border-color: var(--line-strong); }
+body.d3 .h3-mt.past { opacity: .6; }
+body.d3 .h3-mt.next, body.d3 .h3-mt.now { border-color: var(--acc-line-2); }
+body.d3 .h3-mt-time { width: 44px; flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+body.d3 .h3-mt.next .h3-mt-time, body.d3 .h3-mt.now .h3-mt-time { color: var(--text); }
+body.d3 .h3-mt-t { flex: 1 1 auto; min-width: 0; }
+body.d3 .h3-mt .d3-tag { height: 20px; padding: 0 8px; }
+body.d3 .h3-win { background: transparent; border: 1px dashed var(--line-strong); cursor: default; align-items: flex-start; }
+body.d3 .h3-win-t { display: block; color: var(--text-2); }
+body.d3 .h3-win-plan { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
+body.d3 .h3-none { margin: 0; padding: 4px 6px; }
+
+/* «PULSE сейчас» */
+body.d3 .h3-now { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+body.d3 .h3-now h2 { margin: 0; font-size: 15px; }
+body.d3 .h3-now-i { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+body.d3 .h3-now-i .grow { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .h3-now-i a { color: var(--bad-text); }
+
+/* «Пока вас не было» */
+body.d3 .h3-away { border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); }
+body.d3 .h3-away > summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; list-style: none; }
+body.d3 .h3-away > summary::-webkit-details-marker { display: none; }
+body.d3 .h3-away > summary b { font-weight: 600; }
+body.d3 .h3-away > summary .ico { color: var(--cap); transition: transform .15s; }
+body.d3 .h3-away[open] > summary .ico { transform: rotate(180deg); }
+body.d3 .h3-away-b { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 14px; font-size: 13px; color: var(--text-2); }
+body.d3 .h3-away-b p { margin: 0; }
+
+/* --- окно «Что PULSE уже нашёл» (Proposals) --- */
+body.d3 dialog.h3-finds { width: min(640px, calc(100vw - 32px)); }
+body.d3 .h3-finds .dlg-box { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+body.d3 .h3-finds .dlg-head { display: flex; align-items: flex-start; gap: 12px; }
+body.d3 .h3-finds-t { flex: 1 1 0; min-width: 0; }
+body.d3 .h3-finds .dlg-title { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 600; }
+body.d3 .h3-finds-t p, body.d3 .h3-finds .dlg-box > p { margin: 6px 0 0; }
+body.d3 .h3-finds .dlg-box > p { margin: 0; }
+body.d3 .h3-finds .dlg-x { width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); display: grid; place-items: center; }
+body.d3 .h3-finds .dlg-x:hover { background: var(--panel); color: var(--text); }
+body.d3 .h3-blk { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); }
+body.d3 .h3-blk-h { display: flex; align-items: center; gap: 8px; }
+body.d3 .h3-blk-h b { flex: 1 1 auto; font-weight: 600; }
+body.d3 .h3-li { display: flex; align-items: center; gap: 10px; font-size: 14px; min-width: 0; }
+body.d3 .h3-li > .d3-ell { flex: 1 1 0; }
+body.d3 .h3-li > .small { flex: none; }
+body.d3 .h3-finds .dlg-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); margin: 0; }
+body.d3 .h3-finds .h3-empty { padding: 28px 18px; }
+
+/* «„Нет“ — почему?» (полоса из base.html, на Сводке — в тон ленте) */
+body.d3 .why-bar { background: var(--sunken); border: 1px dashed var(--line-strong); border-radius: 12px; }
+body.d3 .why-bar .why-chips .btn.sm { border-radius: 999px; background: transparent; color: var(--text-2); }
+body.d3 .why-bar .why-chips .btn.sm:hover { background: #26262b; color: var(--text); }
+
+/* телефон: действия под текстом во всю ширину, панель тоже */
+@media (max-width: 700px) {
+  body.d3 .frow.h3-row { grid-template-columns: 36px minmax(0, 1fr); padding: 14px; }
+  body.d3 .h3-ax { grid-column: 2; }
+  body.d3 .h3-pnl { grid-column: 1 / -1; }
+  body.d3 .h3-need { padding: 10px; }
+  body.d3 .h3-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+}

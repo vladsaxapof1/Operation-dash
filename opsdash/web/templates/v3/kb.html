@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Уроки и удачи{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-memory.css?v={{ static_v }}">{% endblock %}
+{#- «Память → Уроки и удачи», новый дизайн: база знаний (opsdash.anthology). Формы те же: POST /kb (новая запись),
+    POST /kb/<id> (status). Окно «Добавить запись» открывается и по ссылке /kb#add (app.js, #add-dlg) #}
+
+{% macro entry(r) %}
+<article class="m3-fact m3-kb {{ r.kind }}{{ ' st-outdated' if r.status == 'outdated' }}{{ ' m3-proposed' if r.status == 'proposed' }}">
+  <div class="m3-fb">
+    <div class="m3-fm">
+      <span class="d3-tag {{ {'lesson': 'warn', 'win': 'ok'}.get(r.kind, 'neu') }}">{{ r.kind_title }}</span>
+      {% if r.project %}<a class="m3-who" href="?project={{ r.project | urlencode }}">{{ r.project }}</a>{% endif %}
+      {% if r.people %}<span class="d3-ell">{{ r.people | join(', ') }}</span>{% endif %}
+      {% if r.status not in ('accepted', 'proposed') %}<span class="d3-tag neu">{{ r.status_title }}</span>{% endif %}
+      {% if r.author == 'director' and r.source_type == 'manual' %}<span class="d3-tag acc">от вас</span>{% endif %}
+    </div>
+    <span class="m3-ft">{{ r.title }}</span>
+    {% if r.details %}<details class="m3-txt-d"><summary class="m3-tx">{{ r.details }}</summary></details>{% endif %}
+    <span class="m3-meta">
+      {%- if r.source_type == 'meeting' and r.source_ref %}<a class="m3-src" href="/meetings/{{ r.source_ref }}">встреча «{{ meetings.get(r.source_ref) or r.source_ref }}»</a>
+      {%- elif r.source_type == 'document' and r.source_ref %}<a class="m3-src" href="/docs/view?path={{ r.source_ref | urlencode }}">заметка «{{ r.source_ref.split('/')[-1] | replace('.md', '') | truncate(60, true, '…') }}»</a>
+      {%- elif r.source_type and r.source_type != 'manual' %}<span>{{ SOURCE_TITLES.get(r.source_type, r.source_type) }}</span>
+      {%- else %}<span>добавлено вручную</span>{% endif %}
+      {%- if r.quote %}<span class="m3-qi" title="{{ r.quote }}">«{{ r.quote | truncate(60, true, '…') }}»</span>{% endif %}
+    </span>
+  </div>
+  <div class="m3-act m3-col">
+    {% if r.happened %}<span class="m3-dt">{{ r.happened | date }}{{ '.' ~ r.happened[:4] if r.happened[:4] != today[:4] }}</span>{% endif %}
+    {% if r.status == 'proposed' %}
+    <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="accepted"><button class="btn sm">Да</button></form>
+    <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="rejected"><button class="btn sm">Нет</button></form>
+    {% elif r.status == 'accepted' %}
+    <form class="inline" method="post" action="/kb/{{ r.id }}" data-confirm="Отметить как устаревшее? Запись останется в истории, но Claude не будет на неё опираться."><input type="hidden" name="status" value="outdated"><button class="btn sm" title="Решение пересмотрели или оно больше не действует">Устарело</button></form>
+    {% else %}
+    <form class="inline" method="post" action="/kb/{{ r.id }}"><input type="hidden" name="status" value="accepted"><button class="btn sm">Вернуть</button></form>
+    {% endif %}
+  </div>
+</article>
+{% endmacro %}
+
+{% block content %}
+{% import "_memory.html" as mm %}
+<div class="d3-head">
+  <div class="t"><h1>Память</h1><p class="sub">Уроки и удачи: что решили, на чём обожглись и что сработало. Claude опирается на них в ответах</p></div>
+  <a class="btn" href="/kb/context">Что знает Claude</a>
+  <button type="button" class="btn primary" data-dlg-open="add-dlg">{{ icons.icon('plus', 16) }}Добавить запись</button>
+</div>
+
+{% set nfilters = (1 if project else 0) + (1 if status != 'current' else 0) %}
+<div class="d3-bar">
+  {{ mm.tabbar(tabs, tab) }}
+  <span class="grow"></span>
+  <form method="get" class="d3-search" role="search">
+    {{ icons.icon('search', 16) }}
+    {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}{% if project %}<input type="hidden" name="project" value="{{ project }}">{% endif %}{% if status != 'current' %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    <input type="search" name="q" value="{{ q }}" placeholder="Найти урок или удачу" aria-label="Найти урок или удачу">
+  </form>
+  <nav class="seg m3-seg" aria-label="Вид записи">
+    {% set qs = ('&project=' ~ (project | urlencode) if project else '') ~ ('&status=' ~ status if status != 'current' else '') ~ ('&q=' ~ (q | urlencode) if q else '') %}
+    <a href="/kb?kind={{ qs }}" class="{{ 'active' if not kind }}"{% if not kind %} aria-current="page"{% endif %}>Все<i>{{ counts.decision + counts.lesson + counts.win }}</i></a>
+    {% for k, t, n in [('decision', 'Решения', counts.decision), ('lesson', 'Уроки', counts.lesson), ('win', 'Удачи', counts.win)] %}<a href="/kb?kind={{ k }}{{ qs }}" class="{{ 'active' if kind == k }}"{% if kind == k %} aria-current="page"{% endif %}>{{ t }}<i>{{ n }}</i></a>{% endfor %}
+  </nav>
+  <details class="m3-pop m3-filter"><summary class="btn">{{ icons.icon('filter', 16) }}Фильтр{% if nfilters %}<i class="m3-cnt">{{ nfilters }}</i>{% endif %}</summary>
+    <form method="get" class="m3-pop-b d3-pop">
+      <input type="hidden" name="kind" value="{{ kind }}">{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+      <label for="kf-project">Тема</label>
+      <select id="kf-project" name="project" data-autosubmit><option value="">Все темы</option>{% for p in projects %}<option {{ 'selected' if p == project }}>{{ p }}</option>{% endfor %}</select>
+      <label for="kf-status">Статус</label>
+      <select id="kf-status" name="status" data-autosubmit>
+        <option value="current" {{ 'selected' if status == 'current' }}>Актуальные</option>
+        <option value="outdated" {{ 'selected' if status == 'outdated' }}>Устаревшие</option>
+        <option value="all" {{ 'selected' if status == 'all' }}>Все</option>
+      </select>
+      {% if kind or project or q or status != 'current' %}<a class="m3-src" href="/kb">Сбросить всё</a>{% endif %}
+    </form>
+  </details>
+</div>
+
+<dialog class="dlg m3-dlg" id="add-dlg" aria-labelledby="kb-add-h">
+  <form method="post" action="/kb" class="m3-dlg-b">
+    <div class="m3-dlg-hd"><h2 id="kb-add-h">Новая запись</h2><button type="button" class="m3-ib" data-dlg-close aria-label="Закрыть" title="Закрыть (Esc)">{{ icons.icon('close', 18) }}</button></div>
+    <div class="m3-row3">
+      <div class="m3-fld"><label for="kb-kind">Вид</label><select id="kb-kind" name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == (kind or 'decision') }}>{{ t }}</option>{% endfor %}</select></div>
+      <div class="m3-fld"><label for="kb-project">Тема</label><input type="text" id="kb-project" name="project" list="kb-projects" value="{{ project }}" placeholder="ОРК, Автоворонка"></div>
+      <div class="m3-fld"><label for="kb-when">Когда</label><input type="date" id="kb-when" name="happened" value="{{ today }}"></div>
+    </div>
+    <div class="m3-fld"><label for="kb-title">Суть одной строкой</label><input type="text" id="kb-title" name="title" required placeholder="Например: средний чек апсейла ОРК в плане 15 тыс."></div>
+    <div class="m3-fld"><label for="kb-details">Почему, контекст, цифры</label><textarea id="kb-details" name="details" rows="3"></textarea></div>
+    <div class="m3-dlg-ft"><button type="button" class="btn" data-dlg-close>Отмена</button><button class="btn primary">Добавить</button></div>
+  </form>
+</dialog>
+<datalist id="kb-projects">{% for p in projects %}<option value="{{ p }}">{% endfor %}</datalist>
+
+{% if proposed %}
+<section class="d3-sec d3-dash" id="proposed" aria-label="Claude предлагает записать">
+  <div class="d3-sec-h"><h2>Claude предлагает записать</h2><span class="d3-n">{{ proposed | length }}</span><span class="grow"></span><span class="d3-n">примите, что верно; остальное отклоните</span></div>
+  {% for r in proposed %}{{ entry(r) }}{% endfor %}
+</section>
+{% endif %}
+
+{% for month, rows in months %}
+<section class="d3-sec" aria-label="{{ month }}">
+  <div class="d3-sec-h"><h2>{{ month }}</h2><span class="d3-n">{{ rows | length }}</span>{% if loop.first and not q %}<span class="grow"></span><span class="d3-n">сначала новые</span>{% endif %}</div>
+  {% for r in rows %}{{ entry(r) }}{% endfor %}
+</section>
+{% else %}
+<section class="d3-sec m3-empty"><p>{% if q or kind or project or status != 'current' %}Ничего не найдено, попробуйте сбросить фильтры.{% else %}Пока пусто. Решения появятся из заметок в папках с документами (md с <code>type: решение</code>) и из разборов встреч, уроки и удачи раз в неделю предложит Claude.{% endif %}</p></section>
+{% endfor %}
+
+<p class="m3-note">Решения по темам живут в разделе <a href="/decisions">Решения</a>. Claude опирается на уроки и удачи в ответах, брифах и черновиках.</p>
+{% endblock %}

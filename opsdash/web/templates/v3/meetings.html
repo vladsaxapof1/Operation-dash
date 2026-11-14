@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% block title %}Встречи{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-meetings.css?v={{ static_v }}">{% endblock %}
+{% block content %}
+{#- Встречи, новый дизайн (макеты Meetings, MeetingsEmpty, MeetingModals): шапка с «Загрузить запись», полоса
+    расшифровки, фильтр «Все · Ждут разбора · В работе» (без скриптов: радиокнопки и CSS :has), поиск и папки записей
+    справа. Лента по дням: время, название, статус, одно действие и «…». Пусто: большая зона «Перетащите запись» #}
+{% set folder_svg %}<svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>{% endset %}
+{% set n_rows = days | map(attribute='rows') | map('length') | sum %}
+{% set empty = not n_rows and not waiting and not q %}
+
+<div class="d3-head">
+  <div class="t">
+    <h1>Встречи</h1>
+    <p class="sub small">{{ stats.total }} {{ plural(stats.total, 'запись', 'записи', 'записей') }}{% if stats.processed %} · {{ stats.processed }} {{ plural(stats.processed, 'разобрана', 'разобраны', 'разобрано') }}{% endif %}{% if stats.waiting %} · {{ stats.waiting }} {{ plural(stats.waiting, 'ждёт', 'ждут', 'ждут') }} разбора{% endif %}{% if stats.work %} · {{ stats.work }} в работе{% endif %}
+      {%- if folders %} · папка записей отслеживается, новые файлы разбираются сами{% endif %}</p>
+  </div>
+  <button type="button" class="btn primary" data-dlg-open="upload-dlg">{{ icons.icon('upload', 16) }}Загрузить запись</button>
+</div>
+
+{#- вся расшифровка сразу: что считается, сколько ждёт, пауза и «Остановить всё» #}
+{% if tr_queue %}{% set cur = tr_queue.current %}{% set n = tr_queue.waiting %}
+<section class="m3-strip{{ ' paused' if tr_queue.paused }}" aria-label="Расшифровка">
+  <span class="m3-strip-ic">{% if tr_queue.paused %}{{ icons.icon('pause', 18) }}{% elif cur and cur.status == 'transcribing' %}<span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>{% else %}{{ icons.icon('hourglass', 18) }}{% endif %}</span>
+  <span class="m3-strip-t">{% if tr_queue.paused %}Расшифровка на паузе{% elif cur and cur.status == 'transcribing' %}Идёт расшифровка{% else %}Расшифровка начинается{% endif %}
+    {%- if cur %} · <a href="/meetings/{{ cur.id }}">«{{ cur.title or cur.id }}»</a> {{ ((cur.progress or 0) * 100) | round | int }}%{% endif %}</span>
+  {% if cur %}<div class="m3-bar" role="progressbar" aria-label="Расшифровка" aria-valuenow="{{ ((cur.progress or 0) * 100) | round | int }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ ((cur.progress or 0) * 100) | round }}%" data-meeting-progress="{{ cur.id }}"></span></div>{% endif %}
+  <span class="m3-strip-x small muted" title="«Пауза» освобождает компьютер, прогресс сохраняется. «Остановить»: встречи останутся, расшифровать любую можно позже.">
+    {%- if n %}{{ 'на паузе' if tr_queue.paused and not cur else 'в очереди ещё' if cur else 'в очереди' }} {{ n }} {{ plural(n, 'запись', 'записи', 'записей') }}{% elif tr_queue.paused %}компьютер не нагружается{% else %}«Пауза» освобождает компьютер, прогресс сохраняется{% endif %}</span>
+  <span class="m3-strip-b">{{ ui.transcription_all(tr_queue) }}</span>
+</section>
+{% endif %}
+
+{% if empty %}
+{#- пусто: большая зона, куда перетащить запись или выбрать файл (без скриптов есть кнопка «Загрузить запись» вверху) #}
+<form class="m3-drop big" method="post" action="/meetings/upload" enctype="multipart/form-data" data-drop>
+  <label class="m3-drop-in">
+    <span class="m3-drop-ic">{{ icons.icon('upload', 24) }}</span>
+    <span class="m3-drop-t">Разобранных встреч пока нет</span>
+    <span class="muted m3-drop-x">Перетащите запись сюда: m4a, mp3, mp4, webm или готовую расшифровку txt, vtt, srt, docx</span>
+    <span class="btn">Выбрать файл</span>
+    <input type="file" name="file" accept="audio/*,video/*,.txt,.vtt,.srt,.docx,.md" data-drop-input>
+    <span class="small muted m3-drop-x">{% if folders %}PULSE сам находит новые записи в {{ 'папке' if folders | length == 1 else 'папках' }}: {{ folders | join(', ') }}. {% endif %}Добавить папку можно в <a href="/settings?tab=recordings">Папки, за которыми я слежу</a>.</span>
+  </label>
+</form>
+{% else %}
+<div class="m3-feed">
+  <div class="d3-bar m3-tools">
+    <div class="m3-pills" role="radiogroup" aria-label="Какие встречи показать">
+      <label class="m3-pill"><input type="radio" name="m3f" value="all" checked>Все · {{ n_rows + (waiting | length) }}</label>
+      {% if stats.waiting %}<label class="m3-pill"><input type="radio" name="m3f" value="wait" id="m3f-wait">Ждут разбора · {{ stats.waiting }}</label>{% endif %}
+      {% if stats.work or waiting %}<label class="m3-pill"><input type="radio" name="m3f" value="work" id="m3f-work">В работе · {{ stats.work + (waiting | length) }}</label>{% endif %}
+    </div>
+    <span class="grow"></span>
+    {% if q %}<a class="small" href="/meetings">Снять поиск «{{ q }}»</a>{% endif %}
+    <form method="get" class="d3-search m3-search" role="search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Поиск по названию и расшифровке" aria-label="Поиск по встречам"></form>
+    <details class="menu m3-folders"><summary class="btn icon" title="Папки записей" aria-label="Папки записей">{{ folder_svg }}</summary>
+      <div class="menu-pop">
+        <div class="m3-pop-h">Папки, за которыми я слежу</div>
+        {% for f in folders %}<div class="m3-path" title="{{ f }}"><span class="m3-dot ok" aria-hidden="true"></span><span class="d3-ell">{{ f }}</span></div>
+        {% else %}<div class="m3-path muted">Пока ни одной</div>{% endfor %}
+        <div class="menu-sep"></div>
+        <a class="menu-i" href="/settings?tab=recordings">Добавить или убрать папку</a>
+      </div>
+    </details>
+  </div>
+
+  {% if waiting %}
+  <section class="m3-day">
+    <h2 class="m3-day-h">Сейчас</h2>
+    <div class="m3-list">
+      {% for w in waiting %}
+      <div class="m3-row" data-f="work" data-waiting>
+        <span class="m3-time">{{ w.started_at | local('%H:%M') }}</span>
+        <div class="m3-main"><span class="m3-t d3-ell">{{ w.title }}</span>
+          <span class="m3-x d3-ell">{{ w.name }} · {{ 'запись ещё идёт, расшифровка начнётся через минуту после её окончания' if w.growing else 'файл дописан, через минуту встреча появится и начнётся расшифровка' }}</span></div>
+        <div class="m3-tags"><span class="d3-tag warn">{{ 'идёт запись' if w.growing else 'найдена' }}</span></div>
+        <div class="m3-act"></div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% for d in days %}
+  <section class="m3-day">
+    <h2 class="m3-day-h">{{ d.label }}</h2>
+    <div class="m3-list">
+    {% for r in d.rows %}
+    {% if r.kind == 'rec' %}{% set m = r.m %}
+    {% set st = {'new': ('ждёт расшифровки', 'neu'), 'transcribing': ('расшифровка', 'warn'), 'paused': ('расшифровка на паузе', 'neu'), 'cancelled': ('расшифровка остановлена', 'neu'), 'transcribed': ('расшифрована', 'acc'), 'processing': ('идёт разбор', 'warn'), 'processed': ('разобрана', 'ok'), 'failed': ('ошибка', 'bad')}.get(m.status, (m.status, 'neu')) %}
+    {% set f = 'wait' if m.status == 'transcribed' else 'work' if m.status in ('new', 'transcribing', 'paused', 'processing') else 'done' %}
+    <div class="m3-row" data-f="{{ f }}">
+      <span class="m3-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if m.duration_sec %} · {{ (m.duration_sec / 60) | round | int }} мин{% endif %}</span>
+      <div class="m3-main"><a class="m3-t d3-ell" href="/meetings/{{ m.id }}">{{ m.title or m.id }}</a>
+        {% if m.status == 'failed' and m.error %}<span class="m3-x d3-ell bad-text" title="{{ m.error }}">{{ m.error[:200] }}</span>
+        {% elif m.headline or r.people %}<span class="m3-x d3-ell" title="{{ m.headline or r.people }}">{{ m.headline or r.people }}</span>{% endif %}</div>
+      <div class="m3-tags">
+        {% if r.pending %}<a class="d3-tag acc" href="/meetings/{{ m.id }}">{{ r.pending }} {{ plural(r.pending, 'ждёт', 'ждут', 'ждут') }} «да»</a>{% endif %}
+        <span class="d3-tag {{ st[1] }}" data-meeting-status="{{ m.id }}">{{ r.queue or st[0] }}{% if m.status in ('transcribing', 'paused') and m.progress %} {{ (m.progress * 100) | round | int }}%{% endif %}</span>
+      </div>
+      <div class="m3-act">
+        {% if m.status in ('new', 'transcribing', 'paused') %}{{ ui.transcription_controls(m, row=True) }}
+        {% elif m.status == 'cancelled' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="transcribe"><button class="btn sm" title="Расшифровать запись с начала">Расшифровать</button></form>
+        {% elif m.status == 'transcribed' %}<form class="inline" method="post" action="/meetings/{{ m.id }}/rerun"><input type="hidden" name="step" value="process"><button class="btn sm">Разобрать</button></form>
+        {% endif %}
+        {{ ui.meeting_menu(m) }}
+      </div>
+    </div>
+    {% else %}{% set e = r.e %}{% set brief = e.brief if e.brief and e.brief.status == 'ready' else none %}
+    {#- встреча календаря без записи: впереди бриф (открыть или собрать), прошла: «Загрузить запись» #}
+    {% set est = {'past': ('без записи', 'neu'), 'now': ('идёт сейчас', 'acc'), 'planned': ('запланирована', 'neu')}[r.state] %}
+    <div class="m3-row cal" data-f="cal">
+      <span class="m3-time">{{ r.start.strftime('%H:%M') if r.start else '—' }}{% if r.minutes %} · {{ r.minutes }} мин{% endif %}</span>
+      <div class="m3-main"><span class="m3-t d3-ell">{{ e.title or 'Без названия' }}</span>
+        <span class="m3-x d3-ell">{{ r.people }}{{ ' · ' if r.people }}из календаря{% if brief and brief.topic %} · {{ brief.topic }}{% endif %}</span></div>
+      <div class="m3-tags">
+        {% if brief and r.state != 'past' %}<span class="d3-tag ok">бриф готов</span>{% endif %}
+        <span class="d3-tag {{ est[1] }}">{{ est[0] }}</span>
+      </div>
+      <div class="m3-act">
+        {% if r.state == 'past' %}<button type="button" class="btn sm" data-dlg-open="upload-dlg" data-upload-title="{{ e.title }}" data-upload-uid="{{ e.uid }}">Загрузить запись</button>
+        {% elif brief %}<button type="button" class="btn sm" data-brief-open="{{ e.brief_key }}">Открыть бриф</button>
+        {% else %}<form class="inline" method="post" action="/briefs/build" data-busy="Собираю…"><input type="hidden" name="uid" value="{{ e.uid }}"><button class="btn sm" title="Claude соберёт тему, прошлые встречи, открытые задачи и вопросы к встрече">Собрать бриф</button></form>{% endif %}
+        {% call ui.menu('Ещё о встрече') %}
+          {% if r.state != 'past' %}<button type="button" class="menu-i" data-dlg-open="upload-dlg" data-upload-title="{{ e.title }}" data-upload-uid="{{ e.uid }}">Загрузить запись</button>{% endif %}
+          {% if brief and r.state == 'past' %}<button type="button" class="menu-i" data-brief-open="{{ e.brief_key }}">Открыть бриф</button>{% endif %}
+          {% if brief %}<form method="post" action="/briefs/build"><input type="hidden" name="uid" value="{{ e.uid }}"><button class="menu-i">Собрать бриф заново</button></form>{% endif %}
+          <a class="menu-i" href="/calendar?start={{ r.start.strftime('%Y-%m-%d') if r.start else '' }}">Открыть в календаре</a>
+        {% endcall %}
+      </div>
+    </div>
+    {% if brief %}{{ ui.brief_dialog(e) }}{% endif %}
+    {% endif %}
+    {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  {% if not waiting %}<div class="m3-none">{{ 'Ничего не нашлось.' if q else 'Записей пока нет.' }}</div>{% endif %}
+  {% endfor %}
+  <div class="m3-none m3-none-f">В этом виде встреч нет.</div>
+</div>
+
+{#- запись можно перетащить сюда или кликнуть и выбрать файл #}
+<form class="m3-drop" method="post" action="/meetings/upload" enctype="multipart/form-data" data-drop>
+  <label class="m3-drop-in">
+    {{ icons.icon('upload', 18) }}
+    <span>Перетащите запись сюда: m4a, mp3, mp4, webm или готовую расшифровку txt, vtt, srt, docx. Название подставится из календаря.</span>
+    <input type="file" name="file" accept="audio/*,video/*,.txt,.vtt,.srt,.docx,.md" data-drop-input>
+  </label>
+</form>
+{% endif %}
+
+<dialog class="dlg m3-dlg" id="upload-dlg" aria-labelledby="upload-title">
+  <form class="dlg-box dlg-form" method="post" action="/meetings/upload" enctype="multipart/form-data" tabindex="-1">
+    <div class="dlg-head"><div class="m3-dlg-t"><h2 class="dlg-title" id="upload-title">Загрузить запись</h2><p class="small muted">PULSE расшифрует запись, и Claude её разберёт.</p></div>
+      <button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    <span class="m3-lbl">Файл</span>
+    <label class="m3-pick">
+      {{ icons.icon('upload', 20) }}
+      <span class="m3-pick-t">Выберите файл</span>
+      <span class="small muted">m4a, mp3, mp4, webm или готовая расшифровка txt, vtt, srt, docx</span>
+      <input type="file" name="file" required accept="audio/*,video/*,.txt,.vtt,.srt,.docx,.md">
+    </label>
+    <label class="m3-lbl" for="upload-name">Название · необязательно</label>
+    <input type="text" id="upload-name" name="title" placeholder="Подставится из календаря" data-upload-title-input>
+    <input type="hidden" name="event_uid" value="" data-upload-uid-input>
+    <div class="dlg-actions m3-dlg-ft"><button type="button" class="btn" data-dlg-close>Отмена</button><button class="btn primary">Загрузить и разобрать</button></div>
+  </form>
+</dialog>
+{% endblock %}

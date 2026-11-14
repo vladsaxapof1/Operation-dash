@@ -1195,7 +1195,10 @@
       var minutes = Number(col.dataset.hourFrom) * 60 + Math.floor((e.clientY - col.getBoundingClientRect().top) / hourPx * 2) * 30;
       document.querySelector("[data-new-day]").value = col.dataset.day;
       document.querySelector("[data-new-time]").value = ("0" + Math.floor(minutes / 60)).slice(-2) + ":" + ("0" + minutes % 60).slice(-2);
-      window.location.hash = "new";
+      // окно «Новая встреча» (#new-dlg) — модальное: открываем его; старая разметка без окна — по якорю #new
+      var newDlg = document.getElementById("new-dlg");
+      if (newDlg) openDlg(newDlg);
+      else window.location.hash = "new";
       setTimeout(function () { document.querySelector("[data-new-title]").focus(); }, 0);
     });
   });

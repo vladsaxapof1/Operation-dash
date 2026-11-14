@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Навыки{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-system.css?v={{ static_v }}">{% endblock %}
+{#- Навыки в новом дизайне (макет Skills.dc.html): карточки по разделам, поиск и фильтр по разделу (app.js, data-sk-*).
+    Тексты в opsdash/skills.yaml, состояние и правила в opsdash/skills.py #}
+{% macro sk_st(s) -%}
+{% set cls = {'ok': '', 'warn': 'wr', 'need': 'wr'}.get(s.kind, 'no') %}
+<span class="sy-st {{ cls }}"><i></i><span>{{ s.label }}{% if s.kind == 'ok' and s.last_run %} · {{ s.last_run | ago }}{% endif %}</span></span>
+{%- endmacro %}
+{% block content %}
+<div class="sy-page">
+<div class="sy-head"><div class="t"><h1>Навыки</h1>
+  <p class="sub">Что умеет {{ ai_name or 'помощник' }} в PULSE: {{ cat.total }} {{ plural(cat.total, 'навык', 'навыка', 'навыков') }}. Системные обновляются вместе с PULSE и не правятся; своё поведение задайте правилами обычными словами на странице навыка.</p></div></div>
+
+{% if cat.modified %}
+<div class="sy-ban warn" style="max-width:none">{{ icons.icon('edit') }}<div class="t"><b>Изменены на этом компьютере</b>
+  <span>{% for sid, how in cat.modified.items() %}<a href="/skills/{{ sid }}">{{ cat.titles[sid] }}</a> ({{ how }}){{ ', ' if not loop.last }}{% endfor %}. Такой навык может работать не так, как задумано; на его странице есть «Вернуть заводской».</span></div></div>
+{% endif %}
+
+<div class="sy-sk-bar">
+  <div class="seg" data-sk-areas><button type="button" class="active" data-area="">Все</button>{% for a in cat.areas %}<button type="button" data-area="{{ a.id }}">{{ a.title }}</button>{% endfor %}</div>
+  <span class="sy-grow"></span>
+  {% if cat.rules %}<span class="sy-cap">ваших правил: {{ cat.rules }}</span>{% endif %}
+  <label class="sy-search">{{ icons.icon('search', 16) }}<input type="search" placeholder="Найти навык…" data-sk-search aria-label="Найти навык"></label>
+</div>
+
+{% for a in cat.areas %}
+<section class="sy-sk-area" data-sk-area="{{ a.id }}" aria-labelledby="ska-{{ a.id }}">
+  <h2 id="ska-{{ a.id }}">{{ a.title }}</h2>
+  <div class="sy-sk-grid">
+    {% for s in a.skills %}
+    <a class="sy-sk sk-card" href="/skills/{{ s.id }}" data-sk-text="{{ (s.title ~ ' ' ~ s.what ~ ' ' ~ s.when) | lower }}">
+      <div class="sy-sk-top"><span class="sy-tl">{{ icons.icon(area_icons[s.area], 18) }}</span><b title="{{ s.title }}">{{ s.title }}</b></div>
+      <p>{{ s.what }}</p>
+      <span class="sy-cap sy-ell" title="{{ s.when }}">{{ s.when }}</span>
+      <div class="sy-sk-ft">{{ sk_st(s) }}{% if s.rules %}<span class="rules">ваших правил: {{ s.rules }}</span>{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+<p class="sy-empty" data-sk-empty hidden>Ничего не нашлось.</p>
+</div>
+{% endblock %}

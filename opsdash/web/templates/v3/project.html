@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% block title %}{{ p.title }}{% endblock %}
+{% block content %}
+{#- проект: шапка, сводка (процент и прогресс), «Стоит на», задачи по шагам: сначала то, что можно делать сейчас,
+    дальше то, что ждёт предыдущее (связи «ждёт» и подзадачи); выполненные и архивные свёрнуты внизу #}
+{% set st_tag = {'active': 'ok', 'paused': 'warn', 'done': 'neu'}.get(p.status, 'neu') %}
+<a class="t3-back" href="/commitments?view=projects"><svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Проекты</a>
+<div class="t3-phead">
+  <div class="t">
+    <div class="t3-ptitle"><h1>{{ p.title }}</h1><span class="d3-tag {{ st_tag }}">{{ p.status_title }}</span></div>
+    <p class="sub">{{ p.goal or 'Результат не описан' }}
+      {%- if p.due %} · срок проекта {{ p.due | date }}{% if p.due_days is not none %}, {% if p.due_days < 0 %}<span class="t3-red">просрочен на {{ -p.due_days }} {{ plural(-p.due_days, 'день', 'дня', 'дней') }}</span>{% elif p.due_days == 0 %}сегодня{% else %}через {{ p.due_days }} {{ plural(p.due_days, 'день', 'дня', 'дней') }}{% endif %}{% endif %}{% endif %}
+      {%- if p.owner %} · ведёт {{ p.owner }}{% endif %}
+      {%- if p.card %} · <a href="{{ p.card.url }}" target="_blank" rel="noopener" title="{{ p.card.title }}">Kaiten #{{ p.card.id }}</a>{% elif p.kaiten_card_id %} · Kaiten #{{ p.kaiten_card_id }}{% endif %}</p>
+  </div>
+  {% if p.status != 'done' %}<a class="btn primary" href="/commitments?add=mine&project={{ p.id }}#add">{{ icons.icon('plus', 16) }}Задача в проект</a>{% endif %}
+</div>
+
+<div class="t3-bar">
+  <nav class="seg" aria-label="Вид проекта"><a class="active" aria-current="page" href="/projects/{{ p.id }}">Шаги</a><a href="/commitments?view=gantt&project={{ p.id }}">Гант</a><a href="/commitments?view=board&project={{ p.id }}">На доске</a></nav>
+  {% call ui.menu('Ещё о проекте') %}
+    <button type="button" class="menu-i" data-dlg-open="pj-edit-dlg">{{ icons.icon('edit', 16) }}Изменить проект</button>
+    <button type="button" class="menu-i" data-dlg-open="pj-add-dlg">{{ icons.icon('plus', 16) }}Добавить задачу в проект</button>
+    <div class="menu-sep"></div>
+    {% for key, title in [('active', 'Снова в работу'), ('paused', 'На паузу'), ('done', 'Завершить проект')] if key != p.status %}
+    <form method="post" action="/projects/{{ p.id }}/status"><input type="hidden" name="status" value="{{ key }}"><button class="menu-i">{{ icons.icon({'active': 'play', 'paused': 'pause', 'done': 'check'}[key], 16) }}{{ title }}</button></form>
+    {% endfor %}
+    <div class="menu-sep"></div>
+    <form method="post" action="/projects/{{ p.id }}/delete" data-confirm="Удалить проект «{{ p.title }}»? Задачи останутся и станут задачами вне проектов."><button class="menu-i danger">{{ icons.icon('trash', 16) }}Удалить проект</button></form>
+  {% endcall %}
+</div>
+
+<div class="t3-psum">
+  <section class="t3-pcard t3-pnum" aria-label="Сводка проекта">
+    <div class="t3-pct"><b>{{ p.percent }}%</b><span class="muted">{{ p.done }} из {{ p.total }} {{ plural(p.total, 'задачи', 'задач', 'задач') }}</span></div>
+    <div class="t3-pg" title="Выполнено {{ p.done }} из {{ p.total }}"><i style="width: {{ p.percent }}%"></i></div>
+    <div class="small muted t3-pstat">
+      <span><span class="ok-text">{{ p.ready | length }} можно делать</span> · <span class="{{ 'warn-text' if p.blocked }}">{{ p.blocked }} {{ plural(p.blocked, 'ждёт', 'ждут', 'ждут') }} других</span></span>
+      {% if p.overdue or p.at_risk %}<span>{% if p.overdue %}<span class="t3-red">{{ p.overdue }} {{ plural(p.overdue, 'просрочена', 'просрочены', 'просрочено') }}</span>{% endif %}{% if p.overdue and p.at_risk %} · {% endif %}{% if p.at_risk %}{{ p.at_risk }} под угрозой{% endif %}</span>{% endif %}
+    </div>
+  </section>
+  <section class="t3-pcard t3-pstuck" aria-label="Стоит на">
+    <div class="t3-pcard-h"><h2>Стоит на</h2>{% if p.stuck_on %}<span class="small cap">{{ p.stuck_on | length }} {{ plural(p.stuck_on | length, 'задача держит', 'задачи держат', 'задач держат') }} остальные</span>{% endif %}</div>
+    {% for s in p.stuck_on %}{% set t = s.task %}
+    <div class="t3-st">
+      <div class="d3-ell"><b class="d3-ell">{{ ui.task_ref(t) }}</b>
+        <span class="m">{{ 'вы' if t.direction == 'mine' else (t.who or '?') }}{% if t.overdue %} · <span class="t3-red">{{ ui.due_text(t) }}</span>{% elif t.due %} · {{ t.due | date }}{% endif %}{% if t.items_total %} · {{ t.items_done }} из {{ t.items_total }} {{ plural(t.items_total, 'пункта', 'пунктов', 'пунктов') }}{% endif %} · её {{ plural(s.waiting | length, 'ждёт', 'ждут', 'ждут') }} {{ s.waiting | length }} {{ plural(s.waiting | length, 'задача', 'задачи', 'задач') }}</span></div>
+      {% if t.direction == 'to_me' and t.status == 'open' %}<a class="btn sm w" href="/commitments?task={{ t.id }}" data-task-open="{{ t.id }}" data-remind>Напомнить</a>{% else %}<a class="btn sm w" href="/commitments?task={{ t.id }}" data-task-open="{{ t.id }}">Открыть</a>{% endif %}
+    </div>
+    {% else %}
+    <p class="muted small t3-pfree">{% if p.ready and p.status == 'active' %}Ничего не стоит: {{ p.ready | length }} {{ plural(p.ready | length, 'задачу', 'задачи', 'задач') }} можно делать сейчас.{% else %}Ничего не стоит.{% endif %}</p>
+    {% endfor %}
+  </section>
+</div>
+
+{% if p.steps %}
+<div class="t3-steps">
+  {% for step in p.steps %}
+  {% set late = step | selectattr('overdue') | list | length %}
+  <section class="col t3-step" aria-label="{{ 'Можно делать сейчас' if loop.first else 'Шаг ' ~ loop.index }}">
+    <div class="t3-step-h"><h2>{{ 'Можно делать сейчас' if loop.first else 'Шаг ' ~ loop.index }} <span class="n">{{ step | length }}</span>{% if late %} <span class="cnt bad" title="{{ late }} просрочено">{{ late }}</span>{% endif %}</h2>
+      <span class="n">{{ 'ничего не ждут' if loop.first else ('ждут задач слева' if loop.index == 2 else 'ждут шага ' ~ (loop.index - 1)) }}</span></div>
+    {% for c in step %}{{ ui.task_card(c, meetings, show_project=False) }}{% endfor %}
+  </section>
+  {% endfor %}
+</div>
+{% elif p.total %}
+{#- все задачи выполнены: в «Проектах» он уже среди готовых; завершить можно одной кнопкой здесь #}
+<section class="t3-pcard">
+  {% if p.status != 'done' %}<form class="t3-pdone" method="post" action="/projects/{{ p.id }}/status"><input type="hidden" name="status" value="done">
+    <span>Открытых задач нет, всё выполнено. Если результат получен, завершите проект.</span>
+    <button class="btn sm primary">Завершить проект</button></form>
+  {% else %}<p class="muted">Проект завершён, все задачи выполнены.</p>{% endif %}
+</section>
+{% else %}
+<section class="t3-pcard t3-pempty"><p class="muted">В проекте пока нет задач. Добавьте их кнопкой «Задача в проект», через «…» → «Добавить задачу в проект» или в окне задачи, поле «Проект».</p></section>
+{% endif %}
+
+{% for key, title, rows in [('finished', 'Выполненные', p.finished), ('parked', 'Архивные', p.parked)] if rows %}
+<details class="t3-blk pj-more">
+  <summary>{{ icons.icon('chevron', 16) }}<b>{{ title }} · {{ rows | length }}</b>
+    <span class="s">{% if key == 'parked' %}убраны из работы, в прогресс не входят{% else %}{% for c in rows[:2] %}{{ c | headline }}, {{ 'вы' if c.direction == 'mine' else (c.who or '?') }}{% if c.closed_at %}, {{ c.closed_at | local('%d.%m') }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}{% if rows | length > 2 %} и ещё {{ rows | length - 2 }}{% endif %}{% endif %}</span></summary>
+  <div class="t3-blk-b">{% for c in rows %}{{ ui.task_card(c, meetings, show_project=False) }}{% endfor %}</div>
+</details>
+{% endfor %}
+
+<dialog class="dlg t3-form-dlg" id="pj-edit-dlg" aria-labelledby="pj-edit-title">
+  <form class="dlg-box dlg-form" method="post" action="/projects/{{ p.id }}/edit" tabindex="-1">
+    <div class="dlg-head"><h2 class="dlg-title" id="pj-edit-title">Изменить проект</h2><button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    <div class="t3-f"><label for="pe-t">Название</label><input id="pe-t" type="text" name="title" value="{{ p.title }}" required maxlength="120"></div>
+    <div class="t3-f"><label for="pe-g">Что считаем готовым</label><textarea id="pe-g" name="goal" rows="3">{{ p.goal or '' }}</textarea></div>
+    <div class="t3-two">
+      <div class="t3-f"><label for="pe-o">Кто ведёт</label><input id="pe-o" type="text" name="owner" value="{{ p.owner or '' }}" list="people-list" placeholder="пусто — вы"></div>
+      <div class="t3-f"><label for="pe-d">Срок</label><input id="pe-d" type="date" name="due" value="{{ p.due or '' }}"></div>
+    </div>
+    <div class="t3-f"><label for="pe-k">Карточка Kaiten</label><input id="pe-k" type="text" name="card" value="{{ p.kaiten_card_id or '' }}" placeholder="номер"><span class="h">Номер или ссылка: откроется из шапки проекта</span></div>
+    <div class="dlg-actions"><span class="grow"></span><button type="button" class="btn w" data-dlg-close>Отмена</button><button class="btn primary w">Сохранить</button></div>
+  </form>
+</dialog>
+<dialog class="dlg t3-form-dlg" id="pj-add-dlg" aria-labelledby="pj-add-title">
+  <form class="dlg-box dlg-form" method="post" action="/projects/{{ p.id }}/tasks" tabindex="-1">
+    <div class="dlg-head"><h2 class="dlg-title" id="pj-add-title">Добавить задачу в проект</h2><button type="button" class="dlg-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    <span class="small muted t3-dsub">{{ p.title }}</span>
+    <div class="t3-f"><label for="pa-t">Задача</label><input id="pa-t" type="text" name="task" list="task-options" required placeholder="Начните вводить её название"><span class="h">Подзадачи перейдут в проект вместе с ней</span></div>
+    <div class="dlg-actions"><span class="grow"></span><button type="button" class="btn w" data-dlg-close>Отмена</button><button class="btn primary w">Добавить</button></div>
+  </form>
+</dialog>
+
+<datalist id="people-list">{% for person in people %}<option value="{{ person.name }}">{% endfor %}</datalist>
+{{ ui.task_datalist() }}
+{{ ui.event_datalist() }}
+{{ ui.project_datalist() }}
+{% if focus %}<span hidden data-focus-task="{{ focus }}"></span>{% endif %}
+{% endblock %}

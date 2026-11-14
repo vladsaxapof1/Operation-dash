@@ -9,6 +9,8 @@ from __future__ import annotations
 import functools
 import html
 import json
+
+import jinja2
 import os
 import platform
 import re
@@ -36,6 +38,30 @@ HERE = Path(__file__).parent
 app = FastAPI(title="PULSE", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+# Новый дизайн (бета, «Настройки → Основное → Дизайн»): сначала ищет шаблон в templates/v3, иначе берёт классический.
+# Экраны переезжают по одному; данные, маршруты и логика у обоих дизайнов общие. Фильтры и глобальные переменные —
+# те же словари, что у классического окружения: всё, что добавят ниже и в *_views.py, видно обоим.
+templates_v3 = Jinja2Templates(directory=[HERE / "templates" / "v3", HERE / "templates"])
+templates_v3.env.globals = templates.env.globals
+templates_v3.env.filters = templates.env.filters
+templates_v3.env.tests = templates.env.tests
+# «classic/<имя>» — классический шаблон напрямую: v3-версия общего файла макросов может взять из классического
+# всё, что не переделывала (`{% import "classic/_macros.html" as c %}`), и переопределить только своё
+templates_v3.env.loader = jinja2.ChoiceLoader([templates_v3.env.loader, jinja2.PrefixLoader(
+    {"classic": jinja2.FileSystemLoader(HERE / "templates")})])
+DESIGNS = {"classic": "Классический", "v3": "Новый · бета"}
+
+
+def design_of(settings: dict | None = None) -> str:
+    """Какой дизайн выбран: classic (по умолчанию) или v3."""
+    settings = settings or config.load_settings()
+    d = (settings.get("web") or {}).get("design") or "classic"
+    return d if d in DESIGNS else "classic"
+
+
+def ui(request: Request | None = None, settings: dict | None = None) -> Jinja2Templates:
+    """Шаблоны выбранного дизайна — для страниц и для кусков разметки, которые подгружает app.js."""
+    return templates_v3 if design_of(settings) == "v3" else templates
 
 DOCS_DIR = config.APP_DIR / "docs"
 if (DOCS_DIR / "img").is_dir():
@@ -283,7 +309,8 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     p = proposals.get(int(why)) if why.isdigit() else None
     ctx["why_p"] = p if p and p["status"] == "rejected" and not p.get("reject_reason") else None
     ctx["ai_name"] = brain.name(settings)  # кто работает: «Claude» или «ChatGPT» — в меню и в «Спросить»
-    return templates.TemplateResponse(request, name, ctx)
+    ctx["design"] = design_of(settings)
+    return ui(settings=settings).TemplateResponse(request, name, ctx)
 
 
 @app.get("/api/notices")
@@ -294,7 +321,7 @@ def notices_api(after: int = 0):
     running = notices.running()
     tr = next((r["tr"] for r in running if r.get("tr")), None)
     # кнопки расшифровки в углу — той же разметкой, что при загрузке страницы (_macros.transcription_all)
-    tr_html = str(templates.env.get_template("_macros.html").module.transcription_all(tr, corner=True)).strip()
+    tr_html = str(ui().env.get_template("_macros.html").module.transcription_all(tr, corner=True)).strip()
     return {"items": [{**n, "ago": f_ago(n["created"])} for n in notices.recent(after)],
             "running": [{k: v for k, v in r.items() if k != "tr"} for r in running],
             "tr": {"paused": tr["paused"]} if tr else None, "tr_html": tr_html,
@@ -1134,7 +1161,7 @@ def _day_review(after: bool = False) -> str:
     """Тело окна «Разобрать день» — заново после каждого решения: итог, окна и предложенное время пересчитаны."""
     settings = config.load_settings()
     p = day_mod.plan(settings=settings)
-    return str(templates.env.get_template("_day.html").module.review_body(
+    return str(ui().env.get_template("_day.html").module.review_body(
         p, due_choices(), day_mod.next_label(p["date"], settings), after))
 
 
@@ -1289,9 +1316,9 @@ def _log_reply(cid: int) -> JSONResponse:
     «ответа нет» после новой записи снимается — поэтому ленту целиком)."""
     c = records.get_commitment(cid)
     worklog.add_links([c])
-    ui = templates.env.get_template("_macros.html").module
-    return JSONResponse({"ok": True, "list": "".join(str(ui.log_entry(c, e)) for e in c["log"]),
-                         "now": str(ui.task_now(c)), "count": c["log_count"]})
+    ui_m = ui().env.get_template("_macros.html").module
+    return JSONResponse({"ok": True, "list": "".join(str(ui_m.log_entry(c, e)) for e in c["log"]),
+                         "now": str(ui_m.task_now(c)), "count": c["log_count"]})
 
 
 @app.post("/commitments/{cid}/log")
@@ -1851,8 +1878,11 @@ def calendar_page(request: Request, start: str = "", view: str = "week", task: i
             e["s_local"] = store.parse_ts(e["start"]).astimezone(tz)
             e["past"] = store.parse_ts(e["end"]) <= now
     count = len({e["uid"] for e in shown if view != "month" or e["s_local"].month == month_first.month})
+    dp = day_mod.plan(settings=settings, now=now)  # «Разобрать день» и вердикт сегодняшнего дня — как на Сводке
+    dp["week"] = day_mod.week(settings=settings, now=now)
     page = render(request, "calendar.html", nav="calendar", view=view, grid=grid, days=days, first=first,
-                  show_tasks=show_tasks,
+                  show_tasks=show_tasks, dp=dp, due_choices=due_choices(),
+                  next_label=day_mod.next_label(now.date(), settings),
                   last=last, today=now.date(), is_current=first <= now.date() <= last, title=title, count=count,
                   week_no=first.isocalendar()[1], month=month_first.month,
                   prev=prev, next=nxt, can_refresh=bool(sources), connected=bool(sources),
@@ -2646,7 +2676,7 @@ def office_live(request: Request, o: str = ""):
     """Списки и данные картинки — страница подменяет их сама, пока открыта (app.js); o — какой офис выбран."""
     from opsdash import office
 
-    return templates.TemplateResponse(request, "_office_body.html", {"snaps": office.everything(), "open_key": o})
+    return ui().TemplateResponse(request, "_office_body.html", {"snaps": office.everything(), "open_key": o})
 
 
 @app.get("/api/office")
@@ -2731,7 +2761,7 @@ welcome_views.register(app, render, back)
 skills_views.register(app, render, back)
 decisions_views.register(app, render, back)
 memory_views.register(app, render, back)
-agent_views.register(app, render, templates, back)
+agent_views.register(app, render, ui, back)
 
 
 @app.exception_handler(Exception)

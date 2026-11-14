@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% block title %}Задачи · Kaiten{% endblock %}
+{% block content %}
+{#- вкладка «Kaiten» в «Задачах»: доски отслеживаемых пространств колонками, только чтение; клик открывает Kaiten #}
+{% set nf = (1 if who else 0) + (1 if created else 0) + (1 if due else 0) + (1 if only else 0) + (1 if view == 'list' else 0) %}
+<div class="t3-head">
+  <h1>Задачи</h1>
+  <span class="t3-sum">Kaiten: {{ cards | length }} {{ plural(cards | length, 'карточка', 'карточки', 'карточек') }}{% if spaces_n %} в {{ spaces_n }} {{ plural(spaces_n, 'пространстве', 'пространствах', 'пространствах') }}{% endif %}
+    · {{ counts.work }} в работе · {{ counts.queue }} в очереди{% if counts.stale %} · <span class="t3-amb">{{ counts.stale }} без движения</span>{% endif %}{% if synced %} · обновлено {{ synced | local('%H:%M') }}{% endif %}</span>
+  <a class="btn primary" href="/commitments?add=mine#add">{{ icons.icon('plus', 16) }}Задача</a>
+</div>
+
+<div class="t3-bar">
+  <nav class="seg" aria-label="Вид">
+    <a href="/commitments?view=board">Доска</a><a href="/commitments?view=list">Список</a><a href="/commitments?view=gantt">Гант</a><a href="/commitments?view=projects">Проекты</a><a class="active" aria-current="page" href="/commitments?view=kaiten">Kaiten</a>
+  </nav>
+  <form method="get" action="/commitments" class="t3-tools">
+    <input type="hidden" name="view" value="kaiten">
+    <label class="d3-search">{{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Поиск по карточкам" aria-label="Поиск по карточкам Kaiten"></label>
+    <select name="space" data-autosubmit aria-label="Пространство"><option value="">Все пространства</option>{% for s in spaces %}<option {{ 'selected' if s == space }}>{{ s }}</option>{% endfor %}</select>
+    <label class="t3-q t3-chk{{ ' on' if mine }}"><input type="checkbox" name="mine" value="1" {{ 'checked' if mine }} data-autosubmit> Только мои</label>
+    <details class="menu filter-menu">
+      <summary class="btn{{ ' von' if nf }}">{{ icons.icon('filter', 16) }}Фильтр{% if nf %} · {{ nf }}{% endif %}</summary>
+      <div class="menu-pop t3-pop filter-pop">
+        <label>Исполнитель</label>
+        <select name="who"><option value="">все</option>{% for p in people %}<option {{ 'selected' if p == who }}>{{ p }}</option>{% endfor %}</select>
+        <label>Показать</label>
+        <select name="only">{% for key, t in [('', 'все карточки'), ('work', 'в работе'), ('queue', 'в очереди'), ('stale', 'без движения')] %}<option value="{{ key }}" {{ 'selected' if only == key }}>{{ t }}</option>{% endfor %}</select>
+        <label>Создана</label>
+        <select name="created"><option value="">когда угодно</option>{% for key, t in created_periods %}<option value="{{ key }}" {{ 'selected' if created == key }}>{{ t }}</option>{% endfor %}</select>
+        {% if created == 'custom' %}<div class="period"><input type="date" name="created_from" value="{{ created_from }}" aria-label="Создана с">–<input type="date" name="created_to" value="{{ created_to }}" aria-label="Создана по"></div>{% endif %}
+        <label>Срок</label>
+        <select name="due"><option value="">любой</option>{% for key, t in due_periods %}<option value="{{ key }}" {{ 'selected' if due == key }}>{{ t }}</option>{% endfor %}</select>
+        {% if due == 'custom' %}<div class="period"><input type="date" name="due_from" value="{{ due_from }}" aria-label="Срок с">–<input type="date" name="due_to" value="{{ due_to }}" aria-label="Срок по"></div>{% endif %}
+        <label>Вид</label>
+        <select name="kview"><option value="boards">доски колонками</option><option value="list" {{ 'selected' if view == 'list' }}>одним списком</option></select>
+        <div class="form-actions"><button class="btn primary">Показать</button>{% if nf or space or q or mine %}<a class="btn ghost" href="/commitments?view=kaiten">Сбросить</a>{% endif %}</div>
+      </div>
+    </details>
+  </form>
+  <form method="post" action="/jobs/run" data-busy="Обновляю…"><input type="hidden" name="name" value="collect:kaiten">
+    <button class="btn" title="Обновить из Kaiten"><svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Обновить</button></form>
+</div>
+
+{% if not settings.kaiten.enabled and not cards %}<div class="d3-card t3-note">Kaiten не подключён. <a href="/settings?tab=kaiten">Подключить</a>: здесь появятся карточки отслеживаемых пространств.</div>{% endif %}
+
+{% if view == 'boards' %}
+  {% for b in boards %}
+  <section class="t3-kboard" aria-label="{{ b.space_title }}{{ ' / ' if b.space_title }}{{ b.title }}">
+    <div class="t3-kboard-h">
+      <h2>{{ b.space_title }}{{ ' / ' if b.space_title }}{{ b.title }}</h2>
+      <span class="n">{{ b.count }} {{ plural(b.count, 'карточка', 'карточки', 'карточек') }}{% if b.stale %} · <span class="t3-amb">{{ b.stale }} без движения</span>{% endif %}</span>
+      <span class="grow"></span>
+      {% if kaiten_base and b.space_id %}<a class="small" href="{{ kaiten_base }}/space/{{ b.space_id }}" target="_blank" rel="noopener">Открыть в Kaiten {{ icons.icon('ext', 14) }}</a>{% endif %}
+    </div>
+    <div class="t3-kcols">
+      {% for col in b.columns %}
+      {% set stale = col.cards | rejectattr('idle_days', 'none') | list | length %}
+      <section class="t3-kcol" aria-label="{{ col.title }}">
+        <div class="t3-kcol-h">{{ col.title }}<span class="n">{{ col.cards | length }}</span>{% if stale %}<span class="d3-tag warn" title="{{ stale }} без движения">{{ stale }} без движения</span>{% endif %}</div>
+        {% for c in col.cards %}{{ ui.kaiten_card(c) }}{% else %}<div class="t3-kempty">Пусто</div>{% endfor %}
+      </section>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <section class="t3-kboard"><p class="t3-kempty">Карточек нет{% if space or who or q or mine or only %}: попробуйте сбросить фильтры{% endif %}.</p></section>
+  {% endfor %}
+{% else %}
+<section class="t3-list">
+  <div class="table-wrap">
+  <table class="t">
+    <thead><tr><th scope="col">Карточка</th><th scope="col">Исполнитель</th><th scope="col">Колонка</th><th scope="col">Срок</th></tr></thead>
+    <tbody>
+    {% for c in cards %}
+      <tr>
+        <td class="c-what"><a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.title }}</a>
+          <div class="sub2">{{ c.space_title }} / {{ c.board_title }}{% if c.lane_title %} · {{ c.lane_title }}{% endif %}{% if c.idle_days is not none %} · <span class="warn-text">{{ c.idle_days }} дн. без движения</span>{% elif c.in_column_days is not none %} · в колонке {{ c.in_column_days }} дн.{% endif %}</div></td>
+        <td>{{ c.responsible_name or '—' }}{% if c.mine %} <span class="muted">· вы</span>{% endif %}</td>
+        <td>{{ c.column_title }}</td>
+        <td class="nowrap">{% if c.due_date %}<span class="{{ 't3-red' if c.overdue }}">{{ c.due_date | date }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="4" class="muted">Карточек нет.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+<p class="t3-foot">{{ icons.icon('lock', 16) }}<span>Здесь Kaiten только для чтения, клик открывает карточку в Kaiten. Изменить карточку, поставить новую или оставить комментарий PULSE предложит, а в Kaiten это уйдёт после вашего «Да». «Без движения» значит {{ stale_days or 3 }} и больше дней без перемещения между колонками.</span></p>
+{% endblock %}

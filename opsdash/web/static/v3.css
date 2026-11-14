@@ -1,0 +1,252 @@
+/* Новый дизайн PULSE (бета, «Настройки → Основное → Дизайн»). Подключается в templates/v3/base.html поверх
+   style.css, dark.css и graphite.css: экраны, которые ещё не переехали в templates/v3, получают новые токены
+   и выглядят в тон; переехавшие экраны пользуются компонентами ниже (классы с приставкой d3-).
+   Источник — холст макетов «PULSE — редизайн» и правила «PULSE — правила макетов (тёмный стиль)».
+   Правило: цвета — только токенами ниже, цвет только у смысла, нейтральное — серым. */
+
+/* Onest (SIL Open Font License) лежит в PULSE: работает без интернета и не ходит к Google */
+@font-face { font-family: "Onest"; font-style: normal; font-weight: 400 600; font-display: swap;
+  src: url(/static/fonts/onest-cyrillic.woff2) format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Onest"; font-style: normal; font-weight: 400 600; font-display: swap;
+  src: url(/static/fonts/onest-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+/* токены и на html: скрипты (карта памяти) читают цвета с document.documentElement */
+html:has(body.d3), body.d3 {
+  /* поверхности */
+  --bg: #09090a;
+  --stage: #050506;  /* фон под окном мастера первого запуска */
+  --panel: #141416;
+  --panel-2: #1c1c20;
+  --sunken: #0d0d0f;
+  --window: #111113;
+  --backdrop: rgba(5, 5, 6, .82);
+  /* линии */
+  --line: #1c1c20;
+  --line-card: #232327;
+  --line-strong: #2a2a30;
+  --dlg-line: #26262b;
+  /* текст */
+  --text: #ededf0;
+  --text-2: #d6d6db;
+  --muted: #a3a3ad;
+  --cap: #8b8b94;
+  --faint: #5d5d66;
+  /* смысл: синий — выбрано, ссылка, «мне должны», встречи */
+  --accent: #8fb4ff;
+  --acc-dot: #5b8def;
+  --accent-soft: #142036;
+  --acc-deep: #0c1220;
+  --acc-line: #1b2b4b;
+  --acc-line-2: #2b4a86;
+  /* янтарный — скоро, застой, ждёт, «мои задачи» */
+  --warn: #f0a04b;
+  --warn-text: #ecb673;
+  --warn-soft: #2e2416;
+  --warn-deep: #15110b;
+  --warn-line: #241b0e;
+  --warn-fill: #f0a04b;
+  /* красный — просрочка и необратимое */
+  --bad: #ff8a84;
+  --bad-text: #ff8a84;
+  --bad-soft: #3a1719;
+  /* зелёный — готово, в работе, подключено */
+  --ok: #5fcf8b;
+  --ok-text: #7ddba1;
+  --ok-soft: #16281f;
+  --ok-deep: #0b1610;
+  --ok-line: #2c5a3f;
+  --google: #9a7bf0;
+  /* встречи в сетке календаря */
+  --ev-bg: #142036; --ev-fg: #8fb4ff; --ev-line: #1b2b4b;
+  --evg-bg: #141416; --evg-fg: #ededf0; --evg-line: #9a7bf0;
+  --today: #0c1220;
+  --weekend: #0d0d0f;
+  /* «Графит» под новыми значениями: экраны, которые ещё не переехали */
+  --g-fill: #1c1c20;
+  --g-fill-hover: #26262b;
+  --g-hair: #1c1c20;
+  --g-hover: #141416;
+  --g-active: #1c1c20;
+  --g-subtle: #0d0d0f;
+  --g-seg-on: #26262b;
+  --g-strong: #ededf0;
+  --g-nav-text: #d6d6db;
+  --g-on-accent: #09090a;
+  --g-side: #0d0d0f;
+  --g-side-solid: #0d0d0f;
+  --g-card: #141416;
+  --g-float: #141416;
+  --g-dlg: #111113;
+  --g-field: #0d0d0f;
+  --g-primary: #ededf0;
+  --g-primary-hover: #d6d6db;
+  --g-ring: none;
+  --g-focus: rgba(143, 180, 255, .55);
+  --g-scroll: #2a2a30;
+  --g-glow-1: transparent; --g-glow-2: transparent; --g-glow-3: transparent;
+  --g-mark: #ededf0;
+  --radius: 14px;
+  --shadow-card: none;
+  --shadow-raised: none;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, .5);
+  --shadow-dlg: 0 30px 80px rgba(0, 0, 0, .6);
+  --font: "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: dark;
+}
+html:has(body.d3) { background: #09090a; }
+body.d3 a { color: var(--accent); }
+body.d3 .ico { stroke-width: 1.8; }
+
+/* --- каркас: меню 248 px, поле страницы 24×32 --- */
+body.d3 .sidebar { width: 248px; flex: none; box-sizing: border-box; padding: 16px 12px; background: var(--sunken);
+  border-right: 1px solid var(--line); backdrop-filter: none; }
+body.d3 .brand { padding: 2px 8px 18px; font-size: 16px; gap: 10px; }
+body.d3 .brand-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--text); color: var(--bg); font-size: 14px; }
+body.d3 .nav { display: flex; flex-direction: column; gap: 2px; }
+body.d3 .nav-g { height: auto; padding: 18px 10px 6px; font-size: 13px; color: var(--cap); }
+body.d3 .nav a { height: 36px; padding: 0 10px; gap: 12px; border-radius: 8px; color: var(--text-2); font-size: 15px; }
+body.d3 .nav a .ico { color: var(--cap); }
+body.d3 .nav a:hover { background: var(--panel); color: var(--text); }
+body.d3 .nav a.active { background: var(--panel-2); color: var(--text); font-weight: 500; }
+body.d3 .nav a.active .ico { color: var(--text); }
+body.d3 .nav .badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; font-size: 12px;
+  background: var(--panel-2); color: var(--muted); }
+body.d3 .nav .badge.acc { background: var(--accent-soft); color: var(--accent); }
+body.d3 .nav .badge.bad { background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .nav .badge.warn { background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .side-foot { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+body.d3 .side-links { display: flex; gap: 14px; margin-bottom: 6px; font-size: 13px; }
+body.d3 .side-links a { color: var(--muted); }
+body.d3 .side-links a.active, body.d3 .side-links a:hover { color: var(--text); text-decoration: none; }
+body.d3 .side-foot p { margin: 0; font-size: 12px; color: var(--cap); line-height: 1.5; }
+@media (min-width: 761px) { body.d3 .sidebar { display: flex; flex-direction: column; } }  /* уже — нижняя панель */
+body.d3 .main { padding: 24px 32px 48px; min-width: 0; }
+body.d3.nav-collapsed .sidebar:not(:hover):not(:focus-within) .side-links { display: none; }
+
+/* --- текст --- */
+body.d3 h1 { font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -.01em; }
+body.d3 h2 { font-size: 17px; font-weight: 600; }
+body.d3 .muted { color: var(--muted); }
+body.d3 .small { font-size: 13px; }
+
+/* --- кнопки: 36, в окне 38, маленькая 30; главная — светлая; синих и зелёных заливок нет --- */
+body.d3 .btn { height: 36px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-strong);
+  background: var(--panel-2); color: var(--text); font-size: 14px; font-weight: 400; box-shadow: none; }
+body.d3 .btn:hover { background: #26262b; border-color: var(--line-strong); text-decoration: none; }
+body.d3 .btn.primary, body.d3 .btn.primary:hover { background: var(--text); border: 1px solid var(--text); color: var(--bg); font-weight: 500; }
+body.d3 .btn.primary:hover { background: var(--text-2); }
+body.d3 .btn.sm { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px; }
+body.d3 .btn.lg { height: 38px; }
+body.d3 .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+body.d3 .btn.ghost:hover { background: var(--panel); color: var(--text); }
+body.d3 .btn.danger, body.d3 .btn.bad { background: transparent; color: var(--bad-text); border-color: var(--line-strong); }
+body.d3 dialog .btn, body.d3 .dlg .btn { height: 38px; }
+body.d3 dialog .btn.sm, body.d3 .dlg .btn.sm { height: 30px; }
+
+/* --- поля --- */
+body.d3 input[type=text], body.d3 input[type=search], body.d3 input[type=date], body.d3 input[type=time],
+body.d3 input[type=number], body.d3 input[type=email], body.d3 input[type=password], body.d3 select, body.d3 textarea {
+  background: var(--sunken); border: 1px solid var(--line-card); border-radius: 10px; color: var(--text); font-family: var(--font); }
+body.d3 input[type=text], body.d3 input[type=search], body.d3 input[type=date], body.d3 input[type=time],
+body.d3 input[type=number], body.d3 input[type=email], body.d3 input[type=password], body.d3 select { height: 36px; }
+body.d3 input:focus, body.d3 select:focus, body.d3 textarea:focus { outline: 2px solid var(--g-focus); outline-offset: 0; border-color: var(--acc-line-2); }
+
+/* --- переключатель видов: плашка #141416, сегмент 30, выбранный #26262b --- */
+body.d3 .seg { display: inline-flex; padding: 3px; gap: 0; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+body.d3 .seg > a, body.d3 .seg > button { height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; white-space: nowrap; box-shadow: none; }
+body.d3 .seg > a.active, body.d3 .seg > button.active, body.d3 .seg > [aria-current=page], body.d3 .seg > [aria-pressed=true] {
+  background: #26262b; color: var(--text); font-weight: 500; }
+body.d3 .seg > a:hover { text-decoration: none; color: var(--text); }
+
+/* --- карточки, чипы --- */
+body.d3 .card { background: var(--panel); border: 1px solid var(--line-card); border-radius: 14px; box-shadow: none; }
+body.d3 .chip { height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; background: var(--panel-2);
+  color: var(--text-2); border: 0; display: inline-flex; align-items: center; }
+body.d3 .chip.work { background: var(--ok-soft); color: var(--ok-text); }
+body.d3 .alert.ok { background: var(--ok-soft); color: var(--ok-text); border: 1px solid var(--ok-line); border-radius: 12px; }
+body.d3 .alert.bad { background: var(--bad-soft); color: var(--bad-text); border: 0; border-radius: 12px; }
+
+/* --- окна: радиус 18, фон окна, затемнение под ним --- */
+body.d3 dialog, body.d3 .modal { background: var(--window); border: 1px solid var(--dlg-line); border-radius: 18px; color: var(--text); }
+body.d3 dialog::backdrop { background: var(--backdrop); }
+body.d3 .dlg { background: var(--window); border: 1px solid var(--dlg-line); border-radius: 18px; color: var(--text); font-size: 15px;
+  line-height: 1.45; box-shadow: var(--shadow-dlg); }
+body.d3 .dlg::backdrop { background: var(--backdrop); }
+
+/* --- кнопка: иконка и текст в один ряд, по центру --- */
+body.d3 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; box-sizing: border-box; }
+body.d3 .btn .ico { flex: none; }
+
+/* --- меню «…» (details.menu): плашка радиус 12, пункты высотой 36 --- */
+body.d3 details.menu { position: relative; }
+body.d3 details.menu > summary { list-style: none; }
+body.d3 details.menu > summary::-webkit-details-marker { display: none; }
+body.d3 .menu > summary.btn.icon { width: 36px; padding: 0; }
+body.d3 .menu[open] > summary.btn { background: var(--g-seg-on); border-color: var(--line-strong); color: var(--text); }
+body.d3 .menu-pop { min-width: 220px; box-sizing: border-box; padding: 6px; border-radius: 12px; background: var(--panel);
+  border: 1px solid var(--line-strong); box-shadow: var(--shadow-pop); }
+body.d3 .menu-pop form { margin: 0; }
+body.d3 .menu-i { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; box-sizing: border-box;
+  border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: inherit; font-size: 14px; text-align: left;
+  text-decoration: none; cursor: pointer; }
+body.d3 .menu-i .ico { color: var(--cap); flex: none; }
+body.d3 .menu-i:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
+body.d3 .menu-i.danger, body.d3 .menu-i.danger .ico { color: var(--bad-text); }
+body.d3 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line-card); }
+
+/* --- всплывающая панель (фильтр, «добавить», карточка встречи): фон окна, радиус 14, тень --- */
+body.d3 .d3-pop { box-sizing: border-box; padding: 14px; border-radius: 14px; background: var(--window); border: 1px solid var(--dlg-line);
+  color: var(--text); box-shadow: var(--shadow-pop); }
+
+/* --- подписи полей: в новых формах расстояние задаёт gap контейнера, классический отступ сверху не нужен --- */
+body.d3 label:has(> input, > select, > textarea), body.d3 .d3-f > label { margin-top: 0; }
+body.d3 .d3-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+body.d3 .d3-f > label { margin-bottom: 0; font-size: 13px; font-weight: 400; color: var(--muted); }
+
+/* ================= компоненты переехавших экранов (приставка d3-) ================= */
+.d3-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 20px; }
+.d3-head > .t { flex: 1 1 auto; min-width: 0; }
+.d3-head h1 { margin: 0; }
+.d3-head .sub { margin: 6px 0 0; color: var(--muted); }
+.d3-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 20px; }
+.d3-bar .grow { flex: 1 1 0; }
+.d3-search { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 1px solid var(--line-card);
+  border-radius: 10px; background: var(--sunken); color: var(--cap); flex: 0 1 260px; box-sizing: border-box; }
+.d3-search input { flex: 1 1 auto; min-width: 0; border: 0 !important; outline: 0 !important; background: transparent !important; height: auto !important; color: var(--text); font-size: 14px; padding: 0; }
+.d3-sec { box-sizing: border-box; padding: 18px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 8px; }
+.d3-sec-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-bottom: 6px; }
+.d3-sec-h h2 { margin: 0; font-size: 16px; }
+.d3-n { font-size: 13px; color: var(--cap); }
+.d3-card { box-sizing: border-box; padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); }
+.d3-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; flex: none; }
+.d3-tag.neu { background: var(--panel-2); color: var(--text-2); }
+.d3-tag.acc { background: var(--accent-soft); color: var(--accent); }
+.d3-tag.warn { background: var(--warn-soft); color: var(--warn-text); }
+.d3-tag.ok { background: var(--ok-soft); color: var(--ok-text); }
+.d3-tag.bad { background: var(--bad-soft); color: var(--bad-text); }
+.d3-tag.dash { background: transparent; border: 1px dashed var(--line-strong); color: var(--muted); }
+.d3-ell { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.d3-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.d3-dash { border-style: dashed !important; background: transparent !important; }
+.d3-act { display: flex; gap: 8px; justify-content: flex-end; flex: none; }
+.d3-act .btn { width: 88px; padding: 0; }
+
+@media (max-width: 900px) {
+  body.d3 .main { padding: 16px 16px 80px; }
+  body.d3 h1 { font-size: 24px; }
+}
+/* телефон: кнопки шапки делят строку поровну, а не стоят столбиком разной ширины */
+@media (max-width: 600px) {
+  body.d3 .d3-head > .btn, body.d3 .d3-head > form { flex: 1 1 0; min-width: 0; margin: 0; }
+  body.d3 .d3-head > form > .btn { width: 100%; }
+}

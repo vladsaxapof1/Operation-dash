@@ -1,0 +1,134 @@
+{#- Настройки → Подключения в новом дизайне (макеты Settings.dc.html и ConnectionModals.dc.html): «PULSE в вашем
+    Claude Code» синей плашкой, «Здоровье» плитками, группы карточками в сетке, окно источника одной колонкой.
+    Данные те же, что у классического _connections.html (connectors.catalog, doctor.run, mcp_server.status);
+    формы источников общие с классическим дизайном: templates/connectors/<id>.html #}
+{% from "_conn_macros.html" import logo, action %}
+{% import "_icons.html" as icons %}
+{% macro st(c) -%}
+{% set cls = {'ok': '', 'pending': 'wr', 'setup': 'wr', 'error': 'wr'}.get(c.kind, 'no') %}
+<span class="sy-st {{ cls }}"><i></i><span>{{ c.label }}{% if c.kind == 'ok' and c.last_ok %} · обновлено {{ c.last_ok | ago }}{% endif %}</span></span>
+{%- endmacro %}
+
+<div class="sy-gh"><h2>Подключения</h2><span>подключено {{ catalog.on }} из {{ catalog.total }}{% if catalog.problems %} · <b style="color:var(--warn-text);font-weight:400">{{ catalog.problems }} {{ 'требует' if catalog.problems == 1 else 'требуют' }} внимания</b>{% endif %} · <a href="/welcome">мастер первого запуска</a></span></div>
+<p class="sy-hint" style="margin-top:-12px">Всё хранится на этом компьютере: пароли и ключи в папке <code>secrets</code>, письма и сообщения в <code>data</code>. Наружу уходит только текст для разбора, в {{ catalog.engine }} по вашей подписке. <a href="/settings?tab=data">Что PULSE делает с данными →</a></p>
+
+{% if pulse_mcp %}
+{#- PULSE в вашем Claude Code (opsdash.mcp_server): сам PULSE как MCP-сервер только для чтения для сессий Claude Code #}
+{% set mcp_on = pulse_mcp.on and not pulse_mcp.stale %}
+<section class="sy-pmcp{{ '' if mcp_on else ' off' }}" id="pulse-mcp" aria-labelledby="pulse-mcp-h">
+  <div class="sy-pmcp-h">
+    <span class="sy-pmark" aria-hidden="true">P</span>
+    <div class="t">
+      <h2 id="pulse-mcp-h">PULSE в вашем Claude Code <span class="sy-pill">MCP · только чтение</span></h2>
+      <p>Claude Code в любой папке сам читает PULSE: встречи и расшифровки, задачи с ходом, решения и проекты. Спросите в сессии проекта «что решили по бюджету склада?», и он найдёт сам, пересказывать не нужно.</p>
+    </div>
+    <div class="sy-pmcp-act">
+      {% if mcp_on %}<span class="sy-st"><i></i>подключено</span>{% elif pulse_mcp.on %}<span class="sy-st wr"><i></i>подключено к другой папке PULSE</span>{% else %}<span class="sy-st no"><i></i>не подключено</span>{% endif %}
+      <form method="post" action="/settings/pulse-mcp" data-busy="Подключаю…">
+        {% if mcp_on %}<button class="btn">Отключить</button>
+        {% else %}<input type="hidden" name="on" value="1"><button class="btn primary">{{ 'Переподключить' if pulse_mcp.on else 'Подключить' }}</button>{% endif %}
+      </form>
+    </div>
+  </div>
+  <details><summary>Подробнее: инструменты, что видит сессия, подключение вручную</summary>
+    <p>{% if mcp_on %}У Claude есть инструменты PULSE: {{ pulse_mcp.tools }}. {% elif pulse_mcp.on %}PULSE перенесли или переустановили: «Переподключить» пропишет новую папку. {% endif %}Изменить что-то в PULSE из сессии нельзя: что агент выяснил или сделал по задаче, он присылает вам на «Да» (Память → От агентов). Самих чатов и писем сессия не видит, только то, что PULSE записал из них в ход задач. Подключение хранится в настройках Claude Code (<code>~/.claude.json</code>), в папки проектов ничего не кладётся; открытые сессии увидят PULSE после перезапуска.</p>
+    <p>Подключить вручную</p><code class="sy-code">{{ pulse_mcp.manual }}</code>
+  </details>
+</section>
+{% endif %}
+
+{% if health %}
+{#- «Здоровье» (CON-5): помощник, фоновые задания, уведомления, записи, диск, ошибки, автозапуск; то же — ./ops doctor #}
+<section class="sy-sec wide" aria-labelledby="conn-health-h">
+  <div class="sy-gh"><h2 id="conn-health-h">Здоровье</h2><span class="sy-st {{ {'ok': '', 'warn': 'wr', 'bad': 'bad'}.get(health.system_worst, 'no') }}"><i></i>{{ health.system_summary }}</span></div>
+  <ul class="sy-health">
+    {% for r in health.system %}
+    <li class="sy-hrow is-{{ r.level }}"><i></i>
+      <div><b>{{ r.title }}</b>{{ r.text }}
+        {% if r.fix and r.level in ('warn', 'bad') %}<div class="fix">{{ r.fix }}{% if r.link %} <a href="{{ r.link }}">Открыть →</a>{% endif %}</div>{% endif %}</div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% for g in catalog.groups %}
+{% set n_on = g.cards | selectattr('kind', 'equalto', 'ok') | list | length %}
+<section class="sy-sec wide" aria-labelledby="cg-{{ g.id }}">
+  {% if g.id == 'ai' %}
+  {#- помощники: работает один из двух, переключатель здесь же #}
+  <div class="sy-gh"><h2 id="cg-{{ g.id }}">{{ g.title }}</h2><span>работает один из двух · сейчас {{ catalog.engine }}</span>
+    <form method="post" action="/settings/ai" class="seg sy-pick-eng" aria-label="Кто работает в PULSE" style="margin-left:auto">{% for key, title in catalog.engines.items() %}<button name="engine" value="{{ key }}" class="{{ 'active' if catalog.engine_key == key }}"{% if catalog.engine_key == key %} aria-pressed="true"{% endif %}>{{ title }}</button>{% endfor %}</form></div>
+  <p class="sy-hint" style="margin-top:-4px">Claude и ChatGPT работают по одной инструкции и с одними данными. Переключить можно в любой момент: начатое доделает прежний, следующее возьмёт выбранный, а разговоры в «Спросить» продолжатся с пересказом начала.</p>
+  {% elif g.mcp %}
+  <div class="sy-gh"><h2 id="cg-{{ g.id }}">{{ g.title }}</h2><span>PULSE читает сервисы · {{ n_on }} подключено · меняет только после вашего «Да»</span></div>
+  <p class="sy-hint" style="margin-top:-4px">Linear, Notion, GitHub, CRM: помощник читает их сам по протоколу MCP. Что ему можно читать, решаете вы в окне подключения.{% if catalog.engine_key == 'chatgpt' %} <span style="color:var(--warn-text)">ChatGPT пока не пользуется MCP-подключениями, они работают с Claude.</span>{% endif %}</p>
+  {% else %}
+  <div class="sy-gh"><h2 id="cg-{{ g.id }}">{{ g.title }}</h2><span>{{ n_on }} из {{ g.cards | length }}{% if g.cards | selectattr('kind', 'in', ['error', 'setup', 'pending']) | list %} · нужно внимание{% endif %}</span></div>
+  {% endif %}
+  <div class="sy-grid">
+    {% for c in g.cards %}
+    <a class="sy-cn{{ ' off' if c.kind in ('off', 'standby') }}{{ ' err' if c.kind == 'error' }}{{ ' on' if c.active }}" href="{{ c.href or (('/settings?tab=' ~ c.id) if c.panel else c.page) }}">
+      <div class="sy-cn-top">{{ logo(c) }}<div><b>{{ c.title_now }}</b><span class="sm" title="{{ c.catches }}">{{ c.catches }}</span></div></div>
+      <div class="sy-cn-ft">{{ st(c) }}<span class="btn sm{{ ' primary' if c.kind == 'error' }}">{{ action(c) }}</span></div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+
+{% if catalog.soon %}
+{#- «Скоро» (CON-8): что подключаем следующим; «Нужно мне» — задача разработчику на GitHub с названием сервиса #}
+<section class="sy-sec wide" aria-labelledby="cg-soon">
+  <div class="sy-gh"><h2 id="cg-soon">Скоро</h2><span>подключения, которые делаем следующими</span></div>
+  {% if catalog.soon[0].request %}<p class="sy-hint" style="margin-top:-4px">«Нужно мне» откроет задачу разработчику на GitHub с названием сервиса, так видно, что подключать первым. PULSE ничего не отправляет сам.</p>{% endif %}
+  <div class="sy-grid">
+    {% for c in catalog.soon %}
+    <div class="sy-cn off">
+      <div class="sy-cn-top">{{ logo(c) }}<div><b>{{ c.title }}</b><span class="sm" title="{{ c.catches }}">{{ c.catches }}</span></div></div>
+      <div class="sy-cn-ft"><span class="sy-st no"><i></i>скоро</span>{% if c.request %}<a class="btn sm" href="{{ c.request }}" target="_blank" rel="noopener">Нужно мне ↗</a>{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+<p class="sy-hint">Порядок подключения с нуля: Telegram-бот, Telegram, почта, календарь, Kaiten. Пошагово в <a href="/help/02-подключения">справке</a>.</p>
+
+{% if conn %}
+{#- окно источника одной колонкой: шапка, шаги, что читает, форма. Сохранили форму — страница открывается снова с этим же
+    окном (?tab=<источник>); закрыли — адрес возвращается к каталогу (app.js, #conn-dlg) #}
+<dialog class="dlg dlg-conn sy-dlg" id="conn-dlg" aria-labelledby="conn-title" data-open-on-load data-conn="{{ conn.id }}">
+  <div class="sy-dlg-b">
+    <div class="sy-dlg-hd">{{ logo(conn, 44) }}
+      <div><h2 id="conn-title" class="dlg-title">{{ conn.title_now }}</h2>{{ st(conn) }}{% if conn.how %}<span class="sy-cap"> · {{ conn.how }}{% if conn.minutes %}, около {{ conn.minutes }} мин{% endif %}</span>{% endif %}</div>
+      <button type="button" class="sy-ib" data-dlg-close aria-label="Закрыть" title="Закрыть (Esc)">{{ icons.icon('close') }}</button>
+    </div>
+    {% if conn.steps and conn.steps | length > 1 %}
+    <ol class="sy-steps" aria-label="Шаги подключения">
+      {% for s in conn.steps %}<li class="{{ 'done' if s.done }}{{ ' now' if conn.todo and s.title == conn.todo.title }}"{% if conn.todo and s.title == conn.todo.title %} aria-current="step"{% endif %}><b>{% if s.done %}{{ icons.icon('check', 12) }}{% else %}{{ loop.index }}{% endif %}</b>{{ s.title }}</li>{% endfor %}
+    </ol>
+    {% endif %}
+    {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+    {% if err %}<div class="alert bad">{{ err }}</div>{% endif %}
+    {% if conn.kind == 'error' %}<div class="sy-ban warn" style="max-width:none">{{ icons.icon('bell') }}<div class="t"><b>Сбор не работает: {{ conn.label[8:] if conn.label.startswith('ошибка: ') else conn.label }}</b>{% if conn.error %}<span>{{ conn.error[:300] }}</span>{% endif %}</div></div>
+    {% elif conn.kind == 'pending' %}<div class="sy-ban acc" style="max-width:none">{{ icons.icon('hourglass') }}<div class="t"><b>Готово</b><span>Первый сбор в течение нескольких минут, статус на карточке обновится сам</span></div></div>
+    {% elif conn.kind == 'paused' %}<div class="sy-ban" style="max-width:none">{{ icons.icon('pause') }}<div class="t"><b>Настроено, но выключено</b><span>PULSE ничего не собирает. Включите галочкой ниже и сохраните</span></div></div>
+    {% endif %}
+    {% if conn.reads or conn.skips or conn.never %}
+    <dl class="sy-rd" aria-label="Что PULSE читает">
+      <dt>Читает</dt><dd>{{ conn.reads }}</dd>
+      <dt>Не читает</dt><dd>{{ conn.skips }}</dd>
+      <dt>Никогда</dt><dd class="nv">{{ conn.never }}</dd>
+    </dl>
+    {% endif %}
+    {% if conn.enables or conn.catches %}
+    <details class="sy-blk"><summary><span>Что станет возможно{% if conn.enables %} · {{ conn.enables | length }}{% endif %}</span>{{ icons.icon('chevron', 16) }}</summary>
+      <div class="bb">{% if conn.catches %}<span>{{ conn.catches }}</span>{% endif %}
+        {% if conn.enables %}<ul>{% for e in conn.enables %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+        {% if conn.help %}<a class="sy-lnk" href="/help/02-подключения#{{ conn.help }}" target="_blank" rel="noopener">Подробная инструкция →</a>{% endif %}</div>
+    </details>
+    {% endif %}
+    <div class="sy-form-src">{% include "connectors/" ~ conn.id ~ ".html" %}</div>
+  </div>
+</dialog>
+{% endif %}

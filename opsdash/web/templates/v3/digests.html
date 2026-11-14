@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Дайджесты{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-know.css?v={{ static_v }}">{% endblock %}
+{% block content %}
+{#- Дайджесты, новый дизайн: слева список по дням, справа выбранный дайджест читаемым текстом #}
+{% set sch = settings.schedule %}
+<div class="d3-head">
+  <div class="t"><h1>Дайджесты</h1>
+    <p class="sub">{% if sch.digest_morning or sch.digest_evening %}{% if sch.digest_morning %}Утром в {{ sch.digest_morning | hhmm }}{% endif %}{% if sch.digest_morning and sch.digest_evening %} и вечером{% elif sch.digest_evening %}Вечером{% endif %}{% if sch.digest_evening %} в {{ sch.digest_evening | hhmm }}{% endif %} в Telegram-бот{% else %}Ежедневные дайджесты выключены{% endif %}
+      {%- if sch.weekly_time %} · итоги недели {{ ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'][(sch.weekly_day or 5) - 1] }}{% endif %}
+      {%- if sch.groups_digest %} · сводка групп в {{ sch.groups_digest | hhmm }}{% endif %} · <a href="/settings?tab=schedule#digests">расписание</a></p></div>
+  <form method="post" action="/digests/run" data-busy="Запускаю…"><input type="hidden" name="tab" value="{{ tab }}"><button class="btn primary">Собрать сейчас</button></form>
+</div>
+
+<div class="d3-bar">
+  <nav class="seg" aria-label="Какие дайджесты">{% for key, title in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}"{% if tab == key %} aria-current="page"{% endif %}>{{ title }}{% if counts[key] %}<span class="kn-seg-n">{{ counts[key] }}</span>{% endif %}</a>{% endfor %}</nav>
+</div>
+
+{% if items %}
+<div class="kn-dg">
+  <section class="kn-dg-list" aria-label="Список дайджестов">
+    {% for d in items %}
+    {% if loop.first or d.day_label != loop.previtem.day_label %}<span class="kn-gl">{{ d.day_label }}</span>{% endif %}
+    <a class="kn-dg-i{{ ' on' if current and d.id == current.id }}" href="?tab={{ tab }}&d={{ d.id }}"{% if current and d.id == current.id %} aria-current="true"{% endif %}>
+      <span class="kn-dg-h"><b class="d3-ell">{{ d.title }}</b><time>{{ d.local.strftime('%H:%M') }}</time></span>
+      <span class="kn-dg-x">{{ d.preview | truncate(90, True, '…') }}</span>
+    </a>
+    {% endfor %}
+  </section>
+  <article class="kn-dg-doc" data-copy-scope>
+    <div class="kn-dg-top">
+      <div class="kn-grow"><h2>{{ current.title }} · {{ current.day_label | lower }}</h2>
+        <p class="kn-meta">Собран в {{ current.local.strftime('%H:%M') }}{% if tab != 'groups' or settings.notifications.groups_digest %} · то же ушло в Telegram-бот{% endif %}</p></div>
+      <div class="kn-rw">
+        <button type="button" class="btn" data-copy-btn>Копировать</button>
+        <form method="post" action="/digests/{{ current.id }}/resend" data-confirm="Отправить этот дайджест в Telegram-бот ещё раз?"><button class="btn">Отправить ещё раз</button></form>
+      </div>
+    </div>
+    <div class="kn-dg-text digest-text" data-copy>{{ current.text | tg }}</div>
+    <p class="kn-cap">{% if next_at %}Следующий дайджест {{ next_label }} в {{ next_at.strftime('%H:%M') }}. {% endif %}Что включать и когда, настраивается в <a href="/settings?tab=schedule#digests">расписании</a>.</p>
+  </article>
+</div>
+{% else %}
+<section class="d3-sec"><p class="kn-empty">{% if tab == 'weekly' %}Итогов недели пока не было.{% elif tab == 'groups' %}Сводок групп пока не было. Нужны рабочие группы, которые PULSE читает: Настройки → Подключения → Telegram.{% else %}Дайджестов пока не было.{% endif %}</p></section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% block title %}Переписка{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-chats.css?v={{ static_v }}">{% endblock %}
+{% block content %}
+{#- Переписка, новый дизайн (макеты Chats, ChatsModals): слева чаты, справа лента пузырями. Отвечать — из Сводки
+    и в самом мессенджере: PULSE читает, но не пишет в чаты. Фильтр «Ждут ответа / Все чаты» — без скриптов
+    (радиокнопки и :has в v3-chats.css) #}
+{% set waiting = chats | selectattr('att') | list %}
+{% macro initials(name) -%}
+{%- set ns = namespace(s='') -%}
+{%- for ch in (name or '') if not ns.s and ch.isalnum() %}{% set ns.s = ch %}{% endfor -%}
+{{ ns.s | upper or '?' }}
+{%- endmacro %}
+<div class="c3">
+<div class="d3-head">
+  <div class="t">
+    <h1>Переписка</h1>
+    <p class="sub">PULSE читает {{ chats_total }} {{ plural(chats_total, 'чат', 'чата', 'чатов') }}
+      {%- if attention %} · {{ attention | length }} {{ plural(attention | length, 'сообщение ждёт', 'сообщения ждут', 'сообщений ждут') }} вашего ответа в <a href="/">Сводке</a>{% endif %}
+      {%- if triage.busy %} · разбираю свежие сообщения{% elif triage.pending %} · {{ triage.pending }} ждут разбора{% else %} · все сообщения разобраны{% endif %}
+      {%- if synced %} · обновлено {{ synced | local('%H:%M') }}{% endif %}</p>
+  </div>
+  <a class="btn" href="/settings?tab=telegram">Какие чаты читать</a>
+  <form method="post" action="/refresh" class="inline"><button class="btn" title="Забрать новые сообщения сейчас">
+    <svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg>Обновить</button></form>
+  {% call ui.menu('Ещё') %}
+    <form method="post" action="/jobs/run"><input type="hidden" name="name" value="triage"><button class="menu-i" {{ 'disabled' if triage.busy }}>Разобрать новые сейчас</button></form>
+    <button type="button" class="menu-i" data-dlg-open="closed-dlg">История отметок</button>
+    {% if triage.last_ts %}<div class="menu-note">Последний разбор {{ triage.last_ts | ago }}: {{ triage.last }}</div>{% endif %}
+  {% endcall %}
+</div>
+
+{#- фильтр списка: радиокнопки без формы — ничего не отправляют #}
+<input class="c3-f" type="radio" name="c3-filter" id="c3-f-all" checked>
+<input class="c3-f" type="radio" name="c3-filter" id="c3-f-wait">
+<div class="d3-bar">
+  {% if chats %}<div class="c3-pills" role="group" aria-label="Какие чаты показать">
+    {% if waiting %}<label class="c3-pill" for="c3-f-wait">Ждут ответа · {{ waiting | length }}</label>{% endif %}
+    <label class="c3-pill" for="c3-f-all">Все чаты</label>
+  </div>{% endif %}
+  <span class="grow"></span>
+  <form method="get" class="d3-search c3-search" role="search">{% if chat %}<input type="hidden" name="chat" value="{{ chat }}">{% endif %}
+    {{ icons.icon('search', 16) }}<input type="search" name="q" value="{{ q }}" placeholder="Поиск по сообщениям" aria-label="Поиск по сообщениям"></form>
+</div>
+
+{#- строка чата: кружок с буквами, название и последнее сообщение; справа — когда и «ждёт» #}
+{% macro chat_item(c) %}
+    <a class="chat-i c3-c{{ ' active' if c.key == chat }}" href="?chat={{ c.key | urlencode }}"{% if c.key == chat %} aria-current="true"{% endif %}{% if c.att %} data-wait{% endif %}>
+      <span class="c3-av{{ ' sq' if c.kind == 'mail' }}" aria-hidden="true">{% if c.kind == 'mail' %}<svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>{% else %}{{ initials(c.title) }}{% endif %}</span>
+      <span class="c3-c-b"><b class="d3-ell">{{ c.title }}</b>
+        <span class="c3-c-x">{% if c.last_text %}{{ 'Вы' if c.last_out else (c.last_sender or '').split(' ')[0] }}: {{ c.last_text | truncate(120, True, '…') }}{% else %}сообщений нет{% endif %}</span></span>
+      <span class="c3-c-m"><span class="c3-c-t">{{ c.last_ts | ago if c.last_ts else '' }}</span>
+        {% if c.att %}<span class="d3-tag {{ 'bad' if c.urgent else 'warn' }}" title="Ждут вашего ответа: {{ c.att | length }}">{{ 'срочно' if c.urgent else 'ждёт' }}{{ (' · ' ~ c.att | length) if c.att | length > 1 }}</span>{% endif %}</span>
+    </a>
+{% endmacro %}
+<div class="c3-wrap">
+  <section class="c3-list" data-chat-list aria-label="Чаты">
+    {% for source, items in groups.items() %}
+    {% set rest = items | selectattr('more') | list %}
+    <div class="c3-src">{{ SOURCE_TITLES.get(source, source) }}</div>
+    {% for c in items | rejectattr('more') %}{{ chat_item(c) }}{% endfor %}
+    {% if rest %}<details class="c3-more"><summary><span class="grow">Ещё {{ rest | length }} {{ plural(rest | length, 'чат', 'чата', 'чатов') }}</span>{{ icons.icon('chevron', 16) }}</summary>
+      {% for c in rest %}{{ chat_item(c) }}{% endfor %}</details>{% endif %}
+    {% else %}
+    <div class="c3-empty">
+      <span class="c3-eic">{{ icons.icon('chats', 22) }}</span>
+      <div class="c3-empty-t">PULSE пока не читает ни одного чата</div>
+      <p>Выберите рабочие чаты, и здесь появятся сообщения, которые ждут вашего ответа.</p>
+      <div class="c3-empty-a"><a class="btn primary" href="/settings?tab=telegram">Выбрать чаты</a><a class="btn" href="/settings?tab=connections">Подключения</a></div>
+    </div>
+    {% endfor %}
+    {% if off_sources %}<p class="c3-off">{{ off_sources | join(', ') }} — не {{ 'подключена' if off_sources | length == 1 and off_sources[0] == 'почта' else ('подключён' if off_sources | length == 1 else 'подключены') }} · <a href="/settings?tab=connections">подключить</a></p>{% endif %}
+  </section>
+
+  <section class="c3-pane" aria-label="{{ ('Поиск «' ~ q ~ '»') if q else (current.title if current else 'Чат') }}">
+    {% if q %}
+    <div class="c3-h">
+      <span class="c3-av" aria-hidden="true">{{ icons.icon('search', 16) }}</span>
+      <div class="c3-h-t"><div class="c3-h-n d3-ell">Поиск «{{ q }}»</div>
+        <div class="c3-h-s">{{ results | length }} {{ plural(results | length, 'сообщение', 'сообщения', 'сообщений') }}{% if results | length == 60 %} (показаны последние 60){% endif %}</div></div>
+      <a class="btn" href="?{{ 'chat=' ~ (chat | urlencode) if chat }}">{{ icons.icon('close', 16) }}Снять поиск</a>
+    </div>
+    <div class="c3-feed">
+      {% for m in results %}
+      <div class="c3-msg{{ ' me' if m.is_outgoing }}">
+        <div class="c3-msg-w"><a href="?chat={{ (m.source ~ '|' ~ m.chat_id) | urlencode }}#m{{ m.id }}">{{ m.chat_title }}</a> · {{ 'Вы' if m.is_outgoing else m.sender_name }}</div>
+        <div class="c3-msg-t">{{ m.text }}</div>
+        <time>{{ m.ts | local('%d.%m, %H:%M') }}</time>
+      </div>
+      {% else %}<p class="c3-feed-empty">Ничего не нашлось.</p>{% endfor %}
+    </div>
+    {% elif current %}
+    <div class="c3-h">
+      <span class="c3-av{{ ' sq' if current.kind == 'mail' }}" aria-hidden="true">{{ initials(current.title) }}</span>
+      <div class="c3-h-t"><div class="c3-h-n d3-ell">{{ current.title }}</div>
+        <div class="c3-h-s">{{ SOURCE_TITLES.get(current.source, current.source) }}{% if current.username %} · @{{ current.username }}{% endif %}{% if current.first_ts %} · читается с {{ current.first_ts | local('%d.%m') }}{% endif %}{% if chat_link %} · <a href="{{ chat_link[0] }}" target="_blank" rel="noopener">открыть в {{ SOURCE_TITLES.get(current.source, current.source) }}</a>{% endif %}</div></div>
+      <a class="btn" href="/ask?chat_ref={{ chat | urlencode }}">{{ icons.icon('ask', 16) }}Спросить о чате</a>
+      {% call ui.menu('Ещё о чате') %}
+        {% if current.source in ('telegram', 'pachca') %}<a class="menu-i" href="/settings?tab={{ current.source }}">Перестать читать</a>{% endif %}
+        <button type="button" class="menu-i" data-dlg-open="closed-dlg">История отметок</button>
+        {% if current.source in ('telegram', 'pachca') %}<div class="menu-note">«Перестать читать» откроет настройки чатов</div>{% endif %}
+      {% endcall %}
+    </div>
+    {#- новые — внизу, лента открывается на последнем сообщении; прокрутка к верху подгружает более ранние (app.js),
+        без скриптов — ссылка «Показать более ранние» #}
+    {% set many = current.kind != 'private' %}
+    <div class="c3-feed" data-chat-feed>
+      {% if more %}<a class="c3-earlier" data-feed-more href="?chat={{ chat | urlencode }}&n={{ more }}{% if messages %}#m{{ messages[0].id }}{% endif %}">Показать более ранние</a>{% endif %}
+      {% for m in messages %}
+      {% if m.day_label %}<div class="c3-day">{{ m.day_label }}</div>{% endif %}
+      <div class="c3-msg{{ ' me' if m.is_outgoing }}{{ ' flagged' if m.att }}" id="m{{ m.id }}">
+        {% if many and not m.is_outgoing %}<div class="c3-msg-w">{{ m.sender_name }}{% if m.topic %} · {{ m.topic }}{% endif %}</div>{% elif m.topic %}<div class="c3-msg-w">{{ m.topic }}</div>{% endif %}
+        <div class="c3-msg-t">{{ m.text }}</div>
+        <time>{{ m.ts | local('%H:%M') }}</time>
+      </div>
+      {% if m.att %}
+      {#- сообщение вынесено в Сводку: черновик ответа (если есть) и отметки — как на Сводке #}
+      <div class="c3-att" data-copy-scope>
+        <div class="c3-att-h">{{ icons.icon('ask', 16) }}<span>{{ 'Срочно ждёт вашего ответа' if m.att.priority == 'high' else 'Ждёт вашего ответа' }}{% if m.att.draft %} · черновик готов{% endif %}</span></div>
+        {% if m.att.draft %}<div class="c3-att-d">{{ m.att.draft }}</div><textarea hidden data-copy>{{ m.att.draft }}</textarea>{% endif %}
+        <div class="c3-att-a">
+          <a class="btn sm primary" href="/#att-{{ m.att.id }}">Ответить из Сводки</a>
+          {% if m.att.draft %}<button type="button" class="btn sm" data-copy-btn>Копировать</button>{% endif %}
+          <span class="grow"></span>
+          <form class="inline" method="post" action="/attention/{{ m.att.id }}/done"><button class="btn sm">Отвечено</button></form>
+          <form class="inline" method="post" action="/attention/{{ m.att.id }}/dismiss"><button class="btn sm">Не нужно отвечать</button></form>
+        </div>
+      </div>
+      {% endif %}
+      {% else %}<p class="c3-feed-empty">Сообщений нет.</p>{% endfor %}
+    </div>
+    <p class="c3-foot">Отвечать можно только в {{ SOURCE_TITLES.get(current.source, current.source) }}: PULSE читает, но не пишет в чаты. Янтарным отмечено то, что он вынес в Сводку.</p>
+    {% else %}
+    <p class="c3-feed-empty c3-pick">Выберите чат слева.</p>
+    {% endif %}
+  </section>
+</div>
+</div>
+
+<dialog class="dlg c3-dlg" id="closed-dlg" aria-labelledby="closed-title">
+  <div class="dlg-box" tabindex="-1">
+    <div class="c3-dlg-h"><div><h2 class="dlg-title" id="closed-title">История отметок</h2>
+      <p>Сообщения, которые вы убрали из Сводки. «Вернуть» снова покажет сообщение в ленте «Нужно от вас».</p></div>
+      <button type="button" class="c3-x" data-dlg-close aria-label="Закрыть">{{ icons.icon('close', 18) }}</button></div>
+    {% if closed %}
+    <div class="c3-hist">
+    {% for a in closed %}
+      <div class="c3-hr"><div class="c3-hr-b"><div class="d3-ell"><b>{{ a.sender_name or a.chat_title }}:</b> {{ a.summary }}</div>
+        <div class="c3-hr-m">{% if a.status == 'done' %}<span class="d3-tag ok">ответ дан</span>{% elif a.status == 'task' %}<span class="d3-tag acc">сделали задачей</span>{% else %}<span class="d3-tag neu">скрыто</span>{% endif %}{{ a.updated | ago }}</div></div>
+      <form class="inline" method="post" action="/attention/{{ a.id }}/reopen"><button class="btn sm c3-w">Вернуть</button></form></div>
+    {% endfor %}
+    </div>
+    {% else %}<div class="c3-hist-empty">Пока пусто.</div>{% endif %}
+    <div class="c3-dlg-f"><button type="button" class="btn" data-dlg-close>Закрыть</button></div>
+  </div>
+</dialog>
+{% endblock %}

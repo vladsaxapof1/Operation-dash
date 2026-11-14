@@ -1,0 +1,684 @@
+/* Новый дизайн PULSE: раздел «Задачи» (доска, список, Гант, проекты, Kaiten, страница проекта) и окна задачи.
+   Окно задачи, «Поручить агенту», «Уточнить срок» и «Без движения» открываются и на Сводке, и в Календаре,
+   поэтому файл подключён в templates/v3/base.html на всех страницах.
+   Макеты: Main, TasksList, TasksGantt, TasksProjects, TasksKaiten, Project, Task, TaskAgent, TaskModals,
+   ProjectModals, TaskTriage. Цвета только токенами из v3.css. Все селекторы начинаются с body.d3. */
+
+/* ===================== шапка и ряд управления ===================== */
+body.d3 .t3-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; margin-bottom: 16px; }
+body.d3 .t3-head h1 { margin: 0; }
+body.d3 .t3-head .t3-sum { flex: 1 1 200px; min-width: 0; color: var(--muted); }
+body.d3 .t3-head > .btn { align-self: center; }
+body.d3 .t3-sum .unfilter { color: var(--cap); font-size: 13px; }
+body.d3 .t3-sum .unfilter:hover { color: var(--text); }
+body.d3 .btn.w { width: 112px; padding: 0; flex: none; }
+body.d3 .btn.von { background: var(--g-seg-on); }
+
+body.d3 .t3-red { color: var(--bad-text); }
+body.d3 .t3-amb { color: var(--warn-text); }
+body.d3 .t3-grn { color: var(--ok-text); }
+body.d3 .cap { color: var(--cap); }
+
+body.d3 .t3-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+body.d3 .t3-bar > .seg { margin-right: auto; }
+body.d3 .t3-bar form { margin: 0; }
+body.d3 .t3-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; flex: 1 1 auto; min-width: 0; }
+body.d3 .t3-tools .d3-search { flex: 0 1 240px; }
+body.d3 .t3-tools select { width: auto; height: 36px; padding: 0 30px 0 12px; font-size: 14px; }
+body.d3 .t3-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-right: 8px; font-size: 13px; color: var(--muted); }
+body.d3 .t3-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+body.d3 .t3-legend .d { width: 8px; height: 8px; border-radius: 50%; }
+body.d3 .t3-legend .d.mine { background: var(--acc-dot); }
+body.d3 .t3-legend .d.to_me { background: var(--ok); }
+body.d3 .t3-legend .d.other { background: var(--cap); }
+body.d3 .t3-legend .d.late { background: var(--bad-text); }
+
+/* быстрые фильтры «Сегодня», «Новые», «Без срока», «Без движения» — плашка 36 со счётчиком */
+body.d3 .t3-q { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; box-sizing: border-box;
+  border: 1px solid var(--line-card); border-radius: 10px; background: var(--sunken); color: var(--text-2); font-size: 14px;
+  white-space: nowrap; cursor: pointer; text-decoration: none; }
+body.d3 .t3-q:hover { color: var(--text); border-color: var(--line-strong); text-decoration: none; }
+body.d3 .t3-q .n { color: var(--cap); font-size: 13px; }
+body.d3 .t3-q .n.acc { color: var(--accent); }
+body.d3 .t3-q .new-dot { margin: 0; }
+body.d3 .t3-q.on { background: var(--accent-soft); border-color: var(--acc-line-2); color: var(--accent); }
+body.d3 .t3-q.on .n { color: var(--accent); }
+body.d3 .t3-chk { margin: 0; }
+body.d3 .t3-chk input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+
+/* переключатель с галочкой во «Виде»: «Между коллегами», «Готово», «Стопки» */
+body.d3 .t3-tg { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; box-sizing: border-box; width: 100%;
+  border: 1px solid var(--line-card); border-radius: 10px; background: var(--sunken); color: var(--text-2); font-size: 14px;
+  white-space: nowrap; text-decoration: none; }
+body.d3 .t3-tg:hover { color: var(--text); text-decoration: none; border-color: var(--line-strong); }
+body.d3 .t3-tg .bx { width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid var(--faint); border-radius: 4px;
+  display: grid; place-items: center; flex: none; color: var(--bg); }
+body.d3 .t3-tg .n { margin-left: auto; color: var(--cap); font-size: 13px; }
+body.d3 .t3-tg.on { background: var(--accent-soft); border-color: var(--acc-line-2); color: var(--accent); }
+body.d3 .t3-tg.on .bx { background: var(--accent); border-color: var(--accent); }
+body.d3 .t3-tg.on .n { color: var(--accent); }
+
+/* всплывающие «Фильтр» и «Вид» (меню «…» и его пункты — общие, в v3.css) */
+body.d3 .t3-pop { right: 0; left: auto; width: 300px; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+body.d3 .t3-pop .ph { margin-top: 6px; font-size: 12px; color: var(--cap); }
+body.d3 .t3-pop .ph:first-child { margin-top: 0; }
+body.d3 .t3-pop .seg { display: flex; }
+body.d3 .t3-pop .seg > a { flex: 1 1 0; justify-content: center; }
+body.d3 .t3-pop select, body.d3 .t3-pop input[type=text] { width: 100%; height: 36px; }
+body.d3 .t3-pop.filter-pop { display: block; padding: 4px 16px 16px; }
+body.d3 .t3-pop.filter-pop label:not(.check) { display: block; margin: 12px 0 6px; font-size: 13px; color: var(--muted); }
+body.d3 .t3-pop .form-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+/* ===================== доска ===================== */
+body.d3 .t3-board { gap: 16px; }
+body.d3 .t3-col { box-sizing: border-box; padding: 12px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line); gap: 8px; }
+body.d3 .t3-col.k-mine { background: var(--warn-deep); border-color: var(--warn-line); }
+body.d3 .t3-col.k-to_me { background: var(--acc-deep); border-color: var(--accent-soft); }
+body.d3 .t3-col.k-done { background: var(--ok-deep); border-color: var(--ok-soft); }
+body.d3 .t3-col .col-h { padding: 2px 6px 6px; gap: 8px; }
+body.d3 .t3-col .col-h h2 { font-size: 15px; margin: 0; }
+body.d3 .t3-col.k-done .col-h h2 { color: var(--ok-text); }
+body.d3 .col-n { font-size: 14px; color: var(--cap); }
+body.d3 .cnt { min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 999px; font-size: 12px; font-weight: 600;
+  display: inline-grid; place-items: center; }
+body.d3 .cnt.bad { background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .cnt.warn { background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .t3-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--cap); }
+body.d3 .t3-dot.k-mine { background: var(--warn); }
+body.d3 .t3-dot.k-to_me { background: var(--acc-dot); }
+body.d3 .t3-dot.k-done { background: var(--ok); }
+body.d3 .t3-col .ibtn.ghost { width: 28px; height: 28px; border: 0; border-radius: 8px; color: var(--cap); background: transparent; }
+body.d3 .t3-col .ibtn.ghost:hover { background: var(--panel-2); color: var(--text); }
+body.d3 .col-empty { padding: 12px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--cap); font-size: 13px; text-align: center; }
+
+/* карточка задачи: 12×14, радиус 12, рамка; «в работе» — зелёная рамка; просрочка — красная полоска слева */
+body.d3 .task, body.d3 .stack-card { padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card);
+  box-shadow: none; color: var(--text); }
+body.d3 .task:hover, body.d3 .stack-card:hover { border-color: var(--line-strong); box-shadow: none; }
+body.d3 .task:focus-visible, body.d3 .stack-card:focus-visible { box-shadow: none; outline: 2px solid var(--g-focus); outline-offset: 0; }
+body.d3 .task.inwork { border-color: var(--ok-line); box-shadow: none; }
+body.d3 .task.inwork:hover { border-color: var(--ok); box-shadow: none; }
+body.d3 .task.overdue, body.d3 .stack-card.overdue { border-left: 1px solid var(--line-card); box-shadow: inset 3px 0 0 var(--bad-text); }
+body.d3 .task.inwork.overdue { border-left-color: var(--ok-line); }
+body.d3 .task.open, body.d3 .task.open:hover { border-color: var(--acc-line-2); box-shadow: none; }
+body.d3 .task.overdue.open { box-shadow: inset 3px 0 0 var(--bad-text); }
+body.d3 .task.rel-hl { border-color: var(--acc-line); box-shadow: none; }
+body.d3 .task.done, body.d3 .task.archived { background: var(--panel); opacity: .7; }
+body.d3 .task-what { font-size: 15px; font-weight: 500; line-height: 1.35; }
+body.d3 .task-meta { margin-top: 4px; font-size: 13px; color: var(--muted); }
+body.d3 .task-dep { color: var(--muted); }
+body.d3 .task-full { margin-top: 6px; padding-top: 2px; border-top: 1px solid var(--line-card); }
+body.d3 .task-more .task-acts { padding-top: 8px; border-top: 1px solid var(--line-card); }
+body.d3 .ibtn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--panel-2); color: var(--muted); }
+body.d3 .ibtn:hover { color: var(--text); }
+body.d3 .ibtn.ok { color: var(--ok-text); }
+body.d3 .ibtn.on { background: var(--ok-soft); color: var(--ok-text); border-color: var(--ok-line); }
+body.d3 .task-open-link { color: var(--accent); }
+body.d3 .flash { outline: 2px solid var(--acc-line-2); }
+body.d3 .ok-text { color: var(--ok-text); }
+body.d3 .warn-text { color: var(--warn-text); }
+body.d3 .bad-text { color: var(--bad-text); }
+body.d3 .quiet-mark { color: var(--warn-text); }
+
+/* приоритет: «Срочно» красный, «Высокий» янтарный, «Обычный» пунктир, «Низкий» серый */
+body.d3 .prio { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 9px; box-sizing: border-box; border-radius: 999px;
+  border: 1px solid transparent; font-size: 12px; font-weight: 400; white-space: nowrap; line-height: 1; }
+body.d3 .prio.p-urgent { background: var(--bad-soft); color: var(--bad-text); font-weight: 500; }
+body.d3 .prio.p-high { background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .prio.p-normal { background: transparent; border: 1px dashed var(--line-strong); color: var(--cap); }
+body.d3 .prio.p-low { background: var(--panel-2); color: var(--muted); }
+body.d3 .prio-menu { margin: 0 0 4px 10px; }
+body.d3 .prio-menu > summary.prio:hover { box-shadow: 0 0 0 1px var(--line-strong); }
+body.d3 .prio-pop { min-width: 260px; }
+body.d3 .prio-pop .menu-i { justify-content: space-between; }
+body.d3 .prio-pop .menu-i.on { color: var(--accent); }
+body.d3 .prio-pop .menu-i.pm-urgent { color: var(--bad-text); }
+body.d3 .prio-pop .menu-i.pm-high { color: var(--warn-text); }
+body.d3 .prio-pop .menu-i.pm-low { color: var(--muted); }
+body.d3 .prio-why { padding: 0 10px 6px; font-size: 12px; color: var(--cap); white-space: normal; }
+
+/* стопка проекта: карточка с одним «листом» под ней */
+body.d3 .stack { --pile: 0 5px 0 -1px var(--panel), 0 5px 0 0 var(--line-card); }
+body.d3 .stack-card { box-shadow: var(--pile); }
+body.d3 .stack-card:hover { box-shadow: var(--pile); }
+body.d3 .stack-card.overdue { box-shadow: inset 3px 0 0 var(--bad-text), var(--pile); }
+body.d3 .stack-ico { color: var(--cap); }
+body.d3 .stack.open { background: var(--sunken); border: 1px solid var(--line); }
+body.d3 .stack.open .stack-card { box-shadow: none; border-color: var(--line-strong); }
+body.d3 .stack.open .stack-chev { color: var(--text); }
+body.d3 .stack-proj { color: var(--accent); }
+
+/* «Ещё N задач со сроком после …» — пунктир */
+body.d3 .later-tile { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 40px; box-sizing: border-box;
+  padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: 12px; background: transparent; color: var(--muted); font-size: 13px; }
+body.d3 .later-tile:hover { border-color: var(--faint); background: transparent; color: var(--text); }
+body.d3 .new-dot, body.d3 .task[data-new] > .task-what::before, body.d3 tr[data-new] > .c-what > .task-open::before { background: var(--acc-dot); }
+
+@media (max-width: 1000px) {
+  body.d3 .t3-board { grid-template-columns: repeat(var(--cols, 2), minmax(280px, 1fr)); overflow-x: auto; padding-bottom: 6px; }
+}
+
+/* ===================== список ===================== */
+body.d3 .t3-list { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: transparent; margin: 0; }
+body.d3 .t3-list .table-wrap { overflow-x: auto; }
+body.d3 .t3-list table.t { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 14px; }
+body.d3 .t3-list table.t th { font-weight: 400; font-size: 12px; color: var(--cap); padding: 10px 14px; border-bottom: 1px solid var(--line);
+  white-space: nowrap; background: transparent; }
+body.d3 .t3-list table.t td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+body.d3 .t3-list table.t td.c-what { white-space: normal; min-width: 260px; width: 34%; }
+body.d3 .t3-list table.t th:first-child, body.d3 .t3-list table.t td:first-child { padding-left: 16px; }
+body.d3 .t3-list .c-what .task-open { padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+body.d3 .t3-list .c-what .task-open:hover { color: var(--accent); }
+body.d3 .t3-list .c-what > a { color: var(--text); font-weight: 500; }
+body.d3 .t3-list .sub2 { margin-top: 2px; font-size: 12px; color: var(--cap); }
+body.d3 .t3-list .sub2 a { color: inherit; }
+body.d3 .t3-list .sub2 a:hover { color: var(--accent); }
+body.d3 .t3-list .sub2.warn-text { color: var(--warn-text); }
+body.d3 .t3-list tr.grp th { padding: 10px 16px; font-size: 15px; font-weight: 600; color: var(--text); text-align: left; background: var(--sunken); }
+body.d3 .t3-list tr.grp th .t3-dot { margin-right: 8px; vertical-align: 1px; }
+body.d3 .t3-list tr.grp th .n { margin-left: 4px; font-weight: 400; color: var(--muted); }
+body.d3 .t3-list tr.grp.k-mine th { background: var(--warn-deep); }
+body.d3 .t3-list tr.grp.k-to_me th { background: var(--acc-deep); }
+body.d3 .t3-list tr.grp.k-done th { background: var(--ok-deep); }
+body.d3 .t3-list tbody tr[data-task] { cursor: pointer; }
+body.d3 .t3-list tbody tr[data-task]:hover td { background: var(--panel); }
+body.d3 .t3-list tr.dim td { opacity: .55; }
+body.d3 .t3-list tr.inwork td:first-child { box-shadow: inset 2px 0 0 var(--ok); }
+body.d3 .t3-list tr.later-row td { padding: 8px 14px; }
+body.d3 .t3-list .t3-now { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .t3-list .t3-pjc a { color: var(--text-2); }
+body.d3 .t3-list .t3-pjc a:hover { color: var(--accent); }
+body.d3 .t3-list .agent-chip { margin-left: 8px; font-size: 12px; }
+body.d3 .t3-list tbody:last-child tr:last-child td { border-bottom: 0; }
+
+/* ===================== Гант ===================== */
+body.d3 .t3-gantt { border: 1px solid var(--line); border-radius: 16px; background: var(--sunken); overflow: hidden; }
+body.d3 .t3-gantt .gantt-head { background: var(--sunken); border-bottom: 1px solid var(--line); }
+body.d3 .t3-gantt .gantt-label { background: var(--sunken); padding: 10px 16px; border-right: 1px solid var(--line); box-sizing: border-box; }
+body.d3 .t3-gantt .gantt-corner { font-weight: 400; font-size: 12px; color: var(--cap); }
+body.d3 .t3-gantt .gantt-top span { font-weight: 500; color: var(--text-2); border-left-color: var(--line); }
+body.d3 .t3-gantt .gantt-bottom span { color: var(--cap); }
+body.d3 .t3-gantt .gantt-bottom span.today { color: var(--accent); font-weight: 600; }
+body.d3 .t3-gantt .gantt-now-label { color: var(--accent); }
+body.d3 .t3-gantt .gantt-bg i { background: var(--window); }
+body.d3 .t3-gantt .gantt-now { border-left: 1px dashed var(--acc-dot); }
+body.d3 .t3-gantt .gantt-group { border-top: 1px solid var(--line); }
+body.d3 .t3-gantt .gantt-group-h { height: auto; padding: 10px 16px; font-weight: 600; background: var(--sunken); border-bottom: 0; }
+body.d3 .t3-gantt .gantt-group-h > .t3-gh { position: sticky; left: 16px; display: inline-flex; align-items: center; gap: 8px; }
+body.d3 .t3-gantt .gantt-group.k-mine .gantt-group-h { background: var(--warn-deep); }
+body.d3 .t3-gantt .gantt-group.k-to_me .gantt-group-h { background: var(--acc-deep); }
+body.d3 .t3-gantt .gantt-group.k-done .gantt-group-h { background: var(--ok-deep); }
+body.d3 .t3-gantt .gantt-group-t { font-weight: 600; }
+body.d3 .t3-gantt .gantt-row { border-top: 1px solid var(--line); }
+body.d3 .t3-gantt .gantt-what { padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; }
+body.d3 .t3-gantt .gantt-what:hover { color: var(--accent); }
+body.d3 .t3-gantt .gantt-meta { font-size: 12px; color: var(--cap); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .t3-gantt .gantt-bar { top: 10px; height: 26px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12px; box-shadow: none; }
+body.d3 .t3-gantt .gantt-bar:hover { filter: none; box-shadow: 0 0 0 1px var(--acc-line-2); }
+body.d3 .t3-gantt .gantt-bar.to_me { background: var(--ok-soft); color: var(--ok-text); }
+body.d3 .t3-gantt .gantt-bar.to_me:hover { box-shadow: 0 0 0 1px var(--ok-line); }
+body.d3 .t3-gantt .gantt-bar.other { background: var(--panel-2); color: var(--text-2); }
+body.d3 .t3-gantt .gantt-bar.overdue { background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .t3-gantt .gantt-bar.done { background: var(--panel-2); color: var(--muted); }
+body.d3 .t3-gantt .gantt-bar.waiting { outline: 1px dashed var(--warn); outline-offset: -1px; }
+body.d3 .t3-gantt .gantt-bar.dot { width: 12px; height: 12px; top: 17px; border-radius: 50%; background: var(--cap); }
+body.d3 .t3-gantt .gantt-note { color: var(--cap); font-size: 12px; }
+body.d3 .t3-gantt .gantt-empty { color: var(--cap); }
+body.d3 .t3-gantt .gantt-later { border-top: 1px solid var(--line); background: var(--sunken); }
+body.d3 .gantt-links path { stroke: var(--warn); stroke-width: 1.5; opacity: .75; }
+body.d3 .gantt-links path.hl { stroke: var(--accent); opacity: 1; }
+body.d3 .gantt-links .gl-head { fill: var(--warn); opacity: .75; }
+body.d3 .gantt-links .gl-head.hl { fill: var(--accent); opacity: 1; }
+
+/* ===================== проекты (вид «Проекты») ===================== */
+body.d3 .t3-pj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+body.d3 .t3-pj { min-width: 0; box-sizing: border-box; padding: 18px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 14px; color: var(--text); font: inherit; text-align: left; }
+body.d3 .t3-pj.paused { opacity: .8; }
+body.d3 .t3-pj-h { display: flex; align-items: center; gap: 10px; }
+body.d3 .t3-pj-h h2 { flex: 1 1 0; min-width: 0; margin: 0; font-size: 17px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .t3-pj-h h2 a { color: var(--text); }
+body.d3 .t3-pj-h h2 a:hover { color: var(--accent); text-decoration: none; }
+body.d3 .t3-pj-goal { margin-top: -8px; font-size: 13px; color: var(--muted); }
+body.d3 .t3-pj-pr { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+body.d3 .t3-pg { height: 6px; border-radius: 999px; background: var(--line-card); overflow: hidden; }
+body.d3 .t3-pg i { display: block; height: 100%; border-radius: 999px; background: var(--ok); }
+body.d3 .t3-kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+body.d3 .t3-kv > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 12px; color: var(--cap); }
+body.d3 .t3-kv b { font-size: 15px; font-weight: 500; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .t3-kv b.t3-red { color: var(--bad-text); }
+body.d3 .t3-pj-tl { display: flex; flex-direction: column; gap: 6px; }
+body.d3 .t3-ti { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; background: var(--panel);
+  border: 1px solid var(--line-card); font-size: 14px; color: var(--text); text-decoration: none; }
+body.d3 .t3-ti:hover { border-color: var(--line-strong); text-decoration: none; color: var(--text); }
+body.d3 .t3-ti b { flex: 1 1 0; min-width: 0; font-weight: 400; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .t3-ti span { font-size: 12px; color: var(--cap); white-space: nowrap; }
+body.d3 .t3-ti span.t3-red { color: var(--bad-text); }
+body.d3 .t3-pj-f { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+body.d3 .t3-pj-line { flex: 1 1 0; min-width: 0; font-size: 13px; color: var(--cap); }
+body.d3 .t3-pj-note { font-size: 13px; color: var(--ok-text); }
+body.d3 .t3-pj-new { align-items: flex-start; justify-content: center; border-style: dashed; border-color: var(--line-strong); background: transparent;
+  min-height: 160px; cursor: default; }
+body.d3 button.t3-pj-new { cursor: pointer; }
+body.d3 button.t3-pj-new:hover { border-color: var(--faint); }
+body.d3 .t3-pj-new-t { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+body.d3 .pj-done-tile .lt-hide, body.d3 .pj-done-tile[aria-expanded="true"] .lt-show { display: none; }
+body.d3 .pj-done-tile[aria-expanded="true"] .lt-hide { display: inline; }
+body.d3 .t3-pj-done { margin-top: 24px; }
+body.d3 .t3-pj-done h2 { margin: 0 0 12px; font-size: 17px; }
+
+/* ===================== страница проекта ===================== */
+body.d3 .t3-back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+body.d3 .t3-back:hover { color: var(--text); text-decoration: none; }
+body.d3 .t3-phead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 16px; }
+body.d3 .t3-phead > .t { flex: 1 1 480px; min-width: 0; }
+body.d3 .t3-ptitle { display: flex; align-items: center; gap: 12px; }
+body.d3 .t3-ptitle h1 { margin: 0; }
+body.d3 .t3-phead .sub { margin: 8px 0 0; color: var(--muted); }
+body.d3 .t3-psum { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; margin-bottom: 16px; }
+body.d3 .t3-pcard { box-sizing: border-box; padding: 18px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+body.d3 .t3-psum .t3-pcard { margin: 0; }
+body.d3 .t3-pnum { flex: 1 1 300px; max-width: 380px; }
+body.d3 .t3-pstuck { flex: 999 1 480px; min-width: 0; }
+body.d3 .t3-pct { display: flex; align-items: baseline; gap: 10px; }
+body.d3 .t3-pct b { font-size: 30px; font-weight: 600; line-height: 1.1; }
+body.d3 .t3-pstat { display: flex; flex-direction: column; gap: 4px; }
+body.d3 .t3-pcard-h { display: flex; align-items: center; gap: 8px; }
+body.d3 .t3-pcard-h h2 { flex: 1 1 auto; margin: 0; font-size: 16px; }
+body.d3 .t3-st { display: grid; grid-template-columns: minmax(0, 1fr) 112px; align-items: center; gap: 12px; padding: 10px 14px;
+  border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); }
+body.d3 .t3-st b { display: block; font-weight: 500; }
+body.d3 .t3-st b a { color: var(--text); }
+body.d3 .t3-st b a:hover { color: var(--accent); }
+body.d3 .t3-st .m { display: block; font-size: 13px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .t3-st .btn.w { width: 112px; }
+body.d3 .t3-pfree { margin: 0; }
+body.d3 .t3-pdone { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0; }
+body.d3 .t3-pdone span { flex: 1 1 260px; }
+body.d3 .t3-pempty p { margin: 0; }
+body.d3 .t3-steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: start; margin-bottom: 16px; }
+body.d3 .t3-step { min-width: 0; box-sizing: border-box; padding: 12px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 8px; }
+body.d3 .t3-step-h { display: flex; flex-direction: column; gap: 2px; padding: 2px 6px 6px; }
+body.d3 .t3-step-h h2 { margin: 0; font-size: 16px; }
+body.d3 .t3-step-h .n { font-size: 13px; font-weight: 400; color: var(--cap); }
+body.d3 .t3-blk { border: 1px solid var(--line); border-radius: 14px; background: var(--sunken); margin-bottom: 12px; }
+body.d3 .t3-blk > summary { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer; list-style: none; }
+body.d3 .t3-blk > summary::-webkit-details-marker { display: none; }
+body.d3 .t3-blk > summary .ico { color: var(--cap); transition: transform .15s; transform: rotate(-90deg); }
+body.d3 .t3-blk[open] > summary .ico { transform: none; }
+body.d3 .t3-blk > summary b { font-weight: 600; }
+body.d3 .t3-blk > summary .s { flex: 1 1 0; min-width: 0; font-size: 13px; color: var(--cap); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .t3-blk-b { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; padding: 0 16px 16px; }
+
+/* ===================== Kaiten ===================== */
+body.d3 .t3-note { margin-bottom: 16px; }
+body.d3 .t3-kboard { box-sizing: border-box; padding: 18px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+body.d3 .t3-kboard-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+body.d3 .t3-kboard-h h2 { margin: 0; font-size: 16px; }
+body.d3 .t3-kboard-h .n { font-size: 13px; color: var(--cap); }
+body.d3 .t3-kboard-h .grow { flex: 1 1 auto; }
+body.d3 .t3-kboard-h a { display: inline-flex; align-items: center; gap: 6px; }
+body.d3 .t3-kcols { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+body.d3 .t3-kcol { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); }
+body.d3 .t3-kcol-h { display: flex; align-items: center; gap: 8px; padding: 2px 4px 4px; font-size: 14px; font-weight: 500; }
+body.d3 .t3-kcol-h .n { font-size: 13px; font-weight: 400; color: var(--cap); }
+body.d3 .t3-kcol-h .d3-tag { margin-left: auto; }
+body.d3 .task.kcard { display: flex; flex-direction: column; gap: 6px; cursor: pointer; text-decoration: none; }
+body.d3 .task.kcard:hover { text-decoration: none; }
+body.d3 .task.kcard .task-what { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .task.kcard .task-meta { margin: 0; }
+body.d3 .t3-kempty { display: flex; align-items: center; justify-content: center; min-height: 44px; margin: 0; border: 1px dashed var(--line-strong);
+  border-radius: 12px; color: var(--cap); font-size: 13px; }
+body.d3 .t3-foot { display: flex; align-items: flex-start; gap: 8px; margin: 16px 0 0; font-size: 13px; color: var(--cap); }
+body.d3 .t3-foot .ico { flex: none; margin-top: 1px; }
+
+/* ===================== окна: общее для форм раздела ===================== */
+body.d3 .dlg .dlg-title { font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; }
+body.d3 .dlg-x { width: 32px; height: 32px; border-radius: 8px; color: var(--muted); }
+body.d3 .dlg-x:hover { background: var(--panel-2); color: var(--text); }
+body.d3 .dlg-actions { padding-top: 16px; border-top: 1px solid var(--line); gap: 8px; }
+body.d3 .dlg-actions .grow, body.d3 .t3-bar .grow { flex: 1 1 auto; }
+body.d3 .dlg label { font-size: 13px; color: var(--muted); }
+body.d3 .dlg input[type=text], body.d3 .dlg input[type=date], body.d3 .dlg select { height: 38px; }
+body.d3 .dlg textarea { padding: 10px 12px; }
+body.d3 .t3-form-dlg { width: min(520px, calc(100vw - 32px)); }
+body.d3 .t3-form-dlg .dlg-box { padding: 24px 28px; display: flex; flex-direction: column; gap: 16px; }
+body.d3 .t3-form-dlg .dlg-head { margin: 0; }
+body.d3 .t3-form-dlg .dlg-actions { margin-top: 0; }
+body.d3 .t3-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+body.d3 .t3-f > label { margin: 0; }
+body.d3 .t3-f input, body.d3 .t3-f select, body.d3 .t3-f textarea { width: 100%; max-width: none; box-sizing: border-box; margin: 0; }
+body.d3 .t3-f .h { font-size: 12px; color: var(--cap); }
+body.d3 .t3-narrow { max-width: 220px; }
+body.d3 .t3-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+body.d3 .t3-dsub { margin-top: -8px; }
+body.d3 .t3-form-dlg details.blk { border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); }
+body.d3 .t3-form-dlg details.blk > summary { display: flex; align-items: center; gap: 10px; padding: 11px 14px; cursor: pointer; list-style: none; font-size: 14px; }
+body.d3 .t3-form-dlg details.blk > summary::-webkit-details-marker { display: none; }
+body.d3 .t3-form-dlg details.blk > summary .ico { color: var(--cap); transform: rotate(-90deg); transition: transform .15s; }
+body.d3 .t3-form-dlg details.blk[open] > summary .ico { transform: none; }
+body.d3 .t3-form-dlg details.blk > summary .s { flex: 1 1 0; min-width: 0; font-size: 13px; color: var(--cap); }
+body.d3 .t3-form-dlg details.blk .bb { display: flex; flex-direction: column; gap: 12px; padding: 4px 14px 14px; }
+@media (max-width: 560px) { body.d3 .t3-two { grid-template-columns: minmax(0, 1fr); } }
+
+/* ===================== окно задачи (макет Task) ===================== */
+/* до 1120: слева задача (своя прокрутка), справа «Ход задачи» на утопленном фоне во всю высоту окна.
+   Уже 1000 px — одна колонка, ход под задачей, листается всё окно */
+body.d3 .dlg-task { width: min(1120px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; overflow: auto; }
+body.d3 .dlg-task .dlg-box { padding: 0; gap: 0; display: block; }
+body.d3 .dlg-task .dlg-view:not([hidden]) { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; }
+body.d3 .dlg-task .dlg-main { flex: 999 1 520px; min-width: 0; box-sizing: border-box; padding: 28px 32px; display: flex; flex-direction: column; gap: 16px; }
+body.d3 .dlg-task .dlg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 0; }
+body.d3 .dlg-task .dlg-head .grow { flex: 1 1 auto; }
+body.d3 .dlg-task .dlg-head .dlg-x { margin: 0; }
+body.d3 .dlg-task .dlg-head .chip.new { height: 22px; }
+body.d3 .t3-ib { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+  display: inline-grid; place-items: center; cursor: pointer; flex: none; }
+body.d3 .t3-ib:hover { background: var(--panel-2); color: var(--text); }
+body.d3 .t3-ib.sm { width: 28px; height: 28px; color: var(--cap); }
+body.d3 .dlg-task .dlg-pencil { margin: 0; vertical-align: 0; }
+body.d3 .dlg-task .dlg-head .menu > summary.btn.icon { width: 32px; height: 32px; border: 0; background: transparent; color: var(--muted); }
+body.d3 .dlg-task .dlg-head .menu > summary.btn.icon:hover, body.d3 .dlg-task .dlg-head .menu[open] > summary.btn.icon { background: var(--panel-2); color: var(--text); }
+body.d3 .dlg-task .dlg-head .menu-pop { min-width: 240px; }
+/* статус — цветом смысла: в работе и готово зелёные, ждёт янтарный, новая серая */
+body.d3 .dlg-state { margin: 0; flex: none; }
+body.d3 .dlg-state select { width: auto; height: 32px; padding: 0 28px 0 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background-color: var(--panel-2); border: 1px solid var(--line-strong); color: var(--text-2); }
+body.d3 .dlg-state select:has(option[value="work"]:checked), body.d3 .dlg-state select:has(option[value="done"]:checked) {
+  background-color: var(--ok-soft); border-color: var(--ok-line); color: var(--ok-text); }
+body.d3 .dlg-state select:has(option[value="wait"]:checked) { background-color: var(--warn-soft); border-color: var(--warn-line); color: var(--warn-text); }
+
+/* заголовок и суть */
+body.d3 .t3-tt { display: flex; flex-direction: column; gap: 8px; }
+body.d3 .dlg-task .dlg-title { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
+body.d3 .dlg-what { margin: 0; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* мета в 4 ячейки: кто → кому, срок, проект, Kaiten */
+body.d3 .t3-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 14px 16px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line-card); }
+body.d3 .t3-mi { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+body.d3 .t3-mi > span { font-size: 12px; color: var(--cap); }
+body.d3 .t3-mi > b { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 500; white-space: nowrap; }
+body.d3 .t3-mi > b > a, body.d3 .t3-mi > b > span:not(.cap) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .t3-mi > b b { font-weight: 500; }
+body.d3 .t3-mi > b { overflow: hidden; text-overflow: ellipsis; }
+body.d3 .t3-mi.wrap > b { display: block; white-space: normal; overflow-wrap: anywhere; }
+body.d3 .t3-mi .dlg-unproj { flex: none; font-size: 12px; color: var(--cap); }
+body.d3 .t3-mi .dlg-unproj:hover { color: var(--text); }
+
+/* блоки-раскрывашки: «Сейчас», «Связи», «Пункты» раскрыты; остальные свёрнуты, суть — в заголовке */
+body.d3 .t3-tb { border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); }
+body.d3 .t3-tb > summary { display: flex; align-items: center; gap: 10px; min-height: 22px; padding: 13px 16px; cursor: pointer; list-style: none; }
+body.d3 .t3-tb > summary::-webkit-details-marker { display: none; }
+body.d3 .t3-tb > summary > b { flex: none; font-weight: 600; }
+body.d3 .t3-tb > summary > .s { flex: 1 1 0; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .t3-tb > summary > .ico { flex: none; color: var(--cap); transition: transform .15s; }
+body.d3 .t3-tb[open] > summary > .ico { transform: rotate(180deg); }
+body.d3 .t3-tb[open] > summary { border-bottom: 1px solid var(--line-card); }
+body.d3 .t3-bb { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+body.d3 .t3-empty { margin: 0; font-size: 13px; color: var(--cap); }
+body.d3 .t3-tb-now .t3-bb:has(.dlg-now) .t3-empty { display: none; }
+body.d3 .t3-tb-now .t3-bb:not(:has(.dlg-now, .dlg-hint, .t3-empty)) { display: none; }
+body.d3 .dlg-known { padding: 0; gap: 0; }
+body.d3 .dlg-known .dlg-known-b { font-size: 14px; }
+
+/* «Сейчас»: последнее по задаче — просто текст, подпись «Сейчас» уже в заголовке блока */
+body.d3 .t3-tb .dlg-now { display: flex; flex-direction: column; gap: 4px; padding: 0; border: 0; border-radius: 0; background: none; font-size: 15px; }
+body.d3 .t3-tb .dlg-now .now-l { display: none; }
+body.d3 .now-m { font-size: 12px; color: var(--cap); }
+body.d3 .dlg-now-slot:empty { display: none; }
+
+/* подсказки: срок сдвинулся, без движения, «мяч у вас» — янтарные; дубль, «похоже, сделано» и предложения Claude —
+   пунктир, это ещё предложение */
+body.d3 .dlg-hint { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--sunken);
+  border: 1px dashed var(--line-strong); font-size: 13px; color: var(--text-2); }
+body.d3 .dlg-hint b { font-weight: 600; color: var(--text); }
+body.d3 .dlg-hint[data-due-moved], body.d3 .dlg-hint.quiet-hint, body.d3 .dlg-hint[data-ball] { background: var(--warn-deep);
+  border: 1px solid var(--warn-line); }
+body.d3 .dlg-hint[data-due-moved] b, body.d3 .dlg-hint.quiet-hint b, body.d3 .dlg-hint[data-ball] b { color: var(--warn-text); }
+body.d3 .dlg-hint .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.d3 .dlg-hint .actions form { margin: 0; }
+body.d3 .dlg-quote { margin: 0; padding: 0 0 0 12px; border: 0; border-left: 2px solid var(--line-card); border-radius: 0; background: none;
+  color: var(--text-2); font-style: normal; font-size: 14px; }
+body.d3 .dlg-origin { margin: 0; font-size: 13px; color: var(--cap); }
+body.d3 .dlg-origin a { color: var(--accent); }
+
+/* «Связи»: строка — иконка, текст, кнопки справа */
+body.d3 .dlg-task .dlg-rels { padding-top: 10px; border-top: 0; }
+body.d3 .rel { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 32px; font-size: 14px; }
+body.d3 .rel > .ico, body.d3 .rel-ico { margin: 0; color: var(--cap); text-align: center; }
+body.d3 .rel.done { color: var(--muted); }
+body.d3 .rel a { color: var(--accent); }
+body.d3 .rel a.btn { color: var(--text); }
+body.d3 .rel .d3-tag { vertical-align: 1px; margin-left: 4px; }
+body.d3 .rel-act { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+body.d3 .rel-act form { margin: 0; }
+body.d3 .rel-act .btn.sm { min-width: 104px; }
+/* напоминание: содержимое details не участвует в сетке строки — строка обычным блоком, форма с отступом под иконкой */
+body.d3 .dlg-remind.rel { display: block; }
+body.d3 .dlg-remind > summary { display: flex; align-items: center; gap: 10px; min-height: 32px; cursor: pointer; list-style: none; color: var(--accent); }
+body.d3 .dlg-remind > summary::-webkit-details-marker { display: none; }
+body.d3 .dlg-remind > summary .ico { flex: none; color: var(--cap); }
+body.d3 .dlg-remind > .remind, body.d3 .dlg-remind > .remind-on { margin: 6px 0 4px 28px; }
+body.d3 .dlg-remind .remind { display: flex; flex-direction: column; gap: 8px; }
+body.d3 .dlg-remind .remind textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 14px; }
+body.d3 .dlg-remind .remind .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.d3 .dlg-adds { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0 0; }
+body.d3 .dlg-pane { display: flex; flex-direction: column; gap: 8px; padding: 0; }
+body.d3 .dlg-pane[hidden] { display: none; }
+body.d3 .meet-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
+body.d3 .meet-pick input { flex: 1 1 220px; min-width: 0; height: 38px; font-size: 14px; }
+body.d3 .meet-pick input[type=date] { flex: 0 0 auto; width: auto; }
+body.d3 .dlg-sec { font-size: 15px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: 0; }
+
+/* «Пункты»: галочка 16, готовые — зачёркнуты */
+body.d3 .dlg-items ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+body.d3 .dlg-items li { display: flex; align-items: center; gap: 10px; min-height: 28px; font-size: 14px; }
+body.d3 .dlg-items li > form { margin: 0; display: inline-flex; }
+body.d3 .dlg-item-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+body.d3 .dlg-items li.done .dlg-item-text .t { color: var(--muted); text-decoration: line-through; }
+body.d3 .chk { width: 16px; height: 16px; padding: 0; border-radius: 5px; border: 1.5px solid var(--faint); background: transparent; color: var(--bg);
+  display: inline-grid; place-items: center; cursor: pointer; }
+body.d3 .chk .ico { stroke-width: 3.5; }
+body.d3 .chk:hover { border-color: var(--muted); }
+body.d3 .chk[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+
+/* «Приоритет» и «Займёт у вас»: подпись 104 px, варианты пилюлями */
+body.d3 .dlg-task .est-row { display: flex; flex-wrap: wrap; align-items: center; margin: 0; gap: 8px; padding: 0; }
+body.d3 .dlg-task .est-l { width: 104px; flex: none; font-size: 13px; color: var(--cap); }
+body.d3 .est { display: inline-flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+body.d3 .est-c { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--panel-2);
+  color: var(--text-2); font-size: 13px; cursor: pointer; }
+body.d3 .est-c:hover { color: var(--text); border-color: var(--faint); }
+body.d3 .est-c[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 500; }
+body.d3 .prio-row .est-c.pc-urgent[aria-pressed="true"] { background: var(--bad-soft); border-color: var(--bad-soft); color: var(--bad-text); }
+body.d3 .prio-row .est-c.pc-high[aria-pressed="true"] { background: var(--warn-soft); border-color: var(--warn-soft); color: var(--warn-text); }
+body.d3 .prio-row .est-c.pc-low[aria-pressed="true"] { background: var(--panel-2); border-color: var(--line-strong); color: var(--muted); }
+
+/* «Агент»: синяя плашка с иконкой */
+body.d3 .agent-block { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px;
+  background: var(--acc-deep); border: 1px solid var(--acc-line); }
+body.d3 .agent-block.hint { border-style: solid; }
+body.d3 .agent-block.waiting, body.d3 .agent-block.blocked { background: var(--warn-deep); border-color: var(--warn-line); }
+body.d3 .agent-block.done { background: var(--ok-deep); border-color: var(--ok-line); }
+body.d3 .agent-ico { width: 32px; height: 32px; border-radius: 9px; background: var(--acc-line); color: var(--accent); display: grid; place-items: center; flex: none; margin: 0; }
+body.d3 .agent-block.waiting .agent-ico, body.d3 .agent-block.blocked .agent-ico { background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .agent-block.done .agent-ico { background: var(--ok-soft); color: var(--ok-text); }
+body.d3 .agent-block-b { flex: 1 1 240px; min-width: 0; font-size: 14px; }
+body.d3 .agent-block-b b { font-weight: 500; }
+body.d3 .agent-block .btn.sm { height: 30px; }
+body.d3 .agent-block.hint .btn, body.d3 .dlg-actions .agent-hint { border-color: var(--acc-line-2); background: transparent; color: var(--accent); }
+body.d3 .agent-block.hint .btn:hover { background: var(--accent-soft); }
+
+/* кнопки внизу: «Готово» главная, остальные серые */
+body.d3 .dlg-task .dlg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding-top: 16px; border-top: 1px solid var(--line); }
+body.d3 .dlg-task .dlg-actions form { margin: 0; }
+body.d3 .day-pass { display: flex; flex-direction: column; gap: 8px; }
+body.d3 .day-pass p { margin: 0; }
+body.d3 .day-pass-f { display: flex; flex-wrap: wrap; gap: 8px; }
+body.d3 .day-pass-f input { flex: 1 1 200px; height: 38px; }
+body.d3 .day-pass-f input[type=date] { flex: 0 0 auto; }
+
+/* «Ход задачи»: колонка справа, записи с полоской слева (синяя — ваши, янтарная — ждут ответа) */
+body.d3 .dlg-task .dlg-log { flex: 1 1 340px; min-width: 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px;
+  padding: 28px 24px; background: var(--sunken); border-left: 1px solid var(--line); border-radius: 0 18px 18px 0; }
+body.d3 .dlg-log .log-head { display: flex; align-items: center; gap: 10px; }
+body.d3 .dlg-log .log-head .dlg-sec { flex: 1 1 auto; }
+body.d3 .dlg-log .log-head form { margin: 0; }
+body.d3 .log-collect { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-strong);
+  border-radius: 8px; background: var(--panel-2); color: var(--text); font-size: 13px; text-decoration: none; cursor: pointer; }
+body.d3 .log-collect:hover { background: var(--g-seg-on); text-decoration: none; }
+body.d3 .log-list { flex: 1 1 auto; padding: 0; gap: 16px; background: none; }
+body.d3 .log-i { padding-left: 14px; border-left: 2px solid var(--line-card); }
+body.d3 .log-i::before { display: none; }
+body.d3 .log-i.k-note, body.d3 .log-i.k-update { border-left-color: var(--acc-dot); }
+body.d3 .log-i.k-ask.waiting, body.d3 .log-i.waiting { border-left-color: var(--warn); }
+body.d3 .log-i.k-event { border-left-color: var(--line); }
+body.d3 .log-meta { font-size: 12px; color: var(--cap); }
+body.d3 .log-src { font-weight: 400; }
+body.d3 .log-text { font-size: 14px; color: var(--text); }
+body.d3 .log-quote { font-size: 13px; font-style: normal; color: var(--muted); }
+body.d3 .log-wait { height: 22px; line-height: 22px; padding: 0 9px; background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .log-ev { color: var(--muted); }
+body.d3 .log-act { color: var(--cap); }
+body.d3 .log-act:hover { background: var(--panel-2); color: var(--text); }
+body.d3 .log-busy { background: var(--acc-deep); border: 1px solid var(--acc-line); border-radius: 10px; }
+body.d3 .log-form { padding-top: 16px; border-top: 1px solid var(--line); gap: 8px; }
+body.d3 .log-form textarea { min-height: 72px; padding: 10px 12px; background: var(--window); border-color: var(--line-card); }
+body.d3 .log-ask { color: var(--muted); }
+@media (min-width: 1000px) {
+  /* две колонки: окно не выше экрана, задача и лента листаются каждая сама */
+  body.d3 .dlg-task:has(.dlg-view:not([hidden])) { overflow: hidden; }
+  body.d3 .dlg-task .dlg-view:not([hidden]) { flex-wrap: nowrap; max-height: calc(100vh - 50px); }
+  body.d3 .dlg-task .dlg-main { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  body.d3 .dlg-task .dlg-log { flex: 0 0 340px; min-height: 0; position: static; max-height: none; }
+  body.d3 .dlg-task .dlg-log .log-list { min-height: 0; overflow-y: auto; }
+}
+@media (max-width: 999px) {
+  body.d3 .dlg-task .dlg-log { flex-basis: 100%; border-left: 0; border-top: 1px solid var(--line); border-radius: 0 0 18px 18px; }
+  body.d3 .t3-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  body.d3 .dlg-task .dlg-main { padding: 18px 16px 20px; }
+  body.d3 .dlg-task .dlg-log { padding: 18px 16px; }
+  body.d3 .dlg-task .est-l { width: 100%; }
+  body.d3 .rel { grid-template-columns: 18px minmax(0, 1fr); }
+  body.d3 .rel-act { grid-column: 2; flex-wrap: wrap; }
+  body.d3 .dlg-task .dlg-actions > .grow { display: none; }
+}
+/* правка задачи — тем же окном, одна колонка */
+body.d3 .dlg-task:has(.dlg-edit:not([hidden])) { width: min(560px, calc(100vw - 32px)); }
+body.d3 .dlg-task .dlg-edit:not([hidden]) { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 24px 28px; }
+body.d3 .dlg-edit .dlg-head { display: flex; align-items: center; gap: 12px; }
+body.d3 .dlg-edit .dlg-head .dlg-title { flex: 1 1 auto; }
+body.d3 .dlg-edit label { margin: 0; }
+body.d3 .dlg-edit input, body.d3 .dlg-edit select, body.d3 .dlg-edit textarea { width: 100%; max-width: none; box-sizing: border-box; margin: 0; }
+body.d3 .dlg-edit .form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+body.d3 .dlg-edit .form-row > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+body.d3 .dlg-edit .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 4px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
+
+/* ===================== «Уточнить срок» и «Без движения»: по одной задаче ===================== */
+body.d3 .dlg-due { width: min(600px, calc(100vw - 32px)); }
+body.d3 .dlg-due .dlg-box { padding: 24px 28px; gap: 16px; }
+body.d3 .dlg-due .dlg-head { align-items: center; gap: 10px; }
+body.d3 .dlg-due .dlg-title { flex: 0 1 auto; }
+body.d3 .due-step { margin: 0 auto 0 0; font-size: 15px; color: var(--muted); }
+body.d3 .due-step + .dlg-x { margin-left: auto; }
+body.d3 .due-card { gap: 12px; }
+body.d3 .due-kind { display: inline-flex; align-self: flex-start; justify-self: start; height: 22px; align-items: center; padding: 0 9px; border-radius: 999px;
+  background: var(--panel-2); color: var(--text-2); font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+body.d3 .due-what { margin: 0; font-size: 18px; font-weight: 600; }
+body.d3 .due-what a { color: var(--text); }
+body.d3 .due-what a:hover { color: var(--accent); }
+body.d3 .due-card .dlg-meta { margin: -4px 0 0; font-size: 13px; color: var(--muted); }
+body.d3 .due-card .dlg-what { color: var(--text-2); }
+body.d3 .due-card .dlg-quote { border: 0; border-left: 2px solid var(--line-card); border-radius: 0; background: transparent; padding: 0 0 0 12px; }
+body.d3 .due-card .warn-text.small { padding: 10px 12px; border-radius: 10px; background: var(--warn-deep); border: 1px solid var(--warn-line); color: var(--text-2); }
+body.d3 .due-pick { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+body.d3 .due-q { min-height: 60px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel-2); color: var(--text);
+  font-size: 14px; font-weight: 500; text-align: left; }
+body.d3 .due-q span { font-size: 12px; color: var(--cap); }
+body.d3 .due-q:hover { background: var(--g-seg-on); border-color: var(--line-strong); }
+body.d3 .due-q[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--acc-line-2); color: var(--text); }
+body.d3 .due-q[aria-pressed="true"] span { color: var(--accent); }
+body.d3 .due-own { font-size: 13px; color: var(--muted); }
+body.d3 .due-own input { height: 38px; }
+body.d3 .due-own.on input { border-color: var(--acc-line-2); background: var(--accent-soft); }
+body.d3 .quiet-last { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); font-size: 13px; color: var(--warn-text); }
+body.d3 .quiet-last b { font-weight: 500; }
+body.d3 .quiet-note { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+body.d3 .quiet-row { display: flex; gap: 8px; }
+body.d3 .quiet-row input { flex: 1 1 auto; height: 38px; }
+body.d3 .quiet-acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+body.d3 .quiet-acts > form, body.d3 .quiet-acts > .btn { margin: 0; }
+body.d3 .quiet-acts > form > .btn, body.d3 .quiet-acts > .btn { width: 100%; }
+body.d3 .quiet-acts .btn.ok { color: var(--ok-text); }
+body.d3 .quiet-acts .quiet-due { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+body.d3 .quiet-acts .quiet-due input { width: 140px; height: 38px; }
+body.d3 .quiet-acts .quiet-due .btn { width: auto; }
+body.d3 .due-end p { color: var(--text-2); }
+
+/* ===================== «Поручить агенту» ===================== */
+body.d3 .dlg-agent { width: min(1120px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+body.d3 .dlg-agent .dlg-box { padding: 0; display: block; }
+body.d3 .t3-agent { display: flex; flex-wrap: wrap; gap: 0; }
+body.d3 .t3-agent-main { flex: 999 1 520px; min-width: 0; box-sizing: border-box; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; }
+body.d3 .t3-agent-aside { flex: 1 1 340px; min-width: 0; box-sizing: border-box; padding: 28px 24px; background: var(--sunken); border-left: 1px solid var(--line);
+  border-radius: 0 18px 18px 0; display: flex; flex-direction: column; gap: 18px; }
+body.d3 .t3-agent-aside > section + section { padding-top: 18px; border-top: 1px solid var(--line); }
+body.d3 .t3-agent-aside > section { display: flex; flex-direction: column; gap: 12px; }
+body.d3 .t3-agent-h { display: flex; flex-direction: column; gap: 2px; }
+body.d3 .t3-agent-h b { font-weight: 600; }
+body.d3 .t3-agent .dlg-head { display: flex; align-items: flex-start; gap: 12px; }
+body.d3 .t3-agent .agent-head { display: flex; flex-direction: column; gap: 6px; }
+body.d3 .t3-agent .agent-head .dlg-title { margin-top: 2px; font-size: 24px; }
+body.d3 .t3-agent .agent-head a.muted { color: var(--muted); align-self: flex-start; }
+body.d3 .t3-agent .agent-head a.muted:hover { color: var(--text); }
+body.d3 .agent-where { gap: 12px; align-items: flex-end; }
+body.d3 .t3-agent-folder { flex: 1 1 260px; }
+body.d3 .agent-field { gap: 6px; }
+body.d3 .agent-field select { width: 100%; min-width: 0; max-width: none; height: 38px; }
+body.d3 .agent-k, body.d3 label.agent-k { font-size: 13px; font-weight: 500; color: var(--cap); }
+body.d3 .agent-seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--sunken); border: 1px solid var(--line-card); }
+body.d3 .agent-seg label + label { border: 0; }
+body.d3 .agent-seg span { height: 30px; padding: 0 14px; border-radius: 7px; font-size: 13px; color: var(--muted); }
+body.d3 .agent-seg input:checked + span { background: var(--g-seg-on); color: var(--text); font-weight: 500; }
+body.d3 .agent-live { padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); }
+body.d3 .agent-prompt textarea { min-height: 300px; padding: 14px 16px; border-radius: 12px; border-color: var(--line-card); background: var(--sunken);
+  color: var(--text-2); font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+body.d3 .agent-fix { gap: 8px; }
+body.d3 .agent-fix input { height: 38px; }
+body.d3 .t3-agent .agent-actions { padding-top: 20px; }
+body.d3 .t3-agent .agent-actions [data-agent-said] { flex: 1 1 160px; text-align: right; }
+body.d3 .t3-agent code { font-size: 12px; color: var(--muted); background: none; }
+body.d3 .agent-files { gap: 12px; }
+body.d3 .agent-files label.check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--text); }
+body.d3 .agent-files label.check input { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); }
+body.d3 .agent-files label.check > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+body.d3 .agent-files b { font-weight: 500; }
+body.d3 .agent-files li:has(input:not(:checked)) b { color: var(--muted); }
+body.d3 .agent-sims { gap: 10px; }
+body.d3 .agent-sims li { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line-card); border-radius: 12px;
+  background: var(--panel); font-size: 13px; }
+body.d3 .agent-sims li b { font-size: 14px; font-weight: 500; }
+body.d3 .agent-page { padding: 0; max-width: 1120px; border-radius: 18px; background: var(--window); border-color: var(--dlg-line); overflow: hidden; }
+@media (max-width: 900px) {
+  body.d3 .t3-agent-main { padding: 20px 18px; }
+  body.d3 .t3-agent-aside { padding: 20px 18px; border-left: 0; border-top: 1px solid var(--line); border-radius: 0 0 18px 18px; }
+}
+
+/* метки агента на карточке и в строке */
+body.d3 .agent-chip { color: var(--cap); }
+body.d3 .agent-chip.working, body.d3 .agent-chip.hint { color: var(--accent); }
+body.d3 .agent-chip.waiting, body.d3 .agent-chip.blocked { color: var(--warn-text); }
+body.d3 .agent-chip.done { color: var(--ok-text); }
+
+@media (max-width: 900px) {
+  body.d3 .t3-bar > .seg { margin-right: 0; flex: 1 0 100%; overflow-x: auto; }
+  body.d3 .t3-tools { width: 100%; }
+  body.d3 .t3-tools .d3-search { flex: 1 1 200px; }
+  body.d3 .t3-pj-grid, body.d3 .t3-steps { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,291 @@
+/* Новый дизайн: раздел «Встречи» (templates/v3/meetings.html, meeting.html). Макеты Meetings, MeetingsEmpty, Meeting,
+   MeetingTranscript, MeetingFollowup, MeetingStates, MeetingModals. Цвета только токенами v3.css; все селекторы
+   начинаются с body.d3, классы раздела с приставкой m3-. */
+
+body.d3 .grow { flex: 1 1 0; }
+body.d3 .m3-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--cap); }
+body.d3 .m3-dot.ok { background: var(--ok); }
+body.d3 .m3-dot.acc { background: var(--acc-dot); }
+body.d3 .m3-dot.warn { background: var(--warn); }
+body.d3 .m3-dot.neu { background: var(--cap); }
+body.d3 .m3-tc { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
+body.d3 .m3-bar { position: relative; height: 4px; border-radius: 999px; background: var(--g-fill-hover); overflow: hidden;
+  flex: 1 1 160px; min-width: 120px; max-width: 260px; }
+body.d3 .m3-bar.wide { height: 6px; max-width: none; width: 100%; flex: none; }
+body.d3 .m3-bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--warn); }
+body.d3 .d3-tag.neu, body.d3 a.d3-tag { text-decoration: none; }
+
+/* ================= лента встреч ================= */
+body.d3 .m3-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 16px; margin-bottom: 20px;
+  border-radius: 14px; background: var(--warn-deep); border: 1px solid var(--warn-line); }
+body.d3 .m3-strip.paused { background: var(--sunken); border-color: var(--line); }
+body.d3 .m3-strip.paused .m3-bar span { background: var(--cap); }
+body.d3 .m3-strip-ic { display: inline-flex; color: var(--warn-text); }
+body.d3 .m3-strip.paused .m3-strip-ic { color: var(--text-2); }
+body.d3 .m3-strip-ic .ask-dots i { background: var(--warn); }
+body.d3 .m3-strip-t { font-weight: 500; }
+body.d3 .m3-strip-t a { color: var(--text); }
+body.d3 .m3-strip-x { flex: 1 1 200px; }
+body.d3 .m3-strip-b { display: flex; gap: 8px; }
+body.d3 .m3-strip-b .btn { height: 30px; border-radius: 8px; font-size: 13px; min-width: 112px; justify-content: center; }
+
+body.d3 .m3-tools { margin-bottom: 20px; }
+body.d3 .m3-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+body.d3 .m3-pill { display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border: 1px solid var(--line-card);
+  border-radius: 999px; background: var(--sunken); color: var(--text); font-size: 14px; cursor: pointer; white-space: nowrap; margin: 0; }
+body.d3 .m3-pill input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+body.d3 .m3-pill:has(input:checked) { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 500; }
+body.d3 .m3-pill:has(input:focus-visible) { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+body.d3 .m3-search { flex: 0 1 320px; margin: 0; }
+body.d3 .m3-folders > summary.btn { width: 36px; padding: 0; justify-content: center; }
+body.d3 .m3-folders .menu-pop { min-width: 300px; max-width: 420px; padding: 10px; background: var(--panel); border-color: var(--dlg-line); border-radius: 12px; }
+body.d3 .m3-pop-h { padding: 4px 10px 6px; font-size: 13px; color: var(--cap); }
+body.d3 .m3-path { display: flex; align-items: center; gap: 10px; padding: 8px 10px; font-size: 14px; color: var(--text-2); min-width: 0; }
+
+/* фильтр без скриптов: выбранная плашка прячет строки и пустые дни */
+body.d3 .m3-feed:has(input[value=wait]:checked) .m3-row:not([data-f=wait]),
+body.d3 .m3-feed:has(input[value=work]:checked) .m3-row:not([data-f=work]),
+body.d3 .m3-feed:has(input[value=wait]:checked) .m3-day:not(:has(.m3-row[data-f=wait])),
+body.d3 .m3-feed:has(input[value=work]:checked) .m3-day:not(:has(.m3-row[data-f=work])) { display: none; }
+body.d3 .m3-feed:has(input[value=wait]:checked) .m3-list > .m3-row[data-f=wait],
+body.d3 .m3-feed:has(input[value=work]:checked) .m3-list > .m3-row[data-f=work] { border-top: 0; }
+body.d3 .m3-none-f { display: none; }
+body.d3 .m3-feed:has(input[value=wait]:checked):not(:has(.m3-row[data-f=wait])) .m3-none-f,
+body.d3 .m3-feed:has(input[value=work]:checked):not(:has(.m3-row[data-f=work])) .m3-none-f { display: block; }
+
+body.d3 .m3-day { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+body.d3 .m3-day-h { margin: 0; font-size: 13px; font-weight: 500; color: var(--cap); }
+body.d3 .m3-list { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line-card); border-radius: 12px; }
+body.d3 .m3-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) 210px 200px; align-items: center; gap: 6px 16px;
+  padding: 12px 18px; border-top: 1px solid var(--line); min-height: 36px; }
+body.d3 .m3-list > .m3-row:first-child { border-top: 0; }
+body.d3 .m3-time { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.d3 .m3-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+body.d3 .m3-t { font-weight: 500; color: var(--text); }
+body.d3 a.m3-t:hover { color: var(--text); text-decoration: underline; text-decoration-color: var(--line-strong); }
+body.d3 .m3-row.cal .m3-t { color: var(--text-2); }
+body.d3 .m3-x { font-size: 13px; color: var(--muted); }
+body.d3 .m3-tags { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+body.d3 .m3-act { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+body.d3 .m3-act form { margin: 0; }
+body.d3 .m3-act .btn.sm, body.d3 .m3-act .btn:not(.icon) { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px; }
+body.d3 .m3-act .btn.icon, body.d3 .m3-act .menu > summary.btn { width: 30px; height: 30px; padding: 0; border-radius: 8px; justify-content: center; }
+body.d3 .m3-none { padding: 28px; border-radius: 16px; border: 1px dashed var(--line-strong); color: var(--muted); text-align: center; }
+
+/* зона «Перетащите запись»: маленькая под лентой, большая — пустой раздел */
+body.d3 .m3-drop { margin: 4px 0 0; }
+body.d3 .m3-drop-in { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border: 1.5px dashed var(--line-strong);
+  border-radius: 14px; color: var(--muted); font-size: 13px; cursor: pointer; position: relative; margin: 0; }
+body.d3 .m3-drop-in input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+body.d3 .m3-drop.over .m3-drop-in, body.d3 .m3-drop-in:hover { border-color: var(--acc-line-2); color: var(--text-2); }
+body.d3 .m3-drop.big .m3-drop-in { flex-direction: column; justify-content: center; text-align: center; min-height: 380px;
+  padding: 40px 24px; border-radius: 16px; font-size: 15px; gap: 12px; }
+body.d3 .m3-drop-ic { width: 56px; height: 56px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line-card);
+  display: grid; place-items: center; color: var(--text-2); }
+body.d3 .m3-drop-t { font-size: 18px; font-weight: 600; color: var(--text); }
+body.d3 .m3-drop-x { max-width: 520px; }
+body.d3 .m3-drop-x a { position: relative; z-index: 1; }
+body.d3 .m3-drop.big .btn { margin-top: 4px; pointer-events: none; }
+
+/* окно «Загрузить запись» */
+body.d3 .m3-dlg { width: min(480px, calc(100vw - 32px)); }
+body.d3 .m3-dlg .dlg-head { align-items: flex-start; }
+body.d3 .m3-dlg-t h2 { margin: 0; font-size: 24px; font-weight: 600; }
+body.d3 .m3-dlg-t p { margin: 6px 0 0; }
+body.d3 .m3-lbl { font-size: 13px; color: var(--muted); margin: 0; }
+body.d3 .m3-pick { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px;
+  border: 1px dashed var(--line-strong); border-radius: 12px; text-align: center; color: var(--text-2); cursor: pointer; margin: 0; }
+body.d3 .m3-pick input[type=file] { width: 100%; max-width: 320px; margin-top: 6px; font-size: 13px; color: var(--muted); }
+body.d3 .m3-pick-t { font-weight: 500; color: var(--text); }
+body.d3 .m3-dlg input[type=text] { width: 100%; height: 38px; box-sizing: border-box; }
+body.d3 .m3-dlg-ft { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+
+/* ================= страница встречи ================= */
+body.d3 .m3-page { display: flex; flex-direction: column; gap: 20px; }
+body.d3 .m3-page > .d3-head { margin-bottom: 0; align-items: flex-end; }
+body.d3 .m3-back { color: var(--muted); align-self: flex-start; }
+body.d3 .m3-back:hover { color: var(--text); text-decoration: none; }
+body.d3 .m3-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+body.d3 .m3-ib { width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; flex: none; padding: 0; }
+body.d3 .m3-ib:hover { background: var(--panel); color: var(--text); }
+body.d3 .m3-rename { display: flex; gap: 8px; margin-top: 10px; max-width: 560px; }
+body.d3 .m3-rename[hidden] { display: none; }
+body.d3 .m3-rename input { flex: 1 1 auto; min-width: 0; }
+body.d3 .m3-head-act { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+body.d3 .m3-head-act .menu > summary.btn { width: 36px; padding: 0; justify-content: center; }
+body.d3 .m3-mi { display: flex; align-items: center; gap: 12px; }
+body.d3 .m3-mi .muted { margin-left: auto; }
+
+/* плашка состояния */
+body.d3 .m3-st { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 8px 16px; max-width: 980px;
+  box-sizing: border-box; padding: 16px 18px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line-card); }
+body.d3 .m3-st-ic { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; align-self: start;
+  background: var(--panel-2); color: var(--text-2); }
+body.d3 .m3-st-ic.warn { background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .m3-st-ic.warn .ask-dots i { background: var(--warn); }
+body.d3 .m3-st-ic.ok { background: var(--ok-soft); color: var(--ok-text); }
+body.d3 .m3-st-ic.ok .ask-dots i { background: var(--ok); }
+body.d3 .m3-st-ic.bad { background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .m3-st-t { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+body.d3 .m3-st-t b, body.d3 .m3-st-h b { font-weight: 600; font-size: 16px; }
+body.d3 .m3-st-h { display: flex; align-items: center; gap: 10px; }
+body.d3 .m3-st-pct { font-size: 16px; font-weight: 600; color: var(--warn-text); font-variant-numeric: tabular-nums; }
+body.d3 .m3-st.paused .m3-st-pct { color: var(--muted); }
+body.d3 .m3-st.paused .m3-bar span { background: var(--cap); }
+body.d3 .m3-st-b { display: flex; gap: 8px; justify-content: flex-end; }
+body.d3 .m3-st-b form { margin: 0; }
+body.d3 .m3-st-b .btn { width: 164px; padding: 0; justify-content: center; height: 36px; }
+
+/* вкладки и переключатель «Структура / Текстом» */
+body.d3 .m3-tabs-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; border-bottom: 1px solid var(--line); }
+body.d3 .m3-tabs { display: flex; flex-wrap: wrap; flex: 1 1 auto; }
+body.d3 .m3-tabs a { padding: 9px 2px; margin-right: 20px; margin-bottom: -1px; color: var(--muted); border-bottom: 2px solid transparent; }
+body.d3 .m3-tabs a:hover { color: var(--text); text-decoration: none; }
+body.d3 .m3-tabs a.on { color: var(--text); border-bottom-color: var(--text); font-weight: 500; }
+body.d3 .m3-tabs a i { font-style: normal; color: var(--cap); margin-left: 6px; font-weight: 400; }
+body.d3 .m3-seg { margin-bottom: 6px; }
+body.d3 .m3-seg label { height: 30px; padding: 0 12px; border-radius: 7px; color: var(--muted); font-size: 13px; display: inline-flex;
+  align-items: center; cursor: pointer; margin: 0; white-space: nowrap; }
+body.d3 .m3-seg label input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+body.d3 .m3-seg label:has(input:checked) { background: var(--g-fill-hover); color: var(--text); font-weight: 500; }
+body.d3 .m3-seg label:has(input:focus-visible) { outline: 2px solid var(--g-focus); }
+body.d3 .m3-text-v { display: none; }
+body.d3 .m3-page:has(#m3v-text:checked) .m3-text-v { display: block; }
+body.d3 .m3-page:has(#m3v-text:checked) .m3-struct-v { display: none; }
+body.d3 .m3-struct-v { display: flex; flex-direction: column; gap: 20px; }
+
+/* текст: разбор, расшифровка, текст для отправки */
+body.d3 .m3-doc { box-sizing: border-box; max-width: 760px; padding: 24px 28px; border-radius: 16px; background: var(--sunken);
+  border: 1px solid var(--line); font-size: 15px; line-height: 1.6; color: var(--text-2); min-width: 0; overflow-wrap: anywhere; }
+body.d3 .m3-doc > :first-child { margin-top: 0; }
+body.d3 .m3-doc > :last-child { margin-bottom: 0; }
+body.d3 .m3-doc h1 { font-size: 22px; margin: 0 0 12px; color: var(--text); }
+body.d3 .m3-doc h2 { font-size: 18px; margin: 24px 0 8px; color: var(--text); font-weight: 600; }
+body.d3 .m3-doc h3 { font-size: 16px; margin: 18px 0 6px; color: var(--text); }
+body.d3 .m3-doc p { margin: 0 0 12px; }
+body.d3 .m3-doc ul, body.d3 .m3-doc ol { margin: 0 0 12px; padding-left: 22px; }
+body.d3 .m3-doc li { margin-bottom: 6px; }
+body.d3 .m3-doc strong, body.d3 .m3-doc b { color: var(--text); font-weight: 500; }
+body.d3 .m3-doc .tc { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.d3 .m3-doc table { width: 100%; border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; }
+body.d3 .m3-doc th, body.d3 .m3-doc td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+body.d3 .m3-doc th { color: var(--cap); font-weight: 500; font-size: 13px; }
+body.d3 .m3-sum { font-size: 16px; }
+body.d3 .m3-sum a.q-task { font-size: 13px; white-space: nowrap; }
+body.d3 .m3-tr { flex: 999 1 520px; max-width: none; padding: 8px 0; }
+body.d3 .m3-tr p { margin: 0; padding: 10px 20px; line-height: 1.55; }
+body.d3 .m3-tr p:hover { background: var(--panel); }
+body.d3 .m3-tr h1, body.d3 .m3-tr h2 { padding: 10px 20px 0; }
+body.d3 .m3-tr h1 + p, body.d3 .m3-tr h1 ~ p:not(:has(.tc)) { color: var(--muted); font-size: 13px; padding-top: 4px; padding-bottom: 4px; }
+body.d3 .m3-tr .tc { display: inline-block; min-width: 72px; margin-right: 8px; }
+body.d3 .m3-ph { max-width: 980px; box-sizing: border-box; padding: 24px 28px; border-radius: 16px; border: 1px dashed var(--line-strong);
+  color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+body.d3 .m3-ph b { color: var(--text-2); font-weight: 500; }
+
+body.d3 .m3-narrow { max-width: 760px; }
+body.d3 .m3-fu { display: flex; flex-direction: column; gap: 14px; }
+body.d3 .m3-fu p { margin: 0; }
+body.d3 .m3-fu-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.d3 .m3-fu-h h2 { margin: 0; flex: 1 1 auto; font-size: 18px; }
+body.d3 .m3-fu-text { white-space: pre-wrap; max-width: none; }
+body.d3 .m3-fu-act { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+body.d3 .m3-fu-act form { margin: 0; }
+
+/* расшифровка и запись: слева текст или файл, справа «Кто в записи» */
+body.d3 .m3-wrap { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
+body.d3 .m3-rec-col { flex: 999 1 520px; min-width: 0; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
+body.d3 .m3-who { flex: 1 0 380px; min-width: 0; max-width: 460px; gap: 10px; }
+body.d3 .m3-who .d3-sec-h { padding-bottom: 0; }
+body.d3 .m3-who > p { margin: 0; }
+body.d3 .m3-who-n { margin-top: -4px !important; }
+body.d3 .m3-spk { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--panel);
+  border: 1px solid var(--line-card); }
+body.d3 .m3-spk.open { border-style: dashed; border-color: var(--line-strong); background: transparent; }
+body.d3 .m3-spk.open .m3-spk-h b { color: var(--warn-text); }
+body.d3 .m3-spk-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
+body.d3 .m3-spk-h b { font-weight: 500; }
+body.d3 .m3-spk-d { margin-left: auto; font-size: 13px; color: var(--cap); white-space: nowrap; font-variant-numeric: tabular-nums; }
+body.d3 .m3-spk-q { font-size: 13px; color: var(--muted); }
+body.d3 .m3-guess { color: var(--text-2); }
+body.d3 .m3-guess b { font-weight: 600; }
+body.d3 .m3-spk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 2px; }
+body.d3 .m3-spk-row form { margin: 0; }
+body.d3 .m3-spk-form { display: flex; gap: 8px; flex: 1 1 200px; min-width: 0; }
+body.d3 .m3-spk-form:has(input[type=hidden][name=name]) { flex: 0 0 auto; }
+body.d3 .m3-spk-form input[type=text] { height: 30px; flex: 1 1 120px; min-width: 0; border-radius: 8px; font-size: 13px; padding: 0 10px;
+  background: var(--window); border-color: var(--line-strong); }
+body.d3 .m3-spk-row .btn.sm { min-width: 112px; justify-content: center; }
+body.d3 .m3-more > summary { cursor: pointer; list-style: none; font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; }
+body.d3 .m3-more > summary::-webkit-details-marker { display: none; }
+body.d3 .m3-more > summary::before { content: "›"; display: inline-block; transition: transform .15s; }
+body.d3 .m3-more[open] > summary::before { transform: rotate(90deg); }
+body.d3 .m3-more[open] > summary { margin-bottom: 8px; }
+body.d3 .m3-more > .m3-it + .m3-it, body.d3 .m3-more > .m3-spk + .m3-spk { margin-top: 8px; }
+body.d3 .m3-more p { margin: 0 0 8px; }
+
+body.d3 .m3-file { box-sizing: border-box; padding: 18px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line-card);
+  display: flex; flex-direction: column; gap: 14px; }
+body.d3 .m3-file p { margin: 0; }
+body.d3 .m3-file-h { display: flex; align-items: center; gap: 12px; min-width: 0; }
+body.d3 .m3-file-ic { width: 40px; height: 40px; border-radius: 10px; background: var(--panel-2); display: grid; place-items: center;
+  color: var(--text-2); flex: none; }
+body.d3 .m3-file-n { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+body.d3 .m3-file-name { font-weight: 500; }
+body.d3 .m3-file-act { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.d3 .m3-file-act form { margin: 0; }
+body.d3 .m3-file-act .btn { width: 200px; padding: 0; justify-content: center; }
+body.d3 .m3-file-act [data-fpath] { position: relative; }
+
+/* итог: «Коротко» и колонки «Решения · Задачи · Открытые вопросы» */
+body.d3 .m3-short { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+body.d3 .m3-short h2 { margin: 0; font-size: 15px; }
+body.d3 .m3-short p { margin: 0; color: var(--text-2); }
+body.d3 .m3-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; align-items: start; }
+body.d3 .m3-col { box-sizing: border-box; padding: 14px; border-radius: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  background: var(--sunken); border: 1px solid var(--line); }
+body.d3 .m3-col.acc { background: var(--acc-deep); border-color: var(--accent-soft); }
+body.d3 .m3-col.warn { background: var(--warn-deep); border-color: var(--warn-line); }
+body.d3 .m3-col-h { display: flex; align-items: center; gap: 8px; padding: 2px 6px 6px; }
+body.d3 .m3-col-h h2 { margin: 0; font-size: 15px; }
+body.d3 .m3-col-h .d3-n { font-size: 14px; color: var(--muted); }
+body.d3 .m3-col-h a, body.d3 .m3-facts .d3-sec-h a { color: var(--muted); }
+body.d3 .m3-col-sub { display: flex; align-items: center; gap: 8px; padding: 8px 6px 0; }
+body.d3 .m3-col-sub form { margin: 0; }
+body.d3 .m3-it { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--panel);
+  border: 1px solid var(--line-card); min-width: 0; }
+body.d3 .m3-it.prop { border-style: dashed; border-color: var(--line-strong); background: transparent; }
+body.d3 .m3-it.off .m3-it-t { color: var(--muted); }
+body.d3 .m3-it-t { color: var(--text); overflow-wrap: anywhere; }
+body.d3 a.m3-it-t:hover { text-decoration: underline; text-decoration-color: var(--line-strong); }
+body.d3 button.m3-it-t { text-align: left; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+body.d3 .m3-it-t b { font-weight: 500; }
+body.d3 .m3-it-x { font-size: 13px; color: var(--muted); }
+body.d3 .m3-it-x a { color: var(--accent); }
+body.d3 .m3-none-in { margin: 0; padding: 4px 6px; }
+body.d3 .m3-pre { display: flex; flex-direction: column; gap: 2px; }
+body.d3 .m3-pre[hidden] { display: none; }
+body.d3 .m3-it-act { display: flex; gap: 8px; }
+body.d3 .m3-it-act form { margin: 0; }
+body.d3 .m3-it-act .btn { min-width: 64px; justify-content: center; }
+body.d3 .m3-facts { max-width: 980px; }
+body.d3 .m3-facts .m3-it { background: var(--panel); }
+body.d3 .m3-foot { margin: 0; color: var(--cap); }
+
+@media (max-width: 1180px) {
+  body.d3 .m3-row { grid-template-columns: 112px minmax(0, 1fr) auto; grid-template-areas: "time main act" ". tags act"; }
+  body.d3 .m3-time { grid-area: time; }
+  body.d3 .m3-main { grid-area: main; }
+  body.d3 .m3-tags { grid-area: tags; justify-content: flex-start; }
+  body.d3 .m3-act { grid-area: act; }
+}
+@media (max-width: 900px) {
+  body.d3 .m3-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time time" "main main" "tags act"; padding: 12px 14px; }
+  body.d3 .m3-search { flex: 1 1 100%; }
+  body.d3 .m3-st { grid-template-columns: 40px minmax(0, 1fr); }
+  body.d3 .m3-st-b { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; }
+  body.d3 .m3-doc { padding: 18px; }
+  body.d3 .m3-tr p { padding: 8px 14px; }
+  body.d3 .m3-file-act .btn { width: auto; padding: 0 14px; }
+}
+body.d3 .m3-folders a.menu-i, body.d3 .m3-head-act a.menu-i { color: var(--text-2); }

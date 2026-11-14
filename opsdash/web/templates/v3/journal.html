@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Журнал{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-system.css?v={{ static_v }}">{% endblock %}
+{% block content %}
+{#- Журнал в новом дизайне (макет Journal.dc.html): слева события по дням, справа задания с «Запустить». Фильтр событий
+    ссылками ?kind=, «Показать раньше» удваивает limit. Данные те же, что у классического journal.html #}
+<div class="sy-page" style="gap:20px">
+<div class="sy-head">
+  <div class="t"><h1>Журнал</h1>
+    <p class="sub">Что и когда делал PULSE · {% if errors_week %}<a href="?kind=errors" style="color:var(--warn-text);text-decoration:none">{{ errors_week }} {{ plural(errors_week, 'ошибка', 'ошибки', 'ошибок') }} за неделю</a>{% else %}ошибок за неделю нет{% endif %}{% if next_collect %} · следующий сбор в {{ next_collect.strftime('%H:%M') }}{% endif %}</p></div>
+</div>
+
+<div class="d3-bar" style="margin:0">
+  <nav class="seg" aria-label="Какие события">
+    {% for key, t in [('', 'Все'), ('notify', 'Уведомления'), ('claude', 'Claude'), ('errors', 'Ошибки')] %}<a class="{{ 'active' if kind == key }}" href="?kind={{ key }}"{% if kind == key %} aria-current="page"{% endif %}>{{ t }}{% if key == 'errors' and counts.errors %}<span class="sy-seg-n warn">{{ counts.errors }}</span>{% endif %}</a>{% endfor %}
+  </nav>
+</div>
+
+<div class="sy-cols">
+  <section class="sy-col-main" aria-label="События">
+    <div class="sy-gh"><h2>События</h2><span>{{ events | length }} {{ plural(events | length, 'событие', 'события', 'событий') }}{% if more %} · последние{% endif %}</span></div>
+    {% for e in events %}
+    {% if e.day %}<div class="sy-day">{{ e.day }}</div>{% endif %}
+    <article class="sy-ev">
+      <span class="t">{{ e.time }}</span>
+      <div class="b">
+        <span class="h{{ ' er' if e.level == 'error' else (' wn' if e.level == 'warning' else '') }}">{{ e.title }}</span>
+        <span class="m">{{ e.who }}{% if e.claude %} · Claude{% endif %}{% if e.level == 'error' %} · ошибка{% endif %}</span>
+        {% if e.rest %}<details><summary>подробнее</summary><pre>{{ e.rest }}</pre></details>{% endif %}
+      </div>
+    </article>
+    {% else %}<div class="sy-empty">Пусто.</div>{% endfor %}
+    {% if more %}<a class="sy-more-l" href="?kind={{ kind }}&limit={{ limit * 2 }}">Показать раньше</a>{% endif %}
+  </section>
+
+  <aside class="sy-col-side" aria-label="Задания">
+    <div class="sy-gh"><h2>Задания</h2>{% if queued %}<span>в очереди: {{ queued | length }}</span>{% endif %}</div>
+    {% for group, items in groups if items or group == 'Сбор' %}
+    <div class="sy-jg">{{ group }}</div>
+    {% for name, when in items %}
+    {% set j = jobs.get(name) %}
+    <div class="sy-jb">
+      <div style="min-width:0"><b>{{ titles.get(name, name) | replace(' (Claude)', '') }}</b><span class="sm" title="{{ when }}">{{ when }}</span></div>
+      {% if j and j.running %}<span class="sy-st run"><i></i><span>идёт</span></span>
+      {% elif j and j.last_error and (not j.last_ok or j.last_ok < j.last_run) %}<span class="sy-st wr" title="{{ j.last_error[:300] }}"><i></i><span>ошибка {{ j.last_run | local('%H:%M') }}</span></span>
+      {% elif j and j.last_ok %}<span class="sy-st"><i></i><span>{{ j.last_ok | local('%H:%M') }} ок</span></span>
+      {% else %}<span class="sy-st no"><i></i><span>ещё не запускалось</span></span>{% endif %}
+      <form method="post" action="/jobs/run"><input type="hidden" name="name" value="{{ name }}"><button class="btn sm"{% if j and j.running %} disabled{% endif %}>{{ 'идёт…' if j and j.running else 'Запустить' }}</button></form>
+    </div>
+    {% endfor %}
+    {% if group == 'Сбор' and not_connected %}<p class="sy-note">{{ not_connected | join(', ') }} не подключены, их задания не запускаются · <a href="/settings?tab=connections">подключения</a></p>{% endif %}
+    {% endfor %}
+    {% if archived_sections %}<p class="sy-note">Задания архивных разделов ({{ archived_sections | join(', ') }}) не запускаются · <a href="/settings?tab=archive">включить</a></p>{% endif %}
+  </aside>
+</div>
+</div>
+{% endblock %}

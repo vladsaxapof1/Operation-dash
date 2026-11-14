@@ -1,0 +1,304 @@
+/* Новый дизайн PULSE: «Календарь» (templates/v3/calendar.html) и всё про день, что открывается и на Сводке:
+   вердикт дня, плановые блоки задач на сетке, окно «Разобрать день» (_day.html), поповер встречи и бриф (_macros.html).
+   Подключается в templates/v3/base.html на всех экранах. Макеты: Calendar, CalendarMonth, CalendarList,
+   CalendarModals, DayPlan. Цвета только токенами v3.css; все селекторы начинаются с body.d3. */
+
+/* ---------- шапка и ряд управления ---------- */
+body.d3 .cal3 { display: flex; flex-direction: column; gap: 16px; }
+body.d3 .cal3-head { margin-bottom: 0; }
+body.d3 .cal3-range { flex: 1 1 auto; min-width: 0; color: var(--muted); }
+body.d3 .cal3-nav { display: inline-flex; gap: 6px; }
+body.d3 .cal3-ib { width: 36px; padding: 0; }
+body.d3 .cal3-nav .cal3-ib .ico { transform: rotate(90deg); }
+body.d3 .cal3-nav .cal3-ib.next .ico { transform: rotate(-90deg); }
+body.d3 .cal3-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+body.d3 .cal3-bar .grow { flex: 1 1 0; }
+body.d3 .cal3-bar form.inline { display: inline-flex; margin: 0; }
+body.d3 .cal3-bar .seg > a { text-decoration: none; }
+body.d3 .cal3-lg { display: inline-flex; align-items: center; gap: 6px; }
+body.d3 .cal3-lg i { width: 12px; height: 12px; border-radius: 3px; box-sizing: border-box; flex: none; }
+body.d3 .cal3-lg i.m { background: var(--acc-dot); }
+body.d3 .cal3-lg i.g { background: var(--google); }
+body.d3 .cal3-lg i.t { border: 1px dashed var(--cap); }
+body.d3 .cal3-lg i.t.w { border-color: var(--ok-line); background: var(--ok-soft); }
+body.d3 .cal3-lg i.t.q { border-color: var(--warn-line); background: var(--warn-soft); }
+body.d3 .cal3 .warn-text { color: var(--warn-text); }
+body.d3 .cal3-cap { color: var(--cap); }
+body.d3 .cal3-foot { margin: 0; }
+body.d3 .cal3-note { position: relative; padding: 12px 44px 12px 14px; border-radius: 12px; border: 1px dashed var(--line-strong);
+  color: var(--muted); font-size: 14px; }
+body.d3 .cal3-note .alert-x { top: 8px; right: 8px; color: var(--muted); }
+
+/* ---------- неделя ---------- */
+body.d3 .cal3-wk { padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--sunken); overflow-x: auto; }
+body.d3 .cal3-wk .wk { --gutter: 56px; min-width: 900px; }
+body.d3 .cal3-wk .wk-head { position: static; background: transparent; border-radius: 0; border-bottom: 1px solid var(--line); }
+body.d3 .cal3-wk .wk-day-h { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 12px 10px; text-align: left;
+  border-left: 1px solid var(--line); }
+body.d3 .cal3-wk .wk-day-h.today { background: var(--today); }
+body.d3 .cal3-dn { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+body.d3 .cal3-dn b { font-size: 22px; font-weight: 600; line-height: 1.1; }
+body.d3 .cal3-dn span { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .wk-day-h.today .cal3-dn b, body.d3 .wk-day-h.today .cal3-dn span { color: var(--accent); }
+body.d3 .cal3-ld { display: flex; height: 4px; border-radius: 999px; background: var(--line-card); overflow: hidden; }
+body.d3 .cal3-ld i { display: block; height: 100%; }
+body.d3 .cal3-ld i.m { background: var(--acc-dot); }
+body.d3 .cal3-ld i.t { background: var(--cap); }
+body.d3 .cal3-dl { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .cal3-wk .wk-allday { padding: 6px 0; grid-auto-rows: 24px; row-gap: 4px; border-bottom: 1px solid var(--line); }
+body.d3 .cal3-wk .wk-allday-label { font-size: 12px; color: var(--cap); }
+body.d3 .cal3-wk .wk-body { padding-top: 12px; }
+body.d3 .cal3-wk .wk-hour span { font-size: 12px; color: var(--cap); }
+body.d3 .cal3-wk .wk-col { border-left-color: var(--line); }
+body.d3 .cal3-wk .wk-col.today { background-color: var(--today); }
+body.d3 .cal3-wk .wk-col.we:not(.today) { background-color: var(--weekend); }
+body.d3 .cal3-wk .wk-now, body.d3 .cal3-wk .wk-now::before { background: var(--accent); }
+body.d3 .cal3-wk .wk-now span { background: var(--sunken); color: var(--accent); font-size: 12px; }
+
+/* встречи на сетке (неделя и «Сегодня» на Сводке): синие — Яндекс, с фиолетовой рамкой — Google и другие только для чтения */
+body.d3 .wk-col .ev, body.d3 .day-col .ev { padding: 4px 8px; border: 1px solid var(--ev-line); border-radius: 8px;
+  background: var(--ev-bg); color: var(--ev-fg); font-size: 13px; line-height: 1.3; box-shadow: none; }
+body.d3 .wk-col .ev.short, body.d3 .day-col .ev.short { padding-top: 1px; padding-bottom: 1px; }
+body.d3 .ev .ev-t { font-weight: 500; }
+body.d3 .ev .ev-time { font-size: 12px; opacity: .8; }
+body.d3 .ev.short .ev-time { font-size: inherit; }
+body.d3 .ev.google, body.d3 .mev.google { background: var(--evg-bg); color: var(--evg-fg); border: 1px solid var(--evg-line);
+  box-shadow: inset 3px 0 0 var(--evg-line); }
+body.d3 .ev:hover { box-shadow: none; border-color: var(--acc-line-2); }
+body.d3 .ev.google:hover { box-shadow: inset 3px 0 0 var(--evg-line); }
+body.d3 .ev.past, body.d3 .mev.past { opacity: .55; }
+body.d3 .ev.now { outline: 1px solid var(--acc-line-2); outline-offset: 1px; }
+body.d3 .ev-allday { margin: 0 4px; padding: 2px 8px; border: 1px solid var(--ev-line); border-radius: 6px; font-size: 12px; font-weight: 500;
+  background: var(--ev-bg); color: var(--ev-fg); }
+body.d3 .ev-ok { color: var(--ok-text); }
+body.d3 .ev.focus { background: var(--panel); color: var(--text); border: 1px dashed var(--line-strong); }
+body.d3 .ev.free { background: transparent; color: var(--muted); border: 1px dashed var(--line-strong); }
+
+/* плановые задачи на сетке (_day.html task_block): пунктир; «в работе» — зелёная; закреплённая вами — сплошной рамкой */
+body.d3 .pb { padding: 4px 8px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--text);
+  font-size: 13px; line-height: 1.3; }
+body.d3 .wk-col .pb { padding: 3px 7px; }
+body.d3 .pb:hover { background: var(--panel-2); box-shadow: none; }
+body.d3 .pb .pb-t { font-weight: 500; }
+body.d3 .pb .pb-m { font-size: 12px; color: var(--muted); opacity: 1; }
+body.d3 .pb.work { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok-text); }
+body.d3 .pb.work .pb-m { color: var(--ok-text); opacity: .8; }
+body.d3 .pb.pinned { border-style: solid; }
+body.d3 .pb.late { border-color: var(--warn); }
+body.d3 .pb.done { opacity: .55; }
+body.d3 .pb.tiny { padding-top: 0; padding-bottom: 0; }
+body.d3 .pb.dragging { box-shadow: var(--shadow-pop); }
+body.d3 .pl-buffer { background: repeating-linear-gradient(135deg, var(--line-strong) 0 1px, transparent 1px 6px); }
+body.d3 .pl-short { background: var(--sunken); }
+
+/* строка «весь день»: «ждёт другого» — янтарный пунктир, просроченное — красный текст; «не влезает до срока» — янтарный */
+body.d3 .ev-wait { margin: 0 4px; padding: 2px 8px; border: 1px dashed var(--warn-line); border-radius: 8px; background: var(--warn-soft);
+  color: var(--warn-text); font-size: 12px; }
+body.d3 .ev-wait .ev-wait-t { color: inherit; font-weight: 500; }
+body.d3 .ev-wait:hover { color: var(--text); }
+body.d3 .ev-wait.late { border-color: var(--bad-soft); background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .ev-waits-list { padding: 6px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-pop); }
+body.d3 .ev-late { margin: 0 4px; padding: 2px 8px; border: 1px dashed var(--warn); border-radius: 8px; background: var(--warn-deep);
+  color: var(--warn-text); font-size: 12px; }
+
+/* ---------- месяц ---------- */
+body.d3 .cal3-mo { border: 1px solid var(--line); border-radius: 16px; background: var(--sunken); overflow-x: auto; }
+body.d3 .cal3-mg { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; min-width: 840px; background: var(--line); }
+body.d3 .cal3-wd { padding: 10px 12px; background: var(--sunken); font-size: 13px; color: var(--cap); }
+body.d3 .cal3-mo .mcell { display: flex; flex-direction: column; gap: 4px; height: 140px; min-height: 0; box-sizing: border-box; padding: 8px 10px;
+  border: 0; background: var(--sunken); overflow: hidden; }
+body.d3 .cal3-mo .mcell.other { background: var(--sunken); }
+body.d3 .cal3-mo .mcell.today { background: var(--today); }
+body.d3 .cal3-mn { display: flex; align-items: center; gap: 6px; height: 22px; flex: none; min-width: 0; }
+body.d3 .cal3-mo .mcell-n { padding: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+body.d3 .cal3-mo .mcell-n:hover { color: var(--accent); text-decoration: none; }
+body.d3 .cal3-mo .mcell.other .mcell-n { color: var(--cap); font-weight: 500; }
+body.d3 .cal3-mo .mcell.today .mcell-n, body.d3 .cal3-mo .mcell.today .cal3-mn .small { color: var(--accent); }
+body.d3 .cal3-mx { margin-left: auto; font-size: 12px; color: var(--warn-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .cal3-mo .mtasks { display: block; flex: none; padding: 0; border: 0; font-size: 12px; color: var(--cap); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+body.d3 .cal3-mo .mtasks.work { color: var(--ok-text); }
+body.d3 .cal3-mo .mtasks:hover { color: var(--text); text-decoration: none; }
+body.d3 .cal3-mo .mev { flex: none; height: 20px; line-height: 18px; padding: 0 6px 0 9px; border: 1px solid var(--ev-line); border-radius: 6px;
+  background: var(--ev-bg); color: var(--ev-fg); font-size: 12px; box-sizing: border-box; }
+body.d3 .cal3-mo .mcell.other .mev { opacity: .55; }
+body.d3 .cal3-mo .mev-more { flex: none; padding: 0; font-size: 12px; color: var(--accent); }
+
+/* ---------- список ---------- */
+body.d3 .cal3-day { display: flex; flex-direction: column; gap: 8px; max-width: 1080px; }
+body.d3 .cal3-dh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 4px; }
+body.d3 .cal3-dh h2 { margin: 0; font-size: 16px; font-weight: 600; }
+body.d3 .cal3-dh h2.today { color: var(--accent); }
+body.d3 .cal3-dc { font-size: 13px; color: var(--cap); }
+body.d3 .cal3-lst { border: 1px solid var(--line-card); border-radius: 14px; background: var(--panel); overflow: hidden; }
+body.d3 .cal3-r { display: grid; grid-template-columns: 104px 28px minmax(0, 1fr) 150px; align-items: center; gap: 12px; min-height: 56px;
+  box-sizing: border-box; padding: 10px 14px; border-top: 1px solid var(--line); }
+body.d3 .cal3-r:first-child { border-top: 0; }
+body.d3 .cal3-r.late { box-shadow: inset 3px 0 0 var(--bad); }
+body.d3 .cal3-tm { font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.d3 .cal3-tm.past { color: var(--cap); }
+body.d3 .cal3-k { justify-self: center; width: 12px; height: 12px; border-radius: 3px; box-sizing: border-box; }
+body.d3 .cal3-k.m { background: var(--acc-dot); }
+body.d3 .cal3-k.g { background: var(--google); }
+body.d3 .cal3-k.t { border: 1px dashed var(--cap); }
+body.d3 .cal3-k.t.w { border-color: var(--ok-line); background: var(--ok-soft); }
+body.d3 .cal3-k.t.q { border-color: var(--warn-line); background: var(--warn-soft); }
+body.d3 .cal3-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+body.d3 .cal3-t { display: flex; align-items: center; gap: 8px; min-width: 0; }
+body.d3 .cal3-t b { font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .cal3-s { font-size: 13px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .cal3-gg { background: var(--evg-bg); color: var(--evg-fg); box-shadow: inset 0 0 0 1px var(--evg-line); }
+body.d3 .cal3-tagbtn { border: 0; font: inherit; font-size: 12px; cursor: pointer; }
+body.d3 .cal3 .btn.cal3-w { width: 150px; box-sizing: border-box; }
+body.d3 .cal3-empty { padding: 14px 16px; border: 1px dashed var(--line-strong); border-radius: 14px; font-size: 14px; color: var(--cap); }
+@media (max-width: 760px) {
+  body.d3 .cal3-r { grid-template-columns: 76px 20px minmax(0, 1fr); }
+  body.d3 .cal3 .btn.cal3-w { grid-column: 3; width: auto; justify-self: start; }
+}
+
+/* ---------- окно «Новая встреча» ---------- */
+body.d3 .cal3-new { width: min(560px, calc(100vw - 32px)); }
+body.d3 .cal3-new .dlg-box { display: flex; flex-direction: column; gap: 14px; padding: 22px 24px; }
+body.d3 .cal3-new .dlg-head { align-items: flex-start; }
+body.d3 .cal3-new .dlg-title, body.d3 .dlg-brief .dlg-title, body.d3 .dlg-day .dlg-title { font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -.01em; }
+body.d3 .cal3-fields { display: flex; flex-direction: column; gap: 14px; }
+body.d3 .cal3-fields[hidden] { display: none; }
+body.d3 .cal3-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+body.d3 .cal3-f label { margin: 0; font-size: 13px; font-weight: 400; color: var(--muted); }
+body.d3 .cal3-f input, body.d3 .cal3-f select, body.d3 .cal3-f textarea { width: 100%; box-sizing: border-box; margin: 0; font-size: 14px; }
+body.d3 .cal3-f input, body.d3 .cal3-f select { height: 38px; }
+body.d3 .cal3-f textarea { padding: 10px 12px; resize: vertical; }
+body.d3 .cal3-f3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+body.d3 .cal3-for { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--acc-deep);
+  border: 1px solid var(--acc-line); }
+body.d3 .cal3-for .ico { color: var(--accent); }
+body.d3 .cal3-off { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border: 1px dashed var(--line-strong); border-radius: 14px; }
+body.d3 .cal3-off b { font-weight: 600; }
+body.d3 .cal3-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+body.d3 .cal3-chip { display: inline-flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 999px; border: 1px dashed var(--line-strong);
+  background: transparent; color: var(--text-2); font: inherit; font-size: 13px; cursor: pointer; }
+body.d3 .cal3-chip:hover { border-color: var(--acc-line-2); color: var(--accent); }
+body.d3 .cal3-new .dlg-actions { margin-top: 0; padding-top: 14px; border-top: 1px solid var(--line); }
+body.d3 .cal3-new .dlg-actions .grow { flex: 1 1 0; }
+@media (max-width: 560px) { body.d3 .cal3-f3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- поповер встречи и меню блока задачи ([data-ev-pop]: Календарь и Сводка) ---------- */
+body.d3 .ev-pop { width: 400px; box-sizing: border-box; padding: 18px 20px; gap: 10px; border: 1px solid var(--dlg-line); border-radius: 14px;
+  background: var(--window); color: var(--text); box-shadow: var(--shadow-pop); font-size: 14px; }  /* разметка — из app.js, вид как у .d3-pop */
+body.d3 .ev-pop .ev-detail-h { font-size: 18px; line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
+body.d3 .ev-pop .ev-detail-h a { color: var(--text); }
+body.d3 .ev-pop .muted { color: var(--muted); }
+body.d3 .ev-pop .small { font-size: 13px; }
+body.d3 .ev-pop > .small:not(.muted), body.d3 .ev-pop .ev-desc { font-size: 14px; color: var(--text-2); }
+body.d3 .ev-pop .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+body.d3 .ev-pop .actions:empty { display: none; }
+body.d3 .ev-pop .btn.sm { height: 30px; }
+/* блок брифа: готов — плашка, не собран или соберётся сам — пунктиром */
+body.d3 .ev-pop .ev-brief { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border: 1px dashed var(--line-strong);
+  border-radius: 12px; background: transparent; }
+body.d3 .ev-pop .ev-brief:has(.ev-brief-h) { border-style: solid; border-color: var(--line-card); background: var(--panel); }
+body.d3 .ev-pop .ev-brief:not(:has(*)) { display: none; }
+body.d3 .ev-pop .ev-brief-h { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); }
+body.d3 .ev-pop .ev-brief-h .chip.warn { background: var(--warn-soft); color: var(--warn-text); }
+body.d3 .ev-pop .ev-brief .actions { padding-top: 0; border-top: 0; margin: 0; }
+/* меню блока задачи (task_menu) */
+body.d3 .pbm { gap: 10px; }
+body.d3 .pbm-row { gap: 8px; }
+body.d3 .pbm-row .btn.ghost { color: var(--text-2); }
+body.d3 .pbm-list { padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+body.d3 .pbm-list li { display: flex; align-items: center; gap: 8px; min-height: 30px; padding-top: 8px; border-top: 1px solid var(--line); }
+body.d3 .pbm-list li:first-child { padding-top: 0; border-top: 0; }
+body.d3 .pbm-list li > a { flex: 1 1 auto; min-width: 0; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .pbm .day-pass { padding: 12px 14px; border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); }
+body.d3 .pbm .day-pass[hidden] { display: none; }
+
+/* чипы оценки в меню блока и в «Разобрать день» */
+body.d3 .pbm .est-c, body.d3 .dlg-day .est-c { height: 26px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px;
+  background: var(--panel-2); color: var(--muted); font-size: 12px; }
+body.d3 .pbm .est-c:hover, body.d3 .dlg-day .est-c:hover { color: var(--text); }
+body.d3 .pbm .est-c[aria-pressed="true"], body.d3 .dlg-day .est-c[aria-pressed="true"] { border-color: var(--line-strong); background: var(--g-seg-on);
+  color: var(--text); font-weight: 500; }
+
+/* ---------- окно брифа ---------- */
+body.d3 .dlg-brief { width: min(640px, calc(100vw - 32px)); }
+body.d3 .dlg-brief .dlg-box { padding: 22px 24px; gap: 14px; }
+body.d3 .dlg-brief .brief-head { flex: 1 1 0; min-width: 0; }
+body.d3 .dlg-brief .brief-head .small { margin-top: 4px; font-size: 13px; color: var(--muted); }
+body.d3 .dlg-brief .brief-doc { color: var(--text-2); font-size: 15px; line-height: 1.5; }
+body.d3 .dlg-brief .brief-doc h1, body.d3 .dlg-brief .brief-doc h2, body.d3 .dlg-brief .brief-doc h3 { margin: 14px 0 6px; font-size: 15px;
+  font-weight: 600; color: var(--text); }
+body.d3 .dlg-brief .brief-doc > :first-child { margin-top: 0; }
+body.d3 .dlg-brief .brief-doc ul { margin: 0; padding-left: 18px; }
+body.d3 .dlg-brief .brief-doc li + li { margin-top: 4px; }
+body.d3 .dlg-brief .dlg-actions .grow { flex: 1 1 0; }
+body.d3 .dlg-brief .dlg-actions .muted { color: var(--cap); }
+
+/* ---------- вердикт дня (Сводка) ---------- */
+body.d3 .dv { gap: 10px; padding: 16px; margin: 0 16px 12px; border: 1px solid var(--line-card); border-radius: 14px; background: var(--panel); }
+body.d3 .dv-h { gap: 10px; }
+body.d3 .dv-title { font-size: 16px; font-weight: 600; color: var(--text); }
+body.d3 .dv-ok .dv-title, body.d3 .dv-tight .dv-title, body.d3 .dv-over .dv-title { color: var(--text); }
+body.d3 .dv-dot { width: 8px; height: 8px; background: var(--cap); }
+body.d3 .dv-ok .dv-dot { background: var(--ok); }
+body.d3 .dv-tight .dv-dot { background: var(--warn); }
+body.d3 .dv-over .dv-dot { background: var(--bad); }
+body.d3 .dv-sub { margin: 0; font-size: 13px; color: var(--muted); }
+body.d3 .dv-bar { height: 8px; border-radius: 999px; background: var(--line-card); }
+body.d3 .dv-need { border-radius: 999px; background: var(--ok); }
+body.d3 .dv-tight .dv-need { background: var(--warn); }
+body.d3 .dv-over .dv-need { background: var(--bad); }
+body.d3 .dv-cap { background: var(--text); }
+body.d3 .dv-now, body.d3 .dv-big, body.d3 .dv-week { font-size: 13px; color: var(--text-2); }
+body.d3 .dv-now b { font-weight: 500; color: var(--text); }
+body.d3 .dv-now.muted { color: var(--cap); }
+body.d3 .dv-big.warn-text { color: var(--warn-text); }
+body.d3 .dv-carry { padding: 12px 14px; border: 1px dashed var(--line-strong); border-radius: 12px; }
+body.d3 .dv-carry ul { color: var(--text-2); }
+
+/* ---------- окно «Разобрать день» ---------- */
+body.d3 .dlg-day { width: min(900px, calc(100vw - 32px)); }
+body.d3 .dlg-day .dlg-box { padding: 28px 32px; gap: 16px; }
+body.d3 .dlg-day .day-body { gap: 12px; }
+body.d3 .day-total { gap: 10px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line-card); background: var(--panel);
+  font-size: 16px; font-weight: 600; }
+body.d3 .day-total.dv-ok { background: var(--ok-deep); border-color: var(--ok-line); }
+body.d3 .day-total.dv-tight { background: var(--warn-deep); border-color: var(--warn-line); }
+body.d3 .day-total.dv-over { background: var(--bad-soft); border-color: var(--bad-soft); }
+body.d3 .day-progress { margin: 0; color: var(--cap); }
+body.d3 .dlg-day .day-list { border: 1px solid var(--line-card); border-radius: 14px; background: var(--panel); overflow: hidden; }
+body.d3 .dlg-day .day-it { gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
+body.d3 .dlg-day .day-it:first-child { border-top: 0; }
+body.d3 .dlg-day .day-it.muted { color: var(--muted); }
+body.d3 .day-it-t { font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .day-slot { color: var(--text-2); }
+body.d3 .day-slot.warn-text { color: var(--warn-text); }
+body.d3 .day-it-r { margin: 0; font-size: 13px; color: var(--muted); }
+body.d3 .day-it-a { gap: 8px; }
+body.d3 .day-it-a .btn.sm { height: 30px; }
+body.d3 .day-it-t a { color: var(--text); }
+body.d3 .day-it-t a:hover { color: var(--accent); text-decoration: none; }
+body.d3 .day-it-a { gap: 6px 8px; }
+/* второстепенные решения (как меню «Ещё» в макете): без рамки, проявляются при наведении */
+body.d3 .day-it-a .btn.ghost { padding: 0 8px; color: var(--muted); border-color: transparent; background: transparent; }
+body.d3 .day-it-a .btn.ghost:hover { color: var(--text); background: var(--panel-2); }
+body.d3 .day-it-a .day-plan .btn { background: var(--panel-2); }
+body.d3 .day-plan select { height: 30px; border-radius: 8px; }
+body.d3 .dlg-day .day-pass, body.d3 .dlg-day .day-due { padding: 14px; border-radius: 12px; background: var(--sunken); border: 1px solid var(--line); }
+body.d3 .dlg-day .day-pass[hidden], body.d3 .dlg-day .day-due[hidden] { display: none; }
+body.d3 .dlg-day .day-pass-f input { height: 36px; }
+body.d3 .dlg-day .day-body > p.muted.small { margin: 0; padding: 10px 14px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); }
+body.d3 .dlg-day .dlg-actions .muted { color: var(--cap); }
+@media (max-width: 820px) { body.d3 .dlg-day .dlg-box { padding: 20px 18px; } }
+
+/* вердикт сегодняшнего дня под его заголовком в неделе: щелчок — «Разобрать день» */
+body.d3 .cal3-verdict { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0; border: 0;
+  background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; max-width: 100%;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .cal3-verdict i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+body.d3 .cal3-verdict.v-ok { color: var(--ok-text); }
+body.d3 .cal3-verdict.v-tight { color: var(--warn-text); }
+body.d3 .cal3-verdict.v-tight i { background: var(--warn); }
+body.d3 .cal3-verdict.v-over { color: var(--bad-text); }
+body.d3 .cal3-verdict.v-over i { background: var(--bad); }
+body.d3 .cal3-verdict.v-off i { background: var(--faint); }
+body.d3 .cal3-verdict:hover { color: var(--text); }

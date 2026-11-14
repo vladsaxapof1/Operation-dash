@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Сводка{% endblock %} · PULSE</title>
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  {#- Новый дизайн (бета): тёмный. Под ним — классические стили и «Графит», чтобы экраны, которые ещё не
+      переехали в templates/v3, выглядели в тон; поверх — v3.css (токены, шрифт Onest, каркас и компоненты) #}
+  <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/day.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/agents.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/memory.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/dark.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/graphite.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/v3.css?v={{ static_v }}">
+  {#- окно задачи и «Поручить агенту», сетка и вердикт дня открываются на разных экранах — их стили нужны везде #}
+  <link rel="stylesheet" href="/static/v3-tasks.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/v3-calendar.css?v={{ static_v }}">
+  {% block head %}{% endblock %}
+</head>
+<body class="d3{{ ' nav-collapsed' if nav_collapsed }} page-{{ nav or 'other' }}{% block body_class %}{% endblock %}">
+{% import "_icons.html" as icons %}
+{% from "_macros.html" import transcription_all %}
+{#- меню нового дизайна: Сводка и «Спросить» без заголовка, дальше «Работа · Память · Система».
+    Журнал и Справка — внизу меню мелкими ссылками. Счётчик синий у выбранного раздела, красный — если в
+    «Нужно от вас» есть срочное; остальные — серые #}
+{% set active_key = {'tasks': 'commitments', 'project': 'commitments', 'kb': 'memory'}.get(nav, nav) %}
+{% set nav_groups = [
+  ("", [("home", "/", "Сводка", feed_count), ("ask", "/ask", "Спросить " ~ (ai_name or "Claude"), 0)]),
+  ("Работа", [("commitments", "/commitments", "Задачи", tasks_count), ("calendar", "/calendar", "Календарь", 0),
+              ("meetings", "/meetings", "Встречи", 0), ("chats", "/chats", "Переписка", 0)]),
+  ("Память", [("memory", "/memory", "Память", 0), ("decisions", "/decisions", "Решения", decisions_attention),
+              ("digests", "/digests", "Дайджесты", 0), ("people", "/people", "Люди", 0)]
+             + ([("docs", "/docs", "Документы", 0)] if sections_on.docs else [])),
+  ("Система", [("office", "/office", "Офис", 0), ("skills", "/skills", "Навыки", 0), ("settings", "/settings", "Настройки", 0)]),
+] %}
+{% set nav_system = [("journal", "/journal", "Журнал", 0), ("help", "/help", "Справка", 0)] %}
+{% macro nav_link(key, href, title, n) -%}
+<a href="{{ href }}" class="{{ 'active' if active_key == key }}"{% if active_key == key %} aria-current="page"{% endif %} title="{{ title }}{{ (' — ждут решения без следующего шага: ' ~ n) if key == 'decisions' and n }}">{{ icons.icon(key) }}<span class="lbl">{{ title }}</span>{% if n %}<span class="badge{{ ' bad' if key == 'home' and feed_urgent else (' warn' if key == 'decisions' else (' acc' if active_key == key else '')) }}">{{ n }}</span>{% endif %}</a>
+{%- endmacro %}
+{#- shell — каркас страницы: меню слева, поле с сообщениями и содержимым. Мастер первого запуска заменяет его
+    своим (окно на тёмном фоне без меню и нижней панели) #}
+{% block shell %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">P</span><span class="lbl">PULSE</span>
+      <button type="button" class="nav-toggle" data-nav-toggle title="{{ 'Развернуть меню' if nav_collapsed else 'Свернуть меню' }}" aria-label="{{ 'Развернуть меню' if nav_collapsed else 'Свернуть меню' }}">{{ icons.icon('panel') }}</button></div>
+    <nav class="nav" aria-label="Разделы">
+      {% for group, items in nav_groups %}
+      {% if group %}<div class="nav-g"><span class="lbl">{{ group }}</span></div>{% endif %}
+      {% for key, href, title, n in items %}{{ nav_link(key, href, title, n) }}{% endfor %}
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      <div class="side-links">{% for key, href, title, n in nav_system %}<a href="{{ href }}" class="{{ 'active' if active_key == key }}">{{ title }}</a>{% endfor %}</div>
+      <p class="muted small">Версия {{ version }}{% if build %} · {{ build }}{% endif %} · на этом компьютере
+      {% if update_available %}<br><a class="update-link" href="/settings?tab=updates">● Доступно обновление</a>
+      {% elif restart_needed %}<br><a class="update-link" href="/settings?tab=updates">● Перезапустите PULSE — версия {{ restart_needed.version or restart_needed.sha[:7] }} уже скачана</a>{% endif %}</p>
+    </div>
+  </aside>
+  <main class="main">
+    {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+    {% if err %}<div class="alert bad">{{ err }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
+{#- угол экрана: что PULSE делает сейчас и что сделал (opsdash.notices); обновляется сам (app.js) #}
+<div class="notices" data-notices data-last="{{ notices[0].id if notices else 0 }}">
+  {#- идёт расшифровка — рядом пауза и «Остановить», а ссылка ведёт в «Встречи» (там видно всю очередь) #}
+  {%- set tr_only = running_now and running_now | rejectattr('tr') | list | length == 0 %}
+  <div class="notice-now{{ ' tr-paused' if tr_corner and tr_corner.paused }}" data-notice-now role="status"{% if not running_now %} hidden{% endif %}>
+    <span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <a class="notice-now-t" href="{{ '/meetings' if tr_only else '/office' }}" title="{{ 'Открыть «Встречи»: вся очередь расшифровки' if tr_only else 'Открыть «Офис»: что делает Claude по шагам' }}" data-notice-now-link><span data-notice-now-text>{% for r in running_now %}{{ r.title }}{% if r.detail %} — {{ r.detail }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}</span></a>
+    <span class="notice-now-act" data-notice-now-act>{{ transcription_all(tr_corner, corner=True) }}</span>
+  </div>
+  <div class="notice-head" data-notice-head{% if notices | length < 2 %} hidden{% endif %}>
+    <button type="button" class="notice-clear" data-notice-clear>Скрыть все</button>
+  </div>
+  <div class="notice-list" data-notice-list aria-live="polite"{% if not notices %} hidden{% endif %}>
+    {% for n in notices %}
+    <div class="notice {{ n.level }}" data-notice="{{ n.id }}" data-key="{{ n.kind }}|{{ n.title }}">
+      <div class="notice-b">
+        {% if n.link %}<a class="notice-t" href="{{ n.link }}">{{ n.title }}</a>{% else %}<span class="notice-t">{{ n.title }}</span>{% endif %}
+        {% if n.text %}<div class="notice-x">{{ n.text }}</div>{% endif %}
+        <div class="notice-time" data-ts="{{ n.created }}">{{ n.created | ago }}</div>
+      </div>
+      <button type="button" class="notice-close" data-notice-close title="Скрыть" aria-label="Скрыть">✕</button>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="notice-foot" data-notice-foot hidden>
+    <button type="button" class="notice-more" data-notice-more hidden></button>
+  </div>
+  {% if voice_tip %}
+  <aside class="toast" data-toast="{{ voice_tip.id }}" role="status">
+    <div class="toast-h">🎙 {{ voice_tip.title }}</div>
+    <div class="small">{{ voice_tip.text }}</div>
+    <div class="actions"><a class="btn sm primary" href="/meetings/{{ voice_tip.meeting }}?tab=record#who">{{ voice_tip.button }}</a><button type="button" class="btn sm ghost" data-toast-close>Позже</button></div>
+  </aside>
+  {% endif %}
+</div>
+{#- телефон: нижняя панель из четырёх пунктов, «Ещё» — лист со всеми остальными (работает и без JS) #}
+{% block tabbar %}<nav class="tabbar" aria-label="Разделы">
+  {% for key, href, title, n in [nav_groups[0][1][0]] + nav_groups[1][1][:2] %}<a href="{{ href }}" class="{{ 'active' if active_key == key }}">{{ icons.icon(key, 20) }}<span>{{ title }}</span>{% if n and key == 'home' %}<i class="tabbar-dot{{ ' bad' if key == 'home' and feed_urgent }}"></i>{% endif %}</a>{% endfor %}
+  <details class="tabbar-more" data-tabbar-more>
+    <summary>{{ icons.icon('more', 20) }}<span>Ещё</span></summary>
+    <div class="tabbar-sheet">
+      {% for group, items in nav_groups %}<div class="nav-g">{{ group or 'Главное' }}</div>
+      {% for key, href, title, n in items %}<a href="{{ href }}" class="{{ 'active' if active_key == key }}">{{ icons.icon(key) }}{{ title }}</a>{% endfor %}{% endfor %}
+      <div class="sep"></div>
+      {% for key, href, title, n in nav_system %}<a href="{{ href }}" class="{{ 'active' if active_key == key }}">{{ icons.icon(key) }}{{ title }}</a>{% endfor %}
+    </div>
+  </details>
+</nav>{% endblock %}
+{% if design_intro %}{% include "_design_intro.html" %}{% endif %}
+{% if why_p %}
+{#- «Нет» — почему? (MOD-3): одна строка с причинами; ответ учитывает навык «Уроки из ваших „Нет“». Можно не отвечать #}
+<div class="why-bar" role="dialog" aria-label="Почему «Нет»" data-why="{{ why_p.id }}">
+  <span class="why-t">«Нет» — почему? <span class="muted">Так PULSE поймёт, что предлагать не стоит.</span></span>
+  <div class="why-chips">{% for key, t in WHY_REASONS.items() %}<button type="button" class="btn sm" data-why-reason="{{ key }}">{{ t }}</button>{% endfor %}</div>
+  <input type="text" class="why-note" placeholder="другое — словами" maxlength="300" data-why-note hidden>
+  <button type="button" class="alert-x" data-why-close aria-label="Не отвечать" title="Не отвечать">✕</button>
+</div>
+{% endif %}
+<script src="/static/app.js?v={{ static_v }}"></script>
+<script src="/static/day.js?v={{ static_v }}"></script>
+<script src="/static/agents.js?v={{ static_v }}"></script>
+<script src="/static/memory.js?v={{ static_v }}"></script>
+</body>
+</html>

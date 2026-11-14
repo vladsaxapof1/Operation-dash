@@ -1,0 +1,157 @@
+/* «Спросить Claude», новый дизайн (макеты Ask, AskStates). Подключается только из templates/v3/ask.html.
+   Все селекторы — под body.d3, цвета — токенами v3.css */
+
+/* --- каркас: разговоры слева во всю высоту, разговор колонкой до 760 px --- */
+body.d3.page-ask .main { padding: 0; display: flex; flex-direction: column; min-height: 100vh; }
+body.d3.page-ask .main > .alert { margin: 16px 32px 0; }
+body.d3 .a3 { flex: 1 1 auto; display: flex; min-height: 100vh; }
+body.d3 .a3-side { flex: 0 0 280px; box-sizing: border-box; padding: 24px 12px; border-right: 1px solid var(--line); position: sticky; top: 0;
+  height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+body.d3 .a3-main { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 20px 32px 0; display: flex; flex-direction: column; gap: 20px; }
+body.d3 .a3-col { width: 100%; max-width: 760px; margin: 0 auto; box-sizing: border-box; }
+body.d3 .a3-grow { flex: 1 1 auto; min-width: 0; }
+
+/* --- список разговоров --- */
+body.d3 .a3-new { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px; flex: none; }
+body.d3 .a3-find { flex: none; height: 34px; margin-bottom: 12px; }
+body.d3 .a3-find input { font-size: 13px; }
+body.d3 .a3-gl { padding: 14px 10px 6px; font-size: 13px; color: var(--cap); }
+body.d3 .a3-gl:first-of-type { padding-top: 0; }
+body.d3 .a3-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+body.d3 .a3-q { display: block; padding: 8px 10px; border-radius: 8px; color: var(--text-2); font-size: 14px; text-decoration: none; }
+body.d3 .a3-q:hover { background: var(--panel); color: var(--text); text-decoration: none; }
+body.d3 .a3-q.on { background: var(--panel-2); color: var(--text); }
+body.d3 .a3-q b { display: block; font-weight: 400; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .a3-q span { display: block; font-size: 12px; color: var(--cap); }
+body.d3 .a3-side-empty { margin: 4px 10px; font-size: 13px; color: var(--muted); }
+
+/* --- шапка разговора и меню «…» --- */
+body.d3 .a3-head { display: flex; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+body.d3 .a3-head h2 { flex: 1 1 auto; margin: 0; font-size: 15px; font-weight: 600; }
+body.d3 .a3 .menu > summary.btn.icon { width: 36px; height: 36px; padding: 0; justify-content: center; background: transparent; border-color: transparent; color: var(--muted); }
+body.d3 .a3 .menu > summary.btn.icon:hover, body.d3 .a3 .menu[open] > summary { background: var(--panel-2); color: var(--text); border-color: transparent; }
+
+/* --- разговор --- */
+body.d3 .a3-thread { flex: 1 1 auto; display: flex; flex-direction: column; gap: 24px; padding-bottom: 8px; }
+body.d3 .a3-qb { align-self: flex-end; max-width: 520px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+body.d3 .a3-qt { padding: 10px 16px; border-radius: 16px; background: var(--panel-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+body.d3 .a3-qc { font-size: 13px; color: var(--cap); text-align: right; }
+body.d3 .a3-qc a { color: var(--accent); }
+body.d3 .a3-a { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+body.d3 .a3-text { color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
+body.d3 .a3-text > :first-child { margin-top: 0; }
+body.d3 .a3-text > :last-child { margin-bottom: 0; }
+body.d3 .a3-text li { color: var(--text-2); }
+body.d3 .a3-text a { color: var(--accent); }
+body.d3 .a3-tools { display: flex; gap: 8px; }
+body.d3 .a3-tools .btn, body.d3 .a3-a .btn.sm { display: inline-flex; align-items: center; gap: 6px; }
+body.d3 .a3-a > form { align-self: flex-start; margin: 0; }
+
+/* «Что делал Claude»: свёрнутый блок */
+body.d3 details.a3-blk { border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); }
+body.d3 details.a3-blk > summary { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; list-style: none; font-size: 13px; color: var(--muted); }
+body.d3 details.a3-blk > summary::-webkit-details-marker { display: none; }
+body.d3 details.a3-blk[open] > summary .ico:last-child { transform: rotate(180deg); }
+body.d3 .a3-blk-b { padding: 0 14px 12px 40px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+
+/* ответ пишется: шаги с галочками, текущий — с кольцом */
+body.d3 .a3-steps { padding: 12px 14px; border-radius: 12px; background: var(--sunken); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+body.d3 .a3-steps-done { display: flex; flex-direction: column; gap: 6px; }
+body.d3 .a3-steps-done:empty { display: none; }
+body.d3 .a3-steps-done > div, body.d3 .a3-step-now { display: flex; align-items: center; gap: 10px; min-height: 24px; font-size: 13px; color: var(--muted); }
+body.d3 .a3-steps-done > div::before { content: "✓"; width: 18px; height: 18px; border-radius: 50%; background: var(--ok-soft); color: var(--ok-text);
+  display: grid; place-items: center; font-size: 11px; font-weight: 600; flex: none; }
+body.d3 .a3-step-now { color: var(--text); }
+body.d3 .a3-spin { width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--acc-dot); border-right-color: transparent;
+  flex: none; animation: a3-spin .9s linear infinite; }
+@keyframes a3-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { body.d3 .a3-spin { animation: none; } }
+body.d3 .a3-live { color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+body.d3 .a3-live:empty { display: none; }
+
+body.d3 .a3-fail { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .a3-fail.info { background: var(--panel); border: 1px solid var(--line-card); color: var(--muted); }
+body.d3 .a3-fail form { margin: 0; }
+
+/* предложения Claude: пунктир — «ещё нет»; «Да / Нет» в колонках одной ширины */
+body.d3 .a3-prop { padding: 14px; border-radius: 14px; border: 1px dashed var(--line-strong); display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 88px; align-items: center; gap: 10px; }
+body.d3 .a3-prop.done { grid-template-columns: minmax(0, 1fr) auto; border-style: solid; border-color: var(--line-card); padding: 10px 14px; }
+body.d3 .a3-prop form { margin: 0; }
+body.d3 .a3-prop-b { min-width: 0; }
+body.d3 .a3-prop-t { font-size: 14px; color: var(--text-2); }
+body.d3 .a3-prop-m { margin-top: 4px; font-size: 13px; color: var(--muted); }
+body.d3 .a3-prop-l { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+body.d3 .a3-src { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--accent-soft);
+  color: var(--accent); font-size: 12px; white-space: nowrap; text-decoration: none; }
+body.d3 .a3-w { width: 100%; justify-content: center; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- поле вопроса: прижато к низу, фон под ним до края --- */
+body.d3 .a3-dock.ask-dock { position: sticky; bottom: 0; z-index: 5; width: 100%; max-width: 760px; margin: 0 auto; padding: 12px 0 16px;
+  background: var(--bg); box-sizing: border-box; }
+body.d3 .a3-dock.ask-dock::before { display: none; }
+body.d3 .a3-form { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+body.d3 .a3-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 10px 10px 14px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--window); }
+body.d3 .a3-box:focus-within { border-color: var(--acc-line-2); }
+body.d3 .a3-box textarea { width: 100%; box-sizing: border-box; border: 0; outline: 0; background: transparent; color: var(--text); resize: none;
+  padding: 4px 0; font-size: 15px; line-height: 1.45; min-height: 30px; }
+body.d3 .a3-box textarea:focus { outline: 0; border: 0; }
+body.d3 .a3-box textarea::placeholder { color: var(--cap); }
+body.d3 .a3-ctx { display: flex; flex-wrap: wrap; gap: 6px; }
+body.d3 .a3-ctx:empty { display: none; }
+body.d3 .a3 .ctx-chip { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 4px 0 10px; border-radius: 999px; background: var(--panel-2);
+  color: var(--text-2); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .a3 .ctx-chip button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; font-size: 11px; flex: none; }
+body.d3 .a3 .ctx-chip button:hover { background: var(--line-strong); color: var(--text); }
+body.d3 .a3-bar { display: flex; align-items: center; gap: 6px; }
+body.d3 .a3-ib { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; flex: none; list-style: none; box-sizing: border-box; }
+body.d3 .a3-ib::-webkit-details-marker { display: none; }
+body.d3 .a3-ib:hover, body.d3 .a3-add[open] > .a3-ib { background: var(--panel-2); color: var(--text); }
+body.d3 .a3-ib.on { background: var(--bad-soft); color: var(--bad-text); }
+body.d3 .a3-send, body.d3 .a3-send:hover { background: var(--text); color: var(--bg); }
+body.d3 .a3-send:disabled { opacity: .5; cursor: default; }
+body.d3 .a3-mic-st { font-size: 13px; color: var(--muted); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .a3-model { height: 30px; width: auto; max-width: 220px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-strong);
+  background: var(--panel-2); color: var(--text); font-size: 13px; cursor: pointer; }
+body.d3 .a3-under { font-size: 13px; color: var(--cap); text-align: center; }
+
+/* «+»: что приложить */
+body.d3 .a3-add { position: relative; }
+body.d3 .a3-pop { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 20; width: 340px; max-width: calc(100vw - 48px); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 10px; }
+body.d3 .a3-fl { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+body.d3 .a3-fl > span { font-size: 12px; color: var(--cap); }
+body.d3 .a3-fl select, body.d3 .a3-fl input { width: 100%; box-sizing: border-box; padding: 0 12px; font-size: 14px; }
+body.d3 .a3-file { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+body.d3 .a3-file:focus-within { outline: 2px solid var(--g-focus); }
+body.d3 .a3-hint { font-size: 12px; color: var(--cap); }
+
+/* --- новый разговор: знак, вопрос, примеры и поле одним блоком --- */
+body.d3 .a3-main.is-empty { padding-bottom: 32px; justify-content: center; }
+body.d3 .a3-empty { box-sizing: border-box; padding: 56px 24px 32px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line);
+  display: flex; flex-direction: column; align-items: center; gap: 20px; }
+body.d3 .a3-eic { width: 48px; height: 48px; border-radius: 14px; background: var(--panel-2); color: var(--text-2); display: grid; place-items: center; }
+body.d3 .a3-empty-t { text-align: center; max-width: 520px; }
+body.d3 .a3-empty-h { font-size: 20px; font-weight: 600; }
+body.d3 .a3-empty-t p { margin: 8px 0 0; color: var(--muted); }
+body.d3 .a3-sugs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 760px; }
+body.d3 .a3-sug { height: 36px; max-width: 100%; padding: 0 14px; border: 1px solid var(--line-card); border-radius: 999px; background: var(--sunken);
+  color: var(--text-2); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.d3 .a3-sug:hover { border-color: var(--line-strong); color: var(--text); }
+body.d3 .a3-empty .a3-dock.ask-dock { position: static; padding: 0; background: transparent; }
+body.d3 .a3-empty .a3-under { margin-top: 2px; }
+
+@media (max-width: 1000px) {
+  body.d3 .a3 { flex-direction: column; min-height: 0; }
+  body.d3 .a3-side { position: static; height: auto; max-height: 40vh; flex: none; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; }
+  body.d3 .a3-main { padding: 16px 16px 0; }
+  body.d3 .a3-prop { grid-template-columns: minmax(0, 1fr) 1fr 1fr; }
+  body.d3 .a3-prop-b { grid-column: 1 / -1; }
+  body.d3 .a3-prop > form:first-of-type { grid-column: 2; }
+}
+@media (max-width: 760px) {
+  body.d3.page-ask .a3-dock.ask-dock { bottom: calc(64px + env(safe-area-inset-bottom)); }
+  body.d3 .a3-empty { padding: 32px 16px 20px; }
+}

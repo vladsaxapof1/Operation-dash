@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% import "_icons.html" as icons %}
+{% import "_decisions.html" as dm %}
+{% block title %}{{ topic }} · Решения{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-know.css?v={{ static_v }}">{% endblock %}
+{#- Тема решений, новый дизайн: о чём, «Тема» (переименовать) свёрнутым блоком, «Ждут решения», «Что решено».
+    Строка вопроса раскрывается в историю событий, у каждого события своё «Изменить» #}
+{% block content %}
+<a class="kn-crumb" href="/decisions">{{ icons.icon('chevron', 16) }}Решения</a>
+
+<div class="d3-head kn-topic-head">
+  <div class="t"><h1>{{ topic }}</h1>
+    {% if v.about %}<p class="kn-lead">{{ v.about }}</p>
+    {% else %}<p class="sub">О чём эта тема, одной строкой допишет {{ ai_name or 'помощник' }}. Или впишите сами в блоке «Тема».</p>{% endif %}
+    <p class="kn-meta">{{ v.questions | length }} {{ plural(v.questions | length, 'вопрос', 'вопроса', 'вопросов') }}
+      {%- if v.open %} · по {{ v.open | length }} ждём решения{% endif %} · последнее решение {{ v.updated | date }}</p></div>
+  <div data-copy-scope>
+    <textarea hidden data-copy>{{ tsv }}</textarea>
+    <button type="button" class="btn" data-copy-btn title="Вопросы темы: что решено сейчас, статус, чего ждём, с какого числа. Вставляется в Таблицы и Excel по колонкам">{{ icons.icon('stack', 16) }}Скопировать таблицей</button>
+  </div>
+</div>
+
+{{ ui.task_datalist() }}
+<datalist id="dec-topics">{% for t in summary.topic_names %}<option value="{{ t }}">{% endfor %}</datalist>
+
+<details class="kn-blk dec-rename">
+  <summary>{{ icons.icon('edit', 16) }}<b>Тема</b><span class="kn-s">о чём тема, переименовать или влить в другую</span>{{ icons.icon('chevron', 16) }}</summary>
+  <form method="post" action="/decisions/topic-rename" class="kn-blk-b">
+    <input type="hidden" name="old" value="{{ topic }}">
+    <label class="kn-fl"><span>О чём тема, одной строкой</span>
+      <textarea name="about" rows="2" maxlength="200" placeholder="KPI на ноябрь для команд: цели, веса метрик, как считаем качество звонков">{{ v.about }}</textarea></label>
+    <label class="kn-fl"><span>Название: переименовать или влить в другую тему</span>
+      <input type="text" name="new" value="{{ topic }}" list="dec-topics" required></label>
+    <div class="kn-rw"><span class="kn-grow"></span><button class="btn primary">Сохранить</button></div>
+  </form>
+</details>
+
+{% if v.open %}
+{% set no_step = v.open | selectattr('no_step') | list | length %}
+<section class="d3-sec kn-sec" aria-label="Ждут решения">
+  <div class="d3-sec-h"><h2>Ждут решения</h2><span class="d3-n">{{ v.open | length }}</span>{% if no_step %}<span class="kn-grow"></span><span class="d3-tag warn">{{ no_step }} без следующего шага</span>{% endif %}</div>
+  <div class="kn-th"><span>Вопрос</span><span>Что известно</span><span>Чего ждём</span><span></span></div>
+  {% for q in v.open %}{{ dm.qrow(q, stages, meetings, options, relations, summary.topic_names, open_mode=True) }}{% endfor %}
+</section>
+{% endif %}
+
+{% if v.decided %}
+<section class="d3-sec kn-sec" aria-label="Что решено">
+  <div class="d3-sec-h"><h2>Что решено</h2><span class="d3-n">{{ v.decided | length }}</span><span class="kn-cap">по вопросу последнее решение; по клику видно, как к нему пришли</span></div>
+  <div class="kn-th"><span>Вопрос</span><span>Сейчас</span><span>С</span><span></span></div>
+  {% for q in v.decided %}{{ dm.qrow(q, stages, meetings, options, relations, summary.topic_names) }}{% endfor %}
+</section>
+{% endif %}
+{% endblock %}

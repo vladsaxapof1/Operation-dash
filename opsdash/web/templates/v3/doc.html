@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-system.css?v={{ static_v }}">{% endblock %}
+{% block content %}
+{#- Страница документа в новом дизайне (макет Docs.dc.html, «Страница документа»): текст по частям — то, что видит
+    поиск и Claude #}
+<div class="sy-page" style="gap:16px">
+<a class="sy-crumb" href="/docs{{ ('?q=' ~ (q | urlencode)) if q }}"><svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>{{ 'К результатам' if q else 'Документы' }}</a>
+<div class="sy-head" style="align-items:center;margin-top:-4px">
+  <div class="t"><h1 style="font-size:26px;overflow-wrap:anywhere">{{ d.title }}</h1>
+    <p class="sub"><span class="sy-ty" style="vertical-align:1px">{{ d.ext | replace('.', '') or d.type }}</span> <span class="sy-mono">{{ d.rel }}</span> · изм. {{ d.modified | local('%d.%m.%Y %H:%M') }}</p></div>
+  <div class="sy-act">
+    <form method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><button class="btn primary">Открыть файл</button></form>
+    <form method="post" action="/docs/open"><input type="hidden" name="path" value="{{ d.path }}"><input type="hidden" name="reveal" value="1"><button class="btn">{{ 'Показать в Finder' if is_mac else 'Показать в папке' }}</button></form>
+    <a class="btn" href="/ask?doc={{ d.path | urlencode }}" title="Задать вопрос по этому документу">Спросить Claude</a>
+  </div>
+</div>
+
+{% if d.status == 'error' %}<div class="sy-ban bad" style="max-width:none"><div class="t"><b>Текст не прочитан</b><span>{{ d.error }}</span></div></div>{% endif %}
+<p class="sy-hint">Это текст, который видит поиск и Claude. Оформление, картинки и графики остаются в самом файле.</p>
+
+<div style="display:flex;flex-direction:column;gap:8px;max-width:920px">
+{% for p in parts %}
+<section class="sy-part doc-part" id="r{{ p.rid }}">
+  {% if p.part %}<span class="h">{{ p.part }}</span>{% endif %}
+  <div class="doc-text">{{ p.body }}</div>
+</section>
+{% else %}
+<div class="sy-empty">Текста в файле не нашлось: возможно, это сканы или картинки.</div>
+{% endfor %}
+</div>
+</div>
+{% endblock %}

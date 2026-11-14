@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Что знает Claude{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/v3-memory.css?v={{ static_v }}">{% endblock %}
+{#- «Что знает Claude», новый дизайн: сводка контекста (opsdash.context), кнопка задания company-context (POST /jobs/run).
+    Разделы справа собраны из заголовков «## …» самой сводки #}
+{% block content %}
+<a class="m3-back" href="/kb">{{ icons.icon('chevron', 14) }}Уроки и удачи</a>
+
+<div class="d3-head">
+  <div class="t"><h1>Что знает Claude</h1>
+    <p class="sub">Сводка, которую Claude читает в каждом запуске в PULSE: в боте, в разборе встреч и сообщений, в дайджестах · {{ chars }} {{ plural(chars, 'знак', 'знака', 'знаков') }}, около {{ (chars / 4) | round | int }} токенов</p></div>
+  <form method="post" action="/jobs/run" data-busy="Claude пишет…"><input type="hidden" name="name" value="company-context"><button class="btn primary" {{ 'disabled' if job.running }}>{{ 'Собрать «О компании»' if not has_company else 'Обновить «О компании»' }}</button></form>
+</div>
+
+{% if job.running %}
+<div class="m3-plate run"><span class="m3-spin" aria-hidden="true"></span><span class="m3-grow">Claude обновляет раздел «О компании» по вашим документам. Это займёт несколько минут, обновите страницу позже.</span></div>
+{% elif job.last_error %}
+<div class="m3-plate bad">{{ icons.icon('close', 16) }}<span class="m3-grow">Последнее обновление «О компании» не удалось: {{ job.last_error }}</span>
+  <form method="post" action="/jobs/run" data-busy="Claude пишет…"><input type="hidden" name="name" value="company-context"><button class="btn sm">Повторить</button></form></div>
+{% elif not has_company %}
+<div class="m3-plate dash"><span class="m3-grow">Раздела «О компании» пока нет. Claude соберёт его по документам из ваших папок.</span></div>
+{% else %}
+<div class="m3-plate ok"><span class="m3-dot" aria-hidden="true"></span><span class="m3-grow">«О компании» {% if job.last_ok %}обновлён {{ job.last_ok | local('%d.%m') }} {% endif %}по вашим документам. Claude обновляет его по понедельникам или по кнопке.</span></div>
+{% endif %}
+
+{% set heads = [] %}
+{% for line in text.splitlines() %}{% if line.startswith('## ') %}{% set _ = heads.append(line[3:].strip()) %}{% endif %}{% endfor %}
+
+<div class="m3-cols">
+  <article class="m3-doc m3-main" aria-label="Текст сводки"><div class="doc">{{ text | md | safe }}</div></article>
+  <aside class="m3-side" aria-label="Разделы сводки">
+    {% if heads %}
+    <section class="m3-card m3-tight">
+      <h2 class="m3-toc-h">Разделы</h2>
+      {% for h in heads %}<a class="m3-toc" href="#:~:text={{ h | urlencode }}"><b>{{ h }}</b></a>{% endfor %}
+    </section>
+    {% endif %}
+    <p class="m3-note">«О компании» Claude пишет сам по рабочим документам. Решения, задачи и люди подставляются из PULSE при каждом запуске, поэтому всегда свежие. Править текст не нужно: чтобы поправить факт, измените решение, задачу или документ. <a href="/memory">Память</a></p>
+  </aside>
+</div>
+{% endblock %}
