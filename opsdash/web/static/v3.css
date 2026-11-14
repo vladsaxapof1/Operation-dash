@@ -130,7 +130,28 @@ body.d3 .side-links a.active, body.d3 .side-links a:hover { color: var(--text); 
 body.d3 .side-foot p { margin: 0; font-size: 12px; color: var(--cap); line-height: 1.5; }
 @media (min-width: 761px) { body.d3 .sidebar { display: flex; flex-direction: column; } }  /* уже — нижняя панель */
 body.d3 .main { padding: 24px 32px 48px; min-width: 0; }
-body.d3.nav-collapsed .sidebar:not(:hover):not(:focus-within) .side-links { display: none; }
+/* свёрнутое меню — полоска иконок 64 px. В классическом оно раскрывается поверх страницы при наведении; в новом
+   остаётся узким всегда, название раздела — подсказкой у иконки (title). Группы — короткими линиями, счётчики —
+   точкой в углу иконки, низ меню (Журнал, Справка, версия) спрятан */
+@media (min-width: 761px) {
+  body.d3.nav-collapsed .sidebar, body.d3.nav-collapsed .sidebar:hover, body.d3.nav-collapsed .sidebar:focus-within {
+    position: sticky; width: 64px; padding: 16px 10px; overflow-x: hidden; box-shadow: none; background: var(--sunken); }
+  body.d3.nav-collapsed .main { margin-left: 0; }
+  body.d3.nav-collapsed .sidebar .lbl { display: none; }
+  body.d3.nav-collapsed .brand { flex-direction: column; gap: 10px; padding: 2px 0 10px; }
+  body.d3.nav-collapsed .nav-toggle { margin: 0; }
+  body.d3.nav-collapsed .nav a { position: relative; justify-content: center; padding: 0; gap: 0; }
+  body.d3.nav-collapsed .nav-g { position: relative; height: 17px; padding: 0; }
+  body.d3.nav-collapsed .nav-g::after { content: ""; position: absolute; left: 10px; right: 10px; top: 8px; height: 1px;
+    background: var(--line); }
+  body.d3.nav-collapsed .side-foot { display: none; }
+  body.d3.nav-collapsed .nav .badge { position: absolute; top: 6px; left: 26px; min-width: 0; width: 8px; height: 8px;
+    padding: 0; font-size: 0; border: 2px solid var(--sunken); box-sizing: content-box; }
+  body.d3.nav-collapsed .nav .badge.acc { background: var(--accent); }
+  body.d3.nav-collapsed .nav .badge.bad { background: var(--bad); }
+  body.d3.nav-collapsed .nav .badge.warn { background: var(--warn); }
+  body.d3.nav-collapsed .nav .badge:not(.acc):not(.bad):not(.warn) { display: none; }
+}
 
 /* --- текст --- */
 body.d3 h1 { font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -.01em; }

@@ -79,7 +79,7 @@
     }
   });
 
-  if (dlg) dlg.addEventListener("close", function () { if (dlg.dataset.changed) location.reload(); });
+  if (dlg) dlg.addEventListener("close", function () { if (dlg.dataset.changed) pulseReload(); });
 
   // ссылка «/#day» (уведомление «места нет — что двигаем?») сразу открывает «Разобрать день»
   var openDay = function () {
@@ -103,7 +103,7 @@
     Object.keys(fields).forEach(function (k) { body.set(k, fields[k]); });
     return fetch("/day/act", { method: "POST", body: body, headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); })
-      .then(function (res) { if (!res.ok) throw new Error(res.err); location.reload(); });
+      .then(function (res) { if (!res.ok) throw new Error(res.err); pulseReload(); });
   };
   var columnAt = function (x, y) {  // колонка дня недели под курсором (кроме прошедших дней)
     var hit = document.elementsFromPoint(x, y).filter(function (n) { return n.classList && n.classList.contains("wk-col"); })[0];

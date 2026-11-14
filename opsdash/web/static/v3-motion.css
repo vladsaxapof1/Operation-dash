@@ -154,6 +154,30 @@ body.d3 [data-mem-map]:not([data-drawn]) .mem-map-stage::after {
   animation: m-shimmer 1.2s linear infinite;
 }
 
+/* ---------- переходы без перезагрузки (nav.js) ----------
+   Меню и нижняя панель стоят на месте, прошлый экран коротко гаснет, новый проявляется своей анимацией (.main выше).
+   Длительность — у html нет --m, поэтому «Быстрые» заданы отдельно. При «Выключены» nav.js переход не анимирует */
+body.d3 .main { view-transition-name: pulse-main; }
+body.d3 .sidebar { view-transition-name: pulse-side; }
+body.d3 .tabbar { view-transition-name: pulse-tabbar; }
+body.d3 .main:focus { outline: none; }
+::view-transition-group(*) { animation: none; }
+::view-transition-old(*), ::view-transition-new(*) { animation: none; }
+::view-transition-old(pulse-main) { animation: m-fade-out 110ms cubic-bezier(.4, 0, 1, 1) both; }
+html:has(body.d3.motion-fast)::view-transition-old(pulse-main) { animation-duration: 55ms; }
+/* та же страница (после «Готово», смена вкладки или фильтра): экран целиком не проявляется — меняется только то,
+   что изменилось; окно, которое открылось снова, — без анимации */
+body.d3.nav-same .main, body.d3.nav-same dialog[open], body.d3.nav-same dialog[open]::backdrop,
+body.d3.nav-same :is(.d3-grid, .h3-feed, .m3-tiles, .kn-pgrid, .t3-pj-grid) > *, body.d3.nav-same .frow.h3-row {
+  animation: none;
+}
+/* полоска загрузки сверху: появляется, если сервер отвечает дольше 150 мс */
+.nav-bar { position: fixed; z-index: 2147483000; left: 0; top: 0; height: 2px; width: 100%; pointer-events: none;
+  background: var(--accent, #4f6bed); transform-origin: 0 50%; transform: scaleX(0); opacity: 0; }
+.nav-bar.run { opacity: 1; transform: scaleX(.8); transition: transform 2.5s cubic-bezier(.1, .7, .2, 1), opacity .1s; }
+.nav-bar.run.done { transform: scaleX(1); opacity: 0; transition: transform .15s ease-out, opacity .2s .1s; }
+form[aria-busy="true"] :is(button, .btn)[type="submit"], form[aria-busy="true"] button:not([type]) { cursor: progress; }
+
 /* ================= выключено: настройка «Выключены» или «уменьшить движение» в системе, если не выбирали ================= */
 body.d3.motion-off, body.d3.motion-off *, body.d3.motion-off *::before, body.d3.motion-off *::after, body.d3.motion-off ::backdrop {
   animation: none !important; transition: none !important;

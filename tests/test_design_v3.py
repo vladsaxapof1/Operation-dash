@@ -146,3 +146,20 @@ def test_new_design_theme(client, theme, cls):
     assert f'class="d3 {cls}' in page and "/static/v3-light.css" in page
     s = client.get("/settings").text
     assert "Как в системе" in s and ">Светлая<" in s and "Графит" not in s
+
+
+@pytest.mark.parametrize("design", ["v3", "classic"])
+def test_nav_script_loads_once_before_app(client, design):
+    """nav.js (переходы без перезагрузки) — в обоих дизайнах, первым и с data-once: после смены экрана его не
+    запускают снова, а app.js и в классическом зовёт pulseReload / pulseGo, которые он даёт."""
+    config.update_settings("web", {"design": design})
+    page = client.get("/commitments").text
+    nav = page.index('src="/static/nav.js')
+    assert 0 < nav < page.index('src="/static/app.js')
+    assert "data-once" in page[nav:page.index(">", nav)]
+
+
+def test_nav_script_has_no_inline_eval():
+    """CSP запрещает inline-скрипты: nav.js заново подключает скрипты страницы только по src."""
+    src = (Path(__file__).parents[1] / "opsdash/web/static/nav.js").read_text(encoding="utf-8")
+    assert "eval(" not in src and "new Function" not in src

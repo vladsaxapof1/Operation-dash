@@ -5,8 +5,12 @@
   // новый дизайн: окна закрываются коротким затуханием (v3-motion.css, .m-closing), а не пропадают разом. Работает для
   // любого dialog.close() и для Esc. Анимации выключены (настройка или «уменьшить движение» в системе) — у .m-closing
   // нет анимации, и окно закрывается сразу. Классический дизайн не затронут: там body без d3
-  if (document.body.classList.contains("d3") && window.HTMLDialogElement && HTMLDialogElement.prototype.close) {
+  // nav.js запускает app.js заново после смены экрана: окна подменяем один раз, а Esc (обработчик на document,
+  // nav.js его снимает перед сменой) вешаем каждый раз
+  if (document.body.classList.contains("d3") && window.HTMLDialogElement && HTMLDialogElement.prototype.close
+      && !HTMLDialogElement.prototype._m3) {
     var dlgProto = HTMLDialogElement.prototype, nativeClose = dlgProto.close, nativeModal = dlgProto.showModal;
+    dlgProto._m3 = true;
     var stopClosing = function (dlg) {
       clearTimeout(dlg._mClosing);
       dlg.removeEventListener("animationend", dlg._mEnd);
@@ -33,6 +37,8 @@
       if (this._mClosing) { stopClosing(this); return undefined; }  // открыли снова, пока закрывалось, — остаётся открытым
       return nativeModal.apply(this, arguments);
     };
+  }
+  if (document.body.classList.contains("d3") && window.HTMLDialogElement && HTMLDialogElement.prototype._m3) {
     document.addEventListener("cancel", function (e) {  // Esc: браузер закрыл бы окно сразу — закрываем так же, как ✕
       var dlg = e.target;
       if (!(dlg instanceof HTMLDialogElement) || !e.cancelable || !dlg.open) return;
@@ -683,7 +689,7 @@
           .finally(function () { buttons.forEach(function (b) { b.disabled = false; }); });
       });
     });
-    dueDlg.addEventListener("close", function () { if (dueDlg.dataset.changed) location.reload(); });
+    dueDlg.addEventListener("close", function () { if (dueDlg.dataset.changed) pulseReload(); });
   }
 
   // «Без движения»: задачи, по которым давно ничего не происходит, по одной (opsdash.quiet). Каждое действие —
@@ -740,7 +746,7 @@
       });
       card.querySelector("[data-quiet-next]").addEventListener("click", function () { qDone.later++; qShow(qAt + 1); });
     });
-    qDlg.addEventListener("close", function () { if (qDlg.dataset.changed) location.reload(); });
+    qDlg.addEventListener("close", function () { if (qDlg.dataset.changed) pulseReload(); });
   }
 
   // закрываемые подсказки: «×» прячет и запоминает (cookie на год)
@@ -1431,7 +1437,7 @@
   if (document.querySelector("[data-first-run]")) {
     var firstTimer = setInterval(function () {
       fetch("/welcome/status").then(function (r) { return r.json(); }).then(function (res) {
-        if (res.status !== "queued" && res.status !== "running") { clearInterval(firstTimer); location.reload(); }
+        if (res.status !== "queued" && res.status !== "running") { clearInterval(firstTimer); pulseReload(); }
       }).catch(function () { /* PULSE перезапускается — спросим в следующий раз */ });
     }, 5000);
   }
@@ -1458,7 +1464,7 @@
         if (res.state === "ok") document.getElementById("tg-qr-done").submit();
         else if (res.state === "password") window.location.href = location.pathname === "/welcome"
           ? "/welcome?step=messages&open=telegram&need=password" : "/settings?tab=telegram&need=password";
-        else if (res.state !== qrBox.dataset.tgQr) window.location.reload();
+        else if (res.state !== qrBox.dataset.tgQr) pulseReload();
       });
     }, 2000);
   }
@@ -1475,7 +1481,7 @@
     setInterval(function () {
       fetch(waitingRec ? "/api/status?waiting=1" : "/api/status").then(function (r) { return r.json(); }).then(function (res) {
         var state = JSON.stringify([res.meetings.map(function (m) { return [m.id, m.status, Math.round((m.progress || 0) * 20)]; }), res.waiting || []]);
-        if (last !== null && state !== last) window.location.reload();
+        if (last !== null && state !== last) pulseReload();
         last = state;
         res.meetings.forEach(function (m) {
           var bar = document.querySelector('[data-meeting-progress="' + m.id + '"]');
@@ -1718,7 +1724,7 @@
         liveState = askLive.querySelector("[data-live-state]");
     var askPoll = setInterval(function () {
       fetch("/api/ask/" + askLive.dataset.askLive + "/live", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
-        if (!res.running) { clearInterval(askPoll); window.location.reload(); return; }
+        if (!res.running) { clearInterval(askPoll); pulseReload(); return; }
         var nearEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 200;
         liveSteps.innerHTML = "";
         (res.steps || []).forEach(function (step) {
@@ -1882,7 +1888,7 @@
         }
         e.preventDefault();
         // уходим, когда уведомление уехало и сервер его скрыл — иначе на новой странице оно покажется снова
-        var went = false, go = function () { if (!went) { went = true; location.href = href; } };
+        var went = false, go = function () { if (!went) { went = true; pulseGo(href); } };
         Promise.all([sent.catch(function () {}), new Promise(function (r) { setTimeout(r, 220); })]).then(go);
         setTimeout(go, 1500);  // сервер не ответил — всё равно переходим
       } else if (e.target.closest("[data-notice-clear]")) {
