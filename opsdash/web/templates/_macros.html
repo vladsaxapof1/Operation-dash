@@ -598,7 +598,7 @@
           <button class="btn primary">Записать</button></div>
       </form>
       <div class="quiet-acts">
-        <form class="inline" method="post" action="/commitments/{{ c.id }}/log/collect" data-quiet-form="collect"><button class="btn" title="Claude поищет по задаче в переписке, встречах и Kaiten и допишет ход — в фоне">Собрать ход с Claude</button></form>
+        <form class="inline{{ ' quiet-wide' if not c.remind }}" method="post" action="/commitments/{{ c.id }}/log/collect" data-quiet-form="collect"><button class="btn" title="Claude поищет по задаче в переписке, встречах и Kaiten и допишет ход — в фоне">Собрать ход с Claude</button></form>
         {% if c.remind %}<button type="button" class="btn" data-reveal="qrem-{{ c.id }}" title="Напомнить: {{ c.who }}">Напомнить</button>{% endif %}
         <form class="inline quiet-due" method="post" action="/commitments/{{ c.id }}/quiet" data-quiet-form="due"><input type="hidden" name="act" value="due">
           <input type="date" name="due" required aria-label="Новый срок"><button class="btn" title="Перенести срок — и неделю не отмечать">Новый срок</button></form>

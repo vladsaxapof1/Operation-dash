@@ -10,6 +10,7 @@ html:has(body.d3.light), body.d3.light {
   --line: #e6e6ea; --line-card: #e1e1e6; --line-strong: #d4d4da; --dlg-line: #e1e1e6;
   /* текст */
   --text: #16161a; --text-2: #2e2e35; --muted: #5c5c66; --cap: #6b6b75; --faint: #a3a3ad;
+    --date-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235c5c66' stroke-width='1.4' stroke-linecap='round'%3E%3Crect x='2.5' y='3.5' width='11' height='10' rx='2'/%3E%3Cpath d='M2.5 6.5h11M5.5 2v3M10.5 2v3'/%3E%3C/svg%3E");
   /* смысл: тёмнее, чем в тёмной теме, чтобы мелкий текст держал контраст 4.5:1 на белом */
   --accent: #2c5bc4; --acc-dot: #3d72e0; --accent-soft: #e8efff; --acc-deep: #f3f6ff; --acc-line: #cddcfb; --acc-line-2: #9db8f3;
   --warn: #d98a2b; --warn-text: #8f5300; --warn-soft: #fbefdc; --warn-deep: #fdf8ef; --warn-line: #f0dcb8; --warn-fill: #d98a2b;
@@ -39,6 +40,7 @@ html:has(body.d3.light), body.d3.light {
     --line: #e6e6ea; --line-card: #e1e1e6; --line-strong: #d4d4da; --dlg-line: #e1e1e6;
     /* текст */
     --text: #16161a; --text-2: #2e2e35; --muted: #5c5c66; --cap: #6b6b75; --faint: #a3a3ad;
+    --date-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235c5c66' stroke-width='1.4' stroke-linecap='round'%3E%3Crect x='2.5' y='3.5' width='11' height='10' rx='2'/%3E%3Cpath d='M2.5 6.5h11M5.5 2v3M10.5 2v3'/%3E%3C/svg%3E");
     /* смысл: тёмнее, чем в тёмной теме, чтобы мелкий текст держал контраст 4.5:1 на белом */
     --accent: #2c5bc4; --acc-dot: #3d72e0; --accent-soft: #e8efff; --acc-deep: #f3f6ff; --acc-line: #cddcfb; --acc-line-2: #9db8f3;
     --warn: #d98a2b; --warn-text: #8f5300; --warn-soft: #fbefdc; --warn-deep: #fdf8ef; --warn-line: #f0dcb8; --warn-fill: #d98a2b;

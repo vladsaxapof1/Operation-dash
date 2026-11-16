@@ -293,7 +293,7 @@
     <div class="gantt-label">
       <button type="button" class="gantt-what task-open" data-task-open="{{ c.id }}" title="{{ c.what }}">{{ title }}</button>
       <div class="gantt-meta">{{ person }}
-        {%- if c.in_work and c.status == 'open' %}{{ ' · ' if person }}<span class="ok-text">в работе</span>{% endif %}
+        {%- if c.in_work and c.status == 'open' %} <span class="work-tag">{{ icons.icon('play', 10) }}в работе</span>{% endif %}
         {%- if open_waits %} · <span class="warn-text">ждёт {% if open_waits | length > 1 %}{{ open_waits | length }} {{ plural(open_waits | length, 'задачу', 'задачи', 'задач') }}{% elif open_waits[0].task %}«{{ open_waits[0].task.headline | truncate(24, True, '…') }}»{% else %}{{ open_waits[0].event | truncate(24, True, '…') }}{% endif %}</span>{% endif %}
         {%- if c.items_total %} · {{ c.items_done }} из {{ c.items_total }}{% endif %}
         {%- if c.merge_hint %} · <span class="warn-text">дубль?</span>{% endif %}</div>
@@ -375,7 +375,7 @@
       {%- elif c.status != 'open' %}<span class="{{ 'ok-text' if c.status == 'done' else 'muted' }}">{{ ui.task_state_title(c) }}</span>
       {%- elif c.now and c.now.waiting %}<span class="warn-text" title="{{ c.now.day }} · {{ c.now.text }}">{{ c.now.waiting_short or c.now.waiting }}</span>
       {%- elif open_waits %}{% set w = open_waits[0] %}<span class="warn-text" title="Ждёт: {{ ('«' ~ w.task.headline ~ '»') if w.task else w.event }}">ждёт {% if w.task %}«{{ w.task.headline | truncate(28, True, '…') }}»{% else %}{{ w.event | truncate(28, True, '…') }}{% endif %}</span>
-      {%- elif c.in_work %}<span class="ok-text">в работе</span>
+      {%- elif c.in_work %}<span class="work-tag">{{ icons.icon('play', 10) }}в работе</span>
       {%- elif c.now %}<span class="muted" title="Последнее по задаче — {{ c.now.day }}, {{ c.now.src }}: {{ c.now.text }}">{{ c.now.text | truncate(48, True, '…') }}</span>
       {%- else %}<span class="muted">{{ ui.task_state_title(c) }}</span>{% endif %}</td>
   </tr>

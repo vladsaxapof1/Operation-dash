@@ -90,7 +90,7 @@
     {%- if person %}{{ person }} · {% endif -%}
     {%- if c.status == 'done' %}<span class="ok-text">готово{% if c.closed_at %} {{ c.closed_at | local('%d.%m') }}{% endif %}</span>
     {%- elif c.status != 'open' %}отменена{% else %}{{ due_text(c) }}{% endif -%}
-    {%- if c.in_work and c.status == 'open' %} · <span class="ok-text">в работе</span>{% endif -%}
+    {%- if c.in_work and c.status == 'open' %} <span class="work-tag">{{ icons.icon('play', 10) }}в работе</span>{% endif -%}
     {%- if c.items_total and not full %} · {{ c.items_done }} из {{ c.items_total }}{% endif -%}
     {%- if c.merge_hint %} · <span class="warn-text" title="{{ c.merge_hint.reason }}">дубль?</span>{% endif -%}
     {%- if c.done_hint %} · <span class="ok-text" title="{{ c.done_hint.reason }}">похоже, сделано?</span>{% endif -%}

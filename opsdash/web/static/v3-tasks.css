@@ -91,13 +91,19 @@ body.d3 .t3-col .ibtn.ghost { width: 28px; height: 28px; border: 0; border-radiu
 body.d3 .t3-col .ibtn.ghost:hover { background: var(--panel-2); color: var(--text); }
 body.d3 .col-empty { padding: 12px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--cap); font-size: 13px; text-align: center; }
 
-/* карточка задачи: 12×14, радиус 12, рамка; «в работе» — зелёная рамка; просрочка — красная полоска слева */
+/* карточка задачи: 12×14, радиус 12, рамка; «в работе» — зелёная полоска слева, зелёный фон и плашка «▶ в работе»;
+   просрочка — красная полоска слева (у просроченной в работе полоска красная, фон зелёный) */
 body.d3 .task, body.d3 .stack-card { padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card);
   box-shadow: none; color: var(--text); }
 body.d3 .task:hover, body.d3 .stack-card:hover { border-color: var(--line-strong); box-shadow: none; }
 body.d3 .task:focus-visible, body.d3 .stack-card:focus-visible { box-shadow: none; outline: 2px solid var(--g-focus); outline-offset: 0; }
-body.d3 .task.inwork { border-color: var(--ok-line); box-shadow: none; }
-body.d3 .task.inwork:hover { border-color: var(--ok); box-shadow: none; }
+body.d3 .task.inwork { background: color-mix(in srgb, var(--ok) 8%, var(--panel)); border-color: var(--ok-line); box-shadow: inset 3px 0 0 var(--ok); }
+body.d3 .task.inwork:hover { border-color: var(--ok); box-shadow: inset 3px 0 0 var(--ok); }
+body.d3 .task.inwork.open, body.d3 .task.inwork.open:hover { box-shadow: inset 3px 0 0 var(--ok); }
+body.d3 .work-tag { display: inline-flex; align-items: center; gap: 4px; height: 18px; margin-left: 4px; padding: 0 7px 0 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 20%, var(--panel)); border: 1px solid var(--ok-line); color: var(--ok-text); font-size: 11.5px; font-weight: 500;
+  line-height: 1; vertical-align: 1px; white-space: nowrap; }
+body.d3 .work-tag svg { flex: none; }
 body.d3 .task.overdue, body.d3 .stack-card.overdue { border-left: 1px solid var(--line-card); box-shadow: inset 3px 0 0 var(--bad-text); }
 body.d3 .task.inwork.overdue { border-left-color: var(--ok-line); }
 body.d3 .task.open, body.d3 .task.open:hover { border-color: var(--acc-line-2); box-shadow: none; }
@@ -183,7 +189,9 @@ body.d3 .t3-list tr.grp.k-done th { background: var(--ok-deep); }
 body.d3 .t3-list tbody tr[data-task] { cursor: pointer; }
 body.d3 .t3-list tbody tr[data-task]:hover td { background: var(--panel); }
 body.d3 .t3-list tr.dim td { opacity: .55; }
-body.d3 .t3-list tr.inwork td:first-child { box-shadow: inset 2px 0 0 var(--ok); }
+body.d3 .t3-list tr.inwork td { background: color-mix(in srgb, var(--ok) 6%, var(--panel)); }
+body.d3 .t3-list tr.inwork td:first-child { box-shadow: inset 3px 0 0 var(--ok); }
+body.d3 .t3-list tr.inwork .work-tag { margin-left: 0; }
 body.d3 .t3-list tr.later-row td { padding: 8px 14px; }
 body.d3 .t3-list .t3-now { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 body.d3 .t3-list .t3-pjc a { color: var(--text-2); }
@@ -616,9 +624,11 @@ body.d3 .quiet-acts { display: grid; grid-template-columns: repeat(2, minmax(0, 
 body.d3 .quiet-acts > form, body.d3 .quiet-acts > .btn { margin: 0; }
 body.d3 .quiet-acts > form > .btn, body.d3 .quiet-acts > .btn { width: 100%; }
 body.d3 .quiet-acts .btn.ok { color: var(--ok-text); }
-body.d3 .quiet-acts .quiet-due { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
-body.d3 .quiet-acts .quiet-due input { width: 140px; height: 38px; }
-body.d3 .quiet-acts .quiet-due .btn { width: auto; }
+body.d3 .quiet-acts .quiet-wide { grid-column: 1 / -1; }
+/* «Новый срок»: поле даты и кнопка встают в те же две колонки, что и кнопки под ними — справа без пустоты */
+body.d3 .quiet-acts .quiet-due { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; gap: 8px; align-items: center; }
+body.d3 .quiet-acts .quiet-due input[type=date] { width: 100%; min-width: 0; height: 38px; }
+body.d3 .quiet-acts .quiet-due .btn { width: 100%; }
 body.d3 .due-end p { color: var(--text-2); }
 
 /* ===================== «Поручить агенту» ===================== */

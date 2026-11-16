@@ -163,3 +163,28 @@ def test_nav_script_has_no_inline_eval():
     """CSP запрещает inline-скрипты: nav.js заново подключает скрипты страницы только по src."""
     src = (Path(__file__).parents[1] / "opsdash/web/static/nav.js").read_text(encoding="utf-8")
     assert "eval(" not in src and "new Function" not in src
+
+
+def test_task_in_work_is_marked_on_board_and_list(client):
+    """«В работе» в новом дизайне видно издалека: класс inwork у карточки (полоска и фон) и плашка «▶ в работе»
+    — на доске и в списке (16.11.2026: по бледной рамке задачи в работе почти не отличались)."""
+    from opsdash import records
+
+    config.update_settings("web", {"design": "v3"})
+    cid = records.add_commitment(direction="mine", what="Подготовить отчёт для правления", title="Отчёт для правления")
+    records.add_commitment(direction="mine", what="Созвониться с юристом")
+    client.post(f"/commitments/{cid}/work", data={"on": "1"})
+    board = client.get("/commitments").text
+    card = board.split(f'data-task="{cid}"')[0].rsplit("<div", 1)[1] + board.split(f'data-task="{cid}"')[1][:1500]
+    assert "inwork" in card and 'class="work-tag"' in card
+    assert board.count('class="work-tag"') == 1  # у второй задачи плашки нет
+    listed = client.get("/commitments?view=list").text
+    assert listed.count('class="work-tag"') == 1
+
+
+def test_date_picker_script_is_loaded(client):
+    """Свой календарь у полей даты (static/datepick.js) — только в новом дизайне."""
+    config.update_settings("web", {"design": "v3"})
+    assert "/static/datepick.js" in client.get("/commitments").text
+    config.update_settings("web", {"design": "classic"})
+    assert "/static/datepick.js" not in client.get("/commitments").text

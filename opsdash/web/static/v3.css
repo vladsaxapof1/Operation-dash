@@ -34,6 +34,7 @@ html:has(body.d3), body.d3 {
   --muted: #a3a3ad;
   --cap: #8b8b94;
   --faint: #5d5d66;
+  --date-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23a3a3ad' stroke-width='1.4' stroke-linecap='round'%3E%3Crect x='2.5' y='3.5' width='11' height='10' rx='2'/%3E%3Cpath d='M2.5 6.5h11M5.5 2v3M10.5 2v3'/%3E%3C/svg%3E");  /* значок поля даты, цвет --muted */
   /* смысл: синий — выбрано, ссылка, «мне должны», встречи */
   --accent: #8fb4ff;
   --acc-dot: #5b8def;
@@ -180,6 +181,41 @@ body.d3 input[type=number], body.d3 input[type=email], body.d3 input[type=passwo
 body.d3 input[type=text], body.d3 input[type=search], body.d3 input[type=date], body.d3 input[type=time],
 body.d3 input[type=number], body.d3 input[type=email], body.d3 input[type=password], body.d3 select { height: 36px; }
 body.d3 input:focus, body.d3 select:focus, body.d3 textarea:focus { outline: 2px solid var(--g-focus); outline-offset: 0; border-color: var(--acc-line-2); }
+/* поле даты: своё окошко календаря (static/datepick.js) вместо браузерного; значок — свой (--date-icon) */
+body.d3 input[type=date] { padding-right: 34px; cursor: pointer; background-repeat: no-repeat; background-position: right 10px center;
+  background-size: 16px; background-image: var(--date-icon); }
+body.d3 input[type=date]::-webkit-calendar-picker-indicator { display: none; }
+body.d3 input[type=date]::-webkit-datetime-edit { color: var(--text); }
+body.d3 input[type=date]:invalid::-webkit-datetime-edit, body.d3 input[type=date][value=""]::-webkit-datetime-edit { color: var(--cap); }
+body.d3 .dp { position: fixed; inset: auto; margin: 0; z-index: 1000; width: 272px; padding: 12px; border-radius: 14px;
+  background: var(--panel-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-pop); color: var(--text);
+  font-family: var(--font); font-size: 13px; overflow: visible; }
+body.d3 .dp:not(.open) { display: none; }
+body.d3 .dp::backdrop { background: transparent; }
+body.d3 .dp-head { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+body.d3 .dp-title { flex: 1; text-align: center; font-weight: 500; font-size: 14px; }
+body.d3 .dp-title::first-letter { text-transform: uppercase; }
+body.d3 .dp-nav { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+body.d3 .dp-nav:hover { background: var(--panel-3); color: var(--text); }
+body.d3 .dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+body.d3 .dp-wd { height: 26px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--cap); }
+body.d3 .dp-d { height: 34px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text);
+  font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+body.d3 .dp-d.we { color: var(--muted); }
+body.d3 .dp-d.out { color: var(--faint); }
+body.d3 .dp-d:hover:not(:disabled) { background: var(--panel-3); }
+body.d3 .dp-d.today { box-shadow: inset 0 0 0 1px var(--acc-line-2); color: var(--accent); font-weight: 500; }
+body.d3 .dp-d.sel, body.d3 .dp-d.sel:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--acc-line-2); color: var(--accent); font-weight: 600; }
+body.d3 .dp-d:disabled { color: var(--faint); opacity: .45; cursor: default; }
+body.d3 .dp-d:focus-visible, body.d3 .dp-nav:focus-visible, body.d3 .dp-q:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 0; }
+body.d3 .dp-foot { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-card); }
+body.d3 .dp-q { flex: 1 1 0; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel);
+  color: var(--text); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+body.d3 .dp-q:hover:not(:disabled) { background: var(--panel-3); }
+body.d3 .dp-q.on { background: var(--accent-soft); border-color: var(--acc-line-2); color: var(--accent); }
+body.d3 .dp-q.dp-clear { flex: 0 0 auto; border-color: transparent; background: transparent; color: var(--muted); }
+body.d3 .dp-q:disabled { opacity: .4; cursor: default; }
 
 /* --- переключатель видов: плашка #141416, сегмент 30, выбранный #26262b --- */
 body.d3 .seg { display: inline-flex; padding: 3px; gap: 0; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }

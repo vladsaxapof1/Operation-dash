@@ -33,6 +33,7 @@ class FakePachca:
         self.threads: list[dict] = []
         self.requests: list[httpx.Request] = []
         self.next_id = 1
+        self.stale: set[str] = set()  # курсоры, которые Пачка «забыла»
 
     def add(self, chat_id, user_id, text, ago=timedelta(hours=1), **extra) -> dict:
         m = {"id": self.next_id, "chat_id": chat_id, "user_id": user_id, "content": text,
@@ -76,8 +77,16 @@ class FakePachca:
             return self.page([{"id": cid, "archived": False, "last_message_at": None, **c}
                               for cid, c in self.chats.items()], request)
         if path == "/messages":
+            # курсор — id последнего отданного сообщения: новые сообщения сверху его не сдвигают, как у настоящей Пачки
+            cursor = request.url.params.get("cursor")
+            if cursor in self.stale:
+                return httpx.Response(422, json={"errors": [{"message": "invalid cursor", "code": "invalid"}]})
             items = sorted(self.messages[int(request.url.params["chat_id"])], key=lambda m: -m["id"])
-            return self.page(items, request)
+            items = [m for m in items if not cursor or m["id"] < int(cursor)]
+            chunk = items[:int(request.url.params.get("limit") or 50)]
+            more = len(items) > len(chunk)
+            return httpx.Response(200, json={"data": chunk, "meta": {"paginate": {
+                "next_page": str(chunk[-1]["id"]) if chunk else None, "has_next": more}}})
         if path == "/threads":
             if "threads:read" not in self.scopes:
                 return httpx.Response(403, json={"error": "insufficient_scope", "error_description": "no scope"},
@@ -145,6 +154,84 @@ def test_collect_reads_enabled_chats_with_pagination_checkpoint_and_threads(fake
     assert pachca.collect(transport=httpx.MockTransport(fake)).endswith("новых сообщений: 0")
     assert store.scalar("SELECT COUNT(*) FROM messages WHERE source='pachca'") == 124
     assert not [r for r in fake.requests if r.method != "GET"]  # только чтение
+
+
+def test_weekend_backlog_is_read_over_several_passes(fake, monkeypatch):
+    """Ноутбук выключен с пятницы, в «Складе» за выходные 1200 сообщений, а за проход PULSE берёт 500.
+    Раньше ранние 700 пропадали насовсем. Теперь следующие проходы дочитывают их, а свежее идёт первым."""
+    fake.add(10, PETR, "Пятница", ago=timedelta(days=3))
+    store.execute("UPDATE chats SET enabled=1 WHERE source='pachca'")  # чатов ещё нет — включим после списка
+    pachca.collect(transport=httpx.MockTransport(fake))
+    store.execute("UPDATE chats SET enabled=1 WHERE source='pachca' AND chat_id='10'")
+    pachca.collect(transport=httpx.MockTransport(fake))
+    assert store.get_state("pachca_last:10") == {"id": 1, "at": fake.chats[10]["last_message_at"]}
+
+    for i in range(1200):
+        fake.add(10, PETR, f"Выходные {i}", ago=timedelta(minutes=3000 - i))
+    run = lambda: pachca.collect(transport=httpx.MockTransport(fake))
+    texts = lambda: {r["text"] for r in store.rows("SELECT text FROM messages WHERE chat_id='10'")}
+
+    assert run().endswith("новых сообщений: 500")
+    assert "Выходные 1199" in texts() and "Выходные 699" not in texts()  # сначала свежее
+    assert store.get_state("pachca_last:10")["gaps"]
+
+    fake.add(10, PETR, "Понедельник, срочно", ago=timedelta(minutes=1))
+    fake.requests.clear()
+    assert run().endswith("новых сообщений: 451")  # страница со свежим и девять страниц ранних
+    assert fake.message_pages(10) == 10 and "Понедельник, срочно" in texts()
+
+    assert run().endswith("новых сообщений: 250")
+    assert texts() == {"Пятница", "Понедельник, срочно", *(f"Выходные {i}" for i in range(1200))}
+    assert "gaps" not in store.get_state("pachca_last:10")
+    assert run().endswith("новых сообщений: 0")
+    assert store.scalar("SELECT COUNT(*) FROM messages WHERE chat_id='10'") == 1202
+
+
+def test_first_read_backlog_stops_at_backfill_days(fake):
+    """Первое чтение большого чата: дочитываем за несколько проходов, но не раньше BACKFILL_DAYS дней."""
+    fake.add(10, PETR, "Давнее", ago=timedelta(days=pachca.BACKFILL_DAYS + 1))
+    for i in range(600):
+        fake.add(10, PETR, f"Свежее {i}", ago=timedelta(minutes=700 - i))
+    pachca.collect(transport=httpx.MockTransport(fake))
+    store.execute("UPDATE chats SET enabled=1 WHERE source='pachca' AND chat_id='10'")
+    assert pachca.collect(transport=httpx.MockTransport(fake)).endswith("новых сообщений: 500")
+    assert pachca.collect(transport=httpx.MockTransport(fake)).endswith("новых сообщений: 100")
+    assert not store.row("SELECT 1 FROM messages WHERE text='Давнее'")
+    assert "gaps" not in store.get_state("pachca_last:10")
+
+
+def test_forgotten_cursor_drops_only_the_backlog(fake):
+    """Пачка не узнала сохранённый курсор — ранний хвост бросаем, чтение чата не ломается."""
+    fake.add(10, PETR, "Старт", ago=timedelta(days=1))
+    pachca.collect(transport=httpx.MockTransport(fake))
+    store.execute("UPDATE chats SET enabled=1 WHERE source='pachca' AND chat_id='10'")
+    pachca.collect(transport=httpx.MockTransport(fake))
+    for i in range(520):
+        fake.add(10, PETR, f"Пачка {i}", ago=timedelta(minutes=600 - i))
+    pachca.collect(transport=httpx.MockTransport(fake))
+    fake.stale.add(store.get_state("pachca_last:10")["gaps"][0]["cursor"])
+    fake.add(10, PETR, "Новое", ago=timedelta(minutes=1))
+    assert pachca.collect(transport=httpx.MockTransport(fake)).endswith("новых сообщений: 1")
+    assert "gaps" not in store.get_state("pachca_last:10")
+
+
+def test_thread_backlog_is_finished_even_when_thread_goes_quiet(fake):
+    """В треде за выходные больше 500 ответов, потом в нём замолчали: в список свежих тредов он больше не попадёт,
+    но ранние ответы PULSE всё равно дочитает."""
+    fake.add(10, PETR, "Корень", ago=timedelta(days=1))
+    pachca.collect(transport=httpx.MockTransport(fake))
+    store.execute("UPDATE chats SET enabled=1 WHERE source='pachca' AND chat_id='10'")
+    pachca.collect(transport=httpx.MockTransport(fake))
+    for i in range(530):
+        fake.add(5000, PETR, f"Тред {i}", ago=timedelta(minutes=600 - i))
+    fake.threads = [{"id": 900, "chat_id": 5000, "message_id": 1, "message_chat_id": 10, "updated_at": iso(NOW)}]
+    pachca.collect(transport=httpx.MockTransport(fake))
+    assert store.get_state("pachca_thread_gaps") == {"5000": {"chat_id": 5000, "parent": "10", "message_id": 1}}
+    fake.threads = []  # в треде больше не пишут
+    pachca.collect(transport=httpx.MockTransport(fake))
+    rows = store.rows("SELECT * FROM messages WHERE text LIKE 'Тред %'")
+    assert len(rows) == 530 and {(r["chat_id"], r["reply_to"]) for r in rows} == {("10", "1")}
+    assert store.get_state("pachca_thread_gaps") == {}
 
 
 def test_new_chat_is_read_right_away_with_its_older_threads(fake):

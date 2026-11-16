@@ -139,8 +139,8 @@ body.d3 .h3-tasks { display: flex; flex-direction: column; gap: 12px; }
 body.d3 .h3-tasks-h { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 body.d3 .h3-tasks-h h2 { flex: 1 1 auto; margin: 0; font-size: 15px; }
 body.d3 .h3-note { color: var(--muted); font-weight: 400; }
-body.d3 .h3-tasks .seg > label { height: 30px; padding: 0 12px; border-radius: 7px; display: inline-flex; align-items: center; font-size: 13px;
-  color: var(--muted); cursor: pointer; white-space: nowrap; }
+body.d3 .h3-tasks .seg > label { height: 30px; margin: 0; padding: 0 12px; border-radius: 7px; display: inline-flex; align-items: center;
+  font-size: 13px; font-weight: 400; color: var(--muted); cursor: pointer; white-space: nowrap; }
 body.d3 .h3-tasks .seg > label:hover { color: var(--text); }
 body.d3 #h3-scope-today:checked ~ .h3-tasks-h label[for=h3-scope-today],
 body.d3 #h3-scope-all:checked ~ .h3-tasks-h label[for=h3-scope-all] { background: var(--panel-3); color: var(--text); font-weight: 500; }

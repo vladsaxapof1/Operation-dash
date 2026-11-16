@@ -22,7 +22,8 @@ APP = "https://app.pachca.com"
 SCOPES = ("chats:read", "messages:read", "threads:read", "users:read")  # всё, что нужно PULSE, — только чтение
 BACKFILL_DAYS = 5  # при первом чтении чата — сообщения за последние дни
 PAGE = 50  # больше Пачка за раз не отдаёт
-MAX_PAGES = 10  # не больше 500 новых сообщений чата за проход (накопилось больше — старшие пропускаем)
+MAX_PAGES = 10  # не больше 500 сообщений чата за проход; накопилось больше — ранние дочитаем следующими проходами
+STALE_CURSOR = (400, 404, 410, 422)  # Пачка не узнала сохранённый курсор — этот хвост бросаем
 THREADS_OVERLAP = timedelta(minutes=10)  # треды берём с запасом: часы компьютера и сервера могут расходиться
 
 
@@ -214,29 +215,76 @@ def _announce_new(titles: list[str]) -> None:
     store.log(SOURCE, f"{title}: читаю сразу (настройка «Новые чаты читать сразу»)")
 
 
+def _message_page(http: httpx.Client, api_chat_id: int, cursor: str | None) -> tuple[list[dict], str | None]:
+    """Страница сообщений чата от новых к старым и курсор следующей (None — дальше ничего нет)."""
+    data = _get(http, "/messages", {"chat_id": api_chat_id, "sort": "id", "order": "desc", "limit": PAGE,
+                                    **({"cursor": cursor} if cursor else {})})
+    paginate = (data.get("meta") or {}).get("paginate") or {}
+    return data.get("data") or [], (paginate.get("next_page") or None) if paginate.get("has_next") else None
+
+
+def _walk(http: httpx.Client, api_chat_id: int, cursor: str | None, floor: int, since: datetime | None,
+          budget: int, batch: list[dict]) -> tuple[str | None, int]:
+    """Листает от cursor к старым сообщениям, пока не дойдёт до id floor (или до since), но не больше budget страниц.
+    Возвращает курсор, на котором остановились (None — дошли до конца), и сколько страниц потратили."""
+    pages = 0
+    while pages < budget:
+        items, nxt = _message_page(http, api_chat_id, cursor)
+        pages += 1
+        for m in items:
+            if int(m["id"]) <= floor or (since and (_ts(m.get("created_at")) or since) < since):
+                return None, pages
+            batch.append(m)
+        if not nxt:
+            return None, pages
+        cursor = nxt
+    return cursor, pages
+
+
 def _read_chat(http: httpx.Client, api_chat_id: int, chat_id: str, title: str, me_id: int, since: datetime,
                thread_of: int | None = None, last_at: str | None = None) -> int:
     """Новые сообщения чата или треда. Пачка отдаёт их от новых к старым: листаем, пока не дойдём
-    до прочитанного (чекпоинт — id последнего сообщения) или, при первом чтении, до since."""
+    до прочитанного (чекпоинт — id последнего сообщения) или, при первом чтении, до since.
+    За проход — не больше MAX_PAGES страниц. Если новых больше (ноутбук был выключен все выходные), запоминаем
+    курсор, где остановились, и id, до которого дочитать: следующие проходы доберут ранние сообщения."""
     key = f"pachca_last:{api_chat_id}"
     seen = store.get_state(key) or {}
     last_id = int(seen.get("id") or 0)
-    if last_at and seen.get("at") == last_at:
+    gaps = list(seen.get("gaps") or [])
+    if last_at and seen.get("at") == last_at and not gaps:
         return 0  # с прошлого раза в чате ничего не писали
-    batch = []
-    for m in _pages(http, "/messages", {"chat_id": api_chat_id, "sort": "id", "order": "desc"}, MAX_PAGES):
-        if int(m["id"]) <= last_id:
-            break
-        if not last_id and (_ts(m.get("created_at")) or since) < since:
-            break
-        batch.append(m)
+    batch: list[dict] = []
+    # сначала свежее — сверху до прочитанного
+    cursor, used = _walk(http, api_chat_id, None, last_id, None if last_id else since, MAX_PAGES, batch)
+    if cursor:
+        gaps.append({"cursor": cursor, "floor": last_id,
+                     "since": None if last_id else since.replace(microsecond=0).isoformat()})
+    # остаток страниц — на ранние сообщения, которые не успели прочитать прошлые проходы
+    budget, left = MAX_PAGES - used, []
+    for gap in gaps:
+        if budget <= 0:
+            left.append(gap)
+            continue
+        try:
+            cursor, used = _walk(http, api_chat_id, gap["cursor"], int(gap.get("floor") or 0),
+                                 _ts(gap.get("since")), budget, batch)
+        except PachcaError as e:
+            if e.status not in STALE_CURSOR:
+                raise
+            continue
+        budget -= used
+        if cursor:
+            left.append({**gap, "cursor": cursor})
     users = _users(http, {m.get("user_id") for m in batch if not m.get("display_name")})
     new = 0
-    for m in reversed(batch):
+    for m in sorted(batch, key=lambda m: int(m["id"])):
         msg = parse_message(m, chat_id, title, me_id, users, thread_of)
         if msg:
             new += int(store.add_message(msg))
-    store.set_state(key, {"id": max([last_id, *(int(m["id"]) for m in batch)]), "at": last_at or seen.get("at")})
+    state = {"id": max([last_id, *(int(m["id"]) for m in batch)]), "at": last_at or seen.get("at")}
+    if left:
+        state["gaps"] = left
+    store.set_state(key, state)
     return new
 
 
@@ -250,12 +298,24 @@ def _read_threads(http: httpx.Client, enabled: dict[str, dict], me_id: int, sinc
     stored = store.get_state("pachca_threads_since")
     after = stored if stored and not fresh else since.replace(microsecond=0).isoformat()
     new = 0
+    # треды, которые прошлые проходы дочитали не до конца: в них могли больше не писать, и в список они не попадут
+    behind = store.get_state("pachca_thread_gaps") or {}
+    listed = []
     for t in _pages(http, "/threads", {"last_message_at_after": after}, 20):
         parent = str(t.get("message_chat_id") or "")
-        if parent not in enabled:
+        if parent in enabled:
+            listed.append({"chat_id": t["chat_id"], "parent": parent, "message_id": t.get("message_id"),
+                           "at": t.get("updated_at")})
+    todo = {str(t["chat_id"]): t for t in [*behind.values(), *listed]}
+    still = {}
+    for tid, t in todo.items():
+        if t["parent"] not in enabled:
             continue
-        new += _read_chat(http, t["chat_id"], parent, enabled[parent]["title"], me_id, since,
-                          thread_of=t.get("message_id"), last_at=t.get("updated_at"))
+        new += _read_chat(http, t["chat_id"], t["parent"], enabled[t["parent"]]["title"], me_id, since,
+                          thread_of=t.get("message_id"), last_at=t.get("at"))
+        if (store.get_state(f"pachca_last:{t['chat_id']}") or {}).get("gaps"):
+            still[tid] = {k: t[k] for k in ("chat_id", "parent", "message_id")}
+    store.set_state("pachca_thread_gaps", still)
     store.set_state("pachca_threads_since", (started - THREADS_OVERLAP).replace(microsecond=0).isoformat())
     return new
 
