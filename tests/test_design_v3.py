@@ -188,3 +188,11 @@ def test_date_picker_script_is_loaded(client):
     assert "/static/datepick.js" in client.get("/commitments").text
     config.update_settings("web", {"design": "classic"})
     assert "/static/datepick.js" not in client.get("/commitments").text
+
+
+def test_date_picker_reconnects_after_screen_change():
+    """nav.js при смене экрана снимает обработчики на document и window и запускает скрипты заново. Календарь
+    не должен подключаться «один раз»: иначе после первого перехода щелчок по полю даты ничего не открывает."""
+    src = (Path(__file__).parents[1] / "opsdash/web/static/datepick.js").read_text(encoding="utf-8")
+    assert "window.__pulseDatePick" not in src
+    assert 'document.addEventListener("click"' in src
