@@ -260,159 +260,190 @@
 {% endif %}
 
 {% set feed_n = feed.counts.values() | sum %}
-<div class="h3-cols">
-  <div class="h3-main">
-    {#- «Нужно от вас»: янтарная секция, фильтры справа от заголовка; пустая секция серая (HomeEmpty) #}
-    <section class="h3-need{{ ' calm' if not feed['items'] }}" aria-label="Нужно от вас">
-      <div class="h3-need-h">
-        <span class="h3-dot {{ 'warn' if feed['items'] else 'off' }}" aria-hidden="true"></span>
-        <h2>Нужно от вас</h2><span class="h3-n">{{ feed_n }}</span>
-        <span class="grow"></span>
-        <div class="h3-chips" role="group" aria-label="Что показать">
-          <button type="button" class="fchip active" data-feed-filter="">Всё <i>{{ feed_n }}</i></button>
-          {% for key, t in [('confirm', 'Подтвердить'), ('answer', 'Ответить'), ('remind', 'Напомнить'), ('quiet', 'Без движения'), ('due', 'Уточнить срок')] if feed.counts[key] %}<button type="button" class="fchip" data-feed-filter="{{ key }}">{{ t }} <i>{{ feed.counts[key] }}</i></button>{% endfor %}
-        </div>
+{% set has_day = calendars_on or day.events %}
+{#- сверху вниз: «Задачи» и вердикт дня рядом, под ними день карточками по времени, «Нужно от вас» во всю ширину,
+    внизу «PULSE сейчас» и «Пока вас не было» #}
+<div class="h3-page">
+<div class="h3-top{{ ' solo' if not has_day }}">
+  {#- «Задачи»: три числа, по умолчанию «Сегодня» (срок сегодня или раньше), переключатель «Все». Без скриптов: радио #}
+  {% set ns = namespace(mt=0, ot=0, late=0) %}
+  {% for c in s.mine %}{% if c.due_days is not none and c.due_days <= 0 %}{% set ns.mt = ns.mt + 1 %}{% endif %}{% if c.overdue %}{% set ns.late = ns.late + 1 %}{% endif %}{% endfor %}
+  {% for c in s.to_me %}{% if c.due_days is not none and c.due_days <= 0 %}{% set ns.ot = ns.ot + 1 %}{% endif %}{% if c.overdue %}{% set ns.late = ns.late + 1 %}{% endif %}{% endfor %}
+  <section class="h3-tasks" aria-label="Задачи">
+    <input type="radio" name="h3-scope" id="h3-scope-today" class="h3-radio" checked>
+    <input type="radio" name="h3-scope" id="h3-scope-all" class="h3-radio">
+    <div class="h3-tasks-h">
+      <h2>Задачи <span class="h3-note h3-s-today">· со сроком сегодня</span><span class="h3-note h3-s-all">· все открытые</span></h2>
+      <div class="seg" role="group" aria-label="Какие задачи считать">
+        <label for="h3-scope-today">Сегодня</label><label for="h3-scope-all">Все</label>
       </div>
-      {% if feed['items'] %}
-      <div class="h3-feed">
-        {% for it in feed['items'] %}{{ feed_row(it) }}{% endfor %}
-        <div class="h3-foot"><span class="grow">Остальные задачи и договорённости не требуют действий сегодня</span><a href="/commitments">Все {{ tasks_count }} на доске</a></div>
-      </div>
-      {% else %}
-      <div class="h3-empty">
-        {% if messages_on %}
-        <span class="h3-eic">{{ icons.icon('check', 22) }}</span>
-        <b>От вас сейчас ничего не ждут</b>
-        <p class="small muted">Новые ответы, напоминания и предложения на «Да» появятся здесь после следующего сбора.</p>
-        {% else %}
-        {#- ONB-4: лента пуста, потому что переписка не подключена #}
-        <span class="h3-eic">{{ SVG_TRAY | safe }}</span>
-        <b>Здесь появятся письма и сообщения, которые ждут вашего ответа</b>
-        <p class="small muted">А ещё напоминания коллегам, задачи без движения и предложения на «Да».</p>
-        <div class="h3-src"><a href="/settings?tab=telegram">Telegram</a><a href="/settings?tab=gmail">Gmail</a><a href="/settings?tab=imap">Другая почта</a><a href="/settings?tab=pachca">Пачка</a></div>
-        {% endif %}
-      </div>
-      <div class="h3-foot bare"><span class="grow">{{ 'От вас сейчас ничего не ждут' if messages_on else 'Переписка не подключена' }}</span><a href="/commitments">Все {{ tasks_count }} на доске</a></div>
-      {% endif %}
-    </section>
-    {% if no_due %}{{ ui.due_dialog(no_due, due_choices, meeting_titles) }}{% endif %}
-    {% if still %}{{ ui.quiet_dialog(still) }}{% endif %}
-    {#- окна «Сделать задачей» у строк «Ответить» стоят вне ленты: фильтр ленты прячет строки, а окно должно открываться #}
-    {% set answers = feed['items'] | selectattr('kind', 'equalto', 'answer') | list %}
-    {% for it in answers %}{{ ui.att_task_dialog(it.a, due_choices) }}{% endfor %}
-    {% if answers %}<datalist id="att-people">{% for name in day_people() %}<option value="{{ name }}">{% endfor %}</datalist>{% endif %}
-    {{ ui.task_datalist() }}
-    {{ ui.event_datalist() }}
+    </div>
+    <div class="h3-stats h3-s-today">
+      <a class="h3-stat" href="/commitments?view=list&direction=mine&due=now"><b>{{ ns.mt }}</b><span>мои задачи</span></a>
+      <a class="h3-stat" href="/commitments?view=list&direction=to_me&due=now"><b>{{ ns.ot }}</b><span>мне должны</span></a>
+      <a class="h3-stat" href="/commitments?view=list&due=now"><b class="{{ 'bad' if ns.late }}">{{ ns.late }}</b><span>просрочено к сегодня</span></a>
+    </div>
+    <div class="h3-stats h3-s-all">
+      <a class="h3-stat" href="/commitments?view=list&direction=mine"><b>{{ s.mine | length }}</b><span>мои задачи</span></a>
+      <a class="h3-stat" href="/commitments?view=list&direction=to_me"><b>{{ s.to_me | length }}</b><span>мне должны</span></a>
+      <a class="h3-stat" href="/commitments?view=list&due=now"><b class="{{ 'bad' if ns.late }}">{{ ns.late }}</b><span>просрочено</span></a>
+    </div>
+  </section>
+  {% if has_day %}
+  {#- вердикт дня: хватит ли окон на задачи, что делать сейчас, «Разобрать день» #}
+  <section class="h3-plan" aria-label="Реально">{{ dayui.verdict(dp) }}</section>
+  {% endif %}
+</div>
+
+{#- «Сегодня»: день полосой по часам рабочего дня, как на Ганте (раскладка — day.strip). Сверху встречи, под ними
+    задачи из плана PULSE на подложке свободных окон. Линия «сейчас» движется (app.js, data-tl-now). Щелчок по встрече —
+    её карточка, по задаче — окно задачи прямо здесь, по «Мелочи ×N» — список с «готово» у каждой (day.js) #}
+<section class="h3-today{{ ' calm' if not has_day }}" aria-label="Сегодня">
+  <div class="h3-today-h">
+    <span class="h3-dot {{ 'acc' if has_day else 'off' }}" aria-hidden="true"></span>
+    <h2>Сегодня</h2>
+    <span class="small muted grow">{% if meet_n %}{{ meet_n }} {{ plural(meet_n, 'встреча', 'встречи', 'встреч') }}{% if busy_min %} · {% if busy_min >= 60 %}{{ busy_min // 60 }} ч{% endif %}{% if busy_min % 60 %} {{ busy_min % 60 }} мин{% endif %}{% endif %}{% else %}встреч нет{% endif %}</span>
+    <a class="small" href="/calendar">неделя</a>
   </div>
+  {% if has_day %}
+  {% if day.allday %}
+  <div class="h3-allday">{% for a in day.allday %}<button type="button" class="d3-tag neu ev-allday" data-ev="{{ a.ev.n }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>{% endfor %}</div>
+  {% endif %}
+  {% set st = strip if strip is defined else none %}
+  {% if st %}
+  <div class="h3-tl-wrap" data-tl-wrap>
+  <div class="h3-tl" style="--n: {{ st.hours | length }}">
+    <div class="h3-tl-scale" aria-hidden="true">
+      {% for h in st.hours %}<span style="left: {{ h.x }}%">{{ h.h }}:00</span>{% endfor %}
+    </div>
+    <span class="h3-tl-lbl h3-tl-l1">Встречи</span>
+    <div class="h3-tl-lane h3-tl-l1">
+      {#- фокус-блоки и встречи, от которых отказались, — фоном: время в них идёт на задачи #}
+      {% for g in st.back %}{% set e = g.ev %}
+      <button type="button" class="h3-tl-ev bg {{ e.day_kind }}{{ ' past' if e.past }}" data-ev="{{ e.n }}" style="left: {{ g.x }}%; --w: calc({{ g.w }}% - 2px)"
+              title="{{ e.title or 'Без названия' }} · {{ ui.ev_time(e) }} · {{ 'фокус: время на задачи' if e.day_kind == 'focus' else 'вы отказались' }}"><span class="h3-tl-t">{{ e.title or 'Без названия' }}</span></button>
+      {% endfor %}
+      {% for g in st.meetings %}{% set e = g.ev %}{% set brief = e.brief and e.brief.status == 'ready' %}
+      <button type="button" class="h3-tl-ev{{ ' past' if e.past }}{{ ' now' if e.now }}{{ ' next' if day.next and day.next.uid == e.uid and not e.now }}" data-ev="{{ e.n }}"
+              style="left: {{ g.x }}%; --w: calc({{ g.w }}% - 2px); top: {{ '%.2f' % (g.left * 100) }}%; height: {{ '%.2f' % (g.width * 100) }}%"
+              title="{{ e.title or 'Без названия' }} · {{ ui.ev_time(e) }}{{ ' · идёт' if e.now }}{{ ' · бриф готов' if brief }}">
+        {%- if brief %}<i class="h3-tl-mark" aria-hidden="true"></i>{% endif %}<span class="h3-tl-t">{{ e.title or 'Без названия' }}</span>
+      </button>
+      {% endfor %}
+      {% if not st.meetings and not st.back %}<span class="h3-tl-empty">встреч нет</span>{% endif %}
+    </div>
+    <span class="h3-tl-lbl h3-tl-l2">Задачи</span>
+    <div class="h3-tl-lane h3-tl-l2">
+      {% for w in st.windows %}<span class="h3-tl-win" style="left: {{ w.x }}%; width: {{ w.w }}%" title="Окно для задач {{ w.s | hm }}–{{ w.e | hm }} · {{ w.len | dur }}"></span>{% endfor %}
+      {% for b in st.tasks %}{% set it = b.item %}
+      {% set cls = (' work' if b.work else '') ~ (' pinned' if b.pinned else '') ~ (' done' if b.done else '') ~ (' late' if b.late else '') %}
+      {% if it.id %}
+      <a class="h3-tl-task{{ cls }}" href="/commitments?task={{ it.id }}" data-task-open="{{ it.id }}" style="left: {{ b.x }}%; --w: calc({{ b.w }}% - 2px)"
+         title="{{ it.title }} · {{ b.time }} · {{ 'сделано' if b.done else '≈' ~ (it.est | dur) }}{{ ' · в работе' if b.work }}{{ ' · после срока' if b.late }}{{ ' · вы поставили сюда' if b.pinned }}"><span class="h3-tl-t">{{ '✓ ' if b.done }}{{ it.title }}</span></a>
+      {% elif it.members %}
+      <a class="h3-tl-task pb batch{{ cls }}" href="/commitments?task={{ it.members[0].id }}" data-pb="{{ b.key }}" style="left: {{ b.x }}%; --w: calc({{ b.w }}% - 2px)"
+         title="Мелочи: {% for m in it.members %}{{ m.title }} (≈{{ m.est | dur }}){{ '; ' if not loop.last }}{% endfor %} · {{ b.time }}"><span class="h3-tl-t">{{ it.title }}</span></a>
+      {% if not b.done %}<template id="pbm-{{ b.key }}">{{ dayui.task_menu(b) }}</template>{% endif %}
+      {% endif %}
+      {% else %}<span class="h3-tl-empty">{{ 'в окнах пока ничего не запланировано' if st.windows else 'задач в плане на сегодня нет' }}</span>{% endfor %}
+    </div>
+    <div class="h3-tl-over" aria-hidden="true">
+      {% if st.past %}<div class="h3-tl-past" data-tl-past style="width: {{ st.past }}%"></div>{% endif %}
+      {% if st.now is not none %}<div class="h3-tl-now" data-tl-now="{{ st.now_m }}" data-r0="{{ st.r0 }}" data-span="{{ st.span }}" style="left: {{ st.now }}%"><span data-tl-now-label>{{ day.now.strftime('%H:%M') }}</span></div>{% endif %}
+    </div>
+  </div>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="h3-empty">
+    <span class="h3-eic">{{ icons.icon('calendar', 22) }}</span>
+    <b>Подключите календарь</b>
+    <p class="small muted">Здесь будут встречи дня, окна между ними и время на задачи.</p>
+    <div class="h3-src"><a href="/settings?tab=calendar">Яндекс</a><a href="/settings?tab=google_calendar">Google</a><a href="/settings?tab=ics_calendar">Outlook и iCloud</a><a href="/settings?tab=caldav">CalDAV</a></div>
+  </div>
+  {% endif %}
+  {% for e in day.events %}{{ ui.ev_detail(e) }}{{ ui.brief_dialog(e) }}{% endfor %}
+  {% for c in day_tasks or [] %}{{ ui.task_dialog(c, day_task_meetings or {}) }}{% endfor %}
+  <div class="ev-pop" hidden data-ev-pop></div>
+  {{ dayui.review(dp, due_choices, next_label) }}
+</section>
 
-  <aside class="h3-side">
-    {#- «Задачи»: три числа, по умолчанию «Сегодня» (срок сегодня или раньше), переключатель «Все». Без скриптов: радио #}
-    {% set ns = namespace(mt=0, ot=0, late=0) %}
-    {% for c in s.mine %}{% if c.due_days is not none and c.due_days <= 0 %}{% set ns.mt = ns.mt + 1 %}{% endif %}{% if c.overdue %}{% set ns.late = ns.late + 1 %}{% endif %}{% endfor %}
-    {% for c in s.to_me %}{% if c.due_days is not none and c.due_days <= 0 %}{% set ns.ot = ns.ot + 1 %}{% endif %}{% if c.overdue %}{% set ns.late = ns.late + 1 %}{% endif %}{% endfor %}
-    <section class="h3-tasks" aria-label="Задачи">
-      <input type="radio" name="h3-scope" id="h3-scope-today" class="h3-radio" checked>
-      <input type="radio" name="h3-scope" id="h3-scope-all" class="h3-radio">
-      <div class="h3-tasks-h">
-        <h2>Задачи <span class="h3-note h3-s-today">· со сроком сегодня</span><span class="h3-note h3-s-all">· все открытые</span></h2>
-        <div class="seg" role="group" aria-label="Какие задачи считать">
-          <label for="h3-scope-today">Сегодня</label><label for="h3-scope-all">Все</label>
-        </div>
-      </div>
-      <div class="h3-stats h3-s-today">
-        <a class="h3-stat" href="/commitments?view=list&direction=mine&due=now"><b>{{ ns.mt }}</b><span>мои задачи</span></a>
-        <a class="h3-stat" href="/commitments?view=list&direction=to_me&due=now"><b>{{ ns.ot }}</b><span>мне должны</span></a>
-        <a class="h3-stat" href="/commitments?view=list&due=now"><b class="{{ 'bad' if ns.late }}">{{ ns.late }}</b><span>просрочено к сегодня</span></a>
-      </div>
-      <div class="h3-stats h3-s-all">
-        <a class="h3-stat" href="/commitments?view=list&direction=mine"><b>{{ s.mine | length }}</b><span>мои задачи</span></a>
-        <a class="h3-stat" href="/commitments?view=list&direction=to_me"><b>{{ s.to_me | length }}</b><span>мне должны</span></a>
-        <a class="h3-stat" href="/commitments?view=list&due=now"><b class="{{ 'bad' if ns.late }}">{{ ns.late }}</b><span>просрочено</span></a>
-      </div>
-    </section>
-
-    {#- «Сегодня»: вердикт дня («Разобрать день»), встречи и окна под задачи списком по времени (макет Home) #}
-    <section class="h3-today{{ ' calm' if not (calendars_on or day.events) }}" aria-label="Сегодня">
-      <div class="h3-today-h">
-        <span class="h3-dot {{ 'acc' if calendars_on or day.events else 'off' }}" aria-hidden="true"></span>
-        <h2>Сегодня</h2>
-        <span class="small muted grow">{% if meet_n %}{{ meet_n }} {{ plural(meet_n, 'встреча', 'встречи', 'встреч') }}{% if busy_min %} · {% if busy_min >= 60 %}{{ busy_min // 60 }} ч{% endif %}{% if busy_min % 60 %} {{ busy_min % 60 }} мин{% endif %}{% endif %}{% else %}встреч нет{% endif %}{% if dp.capacity %} · свободно {{ dp.capacity | dur }}{% endif %}</span>
-        <a class="small" href="/calendar">неделя</a>
-      </div>
-      {% if calendars_on or day.events %}
-      {{ dayui.verdict(dp) }}
-      {% if day.allday %}
-      <div class="h3-allday">{% for a in day.allday %}<button type="button" class="d3-tag neu ev-allday" data-ev="{{ a.ev.n }}" title="{{ a.ev.title }}">{{ a.ev.title or 'Без названия' }}</button>{% endfor %}</div>
-      {% endif %}
-      {% set rows = [] %}
-      {% for e in day.events if not e.all_day %}{% set _ = rows.append((e.s_local.hour * 60 + e.s_local.minute, 0, e)) %}{% endfor %}
-      {% for w in dp.windows or [] if not w.short %}{% set _ = rows.append((w.s, 1, w)) %}{% endfor %}
-      {% if rows %}
-      <div class="h3-agenda">
-        {% for m, kind, x in rows | sort(attribute='0') %}
-        {% if kind == 0 %}{% set e = x %}
-        <button type="button" class="h3-mt{{ ' past' if e.past }}{{ ' now' if e.now }}{{ ' next' if day.next and day.next.uid == e.uid and not e.now }}" data-ev="{{ e.n }}" title="{{ e.title or 'Без названия' }} · {{ ui.ev_time(e) }}">
-          <span class="h3-mt-time">{{ e.s_local.strftime('%H:%M') }}</span>
-          <span class="h3-mt-t d3-ell">{{ e.title or 'Без названия' }}</span>
-          {% if e.now %}<span class="d3-tag ok">идёт</span>
-          {% elif e.past %}<span class="d3-tag neu">{{ 'разобрана' if e.recorded and e.rec_status == 'processed' else ('запись есть' if e.recorded else 'прошла') }}</span>
-          {% elif e.brief and e.brief.status == 'ready' %}<span class="d3-tag acc">бриф готов</span>
-          {% elif e.day_kind == 'focus' %}<span class="d3-tag neu">фокус</span>{% endif %}
-        </button>
-        {% else %}{% set w = x %}{% set fits = (dp.blocks or []) | selectattr('s', 'ge', w.s) | selectattr('e', 'le', w.e) | list %}
-        <div class="h3-mt h3-win">
-          <span class="h3-mt-time">{{ w.s | hm }}</span>
-          <span class="h3-mt-t"><span class="h3-win-t">Окно для задач · {{ w.len | dur }}</span>
-            {%- if fits %}<span class="h3-win-plan d3-ell">План: {% for b in fits[:3] %}{% if b.item.id %}<a href="/commitments?task={{ b.item.id }}">{{ b.item.title }}</a>{% else %}{{ b.item.title }}{% endif %}{{ ', ' if not loop.last }}{% endfor %}{% if fits | length > 3 %} и ещё {{ fits | length - 3 }}{% endif %}</span>{% endif %}</span>
-          <span class="small muted">до {{ w.e | hm }}</span>
-        </div>
-        {% endif %}
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="small muted h3-none">На сегодня встреч в календаре нет.</p>
-      {% endif %}
-      {% else %}
-      <div class="h3-empty">
-        <span class="h3-eic">{{ icons.icon('calendar', 22) }}</span>
-        <b>Подключите календарь</b>
-        <p class="small muted">Здесь будут встречи дня, окна между ними и время на задачи.</p>
-        <div class="h3-src"><a href="/settings?tab=calendar">Яндекс</a><a href="/settings?tab=google_calendar">Google</a><a href="/settings?tab=ics_calendar">Outlook и iCloud</a><a href="/settings?tab=caldav">CalDAV</a></div>
-      </div>
-      {% endif %}
-      {% for e in day.events %}{{ ui.ev_detail(e) }}{{ ui.brief_dialog(e) }}{% endfor %}
-      <div class="ev-pop" hidden data-ev-pop></div>
-      {{ dayui.review(dp, due_choices, next_label) }}
-    </section>
-
-    {#- «PULSE сейчас»: что делает прямо сейчас и когда проверены источники #}
-    {% set srcs = s.health | rejectattr('key', 'in', ['bot', 'claude']) | list %}
-    {% set ok_src = srcs | selectattr('status', 'equalto', 'ok') | list %}
-    {% set bad_src = s.health | selectattr('status', 'equalto', 'error') | list %}
-    {% if running_now or ok_src or bad_src %}
-    <section class="d3-card h3-now" aria-label="PULSE сейчас">
-      <h2>PULSE сейчас</h2>
-      {% for r in running_now %}<div class="h3-now-i"><span class="h3-dot ok sm" aria-hidden="true"></span><span class="grow">{{ r.title }}{% if r.detail %}: {{ r.detail }}{% endif %}</span></div>{% endfor %}
-      {% for h in bad_src %}<div class="h3-now-i"><span class="h3-dot bad sm" aria-hidden="true"></span><a class="grow" href="/settings?tab={{ 'connections' if h.key in ('bot', 'claude') else h.key }}" title="{{ h.error or '' }}">{{ h.title }}: {{ h.note or 'ошибка сбора' }}</a></div>{% endfor %}
-      {% if ok_src %}{% set last = ok_src | selectattr('last_ok') | map(attribute='last_ok') | list | sort | last %}
-      <div class="h3-now-i muted"><span class="h3-dot off sm" aria-hidden="true"></span><span class="grow">{{ ok_src | map(attribute='title') | join(', ') }}{% if last %}: {{ 'проверены' if ok_src | length > 1 else 'проверен' }} {{ last | ago }}{% endif %}</span></div>
-      {% endif %}
-    </section>
+{#- «Нужно от вас»: янтарная секция во всю ширину, фильтры справа от заголовка; пустая секция серая (HomeEmpty) #}
+<section class="h3-need{{ ' calm' if not feed['items'] }}" aria-label="Нужно от вас">
+  <div class="h3-need-h">
+    <span class="h3-dot {{ 'warn' if feed['items'] else 'off' }}" aria-hidden="true"></span>
+    <h2>Нужно от вас</h2><span class="h3-n">{{ feed_n }}</span>
+    <span class="grow"></span>
+    <div class="h3-chips" role="group" aria-label="Что показать">
+      <button type="button" class="fchip active" data-feed-filter="">Всё <i>{{ feed_n }}</i></button>
+      {% for key, t in [('confirm', 'Подтвердить'), ('answer', 'Ответить'), ('remind', 'Напомнить'), ('quiet', 'Без движения'), ('due', 'Уточнить срок')] if feed.counts[key] %}<button type="button" class="fchip" data-feed-filter="{{ key }}">{{ t }} <i>{{ feed.counts[key] }}</i></button>{% endfor %}
+    </div>
+  </div>
+  {% if feed['items'] %}
+  <div class="h3-feed">
+    {% for it in feed['items'] %}{{ feed_row(it) }}{% endfor %}
+    <div class="h3-foot"><span class="grow">Остальные задачи и договорённости не требуют действий сегодня</span><a href="/commitments">Все {{ tasks_count }} на доске</a></div>
+  </div>
+  {% else %}
+  <div class="h3-empty">
+    {% if messages_on %}
+    <span class="h3-eic">{{ icons.icon('check', 22) }}</span>
+    <b>От вас сейчас ничего не ждут</b>
+    <p class="small muted">Новые ответы, напоминания и предложения на «Да» появятся здесь после следующего сбора.</p>
+    {% else %}
+    {#- ONB-4: лента пуста, потому что переписка не подключена #}
+    <span class="h3-eic">{{ SVG_TRAY | safe }}</span>
+    <b>Здесь появятся письма и сообщения, которые ждут вашего ответа</b>
+    <p class="small muted">А ещё напоминания коллегам, задачи без движения и предложения на «Да».</p>
+    <div class="h3-src"><a href="/settings?tab=telegram">Telegram</a><a href="/settings?tab=gmail">Gmail</a><a href="/settings?tab=imap">Другая почта</a><a href="/settings?tab=pachca">Пачка</a></div>
     {% endif %}
+  </div>
+  <div class="h3-foot bare"><span class="grow">{{ 'От вас сейчас ничего не ждут' if messages_on else 'Переписка не подключена' }}</span><a href="/commitments">Все {{ tasks_count }} на доске</a></div>
+  {% endif %}
+</section>
+{% if no_due %}{{ ui.due_dialog(no_due, due_choices, meeting_titles) }}{% endif %}
+{% if still %}{{ ui.quiet_dialog(still) }}{% endif %}
+{#- окна «Сделать задачей» у строк «Ответить» стоят вне ленты: фильтр ленты прячет строки, а окно должно открываться #}
+{% set answers = feed['items'] | selectattr('kind', 'equalto', 'answer') | list %}
+{% for it in answers %}{{ ui.att_task_dialog(it.a, due_choices) }}{% endfor %}
+{% if answers %}<datalist id="att-people">{% for name in day_people() %}<option value="{{ name }}">{% endfor %}</datalist>{% endif %}
+{{ ui.task_datalist() }}
+{{ ui.event_datalist() }}
 
-    {#- «Пока вас не было» свёрнуто по умолчанию: что PULSE сделал сам, читают по щелчку #}
-    {% set away_n = log | length + (1 if s.unprocessed else 0) %}
-    <details class="h3-away">
-      <summary><b class="grow">Пока вас не было</b>{% if away_n %}<span class="d3-tag neu">{{ away_n }}</span>{% else %}<span class="small muted">ничего нового</span>{% endif %}{{ icons.icon('chevron', 18) }}</summary>
-      <div class="h3-away-b">
-        {% for n in log %}
-        <p>{% if n.link %}<a href="{{ n.link }}">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}{% if n.text %}: {{ n.text }}{% endif %}</p>
-        {% endfor %}
-        {% if s.unprocessed %}<p>{{ s.unprocessed }} {{ plural(s.unprocessed, 'новое сообщение ждёт', 'новых сообщения ждут', 'новых сообщений ждут') }} разбора</p>{% endif %}
-        {% if not log and not s.unprocessed %}<p class="muted">Ничего нового</p>{% endif %}
-        <p class="muted">{% if next_collect %}Следующий сбор в {{ next_collect.strftime('%H:%M') }} · {% endif %}<a href="/journal">журнал</a></p>
-      </div>
-    </details>
-  </aside>
+<div class="h3-bottom">
+  {#- «PULSE сейчас»: что делает прямо сейчас и когда проверены источники #}
+  {% set srcs = s.health | rejectattr('key', 'in', ['bot', 'claude']) | list %}
+  {% set ok_src = srcs | selectattr('status', 'equalto', 'ok') | list %}
+  {% set bad_src = s.health | selectattr('status', 'equalto', 'error') | list %}
+  {% if running_now or ok_src or bad_src %}
+  <section class="d3-card h3-now" aria-label="PULSE сейчас">
+    <h2>PULSE сейчас</h2>
+    {% for r in running_now %}<div class="h3-now-i"><span class="h3-dot ok sm" aria-hidden="true"></span><span class="grow">{{ r.title }}{% if r.detail %}: {{ r.detail }}{% endif %}</span></div>{% endfor %}
+    {% for h in bad_src %}<div class="h3-now-i"><span class="h3-dot bad sm" aria-hidden="true"></span><a class="grow" href="/settings?tab={{ 'connections' if h.key in ('bot', 'claude') else h.key }}" title="{{ h.error or '' }}">{{ h.title }}: {{ h.note or 'ошибка сбора' }}</a></div>{% endfor %}
+    {% if ok_src %}{% set last = ok_src | selectattr('last_ok') | map(attribute='last_ok') | list | sort | last %}
+    <div class="h3-now-i muted"><span class="h3-dot off sm" aria-hidden="true"></span><span class="grow">{{ ok_src | map(attribute='title') | join(', ') }}{% if last %}: {{ 'проверены' if ok_src | length > 1 else 'проверен' }} {{ last | ago }}{% endif %}</span></div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {#- «Пока вас не было» свёрнуто по умолчанию: что PULSE сделал сам, читают по щелчку. Устроен как «PULSE сейчас»
+    рядом — заголовок и строка под ним (последнее событие), оба блока одной высоты #}
+  {% set away_n = log | length + (1 if s.unprocessed else 0) %}
+  <details class="h3-away">
+    <summary><span class="h3-away-h"><b class="grow">Пока вас не было</b>{% if away_n %}<span class="d3-tag neu">{{ away_n }}</span>{% endif %}{{ icons.icon('chevron', 18) }}</span>
+      <span class="h3-now-i muted h3-away-peek"><span class="h3-dot off sm" aria-hidden="true"></span><span class="grow">
+        {%- if log %}{{ log[0].title }}{% if log[0].text %}: {{ log[0].text }}{% endif %}
+        {%- elif s.unprocessed %}{{ s.unprocessed }} {{ plural(s.unprocessed, 'новое сообщение ждёт', 'новых сообщения ждут', 'новых сообщений ждут') }} разбора
+        {%- else %}Ничего нового{% endif %}</span></span></summary>
+    <div class="h3-away-b">
+      {% for n in log %}
+      <p>{% if n.link %}<a href="{{ n.link }}">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}{% if n.text %}: {{ n.text }}{% endif %}</p>
+      {% endfor %}
+      {% if s.unprocessed %}<p>{{ s.unprocessed }} {{ plural(s.unprocessed, 'новое сообщение ждёт', 'новых сообщения ждут', 'новых сообщений ждут') }} разбора</p>{% endif %}
+      {% if not log and not s.unprocessed %}<p class="muted">Ничего нового</p>{% endif %}
+      <p class="muted">{% if next_collect %}Следующий сбор в {{ next_collect.strftime('%H:%M') }} · {% endif %}<a href="/journal">журнал</a></p>
+    </div>
+  </details>
+</div>
 </div>
 {% endblock %}

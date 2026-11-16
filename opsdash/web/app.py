@@ -698,7 +698,15 @@ def home(request: Request):
     start_h, start_m = (int(x) for x in (settings["owner"]["work_hours"].get("start") or "09:00").split(":"))
     work_left = int((now.replace(hour=end_h, minute=end_m, second=0, microsecond=0) - now).total_seconds() // 60)
     before_start = now.hour * 60 + now.minute < start_h * 60 + start_m
+    # задачи на полосе «Сегодня»: по щелчку их окно открывается прямо на Сводке, без перехода в «Задачи»
+    day_ids = list(dict.fromkeys(b["item"]["id"] for b in day.get("plan_layer") or []
+                                 if b.get("kind") == "plan" and b["item"].get("id")))
+    day_tasks = records.add_links([c for c in map(records.get_commitment, day_ids) if c])
+    src_ids = {c["source_ref"] for c in day_tasks if c["source_type"] == "meeting" and c["source_ref"]}
+    day_task_meetings = {m["id"]: m["title"] for m in store.rows(
+        f"SELECT id, title FROM meetings WHERE id IN ({','.join('?' * len(src_ids))})", list(src_ids))} if src_ids else {}
     return render(request, "home.html", nav="home", s=snap, feed=feed, meetings=meetings, no_due=no_due, still=still,
+                  day_tasks=day_tasks, day_task_meetings=day_task_meetings, strip=day_mod.strip(day, dp),
                   first_finds=welcome.finds_for_home(), first_days=welcome.FIRST_DAYS,
                   meeting_titles={k: m["title"] for k, m in meetings.items()}, due_choices=due_choices(),
                   dp=dp, next_label=day_mod.next_label(now.date(), settings), meet_n=len(timed),

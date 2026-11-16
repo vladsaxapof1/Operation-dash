@@ -740,6 +740,42 @@ def decorate(grid: dict, p: dict) -> None:
     grid["plan_from"] = top  # для перетаскивания: минута верхнего края сетки
 
 
+def strip(grid: dict, p: dict) -> dict:
+    """Полоса «Сегодня» на Сводке: тот же день, что на сетке (после decorate), только лёжа — часы слева направо.
+    Встречи — на верхней дорожке; идущие одновременно — друг под другом (top/height — доли высоты дорожки).
+    Фокус-блоки и встречи, от которых отказались, — фоном под встречами: время в них — для задач, дорожку они
+    не делят. Нижняя дорожка — задачи из плана и свободные окна. x и w — проценты ширины полосы."""
+    from opsdash.overview import _layout_day
+
+    r0 = grid["hour_from"] * 60
+    span = len(grid["hours"]) * 60 or 60
+    now = grid["now"]
+    now_m = now.hour * 60 + now.minute
+
+    def seg(s: float, e: float) -> dict | None:
+        s, e = max(s, r0), min(e, r0 + span)
+        return {"x": round((s - r0) * 100 / span, 3), "w": round((e - s) * 100 / span, 3)} if e > s else None
+
+    back, front = [], []
+    for g in grid["days"][0]["events"] if grid["days"] else []:
+        if pos := seg(g["s"], g["e"]):
+            (back if g["ev"].get("day_kind") in ("focus", "free") else front).append(
+                {"ev": g["ev"], "s": g["s"], "e": g["e"], **pos})
+    _layout_day(front)  # col/left/width: наложения — строками дорожки
+    tasks = []
+    for b in grid.get("plan_layer") or []:
+        if b["kind"] != "plan":  # буферы и короткие окна на полосе не рисуем
+            continue
+        start = max(b["start"], r0)  # len — уже обрезанная сеткой длина
+        if pos := seg(start, start + b["len"]):
+            tasks.append({**b, **pos})
+    wins = [{**w, **pos} for w in p["windows"] if not w["short"] and (pos := seg(w["s"], w["e"]))]
+    return {"hours": [{"h": h, "x": round((h * 60 - r0) * 100 / span, 3)} for h in grid["hours"]],
+            "back": back, "meetings": front, "tasks": tasks, "windows": wins,
+            "now": round((now_m - r0) * 100 / span, 3) if r0 <= now_m <= r0 + span else None,
+            "past": round(min(max(now_m - r0, 0), span) * 100 / span, 3), "now_m": now_m, "r0": r0, "span": span}
+
+
 # --- расписание задач на несколько дней (Календарь) ---------------------------------------------------
 
 def _future_decisions(today: date) -> tuple[dict, dict, dict]:

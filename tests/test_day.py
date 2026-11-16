@@ -326,6 +326,33 @@ def test_overview_page_review_and_estimate_chips(settings_with, monkeypatch):
     assert day.opts()["lunch"] == (780, 825) and day.opts()["after"] == 5
 
 
+def test_overview_strip_lanes_now_and_task_window(settings_with, monkeypatch):
+    """Полоса «Сегодня» на Сводке: часы рабочего дня слева направо, фокус-блок — фоном, встречи в одно время — друг
+    под другом, задача из плана — полоской, её окно открывается прямо на Сводке, линия «сейчас» — на своём месте."""
+    from opsdash.overview import day_grid
+    from opsdash.web.app import app
+
+    settings = settings_with(calendar={"enabled": True})
+    monkeypatch.setattr(config, "now", lambda s=None: _at(10, 15))
+    _busy_day()
+    cid = _task("Сводка решений по KPI", DAY.isoformat())
+    grid = day_grid(settings)
+    p = day.plan(DAY, settings, _at(10, 15))
+    day.decorate(grid, p)
+    st = day.strip(grid, p)
+    assert st["hours"][0] == {"h": 9, "x": 0.0} and st["r0"] == 9 * 60
+    assert [g["ev"]["title"] for g in st["back"]] == ["Тайм-аут"]  # фокус дорожку не делит
+    pair = sorted((g["left"], g["width"]) for g in st["meetings"] if g["ev"]["title"] in ("Встреча 2", "Встреча 3"))
+    assert pair == [(0.0, 0.5), (0.5, 0.5)]  # 12:00–13:00 и 12:30–13:00 — друг под другом
+    assert st["now"] == round(75 * 100 / st["span"], 3) and st["past"] == st["now"]
+    task = next(t for t in st["tasks"] if t["item"].get("id") == cid)
+    assert task["x"] >= st["now"] and task["w"] > 0  # план — от «сейчас» и дальше
+    config.update_settings("web", {"design": "v3"})  # полоса — в новом дизайне
+    page = TestClient(app, base_url="http://localhost:8765").get("/").text
+    assert f'data-task-open="{cid}"' in page and f'id="task-{cid}"' in page
+    assert "data-tl-now" in page and "h3-tl-ev bg focus" in page
+
+
 # --- этап 2: передать, вечер, сигналы, перетаскивание ------------------------------------------------
 
 def _at(hh, mm=0):

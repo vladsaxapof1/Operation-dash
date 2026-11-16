@@ -14,11 +14,16 @@ body.d3 .h3-dot.acc { background: var(--acc-dot); }
 body.d3 .h3-dot.ok { background: var(--ok); }
 body.d3 .h3-dot.bad { background: var(--bad); }
 
-/* --- две колонки: лента слева, «Сегодня» справа --- */
-body.d3 .h3-cols { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px; }
-body.d3 .h3-main { flex: 3 1 560px; min-width: 0; }
-body.d3 .h3-side { flex: 1 1 320px; max-width: 440px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-@media (max-width: 1000px) { body.d3 .h3-side { max-width: none; } }
+/* --- сверху вниз: «Задачи» и вердикт дня рядом, день карточками в ряд, «Нужно от вас» во всю ширину, внизу
+   «PULSE сейчас» и «Пока вас не было». Закрытые окна и списки подсказок не видны и места в столбце не берут --- */
+body.d3 .h3-page { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+body.d3 .h3-top { display: grid; grid-template-columns: minmax(340px, 5fr) minmax(0, 7fr); gap: 20px; align-items: stretch; }
+body.d3 .h3-top.solo { grid-template-columns: minmax(0, 1fr); }
+body.d3 .h3-top.solo .h3-tasks { max-width: 560px; }
+/* блоки рядом — одной высоты: короткий тянется до соседа */
+body.d3 .h3-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; align-items: stretch; }
+/* окно уже: плитки задач стали бы узкими — вердикт уходит под них */
+@media (max-width: 1180px) { body.d3 .h3-top { grid-template-columns: minmax(0, 1fr); } }
 
 /* --- «Нужно от вас» --- */
 body.d3 .h3-need { box-sizing: border-box; padding: 14px; border-radius: 16px; background: var(--warn-deep); border: 1px solid var(--warn-line); }
@@ -56,6 +61,8 @@ body.d3 .h3-kick { margin-bottom: 2px; font-size: 12px; line-height: 20px; color
 body.d3 .h3-kick a { color: var(--accent); }
 body.d3 .h3-kick .d3-tag { height: 20px; padding: 0 8px; margin-left: 4px; vertical-align: top; }
 body.d3 .h3-ttl { margin: 0; font-size: 15px; font-weight: 500; line-height: 1.4; color: var(--text); letter-spacing: 0; text-transform: none; }
+/* название не обрезается на первой строке: до двух строк, дальше многоточие */
+body.d3 .h3-ttl.d3-ell { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 body.d3 .h3-ttl a { color: var(--text); }
 body.d3 .h3-ttl a:hover { color: var(--accent); text-decoration: none; }
 body.d3 .h3-days { color: var(--cap); font-weight: 400; }
@@ -148,40 +155,89 @@ body.d3 #h3-scope-today:focus-visible ~ .h3-tasks-h label[for=h3-scope-today],
 body.d3 #h3-scope-all:focus-visible ~ .h3-tasks-h label[for=h3-scope-all] { outline: 2px solid var(--g-focus); }
 body.d3 #h3-scope-today:checked ~ * .h3-s-all, body.d3 #h3-scope-today:checked ~ .h3-s-all,
 body.d3 #h3-scope-all:checked ~ * .h3-s-today, body.d3 #h3-scope-all:checked ~ .h3-s-today { display: none; }
-body.d3 .h3-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-body.d3 .h3-stat { display: flex; flex-direction: column; padding: 14px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card);
-  color: var(--text); min-width: 0; }
+body.d3 .h3-stats { flex: 1 1 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+/* плитки тянутся до высоты вердикта рядом: число сверху, подпись внизу */
+body.d3 .h3-stat { display: flex; flex-direction: column; justify-content: space-between; gap: 6px; padding: 14px 16px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line-card); color: var(--text); min-width: 0; }
 body.d3 .h3-stat:hover { border-color: var(--line-strong); text-decoration: none; }
 body.d3 .h3-stat b { font-size: 26px; font-weight: 600; line-height: 1.15; }
 body.d3 .h3-stat b.bad { color: var(--bad-text); }
 body.d3 .h3-stat span { font-size: 13px; line-height: 1.3; color: var(--muted); }
 
-/* --- «Сегодня»: синяя секция, встречи и окна списком --- */
+/* --- вердикт дня: карточка рядом с «Задачами», той же высоты --- */
+body.d3 .h3-plan { display: flex; min-width: 0; }
+body.d3 .h3-plan .dv { flex: 1 1 auto; min-width: 0; margin: 0; padding: 14px 16px; gap: 8px; align-content: start; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line-card); }
+body.d3 .h3-plan .dv-title { font-size: 15px; }
+body.d3 .h3-plan .dv-dot { width: 8px; height: 8px; }
+body.d3 .h3-plan .dv-bar { background: var(--panel-2); }
+body.d3 .h3-plan .dv-sub { margin: 0; }
+
+/* --- «Сегодня»: синяя секция, день полосой по часам, как на Ганте --- */
 body.d3 .h3-today { box-sizing: border-box; padding: 14px; border-radius: 16px; background: var(--acc-deep); border: 1px solid var(--accent-soft);
   display: flex; flex-direction: column; gap: 8px; }
 body.d3 .h3-today.calm { background: var(--sunken); border-color: var(--line); }
 body.d3 .h3-today-h { display: flex; align-items: center; gap: 8px; padding: 2px 6px 4px; }
 body.d3 .h3-today-h h2 { margin: 0; font-size: 15px; }
 body.d3 .h3-today-h .grow { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-body.d3 .h3-today .dv { padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); }
-body.d3 .h3-today .dv-dot { width: 8px; height: 8px; }
-body.d3 .h3-today .dv-bar { background: var(--panel-2); }
 body.d3 .h3-allday { display: flex; flex-wrap: wrap; gap: 6px; }
 body.d3 .h3-allday .d3-tag { border: 0; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-body.d3 .h3-agenda { display: flex; flex-direction: column; gap: 8px; }
-body.d3 .h3-mt { display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 12px;
-  background: var(--panel); border: 1px solid var(--line-card); color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
-body.d3 button.h3-mt:hover { border-color: var(--line-strong); }
-body.d3 .h3-mt.past { opacity: .6; }
-body.d3 .h3-mt.next, body.d3 .h3-mt.now { border-color: var(--acc-line-2); }
-body.d3 .h3-mt-time { width: 44px; flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
-body.d3 .h3-mt.next .h3-mt-time, body.d3 .h3-mt.now .h3-mt-time { color: var(--text); }
-body.d3 .h3-mt-t { flex: 1 1 auto; min-width: 0; }
-body.d3 .h3-mt .d3-tag { height: 20px; padding: 0 8px; }
-body.d3 .h3-win { background: transparent; border: 1px dashed var(--line-strong); cursor: default; align-items: flex-start; }
-body.d3 .h3-win-t { display: block; color: var(--text-2); }
-body.d3 .h3-win-plan { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
-body.d3 .h3-none { margin: 0; padding: 4px 6px; }
+
+/* сетка: слева подписи дорожек, справа шкала часов, «Встречи» и «Задачи»; поверх — прошедшее и линия «сейчас».
+   Узко (телефон) — полоса листается вбок, к «сейчас» её прокручивает app.js */
+body.d3 .h3-tl-wrap { padding: 0 6px 2px; }
+@media (max-width: 999px) { body.d3 .h3-tl-wrap { overflow-x: auto; overscroll-behavior-x: contain; } }
+body.d3 .h3-tl { position: relative; isolation: isolate; display: grid; grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-rows: 18px 40px 34px; row-gap: 6px; }
+@media (max-width: 999px) { body.d3 .h3-tl { min-width: 640px; } }
+body.d3 .h3-tl-scale { grid-column: 2; grid-row: 1; position: relative; font-size: 11px; line-height: 18px; color: var(--cap);
+  font-variant-numeric: tabular-nums; }
+body.d3 .h3-tl-scale span { position: absolute; top: 0; padding-left: 4px; white-space: nowrap; }
+body.d3 .h3-tl-lbl { grid-column: 1; align-self: center; font-size: 12px; color: var(--muted); }
+body.d3 .h3-tl-l1 { grid-row: 2; }
+body.d3 .h3-tl-l2 { grid-row: 3; }
+body.d3 .h3-tl-lane { grid-column: 2; position: relative; z-index: 1; border-radius: 8px;
+  background-color: color-mix(in srgb, var(--panel) 55%, transparent);
+  background-image: linear-gradient(to right, var(--line) 1px, transparent 1px); background-size: calc(100% / var(--n)) 100%; }
+body.d3 .h3-tl-empty { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--cap); white-space: nowrap; }
+
+/* полоски: встреча и задача — щелчок открывает карточку встречи или окно задачи */
+body.d3 .h3-tl .h3-tl-ev, body.d3 .h3-tl .h3-tl-task { position: absolute; z-index: 1; box-sizing: border-box; display: flex; align-items: center;
+  gap: 6px; min-width: 4px; margin: 0 0 0 1px; padding: 0 8px; border-radius: 8px; font: inherit; font-size: 13px; line-height: 1.2;
+  text-align: left; text-decoration: none; overflow: hidden; cursor: pointer; box-shadow: none; }
+body.d3 .h3-tl .h3-tl-ev, body.d3 .h3-tl .h3-tl-task { width: var(--w); }
+/* короткая полоска при наведении раскрывается на длину названия, длинная остаётся своей ширины */
+body.d3 .h3-tl .h3-tl-ev:hover, body.d3 .h3-tl .h3-tl-task:hover, body.d3 .h3-tl .h3-tl-ev:focus-visible, body.d3 .h3-tl .h3-tl-task:focus-visible {
+  z-index: 5; width: max-content; min-width: var(--w); max-width: 320px; border-color: var(--line-strong); box-shadow: var(--shadow-pop);
+  text-decoration: none; }
+body.d3 .h3-tl .h3-tl-ev.bg:hover { width: var(--w); min-width: 0; z-index: 0; box-shadow: none; }
+body.d3 .h3-tl-t { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body.d3 .h3-tl .h3-tl-ev { border: 1px solid var(--line-card); background: var(--panel); color: var(--text); }
+body.d3 .h3-tl .h3-tl-ev.next, body.d3 .h3-tl .h3-tl-ev.now { border-color: var(--acc-line-2); }
+body.d3 .h3-tl .h3-tl-ev.now { background: var(--accent-soft); }
+body.d3 .h3-tl .h3-tl-ev.past { color: var(--muted); }
+/* фон дорожки: фокус-блок (время на задачи) и встреча, от которой отказались, — встречи ложатся поверх */
+body.d3 .h3-tl .h3-tl-ev.bg { z-index: 0; top: 0; height: 100%; align-items: flex-start; padding-top: 4px; border-style: dashed;
+  border-color: var(--line-strong); background: transparent; color: var(--muted); font-size: 12px; }
+body.d3 .h3-tl .h3-tl-ev.bg:hover { color: var(--text); }
+body.d3 .h3-tl .h3-tl-ev.free .h3-tl-t { text-decoration: line-through; }
+body.d3 .h3-tl-mark { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* задачи — легенда сетки дня: пунктир, «в работе» зелёная, закреплённая вами — сплошной рамкой, сделанная — ✓ */
+body.d3 .h3-tl .h3-tl-task { top: 4px; bottom: 4px; border: 1px dashed var(--line-strong); background: var(--panel); color: var(--text-2); }
+body.d3 .h3-tl .h3-tl-task.work { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok-text); }
+body.d3 .h3-tl .h3-tl-task.pinned { border-style: solid; }
+body.d3 .h3-tl .h3-tl-task.late { border-color: var(--warn); }
+body.d3 .h3-tl .h3-tl-task.done { opacity: .6; border-style: solid; }
+/* свободное окно для задач — подложка под задачами */
+body.d3 .h3-tl-win { position: absolute; top: 0; bottom: 0; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+/* поверх дорожек: прошедшая часть дня притушена, «сейчас» — линия с временем на шкале */
+body.d3 .h3-tl-over { grid-column: 2; grid-row: 1 / -1; position: relative; pointer-events: none; }
+body.d3 .h3-tl-past { position: absolute; left: 0; top: 24px; bottom: 0; z-index: 2; border-radius: 8px 0 0 8px;
+  background: color-mix(in srgb, var(--acc-deep) 45%, transparent); }
+body.d3 .h3-tl-now { position: absolute; top: 0; bottom: 0; z-index: 4; width: 2px; margin-left: -1px; background: var(--accent); }
+body.d3 .h3-tl-now span { position: absolute; top: 0; left: 50%; transform: translateX(-50%); padding: 0 5px; border-radius: 6px;
+  background: var(--accent); color: var(--panel); font-size: 11px; font-weight: 600; line-height: 18px; font-variant-numeric: tabular-nums; }
 
 /* «PULSE сейчас» */
 body.d3 .h3-now { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
@@ -191,13 +247,18 @@ body.d3 .h3-now-i .grow { overflow: hidden; white-space: nowrap; text-overflow: 
 body.d3 .h3-now-i a { color: var(--bad-text); }
 
 /* «Пока вас не было» */
-body.d3 .h3-away { border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); }
-body.d3 .h3-away > summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; list-style: none; }
+/* «Пока вас не было» — как «PULSE сейчас» рядом: те же поля, заголовок 15 px и строка под ним; раскрыт — строки нет,
+   под заголовком весь список */
+body.d3 .h3-away { box-sizing: border-box; border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); min-width: 0; }
+body.d3 .h3-away > summary { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; cursor: pointer; list-style: none; }
 body.d3 .h3-away > summary::-webkit-details-marker { display: none; }
-body.d3 .h3-away > summary b { font-weight: 600; }
+body.d3 .h3-away-h { display: flex; align-items: center; gap: 10px; min-height: 20px; }
+body.d3 .h3-away-h b { font-size: 15px; font-weight: 600; line-height: 20px; }
+body.d3 .h3-away-h .d3-tag { height: 20px; padding: 0 8px; }
+body.d3 .h3-away[open] .h3-away-peek { display: none; }
 body.d3 .h3-away > summary .ico { color: var(--cap); transition: transform .15s; }
 body.d3 .h3-away[open] > summary .ico { transform: rotate(180deg); }
-body.d3 .h3-away-b { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 14px; font-size: 13px; color: var(--text-2); }
+body.d3 .h3-away-b { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 14px; font-size: 13px; color: var(--text-2); }
 body.d3 .h3-away-b p { margin: 0; }
 
 /* --- окно «Что PULSE уже нашёл» (Proposals) --- */

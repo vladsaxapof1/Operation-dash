@@ -1283,6 +1283,28 @@
     }, 30000);
   }
 
+  // полоса «Сегодня» на сводке: линия «сейчас» и притушенное прошедшее едут по часам (время — от серверного, как
+  // выше). Узко, и полоса листается вбок — сразу показываем «сейчас», чуть левее середины
+  var tlNow = document.querySelector("[data-tl-now]");
+  if (tlNow) {
+    var tl0 = Date.now(), tlMin = Number(tlNow.dataset.tlNow), tlR0 = Number(tlNow.dataset.r0), tlSpan = Number(tlNow.dataset.span);
+    var tlPast = document.querySelector("[data-tl-past]"), tlLabel = tlNow.querySelector("[data-tl-now-label]");
+    var tlWrap = tlNow.closest("[data-tl-wrap]");
+    if (tlWrap && tlWrap.scrollWidth > tlWrap.clientWidth) {
+      tlWrap.scrollLeft = tlNow.getBoundingClientRect().left - tlWrap.getBoundingClientRect().left - tlWrap.clientWidth * 0.35;
+    }
+    setInterval(function () {
+      var m = tlMin + (Date.now() - tl0) / 60000;
+      var pct = Math.min(Math.max((m - tlR0) / tlSpan * 100, 0), 100);
+      tlNow.style.left = pct + "%";
+      if (tlPast) tlPast.style.width = pct + "%";
+      if (tlLabel) {
+        var mm = Math.floor(m) % 1440;
+        tlLabel.textContent = ("0" + Math.floor(mm / 60)).slice(-2) + ":" + ("0" + mm % 60).slice(-2);
+      }
+    }, 30000);
+  }
+
   // «?» у поля: подсказка раскрывается вправо, а у правого края карточки или таблицы — влево,
   // иначе её обрезает (таблица листается вбок и прячет всё, что за её краем)
   document.querySelectorAll(".help").forEach(function (h) {
