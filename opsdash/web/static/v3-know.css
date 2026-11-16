@@ -48,7 +48,8 @@ body.d3 .kn-ch-now s { color: var(--cap); font-size: 13px; flex: 0 1 auto; }
 body.d3 .kn-ch-now > span:last-child { flex: 1 1 auto; font-weight: 500; }
 
 /* плитки тем */
-body.d3 .kn-topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; align-items: start; }
+body.d3 .kn-topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; align-items: stretch; }
+body.d3 .kn-topic > .kn-nx:last-child { margin-top: auto; }
 body.d3 .kn-topic { min-width: 0; box-sizing: border-box; padding: 18px; border-radius: 16px; background: var(--sunken);
   border: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 body.d3 .kn-topic-h { display: flex; align-items: center; gap: 10px; }
@@ -200,7 +201,7 @@ body.d3 .kn-bar i { display: block; height: 100%; border-radius: 999px; backgrou
 body.d3 .kn-bar i.bad { background: var(--bad); }
 
 /* «Claude заметил новых людей» — пунктир: предложение */
-body.d3 .kn-fresh { margin-top: 24px; max-width: 640px; box-sizing: border-box; padding: 18px; border-radius: 16px; border: 1px dashed var(--line-strong);
+body.d3 .kn-fresh { margin-top: 24px; box-sizing: border-box; padding: 18px; border-radius: 16px; border: 1px dashed var(--line-strong);
   display: flex; flex-direction: column; gap: 8px; }
 body.d3 .kn-fresh-h { display: flex; align-items: center; gap: 10px; padding-bottom: 6px; color: var(--cap); }
 body.d3 .kn-fresh-h h2 { flex: 1 1 auto; margin: 0; font-size: 15px; color: var(--text); }

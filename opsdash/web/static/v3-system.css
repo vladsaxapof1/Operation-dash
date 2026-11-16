@@ -53,6 +53,9 @@ body.d3 .sy-tsep { width: 1px; flex: none; margin: 10px 16px 10px 0; background:
 /* секция: заголовок с подписью, карточка строк «подпись слева — управление справа» */
 body.d3 .sy-sec { display: flex; flex-direction: column; gap: 12px; max-width: 920px; min-width: 0; margin: 0; }
 body.d3 .sy-sec.wide { max-width: none; }
+/* в настройках все вкладки во всю ширину, как «Подключения»: при переключении ширина не прыгает */
+body.d3.page-settings .sy-sec, body.d3.page-settings .sy-ban, body.d3.page-settings .sy-new,
+body.d3.page-settings .sy-sum, body.d3.page-settings .sy-tbox { max-width: none; }
 body.d3 .sy-gh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 body.d3 .sy-gh h2 { margin: 0; font-size: 16px; font-weight: 600; }
 body.d3 .sy-gh > span { font-size: 13px; color: var(--cap); }

@@ -172,6 +172,11 @@ body.d3 .m3-doc table { width: 100%; border-collapse: collapse; margin: 0 0 12px
 body.d3 .m3-doc th, body.d3 .m3-doc td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 body.d3 .m3-doc th { color: var(--cap); font-weight: 500; font-size: 13px; }
 body.d3 .m3-sum { font-size: 16px; }
+/* «Текстом»: разбор лежит прямо на странице колонкой для чтения; название и строку «Дата · Длительность · Участники»
+   уже показывает шапка встречи */
+body.d3 .m3-doc.m3-sum { background: transparent; border: 0; border-radius: 0; padding: 4px 0 0; }
+body.d3 .m3-sum > h1:first-child, body.d3 .m3-sum > h1:first-child + p:has(> strong:first-child) { display: none; }
+body.d3 .m3-sum > h1:first-child + p:has(> strong:first-child) + * { margin-top: 0; }
 body.d3 .m3-sum a.q-task { font-size: 13px; white-space: nowrap; }
 body.d3 .m3-tr { flex: 999 1 520px; max-width: none; padding: 8px 0; }
 body.d3 .m3-tr p { margin: 0; padding: 10px 20px; line-height: 1.55; }
@@ -194,8 +199,11 @@ body.d3 .m3-fu-act form { margin: 0; }
 
 /* расшифровка и запись: слева текст или файл, справа «Кто в записи» */
 body.d3 .m3-wrap { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
+body.d3 .m3-wrap.m3-rec { align-items: stretch; }
+body.d3 .m3-rec .m3-rec-col > :first-child { flex: 1 1 auto; }
+body.d3 .m3-rec .m3-file-act { margin-top: auto; }
 body.d3 .m3-rec-col { flex: 999 1 520px; min-width: 0; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
-body.d3 .m3-who { flex: 1 0 380px; min-width: 0; max-width: 460px; gap: 10px; }
+body.d3 .m3-who { flex: 1 1 380px; min-width: 0; max-width: 460px; gap: 10px; }
 body.d3 .m3-who .d3-sec-h { padding-bottom: 0; }
 body.d3 .m3-who > p { margin: 0; }
 body.d3 .m3-who-n { margin-top: -4px !important; }
@@ -241,7 +249,7 @@ body.d3 .m3-file-act [data-fpath] { position: relative; }
 body.d3 .m3-short { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
 body.d3 .m3-short h2 { margin: 0; font-size: 15px; }
 body.d3 .m3-short p { margin: 0; color: var(--text-2); }
-body.d3 .m3-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; align-items: start; }
+body.d3 .m3-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; align-items: stretch; }
 body.d3 .m3-col { box-sizing: border-box; padding: 14px; border-radius: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0;
   background: var(--sunken); border: 1px solid var(--line); }
 body.d3 .m3-col.acc { background: var(--acc-deep); border-color: var(--accent-soft); }
@@ -249,7 +257,7 @@ body.d3 .m3-col.warn { background: var(--warn-deep); border-color: var(--warn-li
 body.d3 .m3-col-h { display: flex; align-items: center; gap: 8px; padding: 2px 6px 6px; }
 body.d3 .m3-col-h h2 { margin: 0; font-size: 15px; }
 body.d3 .m3-col-h .d3-n { font-size: 14px; color: var(--muted); }
-body.d3 .m3-col-h a, body.d3 .m3-facts .d3-sec-h a { color: var(--muted); }
+body.d3 .m3-col-h a { color: var(--muted); }
 body.d3 .m3-col-sub { display: flex; align-items: center; gap: 8px; padding: 8px 6px 0; }
 body.d3 .m3-col-sub form { margin: 0; }
 body.d3 .m3-it { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--panel);
@@ -268,8 +276,6 @@ body.d3 .m3-pre[hidden] { display: none; }
 body.d3 .m3-it-act { display: flex; gap: 8px; }
 body.d3 .m3-it-act form { margin: 0; }
 body.d3 .m3-it-act .btn { min-width: 64px; justify-content: center; }
-body.d3 .m3-facts { max-width: 980px; }
-body.d3 .m3-facts .m3-it { background: var(--panel); }
 body.d3 .m3-foot { margin: 0; color: var(--cap); }
 
 @media (max-width: 1180px) {

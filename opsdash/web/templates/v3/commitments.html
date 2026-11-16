@@ -186,7 +186,7 @@
 </div>
 {% endmacro %}
 {% macro pj_card(p) %}
-{%- set ready = p.ready | sort(attribute='due') | list %}
+{%- set ready = (p.ready | selectattr('due') | sort(attribute='due') | list) + (p.ready | rejectattr('due') | list) %}
 {%- set dated = p.ready | selectattr('due') | map(attribute='due') | sort | list %}
 {%- set stuck = p.stuck_on[0].whom if p.stuck_on else ('вас' if not p.owner else p.owner) %}
 <section class="t3-pj{{ ' paused' if p.status == 'paused' }}{{ ' finished' if p.status == 'done' or p.complete }}" aria-label="{{ p.title }}">

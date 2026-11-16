@@ -260,7 +260,7 @@ body.d3 .t3-ti { display: flex; align-items: center; gap: 10px; padding: 9px 12p
   border: 1px solid var(--line-card); font-size: 14px; color: var(--text); text-decoration: none; }
 body.d3 .t3-ti:hover { border-color: var(--line-strong); text-decoration: none; color: var(--text); }
 body.d3 .t3-ti b { flex: 1 1 0; min-width: 0; font-weight: 400; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-body.d3 .t3-ti span { font-size: 12px; color: var(--cap); white-space: nowrap; }
+body.d3 .t3-ti span { font-size: 12px; color: var(--cap); white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
 body.d3 .t3-ti span.t3-red { color: var(--bad-text); }
 body.d3 .t3-pj-f { display: flex; align-items: center; gap: 8px; margin-top: auto; }
 body.d3 .t3-pj-line { flex: 1 1 0; min-width: 0; font-size: 13px; color: var(--cap); }

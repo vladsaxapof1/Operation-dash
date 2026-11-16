@@ -182,7 +182,7 @@
 </div>
 
 {% elif view == 'record' %}
-<div class="m3-wrap">
+<div class="m3-wrap m3-rec">
   <div class="m3-rec-col">
     {% if recording.size is not none %}
     <section class="m3-file" aria-label="Файл записи">
@@ -300,8 +300,8 @@
   {% endif %}
 
   {% if mem_facts %}
-  <section class="d3-sec m3-facts">
-    <div class="d3-sec-h"><h2>Запомнено из встречи</h2><span class="d3-n">{{ mem_facts | selectattr('status', 'equalto', 'active') | list | length }}</span><span class="grow"></span><a class="small" href="/memory?source=meeting&days=0">память</a></div>
+  <section class="m3-col m3-facts" aria-label="Запомнено из встречи">
+    <div class="m3-col-h"><h2>Запомнено из встречи</h2><span class="d3-n">{{ mem_facts | selectattr('status', 'equalto', 'active') | list | length }}</span><span class="grow"></span><a class="small" href="/memory?source=meeting&days=0">память</a></div>
     {% for f in mem_facts %}
     {% if loop.index == 6 %}<details class="m3-more"><summary>ещё {{ mem_facts | length - 5 }}</summary>{% endif %}
     <div class="m3-it{{ ' off' if f.status != 'active' }}">
