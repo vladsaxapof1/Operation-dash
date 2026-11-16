@@ -95,7 +95,12 @@
     </div>
   </div>
   {% endfor %}
-  {% else %}<p class="empty">Пока ничего. Агенты в ваших сессиях Claude Code присылают сюда то, что выяснили по ходу работы («таблица обновляется ночью»): PULSE подключён к ним в Настройки → Подключения.</p>{% endif %}
+  {% endif %}
+  {% if known %}
+  <div class="card-h"><h2>Уже в памяти</h2><span class="muted small">{{ known | length }}{{ '+' if known_more }} · <a href="/memory?tab=feed&source=agent&days=0">в ленте</a></span></div>
+  {% for f in known %}{{ mm.fact(f, {}) }}{% endfor %}
+  {% endif %}
+  {% if not agents and not known %}<p class="empty">Пока ничего. Агенты в ваших сессиях Claude Code присылают сюда то, что выяснили по ходу работы («таблица обновляется ночью»): PULSE подключён к ним в Настройки → Подключения.</p>{% endif %}
 </section>
 {% endif %}
 {% endblock %}

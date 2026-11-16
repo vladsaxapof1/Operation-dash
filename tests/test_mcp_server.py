@@ -241,6 +241,15 @@ def test_remember_and_task_note_go_through_inbox_only(data):
     assert f["status"] == "proposed" and f["author"] == "agent" and f["agent_session"]
     kinds = {p["kind"] for p in proposals.list_proposals("pending")}
     assert kinds == {"memory.fact", "task.log"}
+    from opsdash.web.app import app
+
+    client = TestClient(app, base_url="http://localhost:8765")
+    tab = client.get("/memory", params={"tab": "agents"}).text
+    assert "Принять все" in tab and "Таблица остатков склада" in tab and "Уже в памяти" not in tab
     p = next(p for p in proposals.list_proposals("pending") if p["kind"] == "memory.fact")
     proposals.approve(p["id"])
     assert store.scalar("SELECT status FROM facts") == "active"
+    # после «Да» факт не пропадает с вкладки: раньше она писала «Пока ничего», будто агенты ничего не присылали
+    tab = client.get("/memory", params={"tab": "agents"}).text
+    assert "Уже в памяти" in tab and "Таблица остатков склада" in tab
+    assert "Принять все" not in tab and "Пока ничего" not in tab

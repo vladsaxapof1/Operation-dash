@@ -273,6 +273,10 @@ body.d3 .m3-toc:hover { background: var(--panel-2); text-decoration: none; }
 body.d3 .m3-toc b { display: block; font-weight: 500; font-size: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 @media (max-width: 900px) {
+  /* пять вкладок шире телефона: листаются вбок, а не распирают страницу (открытую ставит в зону видимости app.js) */
+  body.d3 .m3-tabs { max-width: 100%; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  body.d3 .m3-tabs::-webkit-scrollbar { display: none; }
+  body.d3 .m3-tabs > a { flex: none; }
   body.d3 .m3-fact, body.d3 .m3-agent, body.d3 .m3-kb { grid-template-columns: minmax(0, 1fr); }
   body.d3 .m3-act { justify-content: flex-start; flex-wrap: wrap; }
   body.d3 .m3-act.m3-col { flex-direction: row; }

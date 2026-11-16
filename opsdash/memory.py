@@ -814,11 +814,14 @@ def _decorate(items: list[dict]) -> list[dict]:
 
 def facts(*, about: str | int | None = None, kind: str | None = None, since: str | None = None,
           status: str | None = "active", q: str | None = None, source: str | None = None, limit: int = 100,
-          ids: list[int] | None = None) -> list[dict]:
+          ids: list[int] | None = None, author: str | None = None) -> list[dict]:
     where, params = ["1=1"], []
     if status and status != "all":
         where.append("f.status=?")
         params.append(status)
+    if author:
+        where.append("f.author=?")
+        params.append(author)
     if kind:
         where.append("f.kind=?")
         params.append(kind)

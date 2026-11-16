@@ -18,6 +18,7 @@ TABS = [("feed", "Лента"), ("pages", "Страницы"), ("map", "Карт
 MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября",
               "декабря"]
 SOURCES = {"": "Все источники", "meeting": "Встречи", "messages": "Переписка", "director": "От вас", "agent": "От агентов"}
+AGENT_KNOWN_MAX = 50  # «От агентов» → «Уже в памяти»: сколько принятых фактов показать; остальные — в ленте
 
 
 def _day_title(day: str) -> str:
@@ -87,7 +88,10 @@ def register(app: FastAPI, render, back) -> None:
                        live=memory.page_list(12), recent=_recent_sources(), nums=memory.numbers(),
                        entities=memory.page_list(200), link_kinds=memory.LINK_KINDS)
         elif tab == "agents":
-            ctx.update(agents=_agent_facts())
+            # принятые факты остаются на вкладке: иначе после «Да» (или сразу в режиме «Автономия») она пустеет,
+            # будто агенты ничего не присылали
+            known = memory.facts(author="agent", limit=AGENT_KNOWN_MAX + 1)
+            ctx.update(agents=_agent_facts(), known=known[:AGENT_KNOWN_MAX], known_more=len(known) > AGENT_KNOWN_MAX)
         return render(request, "memory.html", **ctx)
 
     @app.get("/memory/page/{eid}", response_class=HTMLResponse)

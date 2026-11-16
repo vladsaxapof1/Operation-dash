@@ -264,7 +264,15 @@
       </article>
       {% endfor %}
     </section>
-    {% else %}
+    {% endif %}
+    {% if known %}
+    <section class="d3-sec" aria-label="Уже в памяти">
+      <div class="d3-sec-h"><h2>Уже в памяти</h2><span class="d3-n">{{ known | length }}{{ '+' if known_more }}</span><span class="grow"></span>
+        <a class="m3-src" href="/memory?tab=feed&source=agent&days=0">В ленте</a></div>
+      {% for f in known %}{{ mm.fact(f, {}) }}{% endfor %}
+    </section>
+    {% endif %}
+    {% if not agents and not known %}
     <section class="d3-sec d3-dash m3-empty"><p>Пока ничего. Агенты в ваших сессиях Claude Code присылают сюда то, что выяснили по ходу работы («таблица обновляется ночью»): PULSE подключён к ним в Настройки → Подключения.</p></section>
     {% endif %}
   </div>

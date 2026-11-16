@@ -1439,6 +1439,11 @@
   if (wizActive && wizActive.parentElement.scrollWidth > wizActive.parentElement.clientWidth) {
     wizActive.parentElement.scrollLeft = wizActive.offsetLeft - 16;
   }
+  // вкладки «Памяти» на телефоне листаются вбок — открытая («От агентов» последняя) в зоне видимости
+  var memTab = document.querySelector(".m3-tabs > a.active");
+  if (memTab && memTab.parentElement.scrollWidth > memTab.parentElement.clientWidth) {
+    memTab.parentElement.scrollLeft += memTab.getBoundingClientRect().left - memTab.parentElement.getBoundingClientRect().left - 16;
+  }
 
   // --- мастер первого запуска: часовой пояс — из браузера, пока имя не указано (свежая установка) ---
   var tzInput = document.querySelector("[data-tz-guess]");
