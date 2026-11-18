@@ -44,6 +44,21 @@
   {% endif %}
 </div></section>
 
+{#- карточка поверх всех окон перед встречей (opsdash/meeting_alert.py): «Открыть Zoom», потом «Включите запись» #}
+<section class="card"><div class="card-h"><h2>Напоминание о встрече</h2></div><div class="card-b">
+  {% if is_mac %}
+  <form method="post" action="/settings/meeting-alert">
+    <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if settings.meeting_alert.enabled }}> Перед встречей показывать карточку поверх всех окон</label>
+    <label>За сколько минут</label>
+    <select name="minutes" style="max-width:160px">{% for m in (1, 2, 3, 5, 10) %}<option value="{{ m }}" {{ 'selected' if settings.meeting_alert.minutes == m }}>за {{ m }} мин</option>{% endfor %}</select>
+    <div class="hint">Карточка появится в правом верхнем углу экрана с кнопкой «Открыть Zoom» (или Телемост, Google Meet). Когда звонок открыт или встреча началась, она напомнит включить запись: без записи PULSE не расшифрует и не разберёт встречу. Напоминает о встречах со ссылкой на звонок или с участниками; «тайм-аут», встречи на весь день и встречи, от которых вы отказались, пропускает.</div>
+    <div class="form-actions"><button class="btn primary">Сохранить</button><button class="btn" formaction="/settings/meeting-alert/test">Показать пример</button></div>
+  </form>
+  {% else %}
+  <p class="muted">Карточка поверх всех окон перед встречей пока работает только на Mac.</p>
+  {% endif %}
+</div></section>
+
 <section class="card"><div class="card-h"><h2>Ваш голос</h2></div><div class="card-b">
   {% if voice_samples %}
   <p>✅ PULSE знает ваш голос (по {{ voice_samples }} {{ plural(voice_samples, 'записи', 'записям', 'записям') }}) и сам подписывает вашу речь в новых расшифровках.</p>

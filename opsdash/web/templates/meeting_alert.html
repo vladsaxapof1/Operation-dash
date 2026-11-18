@@ -1,0 +1,67 @@
+<!doctype html>
+{#- Карточка «скоро встреча» поверх всех окон (opsdash/meeting_alert.py): её показывает окно macOS (macos_alert.js),
+    поэтому страница без меню, на прозрачном фоне, с полями под тень. Шаги: soon («через 2 мин» и «Открыть Zoom»),
+    record («Включите запись»), done («Запись идёт», после чего карточка уходит). Шаг меняет static/alert.js #}
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>pulse</title>
+  <link rel="stylesheet" href="/static/v3.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/v3-light.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/v3-motion.css?v={{ static_v }}">
+  <link rel="stylesheet" href="/static/alert.css?v={{ static_v }}">
+  <script src="/static/alert.js?v={{ static_v }}" defer></script>
+</head>
+<body class="d3 {{ v3_theme }} al-page{{ (' motion-' ~ motion) if motion }}" data-key="{{ c.key }}" data-start="{{ c.start_ms }}"
+      data-until="{{ c.until_ms }}" data-step="{{ c.step }}">
+<section class="al" data-card aria-live="polite">
+  <button type="button" class="al-x" data-act="closed" aria-label="Закрыть и не напоминать об этой встрече" title="Закрыть и не напоминать об этой встрече">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>
+  </button>
+
+  {#- шаг 1: встреча скоро #}
+  <div class="al-step" data-step-box="soon">
+    <div class="al-row">
+      <span class="al-mark" aria-hidden="true">P</span>
+      <div class="al-body">
+        <p class="al-when"><span class="al-dot" aria-hidden="true"></span><span data-countdown>скоро</span></p>
+        <h1 class="al-title">{{ c.title }}</h1>
+        <p class="al-meta">{{ c.time }}{% if c.platform %} · {{ c.platform }}{% endif %}{% if c.people %} · {{ c.people }} {{ plural(c.people, 'участник', 'участника', 'участников') }}{% endif %}</p>
+        {% if c.same_time %}<p class="al-also">Ещё в это время: {% for o in c.same_time %}<a href="/alert/{{ o.key }}">{{ o.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+      </div>
+    </div>
+    <div class="al-actions">
+      {% if c.brief %}<button type="button" class="btn" data-act="brief" title="{{ c.brief.topic or 'Бриф к встрече' }}">Бриф</button>{% endif %}
+      {% if c.has_link or c.demo %}<button type="button" class="btn primary" data-act="join">Открыть {{ c.platform or 'звонок' }}</button>{% endif %}
+    </div>
+  </div>
+
+  {#- шаг 2: встреча началась или звонок открыт — включить запись #}
+  <div class="al-step" data-step-box="record" hidden>
+    <div class="al-row">
+      <span class="al-rec" aria-hidden="true"><span class="al-dot"></span></span>
+      <div class="al-body">
+        <h1 class="al-title">Включите запись{{ (' ' ~ c.where) if c.where }}</h1>
+        <p class="al-meta">{{ c.title }} · <span data-countdown>скоро</span></p>
+        <p class="al-hint">После встречи PULSE расшифрует запись и разберёт встречу.</p>
+      </div>
+    </div>
+    <div class="al-actions">
+      <button type="button" class="btn" data-act="no-record">Без записи</button>
+      <button type="button" class="btn primary" data-act="recording">Запись идёт</button>
+    </div>
+  </div>
+
+  {#- шаг 3: ответили «Запись идёт» — подтверждение, и карточка уходит #}
+  <div class="al-step" data-step-box="done" hidden>
+    <div class="al-row">
+      <span class="al-ok" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4l2.6 2.6L11 4.6"/></svg></span>
+      <div class="al-body">
+        <h1 class="al-title">Запись идёт</h1>
+        <p class="al-meta">PULSE разберёт встречу, когда запись появится в папке.</p>
+      </div>
+    </div>
+  </div>
+</section>
+</body>
+</html>

@@ -32,7 +32,7 @@ from starlette.concurrency import run_in_threadpool
 
 from opsdash import __version__, briefs, config, digests, filepaths, overview, priorities, proposals, records, store, worklog
 from opsdash import day as day_mod
-from opsdash.web import agent_views, decisions_views, memory_views, settings_views, skills_views, welcome_views
+from opsdash.web import agent_views, alert_views, decisions_views, memory_views, settings_views, skills_views, welcome_views
 
 HERE = Path(__file__).parent
 app = FastAPI(title="PULSE", docs_url=None, redoc_url=None, openapi_url=None)
@@ -2784,6 +2784,7 @@ skills_views.register(app, render, back)
 decisions_views.register(app, render, back)
 memory_views.register(app, render, back)
 agent_views.register(app, render, ui, back)
+alert_views.register(app, templates, back)
 
 
 @app.exception_handler(Exception)

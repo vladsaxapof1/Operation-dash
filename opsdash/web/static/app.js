@@ -988,6 +988,12 @@
     dlg.showModal();
     dlg.querySelector(".dlg-box").focus();
   });
+  // «Бриф» на карточке «скоро встреча» поверх окон открывает /calendar?brief=<key> — окно с брифом сразу
+  (function () {
+    var key = new URLSearchParams(location.search).get("brief");
+    var dlg = key && document.getElementById("brief-" + key);
+    if (dlg && !dlg.open) dlg.showModal();
+  })();
 
   // проверка подключений
   document.querySelectorAll("[data-check]").forEach(function (btn) {

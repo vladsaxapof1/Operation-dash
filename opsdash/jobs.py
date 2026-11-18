@@ -952,6 +952,13 @@ def tick(settings: dict | None = None) -> list[str]:
         if submit(name, kind, args):
             started.append(name)
 
+    # встреча через N минут — карточка поверх всех окон (meeting_alert). Здесь, а не заданием в очереди: очередь
+    # бывает занята сбором или разбором, а карточка опоздать не должна. Только в работающем PULSE, не из CLI и тестов
+    if in_daemon():
+        from opsdash import meeting_alert
+
+        meeting_alert.run(settings)
+
     for src in config.SOURCES:
         if settings[src].get("enabled") and _due(f"collect:{src}", config.source_minutes(src, settings)):
             go(f"collect:{src}")
