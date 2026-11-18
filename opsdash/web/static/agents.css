@@ -24,7 +24,7 @@
 .agent-files li.missing { opacity: .6; }
 .agent-files b { font-weight: 600; overflow-wrap: anywhere; }
 .agent-sims li { padding: 6px 10px; border-left: 3px solid var(--line-strong); background: var(--panel-2); border-radius: 0 8px 8px 0;
-  display: grid; gap: 2px; font-size: 14px; }
+  display: grid; gap: 2px; font-size: 14px; overflow-wrap: anywhere; }
 .agent-fix { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
 .agent-fix input { flex: 1 1 280px; min-width: 0; max-width: none; }
 .agent-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

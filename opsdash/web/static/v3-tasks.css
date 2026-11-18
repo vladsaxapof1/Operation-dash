@@ -639,7 +639,7 @@ body.d3 .t3-agent-main { flex: 999 1 520px; min-width: 0; box-sizing: border-box
 body.d3 .t3-agent-aside { flex: 1 1 340px; min-width: 0; box-sizing: border-box; padding: 28px 24px; background: var(--sunken); border-left: 1px solid var(--line);
   border-radius: 0 18px 18px 0; display: flex; flex-direction: column; gap: 18px; }
 body.d3 .t3-agent-aside > section + section { padding-top: 18px; border-top: 1px solid var(--line); }
-body.d3 .t3-agent-aside > section { display: flex; flex-direction: column; gap: 12px; }
+body.d3 .t3-agent-aside > section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 body.d3 .t3-agent-h { display: flex; flex-direction: column; gap: 2px; }
 body.d3 .t3-agent-h b { font-weight: 600; }
 body.d3 .t3-agent .dlg-head { display: flex; align-items: flex-start; gap: 12px; }
@@ -672,7 +672,8 @@ body.d3 .agent-files b { font-weight: 500; }
 body.d3 .agent-files li:has(input:not(:checked)) b { color: var(--muted); }
 body.d3 .agent-sims { gap: 10px; }
 body.d3 .agent-sims li { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line-card); border-radius: 12px;
-  background: var(--panel); font-size: 13px; }
+  background: var(--panel); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+body.d3 .agent-sims li > * { min-width: 0; }
 body.d3 .agent-sims li b { font-size: 14px; font-weight: 500; }
 body.d3 .agent-page { padding: 0; max-width: 1120px; border-radius: 18px; background: var(--window); border-color: var(--dlg-line); overflow: hidden; }
 @media (max-width: 900px) {
