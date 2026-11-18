@@ -58,7 +58,7 @@ def test_protocol_and_read_only(data):
     assert init["serverInfo"]["name"] == "pulse" and "Изменить что-то в PULSE отсюда нельзя" in init["instructions"]
     tools = replies[1]["result"]["tools"]
     assert {t["name"] for t in tools} == {"recall", "page", "facts", "remember", "task_note", "search", "meeting",
-                                          "meetings", "task", "tasks", "decisions", "projects"}
+                                          "meetings", "task", "tasks", "decisions", "projects", "style"}
     assert {t["name"] for t in tools if not t["annotations"]["readOnlyHint"]} == {"remember", "task_note"}
     task = replies[2]["result"]
     assert not task["isError"] and "Бюджет склада" in task["content"][0]["text"]

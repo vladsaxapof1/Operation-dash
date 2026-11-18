@@ -80,6 +80,7 @@ DEFAULTS: dict = {
         "lessons_weekly": "15:30",
         "decisions_weekly": "09:00",  # по понедельникам Claude собирает цепочки решений по темам  # по пятницам Claude ищет повторы в ваших «Нет» и предлагает правила навыкам
         "projects_weekly": "08:30",  # по понедельникам Claude собирает задачи в проекты, связи «ждёт», дубли
+        "style_weekly": "17:00",  # по пятницам Claude обновляет карточку вашего стиля ответов (opsdash.style)
         "digest_morning": "09:00",
         "digest_evening": "18:30",
         "stale_check": "10:00",

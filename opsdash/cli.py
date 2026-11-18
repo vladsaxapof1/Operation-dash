@@ -2091,6 +2091,40 @@ def cmd_skills(a) -> None:
                 out("  почему «Нет»: " + ", ".join(f"{x['reason']} {x['n']}" for x in s["reasons"]))
 
 
+def cmd_style(a) -> None:
+    """Стиль директора (opsdash.style): карточка, прошлые ответы как образцы, сверка черновиков с отправленным."""
+    from opsdash import style
+
+    try:
+        if a.action == "card":
+            out(style.card_text(a.person))
+        elif a.action == "examples":
+            if a.json:
+                return as_json(style.examples(a.person, a.text, a.limit))
+            out(style.examples_text(a.person, a.text, a.limit))
+        elif a.action == "facts":
+            st = style.stats(a.days)
+            if a.json:
+                return as_json(st)
+            out(style.facts_text(st))
+        elif a.action == "drafts":
+            if a.json:
+                return as_json({"stats": style.draft_stats(a.days), "drafts": style.draft_checks(a.days)})
+            out(style.drafts_text(a.days, a.limit))
+        elif a.action == "sample":
+            out(style.sample_text(a.people, a.per))
+        elif a.action == "save":
+            path = Path(a.file)
+            if not path.is_absolute():
+                path = (config.ROOT / path) if (config.ROOT / path).exists() else path.resolve()
+            if not path.exists():
+                fail(f"нет файла {path}")
+            style.save_card(path.read_text(encoding="utf-8"), author="claude", stats_=style.stats())
+            out(f"Карточка стиля сохранена, копия — {style.path()}. Её прочтут черновики ответов и агенты.")
+    except style.StyleError as e:
+        fail(str(e))
+
+
 def cmd_notify(a) -> None:
     from opsdash import bot
 
@@ -2193,7 +2227,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_collect)
     s = sub.add_parser("run", help="выполнить задание сейчас")
     s.add_argument("job", choices=["triage", "digest", "stale", "recordings", "transcribe", "process-meeting", "housekeeping",
-                            "docs-index", "anthology", "company-context"])
+                            "docs-index", "anthology", "company-context", "style"])
     s.add_argument("--meeting", help="id встречи (для transcribe и process-meeting)")
     s.set_defaults(fn=cmd_run)
     sub.add_parser("overview", help="сводка: что сейчас важно").set_defaults(fn=cmd_overview)
@@ -2836,6 +2870,26 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--skill", help="один навык (id из ./ops skills list)")
     x.add_argument("--weeks", type=int, default=8, help="сколько недель показать (по умолчанию 8)")
     s.set_defaults(fn=cmd_skills)
+
+    s = sub.add_parser("style", help="стиль директора: карточка стиля, прошлые ответы как образцы, сверка черновиков")
+    ms = s.add_subparsers(dest="action", required=True)
+    x = ms.add_parser("card", help="как директор пишет: длина, приветствия, «ты»/«вы», обороты, чего не пишет")
+    x.add_argument("--person", help="и как — с этим человеком")
+    x = ms.add_parser("examples", help="3–5 прошлых ответов директора этому человеку или в похожей ситуации")
+    x.add_argument("--person", help="кому отвечаем: имя, как в справочнике или в чате")
+    x.add_argument("--text", help="на что отвечаем: входящее или его суть")
+    x.add_argument("--limit", type=int, default=4)
+    x = ms.add_parser("facts", help="цифры по исходящим директора — для навыка style")
+    x.add_argument("--days", type=int, default=180)
+    x = ms.add_parser("drafts", help="черновики «нужен ответ» и что ушло на самом деле: доля без правок")
+    x.add_argument("--days", type=int, default=60)
+    x.add_argument("--limit", type=int, default=25)
+    x = ms.add_parser("sample", help="образцы ответов людям, с которыми директор переписывается больше всего")
+    x.add_argument("--people", type=int, default=12)
+    x.add_argument("--per", type=int, default=3)
+    x = ms.add_parser("save", help="сохранить карточку стиля из файла (навык style)")
+    x.add_argument("--file", required=True, help="Markdown-файл карточки в data/")
+    s.set_defaults(fn=cmd_style)
 
     s = sub.add_parser("notify", help="написать директору в Telegram")
     s.add_argument("text", help="HTML-разметка Telegram: <b>, <i>, <a href>")

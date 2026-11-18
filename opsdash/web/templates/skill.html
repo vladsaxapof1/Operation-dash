@@ -68,6 +68,17 @@
       </div>
     </section>
 
+    {% if sk.id == 'style' %}
+    <section class="card" id="card">
+      <details class="sk-text" open><summary class="card-h"><h2>Карточка стиля</h2><span class="muted small">{% if style_card %}от {{ style_card.created | date }}, {{ 'написал ' ~ (ai_name or 'помощник') if style_card.author == 'claude' else 'по цифрам' }} · по {{ style_card.messages }} {{ plural(style_card.messages, 'сообщению', 'сообщениям', 'сообщениям') }}{% else %}ещё не собрана{% endif %}</span></summary>
+        <div class="card-b">
+          {% if style_card %}<div class="doc sk-doc">{{ style_card.body | md(False) | safe }}</div>
+          <p class="muted small" style="margin:8px 0 0">По карточке и вашим прошлым ответам пишутся черновики. Её же берут агенты Claude через PULSE. Копия лежит в data/knowledge/Стиль.md.</p>
+          {% else %}<p style="margin:0">Карточку соберёт {{ ai_name or 'помощник' }} в пятницу вечером. Чтобы не ждать, нажмите «{{ sk.run.label }}».</p>{% endif %}
+        </div></details>
+    </section>
+    {% endif %}
+
     <section class="card">
       <details class="sk-text"><summary class="card-h"><h2>Текст навыка</h2><span class="muted small">как его читает {{ ai_name or 'помощник' }} · только чтение</span></summary>
         <div class="card-b">
@@ -85,6 +96,19 @@
         {% else %}<p class="muted small" style="margin:0">Запусков пока не было.</p>{% endif %}
       </div>
     </section>
+    {% if drafts is not none %}
+    <section class="card sk-drafts"><div class="card-h"><h2>Черновики ответов</h2><span class="muted small">за 30 дней</span></div>
+      <div class="card-b">
+        {% if drafts.answered %}
+        {% set kept = drafts.same + drafts.minor %}
+        <p style="margin:0">Вы ответили в чате на {{ drafts.answered }} {{ plural(drafts.answered, 'черновик', 'черновика', 'черновиков') }}. Без правок или почти без правок ушло {{ kept }}, это {{ (kept * 100 / drafts.answered) | round | int }}%.</p>
+        <div class="sk-bar" role="img" aria-label="Ушли без правок или с мелкими правками: {{ kept }} из {{ drafts.answered }}"><i style="width:{{ [kept * 100 / drafts.answered, 2 if kept else 0] | max }}%"></i></div>
+        <p class="muted small" style="margin:0">Без правок {{ drafts.same }}, с мелкими правками {{ drafts.minor }}, переписали {{ drafts.rewritten }}{% if drafts.none %}. Без ответа в том же чате {{ drafts.none }}{% endif %}.</p>
+        {% elif drafts.drafts %}<p style="margin:0">Черновиков {{ drafts.drafts }}, но ответов следом в том же чате ещё нет: сравнивать не с чем.</p>
+        {% else %}<p class="muted small" style="margin:0">Черновиков за 30 дней не было.</p>{% endif %}
+      </div>
+    </section>
+    {% endif %}
   </aside>
 </div>
 {% endblock %}

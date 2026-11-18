@@ -2257,3 +2257,7 @@ a.dec-stat:hover { text-decoration: none; border-color: var(--line-strong); }
 .slack-manifest { margin: 8px 0 4px; }
 .slack-manifest pre { max-height: 180px; overflow: auto; margin: 0 0 6px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2);
   border: 1px solid var(--line); font-size: 12px; line-height: 1.4; }
+
+/* навык: черновики ответов — какая доля ушла без правок (opsdash.style) */
+.sk-bar { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; margin: 8px 0; }
+.sk-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }

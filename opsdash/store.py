@@ -413,6 +413,15 @@ CREATE TABLE IF NOT EXISTS skill_rules (      -- «Ваши правила» к 
     created TEXT, updated TEXT
 );
 
+CREATE TABLE IF NOT EXISTS style_cards (      -- карточка стиля директора: как пишет (opsdash.style); копия — data/knowledge/Стиль.md
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,              -- карточка в Markdown: её читают черновики ответов и агенты через MCP (style)
+    stats TEXT,                      -- JSON: цифры по исходящим, из которых она собрана (style.stats)
+    author TEXT,                     -- claude — навык style | auto — собрана кодом из одних цифр
+    messages INTEGER,                -- по скольким исходящим сообщениям
+    created TEXT
+);
+
 CREATE TABLE IF NOT EXISTS claude_runs (      -- каждый запуск Claude: расход для «Настройки → Подключения → Claude» (opsdash.usage)
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT,

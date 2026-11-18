@@ -46,6 +46,17 @@
     </section>
     {% endif %}
 
+    {% if sk.id == 'style' %}
+    <details class="sy-blk big sk-text" open id="card">
+      <summary>{{ icons.icon('docs', 16) }}<b style="font-weight:500">Карточка стиля</b><span class="s">{% if style_card %}от {{ style_card.created | date }}, {{ 'написал ' ~ (ai_name or 'помощник') if style_card.author == 'claude' else 'по цифрам' }} · по {{ style_card.messages }} {{ plural(style_card.messages, 'сообщению', 'сообщениям', 'сообщениям') }}{% else %}ещё не собрана{% endif %}</span>{{ icons.icon('chevron', 16) }}</summary>
+      <div class="bb">
+        {% if style_card %}<div class="sy-art" style="padding:0;border:0;background:transparent;max-width:none"><div class="doc sk-doc">{{ style_card.body | md(False) | safe }}</div></div>
+        <p class="sy-cap" style="margin:0">По карточке и вашим прошлым ответам пишутся черновики. Её же берут агенты Claude через PULSE. Копия лежит в data/knowledge/Стиль.md.</p>
+        {% else %}<p style="margin:0">Карточку соберёт {{ ai_name or 'помощник' }} в пятницу вечером. Чтобы не ждать, нажмите «{{ sk.run.label }}».</p>{% endif %}
+      </div>
+    </details>
+    {% endif %}
+
     <section class="sy-sec wide" id="rules" aria-label="Ваши правила" style="gap:8px">
       {% set n_on = rules | selectattr('enabled') | list | length %}
       <div class="sy-gh"><h2>Ваши правила</h2><span>{{ (n_on ~ ' из ' ~ (rules | length) ~ ' включено') if rules else 'правил пока нет' }}</span></div>
@@ -82,6 +93,18 @@
         <span class="m">{{ r.created | ago }}{% if r.duration_s %} · {{ (r.duration_s / 60) | round(1) | string | replace('.', ',') }} мин{% endif %}</span></div>
       {% else %}<p class="sy-cap" style="margin:0">Запусков пока не было.</p>{% endfor %}
     </section>
+    {% if drafts is not none %}
+    <section class="sy-box2 sk-drafts" style="gap:10px" aria-label="Черновики ответов">
+      <div class="sy-side-h"><h2>Черновики ответов</h2><span class="sy-cap">за 30 дней</span></div>
+      {% if drafts.answered %}
+      {% set kept = drafts.same + drafts.minor %}
+      <p style="margin:0">Вы ответили в чате на {{ drafts.answered }} {{ plural(drafts.answered, 'черновик', 'черновика', 'черновиков') }}. Без правок или почти без правок ушло {{ kept }}, это {{ (kept * 100 / drafts.answered) | round | int }}%.</p>
+      <div class="sk-bar" role="img" aria-label="Ушли без правок или с мелкими правками: {{ kept }} из {{ drafts.answered }}"><i style="width:{{ [kept * 100 / drafts.answered, 2 if kept else 0] | max }}%"></i></div>
+      <p class="sy-cap" style="margin:0">Без правок {{ drafts.same }}, с мелкими правками {{ drafts.minor }}, переписали {{ drafts.rewritten }}{% if drafts.none %}. Без ответа в том же чате {{ drafts.none }}{% endif %}.</p>
+      {% elif drafts.drafts %}<p style="margin:0">Черновиков {{ drafts.drafts }}, но ответов следом в том же чате ещё нет: сравнивать не с чем.</p>
+      {% else %}<p style="margin:0">Черновиков за 30 дней не было.</p>{% endif %}
+    </section>
+    {% endif %}
     <p class="sy-cap" style="margin:0;padding:0 4px">Уроки из ваших «Нет» Claude собирает по пятницам. Новое правило включится после вашего «Да».</p>
   </aside>
 </div>

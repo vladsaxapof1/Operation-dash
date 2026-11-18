@@ -422,7 +422,7 @@
 
 <form method="post" action="/settings/memory/chats" class="sy-form">
   <section class="sy-sec" aria-label="Не запоминать">
-    {{ gh('Не запоминать', ((mem_chats | selectattr('off') | list | length) ~ ' из ' ~ (mem_chats | length) ~ ' чатов · переписка этих чатов не уходит в «Память дня»') if mem_chats else 'переписка этих чатов не уходит в «Память дня»') }}
+    {{ gh('Не запоминать', ((mem_chats | selectattr('off') | list | length) ~ ' из ' ~ (mem_chats | length) ~ ' чатов · переписка этих чатов не уходит в «Память дня» и в ваш стиль ответов') if mem_chats else 'переписка этих чатов не уходит в «Память дня» и в ваш стиль ответов') }}
     {% if mem_chats %}
     <div class="sy-card">
       {% for c in mem_chats %}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -25,8 +27,17 @@ def register(app: FastAPI, render, back) -> None:
         if not sk:
             return back(request, err="Нет такого навыка", to="/skills")
         meta, body = skills.split_text(sid)
+        drafts = card = None
+        if sid in ("style", "triage"):  # черновики ответов: сколько ушло без правок (opsdash.style)
+            from opsdash import style
+
+            drafts = style.draft_stats(30)
+            card = style.card() if sid == "style" else None
+            if card:  # заголовок «# Как пишет …» на странице повторял бы «Карточку стиля» над ним
+                card["body"] = re.sub(r"\A\s*# [^\n]*\n+", "", card["text"])
         return render(request, "skill.html", nav="skills", sk=sk, cat=cat, area_icons=AREA_ICONS,
-                      rules=skills.rules(sid), runs=skills.runs(sid), text=body, meta=meta)
+                      rules=skills.rules(sid), runs=skills.runs(sid), text=body, meta=meta, drafts=drafts,
+                      style_card=card)
 
     @app.post("/skills/{sid}/rules")
     def skill_rule_add(request: Request, sid: str, text: str = Form("")):

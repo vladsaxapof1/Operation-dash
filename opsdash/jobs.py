@@ -465,6 +465,33 @@ def job_decisions(**_) -> str:
     return f"связей в цепочках: было {links0}, стало {links1}; решений с вопросом: было {named0}, стало {named1}"
 
 
+def job_style(**_) -> str:
+    """Карточка стиля директора (opsdash.style): цифры по исходящим — кодом, текст карточки — навык style.
+    Без нового в переписке Claude не зовём; не сохранил карточку — прежняя остаётся, задание отмечается ошибкой."""
+    from opsdash import style
+
+    st = style.stats()
+    if st["messages"] < style.MIN_MESSAGES:
+        return f"исходящих за полгода {st['messages']} — мало для карточки стиля (нужно {style.MIN_MESSAGES})"
+    if not style.card():  # пока Claude пишет — карточка из одних цифр уже работает
+        style.save_card(style.auto_card(st), author="auto", stats_=st)
+    ds = st.get("drafts") or {}
+    tail = (f" · черновики без правок или с мелкими правками: {round(ds['share'] * 100)}% из {ds['answered']}"
+            if ds.get("share") is not None else "")
+    if not style.stale():
+        return "нового в переписке мало — карточка прежняя" + tail
+    before = store.scalar("SELECT MAX(id) FROM style_cards") or 0
+    settings = config.load_settings()
+    prompt = ("Обнови карточку стиля директора строго по навыку style (.claude/skills/style/SKILL.md). Это фоновый "
+              "запуск: директору ничего не пиши, итог — в карточке.")
+    brain.run(prompt, model=settings["claude"]["model_digest"], job="style", timeout_min=20)
+    if not store.scalar("SELECT 1 FROM style_cards WHERE id > ? AND author='claude'", (before,)):
+        if (style.card() or {}).get("author") == "auto":  # свежие цифры — лучше прежних
+            style.save_card(style.auto_card(st), author="auto", stats_=st)
+        raise RuntimeError("Claude не сохранил карточку стиля (./ops style save) — действует прежняя")
+    return f"карточка стиля обновлена по {st['messages']} сообщениям" + tail
+
+
 def job_company_context(**_) -> str:
     settings = config.load_settings()
     prompt = (
@@ -707,6 +734,7 @@ REGISTRY = {
     "first-finds": lambda **kw: _first_finds(),
     "lessons": job_lessons,
     "decisions": job_decisions,
+    "style": job_style,
 }
 
 TITLES = {
@@ -749,6 +777,7 @@ TITLES = {
     "first-finds": "Первые находки: разбор переписки за 5 дней (Claude)",
     "lessons": "Уроки из ваших «Нет» (Claude)",
     "decisions": "Решения: цепочки по темам (Claude)",
+    "style": "Карточка вашего стиля ответов (Claude)",
 }
 
 
@@ -939,6 +968,7 @@ def _weekly(key: str, weekday: int, at: str, settings: dict) -> str | None:
 
 
 TRIAGE_GAP = 10  # минут
+_style_checked = [0.0]  # когда последний раз проверяли, хватает ли исходящих для первой карточки стиля
 IMPORTANCE_GAP = 120  # минут: оценка важности новых задач (opsdash.priorities)
 
 
@@ -1022,6 +1052,19 @@ def tick(settings: dict | None = None) -> list[str]:
         if store.scalar("SELECT 1 FROM anthology WHERE kind='decision' AND status='accepted' LIMIT 1"):
             store.set_state("decisions_questions", config.now(settings).date().isoformat())
             go("decisions", "heavy")
+    # карточка стиля (opsdash.style): по пятницам вечером, если в переписке набралось новое; первая — не дожидаясь
+    # пятницы, один раз в рабочее время, когда исходящих хватает
+    if (sch.get("style_weekly") and config.now(settings).weekday() == 4
+            and _daily("style", sch["style_weekly"], settings)):
+        go("style", "heavy")
+    elif not store.get_state("style_first") and in_work_hours(settings) and time.time() - _style_checked[0] > 600:
+        from opsdash import style
+
+        _style_checked[0] = time.time()  # подсчёт исходящих — не чаще раза в 10 минут, пока их мало
+        if style.enough():
+            store.set_state("style_first", config.now(settings).date().isoformat())
+            if not style.card():
+                go("style", "heavy")
     if (sch.get("projects_weekly") and config.now(settings).weekday() == 0  # понедельник: проекты к началу недели
             and _daily("projects", sch["projects_weekly"], settings)):
         go("projects", "heavy")
