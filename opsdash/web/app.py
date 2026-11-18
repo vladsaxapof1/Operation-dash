@@ -1551,7 +1551,7 @@ def commitment_meeting(request: Request, cid: int, event: str = Form(""), action
     task_meetings.link(cid, uid)
     for p in store.rows("SELECT id FROM proposals WHERE kind='task.meeting' AND status='pending' "
                         "AND json_extract(payload, '$.commitment_id')=?", (cid,)):
-        proposals.reject(p["id"])  # подсказка связать с другой встречей больше не нужна
+        proposals.reject(p["id"], note="встречу связали вручную")  # подсказка связать с другой встречей не нужна
     return back(request, "Встреча связана с задачей — она на карточке")
 
 

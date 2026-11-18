@@ -32,6 +32,16 @@
       {% endif %}
     </div></section>
 
+    {#- Сколько предложений навыка вы принимаете (2.0.56, _skill_quality.html). Навык, который ничего не предлагает,
+        этого блока не показывает #}
+    {% set q = sk.quality %}
+    {% if q or sk.proposes[:7] != 'Ничего' %}
+    <section class="card sk-q" id="quality">
+      <div class="card-h"><h2>Сколько предложений вы принимаете</h2></div>
+      <div class="card-b">{% set dl_class = 'sk-facts' %}{% include "_skill_quality.html" %}</div>
+    </section>
+    {% endif %}
+
     <section class="card" id="rules">
       <div class="card-h"><h2>Ваши правила</h2><span class="muted small">{{ rules | selectattr('enabled') | list | length }} включено</span></div>
       <div class="card-b">

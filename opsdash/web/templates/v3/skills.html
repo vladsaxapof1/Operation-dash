@@ -34,6 +34,9 @@
       <div class="sy-sk-top"><span class="sy-tl">{{ icons.icon(area_icons[s.area], 18) }}</span><b title="{{ s.title }}">{{ s.title }}</b></div>
       <p>{{ s.what }}</p>
       <span class="sy-cap sy-ell" title="{{ s.when }}">{{ s.when }}</span>
+      {#- доля принятых за 4 недели (skills.quality, RECENT_DAYS); меньше половины заметным цветом #}
+      {% set r = s.quality.recent if s.quality else none %}
+      {% if r and r.total %}<span class="sy-cap sk-q-line{{ ' low' if r.rate is not none and r.rate < 0.5 }}">За 4 недели {{ r.line }}</span>{% endif %}
       <div class="sy-sk-ft">{{ sk_st(s) }}{% if s.rules %}<span class="rules">ваших правил: {{ s.rules }}</span>{% endif %}</div>
     </a>
     {% endfor %}

@@ -637,6 +637,19 @@ MIGRATIONS = [
     # не уходит в «Память дня»
     ("meetings", "private", "INTEGER DEFAULT 0"),
     ("chats", "memory_off", "INTEGER DEFAULT 0"),
+    # качество навыков (2.0.56, opsdash.skills.quality): какое задание сделало предложение, на какой модели и по какой
+    # версии навыка (хеш SKILL.md и включённых правил). Старые предложения — по пачке: «triage:…», «meeting:…»
+    ("proposals", "job", "TEXT",
+     "UPDATE proposals SET job = CASE substr(batch, 1, instr(batch, ':') - 1) WHEN 'triage' THEN 'triage' "
+     "WHEN 'meeting' THEN 'process-meeting' WHEN 'projects' THEN 'projects' WHEN 'lessons' THEN 'lessons' "
+     "WHEN 'digest' THEN 'digest' WHEN 'ask' THEN 'ask' WHEN 'chat' THEN 'chat' END WHERE instr(batch, ':') > 0"),
+    ("proposals", "model", "TEXT"),
+    ("proposals", "skill_ver", "TEXT"),
+    # выполнено без директора — по настройке автономии «auto»: в долю принятых не входит. Старые — по времени:
+    # решено в те же секунды, что создано, — нажать «Да» так быстро человек не успевает
+    ("proposals", "auto", "INTEGER DEFAULT 0",
+     "UPDATE proposals SET auto=1 WHERE status IN ('done', 'failed') AND decided_at IS NOT NULL "
+     "AND (julianday(decided_at) - julianday(created)) * 86400 < 3"),
 ]
 
 

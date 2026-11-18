@@ -33,6 +33,9 @@
       <div class="conn-card-h"><span class="sk-ico">{{ icons.icon(area_icons[s.area], 20) }}</span>
         <div class="conn-card-t"><div class="conn-name">{{ s.title }}</div>{{ sk_status(s) }}</div></div>
       <p class="conn-catch">{{ s.what }}</p>
+      {#- доля принятых за 4 недели (skills.quality, RECENT_DAYS); меньше половины — заметным цветом #}
+      {% set r = s.quality.recent if s.quality else none %}
+      {% if r and r.total %}<p class="sk-q-line small{{ ' low' if r.rate is not none and r.rate < 0.5 }}">За 4 недели {{ r.line }}</p>{% endif %}
       <div class="sk-foot small muted"><span>{{ s.when }}</span>{% if s.rules %}<span class="chip acc">ваших правил: {{ s.rules }}</span>{% endif %}</div>
     </a>
     {% endfor %}

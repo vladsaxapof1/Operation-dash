@@ -35,7 +35,7 @@
 | База знаний: решения, уроки, удачи | база (копия — `data/knowledge/Антология.md`) | `./ops kb search "<тема>"`, `./ops kb list --kind decision\|lesson\|win`, `./ops kb add …` |
 | Документы директора (презентации, Excel, Word, PDF, заметки) | индекс папок `knowledge.folders` | `./ops docs search "<слова>"`, `./ops docs show "<файл>" [--part "слайд 3"]`, `./ops docs recent` |
 | Прошлые сессии Claude Code в папках «Офиса»: промты, файлы, итог | база (индекс журналов) | `./ops agents similar "<слова>"`, `./ops agents show <id>` |
-| Навыки и «Ваши правила» директора к ним | база | `./ops skills list`, `./ops skills rules <навык>` |
+| Навыки и «Ваши правила» директора к ним; сколько предложений навыка директор принимает (по неделям, моделям, версиям навыка) | база | `./ops skills list`, `./ops skills rules <навык>`, `./ops skills stats [--skill <навык>]` |
 | Отклонённые предложения с причинами «Нет» | база | `./ops proposals rejected --days 14` |
 | **Память**: факты (цифры, состояния, кто за что, как работают люди и клиенты, события, как устроено) с датой и источником; страницы знаний о людях, клиентах, проектах | база | `./ops page "<имя>"` (без имени — список), `./ops facts list --about "<кто>"`, `./ops facts show <id>`; записать пачкой — `./ops facts import <файл>`, один — `./ops facts add …`; сущности — `./ops memory entities / merge / forget` |
 | Решения по темам: вопросы и что по ним решено сейчас, история (меняет / уточняет / продолжает / отменяет), следующий шаг, решения встречи | база | `./ops decisions topics`, `./ops decisions topic "<тема>"`, `./ops decisions show <id>`, `list --meeting <id>`, `set <id> --question … --answer … --prev <id> --relation …` |

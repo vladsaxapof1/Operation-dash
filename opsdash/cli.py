@@ -2065,6 +2065,30 @@ def cmd_skills(a) -> None:
             out(f"[{r['id']}] {'вкл' if r['enabled'] else 'выкл'} · {r['text']}" + (" · урок из «Нет»" if r["source"] == "lesson" else ""))
         if not items:
             out("Правил нет.")
+    elif a.action == "stats":
+        if a.skill and not skills.get(a.skill):
+            fail(f"нет навыка «{a.skill}» — ./ops skills list")
+        q = skills.quality(weeks=a.weeks)
+        if a.skill:
+            q = {a.skill: q[a.skill]} if a.skill in q else {}
+        if a.json:
+            return as_json(q)
+        if not q:
+            return out(f"За {a.weeks} нед. навыки{' «' + a.skill + '»' if a.skill else ''} ничего не предлагали.")
+        out(f"Доля принятых: «Да» директора из всех ответов «Да» и «Нет». За {skills.RECENT_DAYS} дн. и по неделям.")
+        for sid, s in sorted(q.items(), key=lambda kv: -kv[1]["recent"]["total"]):
+            r = s["recent"]
+            extra = [f"{k}: {r[v]}" for k, v in (("ждут", "pending"), ("само выполнилось", "auto"),
+                                                    ("отпало само", "dropped")) if r[v]]
+            out(f"\n{sid} — {skills.get(sid)['title']}: {skills.quality_line(r)}" + (" · " + ", ".join(extra) if extra else ""))
+            out("  недели: " + " · ".join(f"{w['label']} {w['accepted']}/{w['decided']}" for w in s["weeks"] if w["total"]))
+            if len(s["models"]) > 1 or a.skill:
+                out("  модели: " + " · ".join(f"{m['title']} — {skills.quality_line(m)}" for m in s["models"]))
+            if s["versions"]:
+                out("  версии: " + " · ".join(f"с {v['since_label']}{' (сейчас)' if v['current'] else ''} — "
+                                              f"{skills.quality_line(v)}" for v in s["versions"]))
+            if s["reasons"]:
+                out("  почему «Нет»: " + ", ".join(f"{x['reason']} {x['n']}" for x in s["reasons"]))
 
 
 def cmd_notify(a) -> None:
@@ -2808,6 +2832,9 @@ def build_parser() -> argparse.ArgumentParser:
     ms.add_parser("list", help="навыки: что делают, сколько правил")
     x = ms.add_parser("rules", help="правила директора к навыку")
     x.add_argument("skill")
+    x = ms.add_parser("stats", help="доля принятых предложений: по навыкам, неделям, моделям и версиям навыка")
+    x.add_argument("--skill", help="один навык (id из ./ops skills list)")
+    x.add_argument("--weeks", type=int, default=8, help="сколько недель показать (по умолчанию 8)")
     s.set_defaults(fn=cmd_skills)
 
     s = sub.add_parser("notify", help="написать директору в Telegram")

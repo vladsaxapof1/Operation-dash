@@ -550,7 +550,7 @@ def mark_me(meeting_id: str, label: str, settings: dict | None = None) -> dict:
         (meeting_id,))
     rejected = 0
     for p in proposals.list_proposals("pending", batch=f"meeting:{meeting_id}"):
-        proposals.reject(p["id"])
+        proposals.reject(p["id"], note="спикеры были перепутаны — встречу разберут заново")
         rejected += 1
     in_kaiten = store.scalar("SELECT COUNT(*) FROM proposals WHERE batch=? AND status='done'", (f"meeting:{meeting_id}",)) or 0
     store.log("voice", f"{meeting_id}: «{label}» — директор; голос {'запомнен' if voice_saved else 'не снят'}, "

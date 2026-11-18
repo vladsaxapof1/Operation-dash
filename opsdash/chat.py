@@ -71,7 +71,7 @@ def delete(chat_id: int) -> None:
     for m in store.rows("SELECT id FROM ask_messages WHERE chat_id=? AND role='assistant'", (chat_id,)):
         stop(m["id"])
         for p in proposals.list_proposals("pending", batch=f"chat:{m['id']}"):
-            proposals.reject(p["id"])
+            proposals.reject(p["id"], note="разговор удалён")
     store.execute("DELETE FROM ask_messages WHERE chat_id=?", (chat_id,))
     store.execute("DELETE FROM ask_chats WHERE id=?", (chat_id,))
     shutil.rmtree(files_dir(chat_id), ignore_errors=True)

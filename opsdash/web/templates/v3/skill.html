@@ -37,6 +37,15 @@
       <p class="sy-lock">{{ icons.icon('lock', 14) }}Системный навык обновляется вместе с PULSE. Сам текст не меняется: своё поведение задайте правилами ниже.</p>
     </section>
 
+    {#- сколько предложений навыка вы принимаете (2.0.56, _skill_quality.html); навык без предложений блока не показывает #}
+    {% set q = sk.quality %}
+    {% if q or sk.proposes[:7] != 'Ничего' %}
+    <section class="sy-box2 sk-q" id="quality" aria-label="Сколько предложений вы принимаете">
+      <div class="sy-side-h"><h2>Сколько предложений вы принимаете</h2></div>
+      {% set dl_class = 'sy-dl' %}{% include "_skill_quality.html" %}
+    </section>
+    {% endif %}
+
     <section class="sy-sec wide" id="rules" aria-label="Ваши правила" style="gap:8px">
       {% set n_on = rules | selectattr('enabled') | list | length %}
       <div class="sy-gh"><h2>Ваши правила</h2><span>{{ (n_on ~ ' из ' ~ (rules | length) ~ ' включено') if rules else 'правил пока нет' }}</span></div>

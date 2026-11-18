@@ -1,0 +1,54 @@
+{#- Сколько предложений навыка вы принимаете (2.0.56, skills.quality): итог за 4 недели, столбики по неделям за 8,
+    почему «Нет», версии навыка и модели. Общий для skill.html и v3/skill.html, снаружи карточка своего дизайна.
+    Ждёт q (sk.quality, может быть пустым) и dl_class (класс списка «название: значение» этого дизайна) #}
+{% if q and q.window.total %}
+{% set r = q.recent %}
+{% if r.decided %}
+<p class="sk-q-lead">За 4 недели вы приняли {{ r.accepted }} из {{ r.decided }} {{ plural(r.decided, 'предложения', 'предложений', 'предложений') }}{% if r.rate is not none %}, это <b>{{ (r.rate * 100) | round | int }}%</b>{% endif %}.</p>
+{% elif r.total %}
+<p class="sk-q-lead">За 4 недели вы ещё не отвечали на предложения этого навыка.</p>
+{% else %}
+<p class="sk-q-lead">За 4 недели навык ничего не предлагал.</p>
+{% endif %}
+{% set extra = [] %}
+{% if r.pending %}{% set _ = extra.append('ждут ответа (' ~ r.pending ~ ')') %}{% endif %}
+{% if r.auto %}{% set _ = extra.append('выполнено без вас по настройке автономии (' ~ r.auto ~ ')') %}{% endif %}
+{% if r.dropped %}{% set _ = extra.append('отпало само без вашего ответа (' ~ r.dropped ~ ')') %}{% endif %}
+{% if extra or (r.decided and r.rate is none) %}
+<p class="sk-q-extra">{% if r.decided and r.rate is none %}Долю PULSE покажет с 5 ответов. {% endif %}{% if extra %}Не входят в счёт: {{ extra | join(', ') }}.{% endif %}</p>
+{% endif %}
+
+{% set peak = [q.weeks | map(attribute='decided') | max, 1] | max %}
+<div class="sk-q-chart{{ ' many' if q.weeks | length > 6 }}" style="--n: {{ q.weeks | length }}" role="img"
+     aria-label="По неделям: {% for x in q.weeks %}с {{ x.label }} принято {{ x.accepted }} из {{ x.decided }}{{ '; ' if not loop.last }}{% endfor %}">
+  {% for x in q.weeks %}
+  <div class="sk-q-col" title="Неделя с {{ x.label }}: {{ x.line }}">
+    <div class="sk-q-stack">
+      {%- if x.accepted %}<i class="yes" style="height: {{ (x.accepted / peak * 100) | round(1) }}%"></i>{% endif -%}
+      {%- if x.rejected %}<i class="no" style="height: {{ (x.rejected / peak * 100) | round(1) }}%"></i>{% endif -%}
+    </div>
+    <span>{{ x.label }}</span>
+  </div>
+  {% endfor %}
+</div>
+<div class="sk-q-legend"><span><i class="yes"></i>Да</span><span><i class="no"></i>Нет</span><span>по неделям, с понедельника</span></div>
+
+{% if q.reasons or q.versions or q.models | length > 1 %}
+<dl class="{{ dl_class }}">
+  {% if q.reasons %}
+  <dt>Почему «Нет»</dt><dd>{% for x in q.reasons %}{{ x.reason }}: {{ x.n }}{{ ', ' if not loop.last }}{% endfor %}
+    {%- set blind = q.reasons | selectattr('reason', 'equalto', 'без причины') | map(attribute='n') | sum %}
+    {% if blind * 2 >= q.window.rejected %}<div class="sk-q-note">Причину можно выбрать кнопкой сразу после «Нет». По причинам навык «Уроки из ваших „Нет“» предлагает правила.</div>{% endif %}</dd>
+  {% endif %}
+  {% if q.versions %}
+  <dt>Версии навыка</dt><dd><ul class="sk-q-vers">{% for v in q.versions %}<li><span>с {{ v.since_label }}{% if v.current %}, сейчас{% endif %}</span><span class="sk-q-v">{{ v.line }}</span></li>{% endfor %}</ul>
+    <div class="sk-q-note">Новая версия начинается после обновления навыка или изменения ваших правил.</div></dd>
+  {% endif %}
+  {% if q.models | length > 1 %}
+  <dt>Модели</dt><dd><ul class="sk-q-vers">{% for m in q.models %}<li><span>{{ m.title }}</span><span class="sk-q-v">{{ m.line }}</span></li>{% endfor %}</ul></dd>
+  {% endif %}
+</dl>
+{% endif %}
+{% else %}
+<p class="sk-q-lead">За 8 недель навык ничего не предлагал.</p>
+{% endif %}

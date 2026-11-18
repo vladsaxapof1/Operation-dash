@@ -2086,6 +2086,31 @@ a.mrow-title:hover { color: var(--accent); text-decoration: none; }
 .sk-doc pre { background: var(--panel-2); border-radius: 8px; overflow-x: auto; margin: 8px 0; }
 .sk-doc pre code { background: none; white-space: pre; overflow-wrap: normal; }
 .sk-runs li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; }
+/* доля принятых предложений навыка (2.0.56, skills.quality): строка в каталоге и блок на странице навыка.
+   Столбик недели: снизу «Да» (акцент), сверху «Нет» (нейтральный), между ними зазор 2px, скруглён только верх */
+.sk-q-line { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sk-q-line.low { color: var(--warn-text); }
+.sk-q .card-b { display: grid; gap: 14px; padding-top: 16px; }
+.sk-q-lead { margin: 0; font-size: 17px; }
+.sk-q-lead b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.sk-q-extra { margin: -8px 0 0; font-size: 13px; color: var(--muted); }
+.sk-q-note { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.sk-q-v { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sk-q-chart { display: grid; grid-template-columns: repeat(var(--n, 8), minmax(0, 48px)); gap: 6px; align-items: end; }
+.sk-q-col { display: grid; gap: 6px; justify-items: center; }
+.sk-q-stack { height: 72px; width: 100%; max-width: 28px; display: flex; flex-direction: column-reverse; gap: 2px;
+  border-bottom: 1px solid var(--line-strong); }
+.sk-q-stack i { display: block; min-height: 2px; }
+.sk-q-stack i:last-child { border-radius: 4px 4px 0 0; }
+.sk-q .yes { background: var(--accent); }
+.sk-q .no { background: var(--faint); }
+.sk-q-col > span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sk-q-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: -6px; font-size: 13px; color: var(--muted); }
+.sk-q-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sk-q-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.sk-q-vers { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.sk-q-vers li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; }
+@media (max-width: 480px) { .sk-q-chart.many .sk-q-col:nth-child(even) > span { visibility: hidden; } }
 @media (max-width: 960px) { .sk-page { grid-template-columns: minmax(0, 1fr); } .sk-facts { grid-template-columns: minmax(0, 1fr); } }
 
 /* «Нет» — почему? (MOD-3): полоса внизу экрана после отказа */

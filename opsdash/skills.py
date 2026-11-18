@@ -11,9 +11,11 @@ git checkout файла навыка (PULSE стоит git-клоном и об�
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import time
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -131,6 +133,139 @@ def rules_prompt(job: str) -> str:
             "писать от имени директора):\n" + lines)
 
 
+# --- качество: сколько предложений навыка проходит через «Да» (2.0.56) -------------------------------------
+#
+# Каждое предложение помечено заданием, моделью и версией навыка (proposals.job / model / skill_ver: их ставит
+# ./ops propose по окружению фонового запуска, brain.job_vars). Отсюда — доля принятых по навыку, неделям, моделям
+# и версиям: после правки навыка, смены модели или нового правила из lessons видно, стало ли лучше.
+# Исходы: accepted — «Да» директора (выполнено или не получилось выполнить); rejected — «Нет» директора;
+# auto — выполнено по автономии без директора; dropped — отпало само (задачу закрыли или убрали в архив, разговор
+# удалён); pending — ждёт ответа. Доля принятых = accepted / (accepted + rejected).
+
+RECENT_DAYS = 28
+MIN_DECIDED = 5  # меньше решений — долю не показываем: одно «Нет» из двух — ещё не качество
+
+
+def version(sid: str) -> str:
+    """Версия навыка: 8 знаков хеша SKILL.md и включённых «Ваших правил». Правка навыка или новое правило — новая версия."""
+    rules_text = "\n".join(r["text"] for r in rules(sid, enabled_only=True))
+    return hashlib.sha1((text(sid) + "\n\n" + rules_text).encode("utf-8")).hexdigest()[:8]
+
+
+def version_for_job(job: str) -> str | None:
+    sid = skill_for_job(job)
+    return version(sid) if sid else None
+
+
+def _outcome(p: dict) -> str:
+    if p["status"] == "pending":
+        return "pending"
+    if p.get("auto"):
+        return "auto"
+    if p["status"] in ("done", "failed", "running"):
+        return "accepted"
+    if p["status"] == "rejected":
+        res = store.loads(p.get("result"), None)
+        return "dropped" if isinstance(res, dict) and res.get("note") else "rejected"
+    return "pending"
+
+
+def _tally(items: list[dict]) -> dict:
+    t = {"accepted": 0, "rejected": 0, "auto": 0, "dropped": 0, "pending": 0}
+    for p in items:
+        t[p["outcome"]] += 1
+    t["decided"] = t["accepted"] + t["rejected"]
+    t["total"] = len(items)
+    t["rate"] = round(t["accepted"] / t["decided"], 3) if t["decided"] >= MIN_DECIDED else None
+    t["line"] = quality_line(t)
+    return t
+
+
+def _local_day(ts: str | None) -> date | None:
+    dt = store.parse_ts(ts)
+    return dt.astimezone(config.tz()).date() if dt else None
+
+
+def model_title(model: str | None) -> str:
+    if not model or model == "default":
+        return "модель по умолчанию"
+    if model.startswith("chatgpt:"):
+        rest = model.split(":", 1)[1]
+        return "ChatGPT" + ("" if rest == "default" else f" ({rest})")
+    return model[:1].upper() + model[1:]
+
+
+def quality(weeks: int = 8, today: date | None = None) -> dict[str, dict]:
+    """Качество навыков: {id навыка: {recent, weeks, models, versions, reasons}}. recent — за RECENT_DAYS дней;
+    weeks — по неделям (с понедельника), старые слева; models, versions и reasons — за все weeks недель.
+    Навыки без предложений за это время в ответ не попадают."""
+    today = today or datetime.now(config.tz()).date()
+    first_week = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks - 1)
+    recent_from = today - timedelta(days=RECENT_DAYS - 1)
+    since = min(first_week, recent_from)
+    since_utc = datetime.combine(since, datetime.min.time(), config.tz()).astimezone(timezone.utc)
+    rows = store.rows("SELECT id, job, model, skill_ver, status, auto, result, reject_reason, created FROM proposals "
+                      "WHERE job IS NOT NULL AND created >= ? ORDER BY created",
+                      (since_utc.replace(microsecond=0).isoformat(),))
+    by_skill: dict[str, list[dict]] = {}
+    for p in rows:
+        sid = skill_for_job(p["job"])
+        day = _local_day(p["created"])
+        if not sid or not day:
+            continue
+        p["outcome"], p["day"] = _outcome(p), day
+        by_skill.setdefault(sid, []).append(p)
+
+    out: dict[str, dict] = {}
+    for sid, items in by_skill.items():
+        window = [p for p in items if p["day"] >= first_week]
+        series = []
+        for i in range(weeks):
+            start = first_week + timedelta(weeks=i)
+            week = [p for p in window if start <= p["day"] < start + timedelta(days=7)]
+            series.append({"start": start.isoformat(), "label": start.strftime("%d.%m"), **_tally(week)})
+        # недели до первого предложения навыка (PULSE ещё не стоял или навык не работал) — не показываем
+        first = next((i for i, w in enumerate(series) if w["total"]), 0)
+        series = series[first:]
+        models = {}
+        for p in window:
+            models.setdefault(p["model"] or "", []).append(p)
+        versions: dict[str, list[dict]] = {}
+        for p in window:
+            if p["skill_ver"]:
+                versions.setdefault(p["skill_ver"], []).append(p)
+        current = version(sid)
+        ver_rows = sorted(({"ver": v, "since": min(p["day"] for p in ps).isoformat(),
+                            "since_label": min(p["day"] for p in ps).strftime("%d.%m"),
+                            "current": v == current, **_tally(ps)} for v, ps in versions.items()),
+                          key=lambda r: r["since"], reverse=True)
+        reasons: dict[str, int] = {}
+        for p in window:
+            if p["outcome"] == "rejected":
+                key = REASONS.get(p["reject_reason"] or "", "без причины")
+                reasons[key] = reasons.get(key, 0) + 1
+        out[sid] = {
+            "skill": sid,
+            "recent": _tally([p for p in items if p["day"] >= recent_from]),
+            "weeks": series,
+            "window": _tally(window),
+            "models": sorted(({"model": m or "", "title": model_title(m), **_tally(ps)} for m, ps in models.items()),
+                             key=lambda r: -r["total"]),
+            "versions": ver_rows,
+            "current_version": current,
+            "reasons": sorted(({"reason": k, "n": n} for k, n in reasons.items()), key=lambda r: -r["n"]),
+        }
+    return out
+
+
+def quality_line(t: dict) -> str:
+    """«принято 12 из 15 · 80%» — счётчик для каталога, команды и бота."""
+    if not t["decided"]:
+        return f"ждут ответа: {t['pending']}" if t["pending"] else "предложений не было"
+    line = f"принято {t['accepted']} из {t['decided']}"
+    return line + (f" · {round(t['rate'] * 100)}%" if t["rate"] is not None else "")
+
+
 # --- защита системных навыков (SK-3) -----------------------------------------------------------------------
 
 _mod_cache: tuple[float, dict | None] = (0.0, None)
@@ -217,9 +352,10 @@ def catalog(settings: dict | None = None) -> dict:
     jobs = {j["name"]: j for j in store.rows("SELECT * FROM jobs")}
     mods = modified()
     counts = rule_counts()
+    q = quality()
     areas = []
     for a in manifest()["areas"]:
-        items = [{**sk, **status(sk, settings, jobs, mods), "rules": counts.get(sk["id"], 0)}
+        items = [{**sk, **status(sk, settings, jobs, mods), "rules": counts.get(sk["id"], 0), "quality": q.get(sk["id"])}
                  for sk in all_skills() if sk["area"] == a["id"]]
         if items:
             areas.append({**a, "skills": items})

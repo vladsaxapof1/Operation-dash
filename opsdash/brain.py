@@ -233,6 +233,26 @@ def _env(settings: dict) -> dict:
     return env
 
 
+def job_vars(settings: dict, job: str, model: str | None, who: str = "claude") -> dict:
+    """Чьё фоновое задание — добавка к окружению запуска (Claude и ChatGPT одинаково). По OPSDASH_JOB, OPSDASH_MODEL
+    и OPSDASH_SKILL_VER ./ops propose помечает предложение заданием, моделью и версией навыка — из них «Навыки» считают
+    долю принятых (opsdash.skills.quality)."""
+    env = {"OPSDASH_JOB": job}
+    if who == "chatgpt":  # у ChatGPT модель одна на всё (Настройки → Помощник), model задаёт только глубину
+        env["OPSDASH_MODEL"] = "chatgpt:" + ((settings.get("chatgpt") or {}).get("model") or "default")
+    else:
+        env["OPSDASH_MODEL"] = model or (settings.get("claude") or {}).get("model") or "default"
+    try:
+        from opsdash import skills
+
+        ver = skills.version_for_job(job)
+    except Exception:  # noqa: BLE001 — без версии навыка запуск всё равно идёт
+        ver = None
+    if ver:
+        env["OPSDASH_SKILL_VER"] = ver
+    return env
+
+
 def _command(settings: dict, claude: str, job: str, *, model: str | None, resume: str | None,
              partial: bool = False, effort: str | None = None) -> list[str]:
     # всегда поток событий: в нём и ответ, и заполненность лимитов подписки (opsdash.usage)
@@ -356,7 +376,8 @@ def _stream(prompt: str, *, settings: dict, model: str | None, resume: str | Non
         kwargs["creationflags"] = 0x08000000
     store.log(job, f"запуск Claude ({model or 'модель по умолчанию'})")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            cwd=str(config.APP_DIR), env={**_env(settings), "OPSDASH_JOB": job}, text=True, encoding="utf-8",
+                            cwd=str(config.APP_DIR), env={**_env(settings), **job_vars(settings, job, model)},
+                            text=True, encoding="utf-8",
                             errors="replace", **kwargs)
     if on_start:
         on_start(proc)

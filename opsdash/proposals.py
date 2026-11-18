@@ -12,6 +12,7 @@ Claude никогда не пишет во внешние системы нап�
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from opsdash import config, records, store
@@ -82,6 +83,15 @@ def _fmt_date(d: str | None) -> str:
         return d
 
 
+def _origin() -> tuple[str | None, str | None, str | None]:
+    """Чьё предложение: фоновое задание, его модель и версия навыка — из окружения запуска (brain.job_vars).
+    Директор в админке, в боте или в своём чате с Claude — пусто: в долю принятых у навыков такое не входит."""
+    job = os.environ.get("OPSDASH_JOB") or None
+    if not job:
+        return None, None, None
+    return job, os.environ.get("OPSDASH_MODEL") or None, os.environ.get("OPSDASH_SKILL_VER") or None
+
+
 def _create(kind: str, title: str, payload: dict, *, autonomy_key: str, reason: str | None,
             source_ref: str | None, batch: str | None) -> dict:
     dup = store.row(
@@ -89,13 +99,15 @@ def _create(kind: str, title: str, payload: dict, *, autonomy_key: str, reason: 
     )
     if dup:
         return get(dup["id"])
+    job, model, skill_ver = _origin()
     pid = store.execute(
-        """INSERT INTO proposals(kind, title, payload, reason, source_ref, batch, status, created)
-           VALUES(?,?,?,?,?,?,'pending',?)""",
-        (kind, title, store.json_col(payload), reason, source_ref, batch, store.utcnow()),
+        """INSERT INTO proposals(kind, title, payload, reason, source_ref, batch, status, created, job, model, skill_ver)
+           VALUES(?,?,?,?,?,?,'pending',?,?,?,?)""",
+        (kind, title, store.json_col(payload), reason, source_ref, batch, store.utcnow(), job, model, skill_ver),
     )
     settings = config.load_settings()
     if settings["autonomy"].get(autonomy_key) == "auto":
+        store.execute("UPDATE proposals SET auto=1 WHERE id=?", (pid,))  # без директора — не в доле принятых
         return approve(pid)
     return get(pid)
 
@@ -572,9 +584,12 @@ def propose_mcp_call(*, server_id: str, tool: str, args: dict | None = None, tit
 
 # --- решение ----------------------------------------------------------------
 
-def reject(pid: int) -> dict:
+def reject(pid: int, note: str | None = None) -> dict:
+    """«Нет» директора. note — предложение отпало само (разговор удалён, встречу разобрали заново, связали вручную):
+    так оно не считается «Нет» в доле принятых у навыка (opsdash.skills.quality)."""
     store.execute(
-        "UPDATE proposals SET status='rejected', decided_at=? WHERE id=? AND status='pending'", (store.utcnow(), pid)
+        "UPDATE proposals SET status='rejected', decided_at=?, result=? WHERE id=? AND status='pending'",
+        (store.utcnow(), store.json_col({"note": note}) if note else None, pid)
     )
     p = get(pid)
     if p and p["kind"].startswith("memory."):
