@@ -630,10 +630,12 @@ def brief_path(b: dict) -> Path:
 
 
 def _rel(path: Path) -> str:
+    """Путь для команды ./ops — с прямыми косыми: Claude на Windows запускает её в Git Bash, и обратная косая
+    без кавычек там пропадает (data\\agent-briefs\\1.md → dataagent-briefs1.md)."""
     try:
-        return str(path.relative_to(config.ROOT))
+        return path.relative_to(config.ROOT).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def _split_file(item: str) -> tuple[str, str] | None:
