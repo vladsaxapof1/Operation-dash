@@ -441,10 +441,38 @@ def cmd_messages(a) -> None:
             items = list(reversed(store.rows(sql, (f"%{title}%", f"%{title}%", since, a.limit))))
             if items:
                 break
+        if not items:  # чат подписан прозвищем («Сокол» у Олега Соколова) — ищем по справочнику
+            for person, chat in _person_chats(a.title):
+                out(f"Чат «{chat['title']}» ({chat['source']}) — {person['name']}, по нику @{chat['username']}")
+                items += store.rows("SELECT * FROM messages WHERE source=? AND chat_id=? AND ts >= ? "
+                                    "ORDER BY ts DESC LIMIT ?", (chat["source"], chat["chat_id"], since, a.limit))
+            items = sorted(items, key=lambda m: (m["ts"], m["id"]))[-a.limit:]
         if not items:
             return out("Сообщений нет.")
         for m in items:
             out(f"«{m['chat_title']}» " + _msg_line(m))
+
+
+def _person_chats(name: str) -> list[tuple[dict, dict]]:
+    """Личные чаты человека из справочника по нику в мессенджере: имя чата бывает прозвищем, и по названию его
+    не найти («Олег Соколов» — чат «Сокол», ник @sokol_o, 18.11.2026). Имя неоднозначно («Олег» — у двоих) —
+    чаты каждого, но не больше трёх людей."""
+    person = records.find_person(name)
+    if person:
+        people = [person]
+    else:
+        q = name.strip().lower().replace("ё", "е")
+        people = [p for p in records.list_people()
+                  if q and any(q in n.lower().replace("ё", "е") for n in [p["name"], *(p["aliases"] or [])])]
+        if len(people) > 3:
+            return []
+    found = []
+    for p in people:
+        nicks = {(p.get(k) or "").strip().lower().lstrip("@") for k in ("telegram", "ymessenger")} - {""}
+        for nick in nicks:
+            for ch in store.rows("SELECT * FROM chats WHERE lower(username)=? AND kind='private'", (nick,)):
+                found.append((p, ch))
+    return found
 
 
 _LATIN = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",

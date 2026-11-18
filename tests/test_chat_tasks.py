@@ -337,3 +337,30 @@ def test_meeting_task_shows_messages_on_add(settings_with, capsys, monkeypatch):
     cli.main(["commitments", "add", "--direction", "to_me", "--who", "Пётр", "--title", "Договор",
               "--what", "Прислать договор", "--source", "telegram:1"])
     assert "уже писали" not in capsys.readouterr().out  # не со встречи — переписку разбирает triage
+
+
+def test_chat_by_nickname(clean_home, capsys):
+    """Чат подписан прозвищем: «./ops messages chat "Олег Соколов"» находит «Сокол» по нику из справочника —
+    иначе «Собрать с Claude» не видит переписку с исполнителем (18.11.2026)."""
+    records.upsert_person("Олег Соколов", aliases=["Олежа"], telegram="@sokol_o")
+    records.upsert_person("Олег Иванов", telegram="@ivanov_o")
+    _chat("telegram", "1", "Сокол", "private", username="sokol_o")
+    _msg("telegram", "1", "Сокол", "1", "[файл: Итог — таблица v3.html]", sender="Сокол")
+    _chat("telegram", "2", "Шеф продаж", "private", username="ivanov_o")
+    _msg("telegram", "2", "Шеф продаж", "1", "Партнёры на связи", sender="Шеф продаж", minute=1)
+
+    cli.main(["messages", "chat", "Олег Соколов", "--days", "3650"])
+    out = capsys.readouterr().out
+    assert "Чат «Сокол» (telegram) — Олег Соколов, по нику @sokol_o" in out
+    assert "таблица v3" in out and "Партнёры" not in out
+
+    cli.main(["messages", "chat", "Олег", "--days", "3650"])  # имя у двоих — чаты обоих
+    out = capsys.readouterr().out
+    assert "таблица v3" in out and "Партнёры на связи" in out
+
+    cli.main(["messages", "chat", "Сокол", "--days", "3650"])  # по названию — как раньше, без строки «по нику»
+    out = capsys.readouterr().out
+    assert "таблица v3" in out and "по нику" not in out
+
+    cli.main(["messages", "chat", "Пётр", "--days", "3650"])
+    assert "Сообщений нет." in capsys.readouterr().out
