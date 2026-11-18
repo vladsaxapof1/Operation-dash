@@ -2,6 +2,7 @@
 окно в «Подключениях»."""
 
 import json
+import subprocess
 import sys
 
 import httpx
@@ -106,7 +107,8 @@ def test_brain_passes_mcp_only_to_chat_jobs(fake, monkeypatch):
     assert "--mcp-config" not in brain._command(config.load_settings(), "claude", "chat", model=None, resume=None)
 
 
-def test_write_through_proposal(fake):
+def test_write_through_proposal(fake, monkeypatch):
+    monkeypatch.setenv("PYTHONIOENCODING", "latin-1")  # как Windows без режима UTF-8: stdio сервера — не в UTF-8
     add_fake(fake)
     mcp.check("tracker")
     with pytest.raises(proposals.ProposalError):
@@ -193,6 +195,19 @@ def test_catalog_and_window(client, fake):
     client.post(f"/settings/mcp/{sid}/remove")
     assert mcp.server(sid) is None and not config.get_secret(mcp.secret_key(sid, "FAKE_TOKEN"))
     assert store.get_state(f"mcp_tools:{sid}") is None
+
+
+def test_command_split_on_windows():
+    """Путь в кавычках — без кавычек, обратная косая — часть пути; поле окна разбирается обратно в то же самое."""
+    split = lambda line: mcp.split_command(line, windows=True)  # noqa: E731
+    assert split(r'"C:\Program Files\Python312\python.exe" "C:\Users\Анна\srv.py" -v') == [
+        r"C:\Program Files\Python312\python.exe", r"C:\Users\Анна\srv.py", "-v"]
+    assert split(r'npx -y pkg --path="C:\a b"') == ["npx", "-y", "pkg", r"--path=C:\a b"]
+    parts = [r"C:\Program Files\x.exe", "a b", "", "C:\\dir\\", 'q"uote']
+    assert split(subprocess.list2cmdline(parts)) == parts  # так поле заполняет _command_line на Windows
+    assert mcp.split_command("python 'my server.py'", windows=False) == ["python", "my server.py"]
+    with pytest.raises(mcp.MCPError, match="кавычки"):
+        mcp.split_command('python "srv.py', windows=False)
 
 
 def test_missing_program(monkeypatch):

@@ -890,7 +890,7 @@ def open_codex_terminal(b: dict) -> bool:
     folder = b.get("folder") or str(Path.home())
     script = config.DATA_DIR / "agent-briefs" / "codex-open"
     script.parent.mkdir(parents=True, exist_ok=True)
-    if os.name == "nt":
+    if sys.platform == "win32":
         clip = script.with_suffix(".txt")
         clip.write_text(text, encoding="utf-8")
         ps = script.with_suffix(".ps1")

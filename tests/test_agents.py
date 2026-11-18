@@ -55,8 +55,8 @@ def _kpi_session(journals, root, name="k1.jsonl", days=3):
     cwd = str(root / "Отчёты")
     csv = root / "Отчёты" / "Выгрузка CRM — сентябрь.csv"
     xlsx = root / "Отчёты" / "KPI продаж — сентябрь.xlsx"
-    csv.write_text("менеджер;выручка\n")
-    xlsx.write_text("x")
+    csv.write_text("менеджер;выручка\n", encoding="utf-8")
+    xlsx.write_text("x", encoding="utf-8")
     first = "Собери сводку KPI отдела продаж за сентябрь из выгрузки CRM: выручка, конверсия, средний чек. " + "Подробно. " * 60
     _write(journals / name, [
         {"type": "custom-title", "customTitle": "Сводка KPI продаж за сентябрь", "sessionId": "k1"},

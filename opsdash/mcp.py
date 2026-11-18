@@ -306,7 +306,10 @@ class _Stdio:
 
     def __init__(self, spec: dict, timeout: float):
         exe = which(spec["command"]) or os.path.expanduser(spec["command"])
-        env = _env_with_path(exe, {**os.environ, **{k: str(v) for k, v in (spec.get("env") or {}).items()}})
+        # протокол MCP по stdio — UTF-8: сервер на Python без этого читает и пишет в кодировке Windows (cp1251/cp1252),
+        # и кириллица в аргументах приходит кракозябрами
+        env = _env_with_path(exe, {**os.environ, "PYTHONIOENCODING": "utf-8",
+                                   **{k: str(v) for k, v in (spec.get("env") or {}).items()}})
         kwargs = {"creationflags": 0x08000000} if os.name == "nt" else {}
         try:
             self.proc = subprocess.Popen([exe, *spec.get("args", [])], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -583,6 +586,45 @@ def _command_line(s: dict) -> str:
     if os.name == "nt":
         return subprocess.list2cmdline(parts)
     return shlex.join(parts)
+
+
+def split_command(line: str, windows: bool | None = None) -> list[str]:
+    """Команда своего сервера из поля окна — программа и аргументы. На Windows — по правилам командной строки
+    Windows (обратное к list2cmdline): кавычки вокруг пути с пробелами снимаются, обратная косая черта — часть пути.
+    Иначе — как в терминале."""
+    import shlex
+
+    if not (os.name == "nt" if windows is None else windows):
+        try:
+            return shlex.split(line)
+        except ValueError as e:
+            raise MCPError(f"Не разобрать команду: {e} — проверьте кавычки") from e
+    parts: list[str] = []
+    cur, slashes, quoted, started = "", 0, False, False
+    for ch in line:
+        if ch == "\\":
+            slashes += 1
+            started = True
+        elif ch == '"':  # 2n косых + кавычка — n косых и граница кавычек; 2n+1 — n косых и сама кавычка
+            cur += "\\" * (slashes // 2)
+            if slashes % 2:
+                cur += '"'
+            else:
+                quoted = not quoted
+            slashes, started = 0, True
+        else:
+            cur += "\\" * slashes
+            slashes = 0
+            if ch in " \t" and not quoted:
+                if started:
+                    parts.append(cur)
+                cur, started = "", False
+            else:
+                cur += ch
+                started = True
+    if started:
+        parts.append(cur + "\\" * slashes)
+    return parts
 
 
 # --- карточки каталога «Подключения» ----------------------------------------------------------------------------

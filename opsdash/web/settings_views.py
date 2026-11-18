@@ -584,8 +584,6 @@ def register(app: FastAPI, render, back) -> None:
     async def mcp_save(request: Request):
         """Подключить сервер из витрины или свой; у подключённого — обновить ключи. Сразу проверяем: список
         инструментов нужен, чтобы помощник знал, что ему можно."""
-        import shlex
-
         from opsdash import mcp
 
         form = await request.form()
@@ -598,7 +596,7 @@ def register(app: FastAPI, render, back) -> None:
             if not p:  # свой сервер: команда или адрес, переменные и заголовки строками «ИМЯ=значение» / «Имя: значение»
                 transport = form.get("transport") or "stdio"
                 command_line = (form.get("command") or "").strip()
-                parts = shlex.split(command_line, posix=sys.platform != "win32") if command_line else []
+                parts = mcp.split_command(command_line) if command_line else []
                 custom_fields = []
                 for line in lines(form.get("env") or ""):
                     if "=" in line:

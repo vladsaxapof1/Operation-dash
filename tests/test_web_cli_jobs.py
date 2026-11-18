@@ -262,7 +262,7 @@ def test_claude_from_desktop_app_and_login(client, monkeypatch, tmp_path):
     client.post("/settings/claude/login", follow_redirects=False)
     script = config.DATA_DIR / "claude-login.command"
     assert opened == [["open", str(script)]]
-    assert "/2.1.308/" in script.read_text() and "auth login" in script.read_text()
+    assert "/2.1.308/" in script.read_text(encoding="utf-8") and "auth login" in script.read_text(encoding="utf-8")
     monkeypatch.undo()
 
     monkeypatch.setattr(brain.shutil, "which", lambda name: None)

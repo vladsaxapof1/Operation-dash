@@ -482,7 +482,7 @@ def _claude(*args: str) -> subprocess.CompletedProcess:
     if not claude:
         raise ToolError("не найден Claude Code (команда claude) — Настройки → Подключения → Claude")
     return subprocess.run([claude, "mcp", *args], capture_output=True, text=True, timeout=60,
-                          env=brain._env(settings))
+                          encoding="utf-8", errors="replace", env=brain._env(settings))
 
 
 def connect() -> None:

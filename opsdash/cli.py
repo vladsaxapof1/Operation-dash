@@ -2875,7 +2875,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(130)
     except BrokenPipeError:  # вывод обрезали (| head) — это не ошибка
         try:
-            sys.stdout = open(os.devnull, "w")  # noqa: SIM115
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
         except OSError:
             pass
         sys.exit(0)

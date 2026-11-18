@@ -148,7 +148,8 @@ def check(settings: dict | None = None) -> str:
     codex = find(settings)
     if not codex:
         raise brain.BrainError("Codex (ChatGPT) не найден")
-    proc = subprocess.run([codex, "--version"], capture_output=True, text=True, timeout=60, env=_env(settings))
+    proc = subprocess.run([codex, "--version"], capture_output=True, text=True, timeout=60,
+                          encoding="utf-8", errors="replace", env=_env(settings))
     status = login_status(codex, settings)
     if status and not status["loggedIn"]:
         raise brain.BrainError("Codex найден, но вход не выполнен — нажмите «Войти в ChatGPT»")

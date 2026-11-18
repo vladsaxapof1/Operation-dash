@@ -64,7 +64,7 @@ def is_running(settings: dict | None = None) -> bool:
 def _acquire_lock() -> bool:
     """Только один PULSE на компьютере: блокировка файла средствами ОС (снимается сама при выходе)."""
     global _lock_handle
-    handle = open(config.DATA_DIR / "pult.lock", "a+")  # noqa: SIM115
+    handle = open(config.DATA_DIR / "pult.lock", "a+", encoding="utf-8")  # noqa: SIM115
     try:
         if os.name == "nt":
             import msvcrt

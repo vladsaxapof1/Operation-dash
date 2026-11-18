@@ -82,7 +82,8 @@ def installed(root: Path | None = None) -> dict:
     """Какая версия стоит: {"sha", "date", "how": "git" | "archive" | ""} ("" — неизвестно)."""
     root = root or config.APP_DIR
     if (root / ".git").exists():
-        res = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%H %cI"], capture_output=True, text=True)
+        res = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%H %cI"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace")
         if res.returncode == 0 and res.stdout.strip():
             sha, date = res.stdout.split()
             return {"sha": sha, "date": date, "how": "git"}
@@ -209,7 +210,8 @@ def nvidia_present() -> bool:
         return True
     try:
         out = subprocess.run(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController).Name"],
-                             capture_output=True, text=True, timeout=30, creationflags=0x08000000).stdout
+                             capture_output=True, text=True, errors="replace", timeout=30,
+                             creationflags=0x08000000).stdout
     except (OSError, subprocess.SubprocessError):
         return False
     return "nvidia" in (out or "").lower()
@@ -261,11 +263,13 @@ def sync_libraries(root: Path) -> None:
     """Библиотеки под новую версию. Библиотека видеокарты NVIDIA не скачалась — обновляемся без неё
     (расшифровка пойдёт на процессоре), попробуем при следующем обновлении."""
     cmd = _sync_command(root)
-    res = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=3600 if cmd != _without_cuda(cmd) else 1800)
+    res = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         timeout=3600 if cmd != _without_cuda(cmd) else 1800)
     if res.returncode and cmd != _without_cuda(cmd):
         store.log("update", "библиотека видеокарты NVIDIA не скачалась — расшифровка пойдёт на процессоре: "
                             + (res.stderr or res.stdout).strip()[-300:], "warning")
-        res = subprocess.run(_without_cuda(cmd), cwd=str(root), capture_output=True, text=True, timeout=1800)
+        res = subprocess.run(_without_cuda(cmd), cwd=str(root), capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=1800)
     if res.returncode:
         raise UpdateError("библиотеки не обновились: " + (res.stderr or res.stdout).strip()[-400:])
 

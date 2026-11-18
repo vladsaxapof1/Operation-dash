@@ -180,7 +180,7 @@ def login_status(claude: str, settings: dict | None = None, max_age: float = 0) 
         return cached[1]
     try:
         proc = subprocess.run([claude, "auth", "status", "--json"], capture_output=True, text=True, timeout=30,
-                              env=_env(settings or config.load_settings()))
+                              encoding="utf-8", errors="replace", env=_env(settings or config.load_settings()))
         data = json.loads(proc.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         data = None
@@ -442,7 +442,8 @@ def check(settings: dict | None = None) -> str:
     claude = find_claude(settings)
     if not claude:
         raise BrainError("Claude Code не найден")
-    proc = subprocess.run([claude, "--version"], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([claude, "--version"], capture_output=True, text=True, timeout=60,
+                          encoding="utf-8", errors="replace")
     status = login_status(claude, settings)
     if status and not status["loggedIn"]:
         raise BrainError("Claude Code найден, но вход не выполнен — нажмите «Войти в Claude»")
