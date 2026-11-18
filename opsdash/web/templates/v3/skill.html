@@ -32,14 +32,14 @@
         <dt>Пример</dt><dd>{{ sk.example }}</dd>
         <dt>Когда</dt><dd>{{ sk.when }}</dd>
         <dt>Что читает</dt><dd>{{ sk.reads }}</dd>
-        <dt>Что предлагает</dt><dd>{{ sk.proposes }}{% if sk.proposes[:7] != 'Ничего' %}. <span class="muted">Только после вашего «Да»</span>{% endif %}</dd>
+        <dt>Что предлагает</dt><dd>{{ sk.proposes }}{% if not sk.proposes.startswith('Ничего') %}. <span class="muted">Только после вашего «Да»</span>{% endif %}</dd>
       </dl>
       <p class="sy-lock">{{ icons.icon('lock', 14) }}Системный навык обновляется вместе с PULSE. Сам текст не меняется: своё поведение задайте правилами ниже.</p>
     </section>
 
     {#- сколько предложений навыка вы принимаете (2.0.56, _skill_quality.html); навык без предложений блока не показывает #}
     {% set q = sk.quality %}
-    {% if q or sk.proposes[:7] != 'Ничего' %}
+    {% if q or not sk.proposes.startswith('Ничего') %}
     <section class="sy-box2 sk-q" id="quality" aria-label="Сколько предложений вы принимаете">
       <div class="sy-side-h"><h2>Сколько предложений вы принимаете</h2></div>
       {% set dl_class = 'sy-dl' %}{% include "_skill_quality.html" %}

@@ -360,3 +360,20 @@ def test_skill_pages_show_quality_in_both_designs(client):
         assert "За 4 недели принято 4 из 5 · 80%" in client.get("/skills").text
         # навык без предложений за 8 недель: блок есть, но честно пустой
         assert "За 8 недель навык ничего не предлагал." in client.get("/skills/projects").text
+
+
+def test_skill_that_proposes_nothing_has_no_quality_block(client):
+    """«Что предлагает: Ничего — …» — без «Только после вашего „Да“» и без пустого блока «Сколько предложений»."""
+    for design in ("classic", None):  # None — новый дизайн, он по умолчанию
+        s = config.load_settings()
+        if design:
+            s["web"]["design"] = design
+        else:
+            s["web"].pop("design", None)
+        config.save_settings(s)
+        for sid in ("weekly", "style"):
+            page = client.get(f"/skills/{sid}").text
+            assert "Сколько предложений вы принимаете" not in page, (design, sid)
+            assert "после вашего «Да»" not in page.split("Что предлагает", 1)[1].split("</dd>", 1)[0], (design, sid)
+        page = client.get("/skills/projects").text
+        assert "Сколько предложений вы принимаете" in page and "после вашего «Да»" in page, design
