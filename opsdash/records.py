@@ -1086,8 +1086,12 @@ def recipient(c: dict, people: list[dict] | None = None) -> dict | None:
     chat = None
     if not username:
         chats = store.rows("SELECT chat_id, title, username FROM chats WHERE source='telegram' AND kind='private'")
+        # слова названий чатов — один раз на вызов, а не для каждого имени и псевдонима заново (сотни чатов × имена:
+        # на странице «Задач» это было ~110 тыс. разборов строк, половина времени отрисовки — 2.0.62)
+        titled = [(ch, _words(ch["title"])) for ch in chats]
         for n in [name, *([person["name"], *person["aliases"]] if person else [])]:
-            hits = [ch for ch in chats if _words(n) and _words(n) <= _words(ch["title"])]
+            want = _words(n)
+            hits = [ch for ch, have in titled if want and want <= have]
             if len(hits) == 1:
                 chat = hits[0]
                 break

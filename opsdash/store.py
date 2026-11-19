@@ -9,10 +9,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import threading
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -811,27 +812,80 @@ def db():
             conn.close()
 
 
+_local = threading.local()
+
+
+@contextmanager
+def _quick():
+    """Соединение для одного простого запроса (rows, row, scalar, execute) — своё у каждого потока и переживает запрос.
+    Новое соединение на каждый запрос стоило ~0,5 мс: SQLite заново читает схему базы (больше 80 таблиц и индексов
+    поиска), а закрытие последнего соединения сбрасывает журнал WAL. На странице «Задач» таких запросов ~350 — до
+    двух третей времени отрисовки (2.0.62). Как и раньше, каждый вызов — своя транзакция (фиксируется сразу) и своё
+    соединение, отдельное от блока `with db()`, внутри которого его могли вызвать. Соединение открывается заново,
+    если сменились процесс, файл базы (подменили или пересоздали) или режим «только чтение»."""
+    with _guard or nullcontext():  # замороженный посреди записи процесс держал бы базу запертой для всего PULSE
+        path = str(config.DB_FILE)
+        try:
+            st = os.stat(path)
+            ident = (st.st_dev, st.st_ino)
+        except OSError:
+            ident = None
+        key = (os.getpid(), path, ident, _query_only)
+        conn = getattr(_local, "conn", None)
+        if conn is None or _local.key != key or path not in _initialized:
+            if conn is not None:
+                with suppress(Exception):
+                    conn.close()
+            conn = _local.conn = None
+            conn = connect()
+            try:  # файл мог появиться только что (первое подключение создаёт базу) — запоминаем его как есть сейчас
+                st = os.stat(path)
+                key = (os.getpid(), path, (st.st_dev, st.st_ino), _query_only)
+            except OSError:
+                pass
+            _local.conn, _local.key = conn, key
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001 — соединение сломано: в следующий раз откроем новое
+                _local.conn = None
+                with suppress(Exception):
+                    conn.close()
+            raise
+
+
 def rows(sql: str, params: Iterable[Any] = ()) -> list[dict]:
-    with db() as conn:
+    with _quick() as conn:
         return [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
 
 
 def row(sql: str, params: Iterable[Any] = ()) -> dict | None:
-    with db() as conn:
-        r = conn.execute(sql, tuple(params)).fetchone()
+    with _quick() as conn:
+        cur = conn.execute(sql, tuple(params))
+        try:
+            r = cur.fetchone()
+        finally:
+            cur.close()  # недочитанный запрос не держит снимок базы между вызовами
         return dict(r) if r else None
 
 
 def execute(sql: str, params: Iterable[Any] = ()) -> int:
     """Выполнить запрос; вернуть lastrowid (для INSERT) или число изменённых строк."""
-    with db() as conn:
+    with _quick() as conn:
         cur = conn.execute(sql, tuple(params))
         return cur.lastrowid if sql.lstrip().upper().startswith("INSERT") else cur.rowcount
 
 
 def scalar(sql: str, params: Iterable[Any] = ()) -> Any:
-    with db() as conn:
-        r = conn.execute(sql, tuple(params)).fetchone()
+    with _quick() as conn:
+        cur = conn.execute(sql, tuple(params))
+        try:
+            r = cur.fetchone()
+        finally:
+            cur.close()
         return r[0] if r else None
 
 
