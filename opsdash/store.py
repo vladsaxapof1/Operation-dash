@@ -813,6 +813,35 @@ def db():
 
 
 _local = threading.local()
+# постоянные соединения процесса по потокам: close_all закрывает их все, в том числе чужих потоков. Соединение
+# закончившегося потока закрывается при следующей регистрации — иначе у долгоживущего PULSE копились бы открытые файлы
+_open: dict = {}
+_open_lock = threading.Lock()
+_generation = 0
+
+
+def _register(conn: sqlite3.Connection) -> None:
+    me = threading.current_thread()
+    with _open_lock:
+        stale = [_open.pop(t) for t in [t for t in _open if t is not me and not t.is_alive()]]
+        _open[me] = conn
+    for c in stale:
+        with suppress(Exception):
+            c.close()
+
+
+def close_all() -> None:
+    """Закрыть постоянные соединения всех потоков; каждый поток при следующем запросе откроет новое. Нужно перед тем,
+    как удалить или подменить файл базы: на Windows открытый файл не удалить (тесты чистят папку данных между собой,
+    2.0.64). Только когда потоки не заняты запросом: соединение, закрытое посреди запроса, этот запрос уронит."""
+    global _generation
+    with _open_lock:
+        conns = list(_open.values())
+        _open.clear()
+        _generation += 1
+    for c in conns:
+        with suppress(Exception):
+            c.close()
 
 
 @contextmanager
@@ -830,7 +859,7 @@ def _quick():
             ident = (st.st_dev, st.st_ino)
         except OSError:
             ident = None
-        key = (os.getpid(), path, ident, _query_only)
+        key = (os.getpid(), path, ident, _query_only, _generation)
         conn = getattr(_local, "conn", None)
         if conn is None or _local.key != key or path not in _initialized:
             if conn is not None:
@@ -840,10 +869,11 @@ def _quick():
             conn = connect()
             try:  # файл мог появиться только что (первое подключение создаёт базу) — запоминаем его как есть сейчас
                 st = os.stat(path)
-                key = (os.getpid(), path, (st.st_dev, st.st_ino), _query_only)
+                key = (os.getpid(), path, (st.st_dev, st.st_ino), _query_only, _generation)
             except OSError:
                 pass
             _local.conn, _local.key = conn, key
+            _register(conn)
         try:
             yield conn
             conn.commit()
@@ -852,6 +882,9 @@ def _quick():
                 conn.rollback()
             except Exception:  # noqa: BLE001 — соединение сломано: в следующий раз откроем новое
                 _local.conn = None
+                with _open_lock:
+                    if _open.get(threading.current_thread()) is conn:
+                        _open.pop(threading.current_thread())
                 with suppress(Exception):
                     conn.close()
             raise

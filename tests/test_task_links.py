@@ -53,8 +53,12 @@ def test_new_tasks_seen_sort_and_old_rows_already_seen():
     assert records.unseen_count() == 1 and [c["id"] for c in records.list_commitments(unseen=True)] == [second]
 
     # база до появления отметки: старые задачи не должны вспыхнуть «новыми»
-    with sqlite3.connect(config.DB_FILE) as conn:
+    conn = sqlite3.connect(config.DB_FILE)  # закрыть явно: `with sqlite3.connect()` соединение не закрывает, и на
+    try:                                    # Windows открытый файл не дал бы очистить базу перед следующим тестом
         conn.execute("ALTER TABLE commitments DROP COLUMN seen_at")
+        conn.commit()
+    finally:
+        conn.close()
     store._initialized.clear()
     assert records.unseen_count() == 0
 

@@ -20,7 +20,7 @@ def connects(monkeypatch):
         return real()
 
     monkeypatch.setattr(store, "connect", counting)
-    store._local.conn = None
+    store.close_all()
     return calls
 
 
@@ -77,6 +77,7 @@ def test_error_rolls_back_and_connection_keeps_working():
     assert store.get_state("after") == 1 and store.get_state("dup") == 1
 
 
+@pytest.mark.skipif(os.name == "nt", reason="на Windows открытый файл базы не подменить — сначала store.close_all()")
 def test_reconnects_when_database_file_is_replaced(connects, tmp_path):
     store.set_state("which", "old")
     copy = tmp_path / "restored.db"
@@ -116,3 +117,39 @@ def test_threads_read_and_write_together():
         t.join()
     assert not errors
     assert [store.get_state(f"t{n}") for n in range(6)] == [49] * 6
+
+
+def test_close_all_releases_connections_of_every_thread(connects):
+    store.set_state("a", 1)
+    ready, go = threading.Event(), threading.Event()
+
+    def worker():  # поток держит своё постоянное соединение и ждёт
+        store.get_state("a")
+        ready.set()
+        go.wait(5)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    ready.wait(5)
+    assert len(store._open) == 2  # главный поток и рабочий
+    store.close_all()
+    assert not store._open  # файл базы свободен: на Windows его теперь можно удалить
+    go.set()
+    t.join()
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.remove(str(config.DB_FILE) + suffix)
+        except FileNotFoundError:
+            pass
+    store._initialized.clear()
+    store.set_state("b", 2)  # новая база с нуля, старое соединение не мешает
+    assert store.get_state("b") == 2 and store.get_state("a") is None
+
+
+def test_connections_of_finished_threads_are_closed():
+    store.close_all()
+    for _ in range(20):
+        t = threading.Thread(target=lambda: store.get_state("x"))
+        t.start()
+        t.join()
+    assert len(store._open) <= 1  # остаётся только последний: прежние закрыты при регистрации следующих

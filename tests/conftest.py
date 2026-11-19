@@ -1,3 +1,4 @@
+import gc
 import os
 import shutil
 import tempfile
@@ -20,6 +21,10 @@ def clean_home():
     for t in threading.enumerate():
         if t is not threading.main_thread() and not t.daemon:
             t.join(timeout=10)
+    # постоянные соединения store держат файл базы открытым, а на Windows открытый файл не удалить: rmtree молча
+    # оставит старую базу, и данные прошлого теста попадут в следующий (UNIQUE constraint failed, прогон по таймауту)
+    store.close_all()
+    gc.collect()  # соединение, которое тест открыл и не закрыл, живёт до сборки мусора и тоже держит файл
     for sub in ("data", "config", "secrets"):
         shutil.rmtree(_HOME / sub, ignore_errors=True)
     store._initialized.clear()
