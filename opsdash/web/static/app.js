@@ -1772,36 +1772,21 @@
     }, 1200);
   }
 
-  // --- «Офис»: тело вкладки перезапрашиваем, пока страница на экране: кто-то работает — каждые 3 с, иначе раз в 15 с.
-  // На скрытой вкладке не спрашиваем вовсе; открытые «История» и «Шаги» после обновления остаются открытыми
+  // --- «Офис»: доску перезапрашиваем, пока страница на экране: кто-то работает — каждые 3 с, иначе раз в 15 с.
+  // На скрытой вкладке не спрашиваем вовсе; раскрытые строки (details[data-key]) после обновления остаются раскрытыми
   var officeBox = document.querySelector("[data-office]");
   if (officeBox) {
-    // какие спойлеры офисов раскрыты — помним в браузере (только удобство: без хранилища все свёрнуты)
-    var remembered = {};
-    try { remembered = JSON.parse(localStorage.getItem("office-open") || "{}") || {}; } catch (e) { remembered = {}; }
-    Array.prototype.forEach.call(officeBox.querySelectorAll("details[data-remember]"), function (d) { if (remembered[d.dataset.key]) d.open = true; });
-    officeBox.addEventListener("toggle", function (e) {
-      var d = e.target;
-      if (!d.matches || !d.matches("details[data-remember]")) return;
-      remembered[d.dataset.key] = d.open;
-      try { localStorage.setItem("office-open", JSON.stringify(remembered)); } catch (err) { /* не запоминаем */ }
-    }, true);
-    // плашки офисов: показываем список выбранного офиса на месте — без перезагрузки, картинка остаётся как была.
-    // Адрес и запрос обновления (data-live) — уже с новым офисом, чтобы обновление не вернуло прежний
-    Array.prototype.forEach.call(document.querySelectorAll("[data-office-tab]"), function (tab) {
-      tab.addEventListener("click", function (e) {
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;  // в новой вкладке — как обычная ссылка
-        e.preventDefault();
-        var key = tab.dataset.officeTab;
-        Array.prototype.forEach.call(document.querySelectorAll("[data-office-tab]"), function (t) {
-          var on = t === tab;
-          t.classList.toggle("active", on);
-          if (on) t.setAttribute("aria-current", "true"); else t.removeAttribute("aria-current");
-        });
-        Array.prototype.forEach.call(officeBox.querySelectorAll(".office-group[data-key]"), function (g) { g.hidden = g.dataset.key !== "g-" + key; });
-        officeBox.dataset.live = "/office/live?o=" + encodeURIComponent(key);
-        try { history.replaceState(null, "", "?o=" + encodeURIComponent(key)); } catch (err) { /* адрес не меняем */ }
-      });
+    // фильтр по проекту: доска с выбранным проектом приходит сразу, без перезагрузки; адрес страницы — тот же,
+    // что у ссылки, чтобы обновление и F5 показывали выбранное
+    officeBox.addEventListener("click", function (e) {
+      var chip = e.target.closest && e.target.closest("[data-office-tab]");
+      if (!chip || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;  // в новой вкладке — как обычная ссылка
+      e.preventDefault();
+      var key = chip.dataset.officeTab;
+      Array.prototype.forEach.call(officeBox.querySelectorAll("[data-office-tab]"), function (t) { t.classList.toggle("on", t === chip); });
+      officeBox.dataset.live = "/office/live" + (key ? "?p=" + encodeURIComponent(key) : "");
+      try { history.replaceState(null, "", key ? "?p=" + encodeURIComponent(key) : location.pathname); } catch (err) { /* адрес не меняем */ }
+      officeRefresh();
     });
     var officeTimer = null;
     var officeActive = function () {

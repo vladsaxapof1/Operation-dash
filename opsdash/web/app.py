@@ -2685,27 +2685,63 @@ def journal(request: Request, kind: str = "", limit: int = 120, level: str = "")
 # --- офис ----------------------------------------------------------------------------
 
 @app.get("/office", response_class=HTMLResponse)
-def office_page(request: Request, o: str = ""):
-    """Офис целиком: PULSE и папки с Claude Code — одной картинкой, списками под ней. o — какой список раскрыть."""
+def office_page(request: Request, p: str = ""):
+    """Офис: доска сессий агентов в ваших папках (работают, ждут вас, закончили) и PULSE в фоне. p — один проект."""
     from opsdash import office
 
     settings = config.load_settings()
-    return render(request, "office.html", nav="office", snaps=office.everything(settings), open_key=o, settings=settings)
+    return render(request, "office.html", nav="office", b=office.board(settings, p), desks=office.pulse(settings),
+                  settings=settings)
 
 
 @app.get("/office/live", response_class=HTMLResponse)
-def office_live(request: Request, o: str = ""):
-    """Списки и данные картинки — страница подменяет их сама, пока открыта (app.js); o — какой офис выбран."""
+def office_live(request: Request, p: str = ""):
+    """Тело доски — страница подменяет его сама, пока открыта (app.js); p — выбранный проект."""
     from opsdash import office
 
-    return ui().TemplateResponse(request, "_office_body.html", {"snaps": office.everything(), "open_key": o})
+    settings = config.load_settings()
+    return ui().TemplateResponse(request, "_office_body.html", {"b": office.board(settings, p),
+                                                                 "desks": office.pulse(settings)})
 
 
 @app.get("/api/office")
-def office_api(o: str = ""):
+def office_api(p: str = ""):
     from opsdash import office
 
-    return office.snapshot(o) if o else {"offices": office.everything()}
+    settings = config.load_settings()
+    return {**office.board(settings, p), "pulse": office.pulse(settings)}
+
+
+@app.post("/office/resume")
+def office_resume(request: Request, sid: str = Form(...)):
+    """«Продолжить в Терминале»: сессия, начатая в терминале, открывается там же с `claude --resume`."""
+    from opsdash import office
+
+    try:
+        title = office.resume(sid)
+    except (ValueError, OSError) as e:
+        return back(request, err=f"Не открылось: {e}")
+    return back(request, f"Открыт Терминал с сессией «{title}»")
+
+
+@app.post("/office/dismiss")
+def office_dismiss(request: Request, sid: str = Form(...)):
+    """«Убрать» закончившую сессию с доски — до её нового хода."""
+    from opsdash import office
+
+    try:
+        c = office.dismiss(sid)
+    except ValueError as e:
+        return back(request, err=str(e))
+    return back(request, f"«{c['title']}» убрана с доски. Появится снова, если в ней будет новый ход")
+
+
+@app.post("/office/restore")
+def office_restore(request: Request):
+    from opsdash import office
+
+    n = office.restore()
+    return back(request, f"Вернули на доску: {n}" if n else "Убранных сессий нет")
 
 
 @app.post("/office/open")

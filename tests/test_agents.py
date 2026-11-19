@@ -117,8 +117,7 @@ def test_index_keeps_prompts_files_and_outcome(work, monkeypatch, settings_with)
 def test_office_still_shows_sessions_with_shared_parser(work):
     journals, root = work
     _kpi_session(journals, root, days=1)
-    snap = office.snapshot("f0")
-    s = snap["rooms"][0]["sessions"][0]
+    s = next(c for lane in office.board()["lanes"].values() for c in lane)
     assert s["title"] == "Сводка KPI продаж за сентябрь" and s["prompts"] == 3 and s["room"] == "Отчёты"
 
 
@@ -385,7 +384,7 @@ def test_link_finds_session_by_service_line_or_brief_file(work, monkeypatch):
     assert agents.show("ours")["title"] == "Сводка KPI"  # сессия сразу и в опыте агентов, название — без «# Задача:»
     assert path.name in str(agents.brief_path(agents.get(bid)))
     assert agents.link() == 0  # уже нашли — не перепривязываем
-    marked = {x["id"]: (x["task"] or {}).get("id") for x in office.snapshot("f0")["rooms"][0]["sessions"]}
+    marked = {x["id"]: (x["task"] or {}).get("id") for lane in office.board()["lanes"].values() for x in lane}
     assert marked == {"ours": cid, "file": other, "alien": None, "old": None}  # пометка «по задаче «…»» в «Офисе»
 
 

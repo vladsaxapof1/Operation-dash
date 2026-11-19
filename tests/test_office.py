@@ -1,4 +1,4 @@
-"""Раздел «Офис»: шаги и итоги фоновых заданий PULSE и сессии Claude Code в папках из настроек."""
+"""Раздел «Офис»: шаги и итоги фоновых заданий PULSE и доска сессий Claude Code и Codex в папках из настроек."""
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -76,7 +76,7 @@ def test_next_digest_time_from_schedule(settings_with):
     assert text.startswith(("утренний дайджест — ", "вечерний дайджест — ")) and ("09:00" in text or "18:30" in text)
 
 
-# --- офис в папке: сессии Claude Code --------------------------------------------------------------
+# --- доска: сессии Claude Code и Codex в папках ------------------------------------------------------
 
 def _line(kind, at, cwd, **extra):
     return {"type": kind, "timestamp": at, "cwd": cwd, "sessionId": "s", **extra}
@@ -89,6 +89,22 @@ def _write(path, lines):
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
 
+def _asked_and_answered(path, cwd, minutes=3, entry="claude-desktop", text="Сделай"):
+    _write(path, [_line("user", _ago(minutes=minutes), cwd, entrypoint=entry, message={"content": text}),
+                  _line("assistant", _ago(minutes=minutes - 1), cwd, message={"content": [{"type": "text", "text": "**Готово.** Отчёт в папке."}]})])
+
+
+def _cards(**kw) -> dict:
+    b = office.board(**kw)
+    return {c["id"]: c for lane in b["lanes"].values() for c in lane}
+
+
+def _app_session(app, cli, **rec):
+    (app / "u" / "w").mkdir(parents=True, exist_ok=True)
+    (app / "u" / "w" / f"local_{cli}.json").write_text(json.dumps({"sessionId": f"local_{cli}", "cliSessionId": cli, **rec},
+                                                                   ensure_ascii=False), encoding="utf-8")
+
+
 @pytest.fixture
 def claude_home(tmp_path, monkeypatch, settings_with):
     home = tmp_path / "claude"
@@ -96,12 +112,16 @@ def claude_home(tmp_path, monkeypatch, settings_with):
     for project in ("Проект А", "Личное", "Проект Б"):
         (root / project).mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))  # не читать настоящие треды Codex
     monkeypatch.setattr(office, "desktop_dir", lambda: tmp_path / "no-app")  # не читать сессии настоящего приложения
+    from opsdash import agents
+
+    monkeypatch.setattr(agents, "chatgpt_app", lambda: False)
     settings_with(office={"folders": [str(root)], "hide": ["личное"], "days": 7})
     return home / "projects" / "-work", root
 
 
-def test_folder_office_reads_sessions_by_project(claude_home):
+def test_board_puts_sessions_into_lanes(claude_home):
     journals, root = claude_home
     report = root / "Проект А" / "Отчёт.xlsx"
     report.write_text("x")
@@ -131,17 +151,18 @@ def test_folder_office_reads_sessions_by_project(claude_home):
     _write(journals / "d4.jsonl", [_line("user", _ago(minutes=5), "/elsewhere", message={"content": "Чужое"})])
     _write(journals / "e5.jsonl", [_line("user", _ago(days=20), cwd, message={"content": "Давнее"})])
 
-    snap = office.snapshot("f0")
-    assert snap["kind"] == "folder" and snap["name"] == "Работа"
-    rooms = {r["name"]: r for r in snap["rooms"]}
-    assert set(rooms) == {"Проект А", "Проект Б"}  # Проект А — по записанному файлу, хотя сессия шла в корне
-    a = rooms["Проект А"]["sessions"][0]
-    assert a["title"] == "Отчёт по продажам" and a["state"] == "waiting" and a["model"] == "claude-opus-5-5"
+    b = office.board()
+    assert [c["id"] for c in b["lanes"]["now"]] == ["b2"] and [c["id"] for c in b["lanes"]["you"]] == ["a1"]
+    assert not b["lanes"]["done"] and b["counts"]["all"] == 2
+    a = b["lanes"]["you"][0]
+    assert a["title"] == "Отчёт по продажам" and a["project"] == "Проект А"  # по записанному файлу, хотя сессия шла в корне
+    assert a["state_title"] == "ответил, ждёт вас" and a["said"] == "Готово, отчёт в папке." and a["model"] == "opus-5-5"
     assert [f["name"] for f in a["files"]] == ["Отчёт.xlsx"] and a["steps"][-1]["t"] == "Пишет «Отчёт.xlsx»"
-    b = rooms["Проект Б"]["sessions"][0]
-    assert b["state"] == "working" and b["steps"][-1]["t"] == "Сверяет итоги"
-    assert b["agents"][0]["title"] == "Сверить выгрузку" and b["agents"][0]["state"] == "working"
-    assert snap["counts"] == {"sessions": 2, "working": 1, "waiting": 1, "agents": 1, "agents_working": 1, "tools": 2}
+    w = b["lanes"]["now"][0]
+    assert w["step"] == "Сверяет итоги" and w["since"] and w["key"] == "Работа/Проект Б"
+    assert [a["title"] for a in w["agents_working"]] == ["Сверить выгрузку"]
+    assert {p["name"]: (p["now"], p["you"]) for p in b["projects"]} == {"Проект А": (0, 1), "Проект Б": (1, 0)}
+    assert b["projects"][0]["name"] == "Проект А"  # кто ждёт вас — первым в фильтре
 
     # дописали журнал — дочитываем только новое: команда закончилась, Claude ответил
     _write(journals / "b2.jsonl", [
@@ -149,8 +170,12 @@ def test_folder_office_reads_sessions_by_project(claude_home):
         _line("assistant", _ago(seconds=1), str(root / "Проект Б"), message={"content": [{"type": "text", "text": "Сошлось."}]}),
     ])
     (sub / "agent-x1.meta.json").write_text(json.dumps({"description": "Сверить выгрузку", "finished": True}))
-    b = next(r for r in office.snapshot("f0")["rooms"] if r["name"] == "Проект Б")["sessions"][0]
-    assert b["state"] == "waiting" and b["agents"][0]["state"] == "done"
+    w = _cards()["b2"]
+    assert w["lane"] == "you" and w["agents"][0]["state"] == "done" and not w["agents_working"]
+
+    one = office.board(project="Работа/Проект Б")  # фильтр по проекту
+    assert one["project"] == "Работа/Проект Б" and [c["id"] for lane in one["lanes"].values() for c in lane] == ["b2"]
+    assert office.board(project="нет такого")["project"] == ""
 
 
 def test_tool_without_answer_for_long_looks_like_permission_wait(claude_home):
@@ -160,22 +185,24 @@ def test_tool_without_answer_for_long_looks_like_permission_wait(claude_home):
         _line("assistant", _ago(minutes=11), str(root), message={"content": [
             {"type": "tool_use", "id": "t", "name": "Bash", "input": {"command": "rm old/*.csv"}}]}),
     ])
-    s = office.snapshot("f0")["rooms"][0]["sessions"][0]
-    assert s["state"] == "blocked" and s["steps"][-1]["t"] == "Выполняет команду rm"
+    s = _cards()["p"]
+    assert s["lane"] == "you" and s["state_title"] == "ждёт разрешения?" and s["steps"][-1]["t"] == "Выполняет команду rm"
 
 
-def test_office_pages_and_open_only_inside_office_folders(client, claude_home, monkeypatch):
+def test_office_page_is_a_board_and_opens_only_inside_office_folders(client, claude_home, monkeypatch):
     journals, root = claude_home
     _write(journals / "a.jsonl", [_line("user", _ago(minutes=1), str(root / "Проект А"), message={"content": "Привет"})])
-    assert "Секретарь" in client.get("/office").text
+    _asked_and_answered(journals / "z.jsonl", str(root / "Проект Б"), minutes=400, entry="cli")
     page = client.get("/office").text
-    assert "Проект А" in page and "Привет" in page
-    # плашки офисов — под картинкой, переключают список на месте (data-office-tab, app.js), картинку не трогают
-    assert page.index("<canvas") < page.index('data-office-tab="pulse"') < page.index('data-office-tab="f0"')
-    assert 'data-key="g-f0" hidden' in page and 'data-key="g-f0" hidden' not in client.get("/office?o=f0").text
-    assert "Проект А" in client.get("/office/live").text and "Секретарь" in client.get("/office/live").text
-    assert client.get("/api/office?o=pulse").json()["desks"][0]["key"] == "triage"
-    assert [o["kind"] for o in client.get("/api/office").json()["offices"]] == ["pulse", "folder"]
+    for part in ("Ждут вас", "Работают сейчас", "Закончили", "PULSE в фоне", "Секретарь", "Проект А", "Привет", "Новая сессия"):
+        assert part in page, part
+    assert "<canvas" not in page and "office.js" not in page and "data-office-json" not in page  # картинки офиса нет
+    assert 'data-office-tab="Работа/Проект А"' in page  # фильтр по проектам
+    assert 'href="claude://code/new?folder=' in page  # новая сессия в папке проекта
+    live = client.get("/office/live?p=Работа/Проект Б").text
+    assert "Привет" not in live and "Продолжить в Терминале" in live and 'data-office-active="0"' in live
+    api = client.get("/api/office").json()
+    assert api["pulse"][0]["key"] == "triage" and set(api["lanes"]) == {"now", "you", "done"}
 
     from opsdash.web import app as web
 
@@ -188,90 +215,169 @@ def test_office_pages_and_open_only_inside_office_folders(client, claude_home, m
     assert "err=" in r.headers["location"] and len(opened) == 1
 
 
-def test_scene_for_pulse_says_what_workers_do():
-    store.execute("INSERT INTO jobs(name, last_run, running) VALUES('triage', ?, 1)", (store.utcnow(),))
-    store.execute("INSERT INTO agent_runs(job, args, started, steps) VALUES('triage', '{}', ?, ?)",
-                  (store.utcnow(), json.dumps([{"t": "Ищет в переписке: «склад»", "at": store.utcnow()}])))
-    scene = office.snapshot("pulse")["scene"]
-    desks = {d["id"]: d for d in scene["desks"]}
-    assert len(desks) == 10 and desks["desk:triage"]["state"] == "working"
-    assert desks["desk:triage"]["say"] == "Ищет в переписке: «склад»" and desks["desk:triage"]["label"] == "Секретарь"
-    assert scene["board"][1] == "работают: 1"
+def test_office_page_without_folders_says_what_to_do(client, settings_with):
+    settings_with(office={"folders": []})
+    page = client.get("/office").text
+    assert "Добавьте папки, где вы работаете с Claude Code или Codex" in page and "Секретарь" in page
 
 
-def test_scene_for_folder_puts_busy_sessions_first_and_caps_desks(client, claude_home, monkeypatch):
+def test_classic_design_renders_the_same_board(client, claude_home, settings_with):
     journals, root = claude_home
-    monkeypatch.setattr(office, "SCENE_DESKS", 2)
-    for i in range(3):  # три давних сессии в «Проекте А» и одна, что ждёт ответа, в «Проекте Б»
-        _write(journals / f"old{i}.jsonl", [_line("user", _ago(hours=5 + i), str(root / "Проект А"), message={"content": f"Задача {i}"}),
-                                           _line("assistant", _ago(hours=5 + i), str(root / "Проект А"), message={"content": [{"type": "text", "text": "Готово"}]})])
-    _write(journals / "w.jsonl", [_line("user", _ago(minutes=3), str(root / "Проект Б"), message={"content": "Сверь цифры"}),
-                                  _line("assistant", _ago(minutes=2), str(root / "Проект Б"), message={"content": [{"type": "text", "text": "Сверил"}]})])
-    _write(journals / "old.jsonl", [_line("user", _ago(hours=30), str(root / "Проект Б"), message={"content": "Позавчерашнее"})])
-    scene = office.snapshot("f0")["scene"]
-    shown = [(z["name"], d["state"]) for z in scene["zones"] for d in z["desks"]]
-    assert ("Проект Б", "waiting") in shown and len(shown) == 2  # сессия старше суток — только в списке
-    assert scene["board"][-1] == "ещё в списке: 3"
-    page = client.get("/office").text  # один офис: PULSE и папка — на одной картинке, списками под ней
-    data = json.loads(page.split('data-office-json>')[1].split("</script>")[0])
-    assert [a["kind"] for a in data["areas"]] == ["pulse", "folder"]
-    assert 'data-obj="sess:w"' in page and 'data-obj="desk:triage"' in page and "/static/office.js" in page
-    assert page.count('class="office-group"') == 2
+    _write(journals / "a.jsonl", [_line("user", _ago(minutes=1), str(root / "Проект А"), message={"content": "Привет"})])
+    settings_with(web={"design": "classic"})
+    page = client.get("/office").text
+    assert "Работают сейчас" in page and "Привет" in page and 'class="topline"' in page and "<canvas" not in page
 
 
-def test_open_in_claude_link_and_pulse_own_runs_hidden(client, claude_home, tmp_path, monkeypatch):
+def test_open_in_claude_link_archive_and_pulse_own_runs_hidden(client, claude_home, tmp_path, monkeypatch):
     journals, root = claude_home
     from opsdash import config
 
     pulse_dir = root / "Пульт"  # PULSE лежит внутри папки офиса — его фоновые запуски не дублируем
     pulse_dir.mkdir()
     monkeypatch.setattr(config, "APP_DIR", pulse_dir)
+    other = root / "Проект Б" / "pulse-copy"  # другая установка PULSE (рабочая копия кода) — тоже служебное
+    (other / "opsdash").mkdir(parents=True)
+    (other / "opsdash" / "office.py").write_text("")
     app = tmp_path / "app-sessions"
     monkeypatch.setattr(office, "desktop_dir", lambda: app)
-    for local, cli, archived in (("local_aaa-1", "mine", False), ("local_bbb-2", "gone", True)):
-        (app / "u" / "w").mkdir(parents=True, exist_ok=True)
-        (app / "u" / "w" / f"{local}.json").write_text(json.dumps({"sessionId": local, "cliSessionId": cli, "isArchived": archived}))
-    answered = [{"type": "text", "text": "Готово"}]
-    _write(journals / "mine.jsonl", [_line("user", _ago(minutes=9), str(root / "Проект А"), entrypoint="claude-desktop", message={"content": "Сделай"}),
-                                     _line("assistant", _ago(minutes=8), str(root / "Проект А"), message={"content": answered})])
+    _app_session(app, "mine", title="Отчёт для правления", isStarred=True)
+    _app_session(app, "gone", isArchived=True)
+    _asked_and_answered(journals / "mine.jsonl", str(root / "Проект А"), minutes=9)
     _write(journals / "gone.jsonl", [_line("user", _ago(minutes=9), str(root / "Проект Б"), entrypoint="claude-desktop", message={"content": "Старое"})])
     _write(journals / "bg.jsonl", [_line("user", _ago(minutes=5), str(pulse_dir), entrypoint="sdk-cli", message={"content": "Разбери сообщения"})])
-    _write(journals / "sdk.jsonl", [_line("user", _ago(minutes=9), str(root / "Проект Б"), entrypoint="sdk-cli", message={"content": "Скрипт"}),
-                                    _line("assistant", _ago(minutes=8), str(root / "Проект Б"), message={"content": answered})])
-    sessions = {s["id"]: s for r in office.snapshot("f0")["rooms"] for s in r["sessions"]}
-    assert "bg" not in sessions  # разбор сообщений PULSE — в офисе PULSE, не в папке
-    assert sessions["mine"]["link"] == "claude://code/continue?session=local_aaa-1" and sessions["mine"]["state"] == "waiting"
-    assert sessions["gone"]["link"] == ""  # в приложении — в архиве
-    assert sessions["sdk"]["state"] == "rest"  # запуск без человека ответа не ждёт
+    _write(journals / "bg2.jsonl", [_line("user", _ago(minutes=5), str(other), entrypoint="sdk-cli", message={"content": "Дайджест"})])
+    _asked_and_answered(journals / "sdk.jsonl", str(root / "Проект Б"), minutes=9, entry="sdk-cli")
+    b = office.board()
+    cards = {c["id"]: c for lane in b["lanes"].values() for c in lane}
+    assert set(cards) == {"mine"}  # PULSE и его копия — в «PULSE в фоне»; запуск без человека после работы не нужен
+    assert b["counts"]["archived"] == 1  # в архиве приложения — не показываем, только считаем
+    mine = cards["mine"]
+    assert mine["link"] == "claude://code/continue?session=local_mine" and not mine["resume"]
+    assert mine["title"] == "Отчёт для правления" and mine["starred"] and mine["lane"] == "you"
     page = client.get("/office").text
-    assert 'href="claude://code/continue?session=local_aaa-1"' in page and "Открыть в Claude" in page
+    assert 'href="claude://code/continue?session=local_mine"' in page and "Открыть в Claude" in page
 
 
-def test_waiting_follows_the_claude_app(claude_home, tmp_path, monkeypatch):
-    """«Ждёт ответа» — только если приложение Claude считает, что нужно действие человека, и вы ещё не открывали
-    сессию после ответа; всё готово или уже просмотрено — сессия просто не активна."""
+def test_lanes_follow_the_claude_app(claude_home, tmp_path, monkeypatch):
+    """«Ждут вас» — когда приложение Claude считает, что нужно действие человека (даже если сессию уже открывали),
+    или Claude ответил, а вы ещё не смотрели; всё готово или просмотрено — «Закончили» с итогом хода одной строкой."""
     journals, root = claude_home
     app = tmp_path / "app"
     monkeypatch.setattr(office, "desktop_dir", lambda: app)
     now_ms = datetime.now(timezone.utc).timestamp() * 1000
     cases = {  # журнал → (итог хода по оценке приложения, открывали ли после ответа)
-        "seen": ("blocked", now_ms), "fresh": ("blocked", 0), "done": ("completed", 0), "old": ("blocked", 0)}
+        "seen": ("blocked", now_ms), "fresh": ("blocked", 0), "done": ("completed", 0), "review": ("review_ready", now_ms),
+        "old": ("blocked", 0)}
     for cli, (status, focused) in cases.items():
-        rec = {"sessionId": f"local_{cli}", "cliSessionId": cli, "lastActivityAt": now_ms - 60000, "lastFocusedAt": focused,
-               "lastAssistantUuid": "u1" if cli != "old" else "u2", "postTurnSummaryFor": "u1",
-               "postTurnSummary": {"status_category": status, "needs_action": "Создать MR и отправить коллеге"}}
-        (app / "x" / "y").mkdir(parents=True, exist_ok=True)
-        (app / "x" / "y" / f"local_{cli}.json").write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
-        _write(journals / f"{cli}.jsonl", [_line("user", _ago(minutes=3), str(root / "Проект А"), entrypoint="claude-desktop", message={"content": "Сделай"}),
-                                          _line("assistant", _ago(minutes=2), str(root / "Проект А"), message={"content": [{"type": "text", "text": "Готово"}]})])
-    snap = office.snapshot("f0")
-    got = {s["id"]: (s["state"], s["needs"]) for r in snap["rooms"] for s in r["sessions"]}
-    assert got["seen"] == ("rest", "Создать MR и отправить коллеге")  # уже открывали — не висит, но что нужно — видно
-    assert got["fresh"] == ("waiting", "Создать MR и отправить коллеге")
-    assert got["done"][0] == "rest"
-    assert got["old"] == ("waiting", "")  # итог от прошлого хода — не верим, решает журнал
-    say = {d["id"]: d["say"] for z in snap["scene"]["zones"] for d in z["desks"]}
-    assert say["sess:fresh"] == "Нужно от вас: Создать MR и отправить коллеге"
+        _app_session(app, cli, lastActivityAt=now_ms - 60000, lastFocusedAt=focused,
+                     lastAssistantUuid="u1" if cli != "old" else "u2", postTurnSummaryFor="u1",
+                     postTurnSummary={"status_category": status, "needs_action": "Создать MR и отправить коллеге",
+                                      "status_detail": "PULSE 2.0.61 выкатил, тесты зелёные"})
+        _asked_and_answered(journals / f"{cli}.jsonl", str(root / "Проект А"))
+    b = office.board()
+    got = {c["id"]: (c["lane"], c["state_title"], c["needs"], c["seen"]) for lane in b["lanes"].values() for c in lane}
+    assert got["seen"] == ("you", "нужно от вас", "Создать MR и отправить коллеге", True)
+    assert got["fresh"] == ("you", "нужно от вас", "Создать MR и отправить коллеге", False)
+    assert got["done"] == ("done", "готово", "", False)
+    assert got["review"] == ("done", "на проверку", "", True)
+    assert got["old"] == ("you", "ответил, ждёт вас", "", False)  # итог от прошлого хода — не верим, решает журнал
+    done = _cards()["done"]
+    assert done["detail"] == "PULSE 2.0.61 выкатил, тесты зелёные" and done["day"] == "Сегодня"
+    assert _cards()["old"]["detail"] == ""
+    assert [c["id"] for c in b["lanes"]["done"]] == ["done", "review"]  # не открывали — сверху
+    assert b["counts"]["unseen"] == 1
+
+
+def test_dismiss_hides_finished_session_until_its_next_turn(client, claude_home, tmp_path, monkeypatch):
+    journals, root = claude_home
+    app = tmp_path / "app"
+    monkeypatch.setattr(office, "desktop_dir", lambda: app)
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    _app_session(app, "f", lastActivityAt=now_ms - 60000, lastFocusedAt=now_ms, lastAssistantUuid="u1",
+                 postTurnSummaryFor="u1", postTurnSummary={"status_category": "completed"})
+    _asked_and_answered(journals / "f.jsonl", str(root / "Проект А"), minutes=50)
+    _write(journals / "w.jsonl", [_line("user", _ago(minutes=1), str(root / "Проект Б"), message={"content": "Работай"})])
+    r = client.post("/office/dismiss", data={"sid": "w"}, follow_redirects=False)  # работающую — нельзя
+    assert "err=" in r.headers["location"]
+    r = client.post("/office/dismiss", data={"sid": "f"}, follow_redirects=False)
+    assert r.status_code == 303 and "msg=" in r.headers["location"]
+    b = office.board()
+    assert "f" not in [c["id"] for c in b["lanes"]["done"]] and b["counts"]["dismissed"] == 1
+    assert "Убрано с доски: 1" in client.get("/office/live").text
+    # новый ход — снова на доске
+    _asked_and_answered(journals / "f.jsonl", str(root / "Проект А"), minutes=2, text="Ещё одно")
+    assert "f" in _cards() and office.board()["counts"]["dismissed"] == 0
+    office.dismiss("f")
+    r = client.post("/office/restore", follow_redirects=False)
+    assert "msg=" in r.headers["location"] and "f" in _cards() and not store.get_state("office_dismissed")
+
+
+def test_resume_in_terminal_for_sessions_started_there(client, claude_home, monkeypatch):
+    journals, root = claude_home
+    from opsdash import brain
+
+    cwd = root / "Проект Б"
+    _asked_and_answered(journals / "t1.jsonl", str(cwd), minutes=300, entry="cli")
+    c = _cards()["t1"]
+    assert c["link"] == "" and c["resume"] and c["lane"] == "done"
+    ran = []
+    monkeypatch.setattr(office, "_terminal", lambda folder, cmd: ran.append((folder, cmd)))
+    monkeypatch.setattr(brain, "find_claude", lambda settings=None: "/opt/claude")
+    r = client.post("/office/resume", data={"sid": "t1"}, follow_redirects=False)
+    assert "msg=" in r.headers["location"] and ran == [(str(cwd), ["/opt/claude", "--resume", "t1"])]
+    r = client.post("/office/resume", data={"sid": "../../etc"}, follow_redirects=False)  # только сессии из папок «Офиса»
+    assert "err=" in r.headers["location"] and len(ran) == 1
+    monkeypatch.setattr(brain, "find_claude", lambda settings=None: None)
+    r = client.post("/office/resume", data={"sid": "t1"}, follow_redirects=False)
+    assert "err=" in r.headers["location"] and "Claude%20Code" in r.headers["location"]
+
+
+def test_terminal_window_on_mac_runs_command_in_session_folder(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(office.sys, "platform", "darwin")
+    monkeypatch.setattr(office.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    office._terminal(str(tmp_path / "Мой проект"), ["/opt/claude", "--resume", "abc"])
+    script = calls[0][1]
+    assert calls[0][0] == "open" and script.endswith("resume.command")
+    text = open(script, encoding="utf-8").read()
+    assert f"cd '{tmp_path / 'Мой проект'}' || exit 1" in text and "exec /opt/claude --resume abc" in text
+
+
+def test_worktree_session_belongs_to_its_project(claude_home):
+    journals, root = claude_home
+    wt = root / ".claude" / "worktrees" / "feature-x"
+    wt.mkdir(parents=True)
+    _asked_and_answered(journals / "wt.jsonl", str(wt), minutes=5)
+    c = _cards()["wt"]
+    assert c["project"] == "Работа" and c["room"] == "" and c["worktree"] == "feature-x"
+
+
+def test_codex_sessions_on_the_board(claude_home, tmp_path, monkeypatch):
+    from opsdash import agents
+
+    journals, root = claude_home
+    day = tmp_path / "codex" / "sessions" / "2026" / "11" / "19"
+    day.mkdir(parents=True)
+    tid = "019a0000-1111-2222-3333-444455556666"
+    j = day / f"rollout-2026-11-19T10-00-00-{tid}.jsonl"
+    _write(j, [{"type": "session_meta", "timestamp": _ago(minutes=20),
+                "payload": {"id": tid, "cwd": str(root / "Проект А"), "source": "vscode", "thread_source": "user"}},
+               {"type": "response_item", "timestamp": _ago(minutes=20),
+                "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Сверь выгрузку"}]}},
+               {"type": "event_msg", "timestamp": _ago(minutes=19), "payload": {"type": "task_complete"}},
+               {"type": "response_item", "timestamp": _ago(minutes=19),
+                "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Сверил, расхождений нет"}]}}])
+    parsed = []
+    real = agents._codex_parse
+    monkeypatch.setattr(agents, "_codex_parse", lambda path: parsed.append(path) or real(path))
+    c = _cards()[f"codex-{tid}"]
+    assert c["engine"] == "codex" and c["project"] == "Проект А" and c["said"] == "Сверил, расхождений нет"
+    assert c["link"] == "" and c["resume"]  # без приложения ChatGPT — Codex CLI в Терминале
+    _cards()
+    assert len(parsed) == 1  # неизменившийся журнал не перечитываем
+    monkeypatch.setattr(agents, "chatgpt_app", lambda: True)
+    assert _cards()[f"codex-{tid}"]["link"] == f"codex://threads/{tid}"
 
 
 def test_office_settings_saved(client):

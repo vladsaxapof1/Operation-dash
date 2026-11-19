@@ -1,144 +1,174 @@
-{#- списки «Офиса» под картинкой — по офису на спойлер; страница перезапрашивает их сама (/office/live, app.js),
-    открытые спойлеры, «История» и «Шаги» не сворачиваются -#}
-{% set CHIP = {"working": "acc", "queued": "warn", "error": "bad", "waiting": "warn", "blocked": "warn", "done": "ok"} %}
-{% macro state(st, title) -%}
-<span class="chip {{ CHIP.get(st, '') }}">{% if st == 'working' %}<span class="ask-dots" aria-hidden="true"><i></i><i></i><i></i></span>{% endif %}{{ title }}</span>
+{#- Тело доски «Офиса» (office.html, v3/office.html — один на оба дизайна): фильтр по проектам, «Ждут вас»,
+    «Работают сейчас», «Закончили» и справа «PULSE в фоне». Страница перезапрашивает этот кусок сама (/office/live,
+    app.js); раскрытые строки (details[data-key]) после обновления остаются раскрытыми. Стили: v3-system.css (новый
+    дизайн) и style.css (классический) -#}
+{% set L = b.lanes %}
+{% macro where(c) -%}
+<span class="of-where">{{ c.project }}{% if c.worktree %} <span class="of-wt" title="Рабочая копия проекта (worktree)">{{ c.worktree }}</span>{% endif %}{% if c.engine == 'codex' %} <span class="of-wt">Codex</span>{% endif %}</span>
 {%- endmacro %}
-{% macro steps(items, n=5) -%}
-{% if items %}<ol class="office-steps">{% for s in items[-n:] %}<li{% if loop.last %} class="last"{% endif %}>{{ s.t }}</li>{% endfor %}</ol>{% endif %}
+{% macro open_btn(c, primary=False) -%}
+{% if c.link %}<a class="btn{{ ' primary' if primary }}" href="{{ c.link }}" title="Открыть эту сессию в приложении {{ 'ChatGPT' if c.engine == 'codex' else 'Claude' }}">Открыть в {{ 'Codex' if c.engine == 'codex' else 'Claude' }}</a>
+{%- elif c.resume %}<form class="inline" method="post" action="/office/resume" data-busy="Открываю…"><input type="hidden" name="sid" value="{{ c.id }}"><button class="btn{{ ' primary' if primary }}" title="Окно Терминала в папке сессии: {{ 'codex resume' if c.engine == 'codex' else 'claude --resume' }}">Продолжить в Терминале</button></form>{% endif %}
 {%- endmacro %}
-{% macro open_file(f, label=None) -%}
-<form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ f.path }}"><button class="office-file" title="{{ f.rel }}">{{ label or f.name }}</button></form>
+{% macro steps(items) -%}
+{% if items %}<ol class="sy-steps-l">{% for s in items %}<li{% if loop.last %} class="last"{% endif %}>{{ s.t }}</li>{% endfor %}</ol>{% endif %}
+{%- endmacro %}
+{% macro files(c) -%}
+{% if c.files %}<div class="sy-files"><span class="sy-cap">Сделала:</span> {% for f in c.files %}<form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ f.path }}"><button class="office-file" title="{{ f.rel }}">{{ f.name }}</button></form>{% endfor %}</div>{% endif %}
+{%- endmacro %}
+{% macro more(c) -%}
+{#- подробности сессии: что ещё сказала, сделанные файлы, субагенты, задача PULSE, папка -#}
+<div class="of-more-b">
+  {% if c.detail and c.said and c.said != c.detail %}<p class="of-said">{{ c.said }}</p>{% endif %}
+  {% if c.steps and c.lane != 'now' %}{{ steps(c.steps[-4:]) }}{% endif %}
+  {{ files(c) }}
+  {% if c.agents %}<ul class="sy-agents">{% for a in c.agents[:6] %}<li><span class="sy-st {{ 'run' if a.state == 'working' else 'no' }}"><i></i><span>{{ a.title }}</span></span>{% if a.state == 'working' and a.steps %} <span class="sy-cap">· {{ a.steps[-1].t }}</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
+  <div class="of-acts">
+    {{ open_btn(c) }}
+    {% if c.task %}<a class="btn" href="/commitments?task={{ c.task.id }}">Задача «{{ c.task.headline | truncate(40, True, '…') }}»</a>{% endif %}
+    <form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ c.cwd }}"><input type="hidden" name="reveal" value="1"><button class="btn" title="{{ c.cwd }}">Папка</button></form>
+    {% if c.lane == 'done' %}<form class="inline" method="post" action="/office/dismiss"><input type="hidden" name="sid" value="{{ c.id }}"><button class="btn" title="Убрать с доски, пока в сессии нет нового хода. В приложении она останется">Убрать</button></form>{% endif %}
+    <span class="sy-cap">{{ c.prompts }} {{ plural(c.prompts, 'вопрос', 'вопроса', 'вопросов') }}, {{ c.tools }} {{ plural(c.tools, 'действие', 'действия', 'действий') }}{% if c.model %}, {{ c.model }}{% endif %}; начата {{ c.first | local }}</span>
+  </div>
+</div>
+{%- endmacro %}
+{% macro done_row(c) -%}
+<details class="of-row{{ ' seen' if c.seen }}" data-key="d-{{ c.id }}">
+  <summary>
+    <span class="of-dot" {% if not c.seen %}title="Вы ещё не открывали сессию после этого ответа"{% endif %}></span>
+    <span class="of-rt"><b class="sy-ell">{{ c.title }}</b><span class="of-m sy-ell">{{ where(c) }}</span></span>
+    <span class="of-rr" title="{{ c.detail or c.said }}">{% if c.status == 'review_ready' or not (c.detail or c.said) %}<span class="of-k">{{ c.state_title | capitalize }}.</span> {% endif %}{{ c.detail or c.said }}</span>
+    <span class="of-rtm">{{ (c.last | ago) if not c.seen else (c.last | local('%H:%M')) }}</span>
+    <span class="of-ra">
+      {%- if c.link %}<a class="of-ghost" href="{{ c.link }}">Открыть</a>{% endif -%}
+      <form class="inline" method="post" action="/office/dismiss"><input type="hidden" name="sid" value="{{ c.id }}"><button class="of-ghost" title="Убрать с доски, пока в сессии нет нового хода. В приложении она останется">Убрать</button></form>
+    </span>
+  </summary>
+  {{ more(c) }}
+</details>
 {%- endmacro %}
 
-{% set busy = namespace(n=0) %}
-{% for snap in snaps %}{% set busy.n = busy.n + ((snap.desks | selectattr('state', 'equalto', 'working') | list | length) if snap.kind == 'pulse' else snap.counts.working) %}{% endfor %}
-<div data-office-active="{{ 1 if busy.n else 0 }}" hidden></div>
-{#- картинка офиса (static/office.js) берёт, что рисовать, отсюда — обновляется вместе с карточками; это данные, не скрипт #}
-<script type="application/json" data-office-json>{{ {"areas": snaps | map(attribute='scene') | list} | tojson }}</script>
-{% set selected = open_key or (snaps[0].key if snaps else '') %}
-{% for snap in snaps %}
-<section class="office-group" data-key="g-{{ snap.key }}"{% if snap.key != selected %} hidden{% endif %}>
-  <div class="office-group-b">
-{% if snap.kind == 'pulse' %}
-<section class="card agents">
-  <div class="table-wrap">
-  <table class="t">
-    <thead><tr><th>Агент</th><th>Что делает</th><th>Сейчас</th><th></th></tr></thead>
-    <tbody>
-    {% for d in snap.desks %}
-    <tr class="{{ 'busy' if d.state == 'working' }}">
-      <td class="nowrap">{{ d.title }}</td>
-      <td class="muted">{{ d.what }}
-        {% if d.history %}<details class="desk-hist" data-key="th-{{ d.key }}"><summary>история · {{ d.history | length }}</summary>
-          <ul>{% for r in d.history[:6] %}<li><span class="muted small nowrap">{{ r.started | local('%d.%m %H:%M') }}</span> {% if r.link %}<a href="{{ r.link }}">{{ r.title or r.what }}</a>{% else %}{{ r.title or r.what }}{% endif %}{% if r.status == 'error' %} <span class="bad-text small">ошибка</span>{% endif %}</li>{% endfor %}</ul></details>{% endif %}</td>
-      <td>{% if d.state == 'working' %}<span class="st acc"><span class="dot acc"></span>{{ (d.current.what if d.current else 'работает') }}{% if d.detail %} — {{ d.detail }}{% endif %}</span>
-        {%- elif d.state == 'queued' %}<span class="st warn"><span class="dot warn"></span>в очереди</span>
-        {%- elif d.state == 'error' %}<span class="st bad"><span class="dot bad"></span>ошибка{% if d.last and d.last.result %}: {{ d.last.result | truncate(80, True, '…') }}{% endif %}</span>
-        {%- elif d.archived %}<span class="muted">в архиве вместе с разделом · <a href="/settings?tab=archive">включить</a></span>
-        {%- elif d.off %}<span class="muted">{{ d.off }}</span>
-        {%- else %}<span class="muted">свободен{% if d.next %} · {{ d.next }}{% elif d.last %} · {{ d.last.finished | ago }}{% endif %}</span>{% endif %}</td>
-      <td class="right nowrap">{% if d.run and d.state not in ('working', 'queued') %}{% set job, label = d.run[0] %}<form class="inline" method="post" action="/jobs/run" data-busy="Запускаю…"><input type="hidden" name="name" value="{{ job }}"><button class="btn sm">{{ label }}</button></form>
-        {%- elif d.state == 'working' %}<span class="muted small">идёт…</span>
-        {%- elif d.link and not d.archived %}<a class="small" href="{{ d.link[0] }}">{{ d.link[1] }} →</a>{% endif %}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+{%- set desks_busy = desks | selectattr('state', 'equalto', 'working') | list | length %}
+<div data-office-active="{{ 1 if L.now or desks_busy else 0 }}" hidden></div>
+{% if b.projects | length > 1 %}
+<nav class="of-chips" aria-label="Проекты">
+  <a class="of-chip{{ ' on' if not b.project }}" href="/office" data-office-tab="">Все <span class="n">{{ b.counts.all }}</span></a>
+  {% for p in b.projects %}<a class="of-chip{{ ' on' if b.project == p.key }}" href="/office?p={{ p.key | urlencode }}" data-office-tab="{{ p.key }}" title="{{ p.path }}">{{ p.name }}{% if p.you %} <span class="w" title="Ждут вас">{{ p.you }}</span>{% endif %}{% if p.now %} <span class="a" title="Работают">{{ p.now }}</span>{% endif %} <span class="n">{{ p.now + p.you + p.done }}</span></a>{% endfor %}
+</nav>
+{% endif %}
+
+<div class="of-grid">
+<div class="of-main">
+{% if not b.folders %}
+  <div class="of-empty big">
+    <b>Добавьте папки, где вы работаете с Claude Code или Codex</b>
+    <span>Здесь появятся их сессии: какие работают, какие ждут вашего ответа и что уже сделано. PULSE только читает журналы сессий, в папки ничего не ставит.</span>
+    <a class="btn primary" href="/settings?tab=office">Выбрать папки</a>
   </div>
-</section>
-<div class="office-grid" hidden>
-  {% for d in snap.desks %}
-  <section class="card desk desk-{{ d.state }}" data-obj="desk:{{ d.key }}">
-    <div class="desk-h">
-      <div><div class="desk-title">{{ d.title }}</div><div class="muted small">{{ d.what }}</div></div>
-      {{ state(d.state, d.state_title) }}
+{% else %}
+  {% for f in b.folders if not f.exists %}<div class="alert">Папки «{{ f.path }}» нет. Проверьте путь в <a href="/settings?tab=office">Настройки → Офис</a>.</div>{% endfor %}
+
+  <section class="of-sec" aria-label="Ждут вас">
+    <div class="of-h"><h2>Ждут вас</h2><span class="c{{ ' w' if L.you }}">{{ L.you | length }}</span></div>
+    {% if L.you %}
+    <div class="of-box you">
+      {% for c in L.you %}
+      <article class="of-ask">
+        <div class="of-ask-b">
+          <div class="of-who"><b class="of-t">{{ c.title }}</b><span class="of-m">{{ where(c) }}, {{ c.last | ago }}</span></div>
+          <p class="of-q">{% if c.needs %}{{ c.needs }}{% else %}<span class="of-k">{{ c.state_title | capitalize }}.</span> {{ c.detail or c.said }}{% endif %}</p>
+          {% if c.task %}<a class="of-m of-task" href="/commitments?task={{ c.task.id }}">По задаче «{{ c.task.headline }}»</a>{% endif %}
+        </div>
+        <div class="of-ask-a">{{ open_btn(c, True) }}</div>
+      </article>
+      {% endfor %}
     </div>
-    {% if d.current %}
-    <div class="desk-now">
-      <div class="desk-now-h">{{ d.current.what }}{% if d.detail %} — {{ d.detail }}{% endif %}{% if d.current.started %} <span class="muted small">· с {{ d.current.started | local('%H:%M') }}</span>{% endif %}</div>
-      {{ steps(d.current.steps) }}
+    {% else %}<div class="of-empty">Никто не ждёт вашего ответа</div>{% endif %}
+  </section>
+
+  <section class="of-sec" aria-label="Работают сейчас">
+    <div class="of-h"><h2>Работают сейчас</h2><span class="c">{{ L.now | length }}</span></div>
+    {% if L.now %}
+    <div class="of-box now">
+      {% for c in L.now %}
+      <details class="of-run" data-key="r-{{ c.id }}">
+        <summary>
+          <span class="of-rt"><b class="of-t">{{ c.title }}</b><span class="of-m">{{ where(c) }}</span></span>
+          <span class="of-rs"><span class="of-live"><i></i><span>{{ c.step or 'Думает' }}</span></span>
+            <span class="of-m">ход идёт {{ c.since or 'только начался' }}{% if c.agents_working %}, субагентов работает: {{ c.agents_working | length }}{% endif %}</span></span>
+          <span class="of-ra">{{ open_btn(c) }}</span>
+        </summary>
+        <div class="of-more-b">
+          {{ steps(c.steps) }}
+          {% if c.agents_working %}<ul class="sy-agents">{% for a in c.agents_working %}<li><span class="sy-st run"><i></i><span>{{ a.title }}</span></span>{% if a.steps %} <span class="sy-cap">· {{ a.steps[-1].t }}</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
+          {{ files(c) }}
+          <div class="of-acts">
+            {% if c.task %}<a class="btn" href="/commitments?task={{ c.task.id }}">Задача «{{ c.task.headline | truncate(40, True, '…') }}»</a>{% endif %}
+            <form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ c.cwd }}"><input type="hidden" name="reveal" value="1"><button class="btn" title="{{ c.cwd }}">Папка</button></form>
+            <span class="sy-cap">{{ c.tools }} {{ plural(c.tools, 'действие', 'действия', 'действий') }}{% if c.model %}, {{ c.model }}{% endif %}; начата {{ c.first | local }}</span>
+          </div>
+        </div>
+      </details>
+      {% endfor %}
     </div>
-    {% endif %}
-    {% if d.sources %}
-    <ul class="desk-sources">
-      {% for s in d.sources %}<li><span>{{ s.title }}</span> <span class="muted small">{% if s.running %}забирает…{% else %}{{ s.last | ago }}{% endif %}</span>{% if s.error %} <span class="chip bad" title="{{ s.error }}">ошибка</span>{% endif %}</li>{% endfor %}
-    </ul>
-    {% elif d.last %}
-    <div class="desk-last">
-      <div class="muted small">Последний раз — {{ d.last.finished | ago }}{% if d.last.duration %}, за {{ d.last.duration }}{% endif %}</div>
-      <div>{% if d.last.link %}<a href="{{ d.last.link }}">{{ d.last.title or d.last.what }}</a>{% else %}{{ d.last.title or d.last.what }}{% endif %}</div>
-      {% if d.last.text %}<div class="small">{{ d.last.text }}</div>{% elif not d.last.title and d.last.result %}<div class="small muted">{{ d.last.result }}</div>{% endif %}
+    {% else %}<div class="of-empty">Сейчас никто не работает</div>{% endif %}
+  </section>
+
+  <section class="of-sec" aria-label="Закончили">
+    <div class="of-h"><h2>Закончили</h2><span class="c">{{ L.done | length }}{% if b.counts.unseen %}, не открывали {{ b.counts.unseen }}{% endif %}</span></div>
+    {% if L.done %}
+    <div class="of-box done">
+      {% set grp = namespace(v='') %}
+      {% for c in L.done %}
+      {% if loop.index == 31 %}<details class="of-rest" data-key="done-rest"><summary>Показать ещё {{ L.done | length - 30 }}</summary>{% endif %}
+      {% set g = 'new' if not c.seen else c.day %}
+      {% if g != grp.v %}<div class="of-day">{{ 'Новое, вы ещё не открывали' if g == 'new' else g }}</div>{% set grp.v = g %}{% endif %}
+      {{ done_row(c) }}
+      {% if loop.last and loop.length > 30 %}</details>{% endif %}
+      {% endfor %}
     </div>
-    {% elif not d.current %}
-    <div class="muted small desk-last">{{ d.off or 'Ещё не работал' }}</div>
-    {% endif %}
-    <div class="desk-foot">
-      <span class="muted small">{% if d.next %}Дальше: {{ d.next }}{% endif %}</span>
-      <span class="desk-actions">
-        {% for job, label in d.run %}<form class="inline" method="post" action="/jobs/run" data-busy="Запускаю…"><input type="hidden" name="name" value="{{ job }}"><button class="btn sm"{% if d.state in ('working', 'queued') %} disabled{% endif %}>{{ label }}</button></form>{% endfor %}
-        {% if d.link %}<a class="btn sm ghost" href="{{ d.link[0] }}">{{ d.link[1] }}</a>{% endif %}
-      </span>
+    {% else %}<div class="of-empty">За {{ b.days }} {{ plural(b.days, 'день', 'дня', 'дней') }} ничего не закончилось</div>{% endif %}
+    {% if b.counts.dismissed or b.counts.archived %}
+    <div class="of-foot">
+      {% if b.counts.dismissed %}Убрано с доски: {{ b.counts.dismissed }}. <form class="inline" method="post" action="/office/restore"><button class="of-link">Вернуть</button></form>{% endif %}
+      {% if b.counts.archived %}В архиве приложения Claude: {{ b.counts.archived }}, их доска не показывает.{% endif %}
     </div>
-    {% if d.history %}
-    <details class="desk-hist" data-key="h-{{ d.key }}">
-      <summary>История · {{ d.history | length }}</summary>
-      <ul>
-        {% for r in d.history %}
-        <li>
-          <div><span class="muted small nowrap">{{ r.started | local('%d.%m %H:%M') }}</span>
-            {% if r.link %}<a href="{{ r.link }}">{{ r.title or r.what }}</a>{% else %}{{ r.title or r.what }}{% endif %}
-            {% if r.status == 'error' %}<span class="chip bad">ошибка</span>{% endif %}
-            {% if r.duration %}<span class="muted small">· {{ r.duration }}</span>{% endif %}</div>
-          {% if r.text or (not r.title and r.result) %}<div class="small muted">{{ r.text or r.result }}</div>{% endif %}
-          {% if r.steps %}<details class="office-more" data-key="r-{{ r.id }}"><summary>Что делал · {{ r.steps | length }}</summary>{{ steps(r.steps, 200) }}</details>{% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-    </details>
     {% endif %}
   </section>
-  {% endfor %}
+{% endif %}
 </div>
 
-{% else %}
-{% if not snap.exists %}<section class="card"><div class="card-b empty">Папки «{{ snap.path }}» нет — проверьте путь в <a href="/settings?tab=office">Настройки → Офис</a>.</div></section>{% endif %}
-{% for room in snap.rooms %}
-<section class="card room">
-  <div class="card-h">
-    <h2>{{ room.name }} <span class="muted small">· {{ room.sessions | length }} {{ plural(room.sessions | length, 'сессия', 'сессии', 'сессий') }} за {{ snap.days }} дн.</span></h2>
-    <span class="desk-actions">
-      {% if room.passport %}<form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ room.passport }}"><button class="btn sm">Паспорт проекта</button></form>{% endif %}
-      <form class="inline" method="post" action="/office/open"><input type="hidden" name="path" value="{{ room.path }}"><input type="hidden" name="reveal" value="1"><button class="btn sm">Папка</button></form>
-    </span>
-  </div>
-  <div class="card-b room-sessions">
-    {% for s in room.sessions %}
-    {% if loop.index == 4 %}<details class="office-more room-rest" data-key="rest-{{ snap.key }}-{{ room.name }}"><summary>Ещё {{ room.sessions | length - 3 }}</summary>{% endif %}
-    <div class="sess sess-{{ s.state }}" data-obj="sess:{{ s.id }}">
-      <div class="sess-h"><span class="sess-title">{{ s.title }}</span>
-        <span class="st {{ {'working': 'acc', 'waiting': 'warn', 'blocked': 'warn', 'done': 'ok', 'error': 'bad'}.get(s.state, '') }}"><span class="dot {{ {'working': 'acc', 'waiting': 'warn', 'blocked': 'warn', 'done': 'ok', 'error': 'bad'}.get(s.state, 'off') }}"></span>{{ s.state_title }}</span>
-        <span class="muted small nowrap">· {{ s.last | ago }}</span>
-        {% if s.link %}<a class="btn sm office-claude{{ ' primary' if s.state in ('waiting', 'blocked') }}" href="{{ s.link }}" title="Открыть эту сессию в приложении Claude">Открыть в Claude</a>{% endif %}</div>
-      {% if s.task %}<div class="small">По задаче <a href="/commitments?task={{ s.task.id }}">«{{ s.task.headline }}»</a></div>{% endif %}
-      {% if s.needs %}<div class="small warn-text">Нужно от вас: {{ s.needs }}</div>{% endif %}
-      {{ steps(s.steps, 5 if s.state == 'working' else 2) }}
-      {% if s.agents %}
-      <ul class="sess-agents">
-        {% for a in s.agents %}<li>{{ state(a.state, a.state_title) }} <span>{{ a.title }}</span>{% if a.kind %} <span class="muted small">{{ a.kind }}</span>{% endif %}{% if a.state == 'working' and a.steps %} <span class="muted small">— {{ a.steps[-1].t }}</span>{% endif %}</li>{% endfor %}
-      </ul>
-      {% endif %}
-      {% if s.files %}<div class="sess-files"><span class="muted small">Файлы:</span> {% for f in s.files %}{{ open_file(f) }}{% endfor %}</div>{% endif %}
-      <div class="muted small">{{ s.prompts }} {{ plural(s.prompts, 'вопрос', 'вопроса', 'вопросов') }} · {{ s.tools }} {{ plural(s.tools, 'действие', 'действия', 'действий') }}{% if s.model %} · {{ s.model | replace('claude-', '') }}{% endif %} · начата {{ s.first | local }}</div>
-    </div>
-    {% if loop.last and loop.length > 3 %}</details>{% endif %}
+<aside class="of-side" aria-label="PULSE в фоне">
+  <div class="of-h"><h2>PULSE в фоне</h2>{% if desks_busy %}<span class="c a">работают: {{ desks_busy }}</span>{% endif %}</div>
+  <div class="of-box">
+    {% for d in desks %}
+    <details class="of-desk {{ d.state }}" data-key="desk-{{ d.key }}">
+      <summary>
+        <span class="of-dot"></span>
+        <span class="of-dt"><b>{{ d.title }}</b>
+          <span class="of-m">{% if d.state == 'working' %}{{ d.current.what if d.current else 'работает' }}{% if d.detail %}, {{ d.detail }}{% endif %}
+            {%- elif d.state == 'queued' %}в очереди
+            {%- elif d.state == 'error' %}ошибка{% if d.last and d.last.result %}: {{ d.last.result | truncate(70, True, '…') }}{% endif %}
+            {%- elif d.archived or d.off %}{{ d.off }}
+            {%- elif d.next %}{{ d.next }}{% elif d.last %}{{ d.last.finished | ago }}{% else %}ещё не работал{% endif %}</span></span>
+      </summary>
+      <div class="of-desk-b">
+        <p class="sy-cap">{{ d.what }}</p>
+        {% if d.current and d.current.steps %}{{ steps(d.current.steps[-5:]) }}{% endif %}
+        {% if d.sources %}<ul class="sy-agents">{% for s in d.sources %}<li><span class="sy-st {{ 'run' if s.running else 'bad' if s.error else 'no' }}"><i></i><span>{{ s.title }}</span></span> <span class="sy-cap">{% if s.running %}забирает…{% elif s.error %}{{ s.error }}{% else %}{{ s.last | ago }}{% endif %}</span></li>{% endfor %}</ul>{% endif %}
+        {% if d.last %}<div class="of-last"><span class="sy-cap">Последний раз {{ d.last.finished | ago }}{% if d.last.duration %}, за {{ d.last.duration }}{% endif %}</span>
+          <div>{% if d.last.link %}<a href="{{ d.last.link }}">{{ d.last.title or d.last.what }}</a>{% else %}{{ d.last.title or d.last.what }}{% endif %}</div>
+          {% if d.last.text %}<div class="sy-cap">{{ d.last.text }}</div>{% endif %}</div>{% endif %}
+        {% if d.history | length > 1 %}<ul class="of-hist">{% for r in d.history[1:6] %}<li><span class="sy-cap">{{ r.started | local('%d.%m %H:%M') }}</span> {% if r.link %}<a href="{{ r.link }}">{{ r.title or r.what }}</a>{% else %}{{ r.title or r.what }}{% endif %}{% if r.status == 'error' %} <span class="bad-text">ошибка</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
+        {% if d.run or (d.link and not d.archived) or d.archived %}
+        <div class="of-acts">
+          {% for job, label in d.run %}<form class="inline" method="post" action="/jobs/run" data-busy="Запускаю…"><input type="hidden" name="name" value="{{ job }}"><button class="btn sm"{% if d.state in ('working', 'queued') %} disabled{% endif %}>{{ label }}</button></form>{% endfor %}
+          {% if d.link %}<a class="btn sm" href="{{ d.link[0] }}">{{ d.link[1] }}</a>{% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </details>
     {% endfor %}
   </div>
-</section>
-{% else %}
-<section class="card"><div class="card-b empty">За {{ snap.days }} дн. сессий Claude Code в этой папке не было.</div></section>
-{% endfor %}
-{% endif %}
-  </div>
-</section>
-{% endfor %}
+</aside>
+</div>

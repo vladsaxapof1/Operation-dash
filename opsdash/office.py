@@ -1,15 +1,16 @@
-"""Раздел «Офис»: кто из агентов Claude сейчас работает, что делает и что уже сделал.
+"""Раздел «Офис»: доска сессий агентов — что работает прямо сейчас, что ждёт вас, что закончилось.
 
-Офисы двух видов:
-- PULSE — фоновые задания по рабочим местам: секретарь разбирает сообщения, стенографист — встречи и т. д.
+Два источника:
+- PULSE в фоне — задания по рабочим местам: секретарь разбирает сообщения, стенографист — встречи и т. д.
   Каждый запуск задания пишется в agent_runs: шаги Claude по ходу («Читает расшифровку…») и итог со ссылкой —
   тот же, что в уведомлении в углу экрана (notices.summary);
-- папки, где вы сами работаете с Claude Code (Настройки → Офис). Их сессии PULSE читает из журналов
-  Claude Code: ~/.claude/projects/<папка>/<сессия>.jsonl, субагенты — <сессия>/subagents/agent-*.jsonl
-  и .meta.json рядом. Только читает: в сами папки ничего не ставит. Формат журналов Claude Code официально
-  не описан — что не разобрали, пропускаем молча; каждый раз дочитываем только дописанное. Сессии, начатые
-  в приложении Claude, открываются там же кнопкой «Открыть в Claude» (desktop_sessions); фоновые запуски
-  самого PULSE в офисы-папки не попадают — они уже в офисе PULSE.
+- папки, где вы сами работаете с Claude Code или Codex (Настройки → Офис) — доска (board). Сессии Claude Code
+  PULSE читает из журналов ~/.claude/projects/<папка>/<сессия>.jsonl, субагенты — <сессия>/subagents/agent-*.jsonl
+  и .meta.json рядом; Codex — opsdash.agents.codex_sessions. Только читает: в сами папки ничего не ставит. Формат
+  журналов официально не описан — что не разобрали, пропускаем молча; каждый раз дочитываем только дописанное.
+  Что сессия ждёт от вас и чем закончился ход, говорит приложение Claude (desktop_sessions); там же она и
+  открывается кнопкой «Открыть в Claude», начатая в терминале — «Продолжить в Терминале» (resume). Фоновые
+  запуски самого PULSE на доску не попадают — они в «PULSE в фоне».
 """
 
 from __future__ import annotations
@@ -17,13 +18,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
+import subprocess
+import sys
 import threading
 import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from opsdash import config, store
 
@@ -410,6 +414,8 @@ def desktop_sessions() -> dict[str, dict]:
             c = _desktop[key] = (mtime, str(d.get("cliSessionId") or ""), {
                 "id": str(d.get("sessionId") or ""), "archived": bool(d.get("isArchived")), "status": status,
                 "needs": str(summary.get("needs_action") or "")[:300] if status == "blocked" else "",
+                "detail": str(summary.get("status_detail") or "")[:300] if fresh else "",  # итог хода одной строкой
+                "title": str(d.get("title") or "").strip()[:200], "starred": bool(d.get("isStarred")),
                 "seen": (d.get("lastFocusedAt") or 0) >= (d.get("lastActivityAt") or 0) > 0})
         if c[1] and _DESKTOP_ID.match(c[2]["id"]):
             out[c[1]] = c[2]
@@ -419,7 +425,7 @@ def desktop_sessions() -> dict[str, dict]:
 def _blank() -> dict:
     return {"cwd": "", "entry": "", "title": "", "prompt": "", "first": None, "last": None, "turn": "", "pending": {},
             "steps": [], "tools": 0, "prompts": 0, "written": [], "touched": Counter(), "model": "", "agents": 0,
-            "first_prompt": "", "asks": [], "skills": [], "answer": ""}
+            "first_prompt": "", "asks": [], "skills": [], "answer": "", "asked": None}
 
 
 def _feed(s: dict, raw: bytes, sub: bool) -> None:
@@ -456,6 +462,7 @@ def _feed(s: dict, raw: bytes, sub: bool) -> None:
                     s["pending"].clear()
                 elif text and not text.startswith("<"):  # <command-name>, <system-reminder> — не вопрос человека
                     s["prompts"] += 1
+                    s["asked"] = at  # с этого вопроса идёт текущий ход
                     s["prompt"] = s["prompt"] or text[:300]
                     if s["prompts"] == 1:
                         s["first_prompt"] = text[:FIRST_PROMPT]
@@ -602,6 +609,16 @@ def _room(s: dict, root: Path) -> str:
     return rooms.most_common(1)[0][0] if rooms else ""
 
 
+_pulse_dirs: dict[str, bool] = {}
+
+
+def _pulse_home(path: str) -> bool:
+    """Папка — программа PULSE (другая установка или рабочая копия кода): её фоновые запуски Claude — служебные."""
+    if path not in _pulse_dirs:
+        _pulse_dirs[path] = (Path(path) / "opsdash" / "office.py").is_file()
+    return _pulse_dirs[path]
+
+
 def hidden(settings: dict) -> set[str]:
     """Проекты, которые в «Офисе» (и в опыте для поручений агенту) не показываем."""
     return {unicodedata.normalize("NFC", h.strip()).casefold() for h in settings["office"].get("hide") or [] if h.strip()}
@@ -624,136 +641,252 @@ def sessions(root: Path, since: float, hide: set[str] = frozenset(), wanted=None
         s = _session(journal)
         if not s or not (s["prompts"] or s["tools"]) or (store.parse_ts(s["last"]) or now).timestamp() < since:
             continue  # пустая или давняя: приложение Claude иногда дописывает в старые журналы служебное
-        if s["entry"].startswith("sdk") and _inside(s["cwd"] or cwd, str(config.APP_DIR)):
+        if s["entry"].startswith("sdk") and (_inside(s["cwd"] or cwd, str(config.APP_DIR)) or _pulse_home(s["cwd"] or cwd)):
             continue  # фоновые запуски самого PULSE (разбор сообщений, дайджесты, «Спросить Claude») — они в офисе PULSE
         room = _room(s, root)
+        if room == ".claude":
+            room = ""  # служебная папка проекта (рабочие копии, навыки) — это сам проект
         if room.casefold() in hide:
             continue
         yield journal, s, room
 
 
-def folder(path: str, settings: dict | None = None) -> dict:
-    """Офис в папке: сессии Claude Code за последние дни по проектам (папкам первого уровня)."""
-    settings = settings or config.load_settings()
-    root = config.resolve_path(path)
+# --- доска: открытые сессии агентов --------------------------------------------------------------
+
+LANES = {"now": "Работают", "you": "Ждут вас", "done": "Закончили"}
+FINISHED = ("completed", "review_ready")  # итог хода по оценке приложения Claude: готово или на проверку
+DISMISS_KEEP = timedelta(days=61)  # «Убрать» помним дольше, чем «Офис» вообще показывает сессии (до 60 дней)
+_WORKTREE = re.compile(r"[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)")
+
+
+def _turn_title(st: str, status: str, needs: str, stopped: bool) -> str:
+    """Состояние сессии словами — для строки на доске."""
+    if st == "working":
+        return "работает"
+    if needs:
+        return "нужно от вас"
+    if st == "blocked":
+        return "ждёт разрешения?"
+    if st == "waiting":
+        return "ответил, ждёт вас"
+    if status == "review_ready":
+        return "на проверку"
+    if status == "completed":
+        return "готово"
+    return "остановлена" if stopped else "не активна"
+
+
+def _first_line(text: str, limit: int = 220) -> str:
+    """Первая содержательная строка ответа агента — без разметки Markdown."""
+    for line in (text or "").splitlines():
+        line = re.sub(r"[*_`#>|]+", "", line).strip(" -—•")
+        if len(line) > 3:
+            return line if len(line) <= limit else line[:limit - 1].rstrip() + "…"
+    return ""
+
+
+def _day(ts: str | None, settings: dict) -> str:
+    """День последнего хода для группы «Закончили»: «Сегодня», «Вчера» или ДД.ММ."""
+    at = store.parse_ts(ts)
+    if not at:
+        return ""
+    local = at.astimezone(config.tz(settings)).date()
+    return {0: "Сегодня", 1: "Вчера"}.get((config.now(settings).date() - local).days) or f"{local:%d.%m}"
+
+
+def _card(journal: Path, s: dict, root: Path, room: str, mine: dict | None, now: datetime, tasks: dict,
+          settings: dict, engine: str = "claude", chatgpt: bool = False) -> dict:
+    """Сессия для доски: где идёт, в каком она состоянии, что сказала напоследок и что с ней можно сделать."""
+    from opsdash import agents
+
+    sid = agents._sid(journal)
+    subs = _subagents(journal, root, now) if engine == "claude" else []
+    st = _state(s, now)
+    if st != "working" and any(a["state"] == "working" for a in subs):
+        st = "working"
+    status = (mine or {}).get("status") or ""
+    seen = (mine or {}).get("seen", True)
+    if st == "waiting" and mine and (seen or status in FINISHED):
+        st = "rest"  # приложение знает лучше: всё готово или вы уже открывали сессию после ответа
+    needs = (mine or {}).get("needs") or ""
+    if st == "working":
+        lane = "now"
+    elif st in ("waiting", "blocked") or status == "blocked" or (status == "review_ready" and not seen):
+        lane = "you"
+    else:
+        lane = "done"
+    wt = _WORKTREE.search(s["cwd"] or "")
+    home = root / room if room else root
+    if engine == "codex":  # тред Codex открывает приложение ChatGPT; без него — Codex CLI в Терминале
+        link = f"codex://threads/{sid.removeprefix('codex-')}" if chatgpt else ""
+    else:
+        link = f"claude://code/continue?session={mine['id']}" if mine and not mine["archived"] else ""
+    title = (mine or {}).get("title") or s["title"] or (s["prompt"].splitlines()[0][:120] if s["prompt"] else "") \
+        or "Без названия"
+    started = store.parse_ts(s["asked"] or s["first"])
+    return {
+        "id": sid, "engine": engine, "title": title, "lane": lane, "state": st,
+        "state_title": _turn_title(st, status, needs, s["turn"] == "stopped"), "status": status, "seen": seen,
+        "starred": bool((mine or {}).get("starred")), "needs": needs,
+        "detail": (mine or {}).get("detail") or "", "said": _first_line(s["answer"]),
+        "step": s["steps"][-1]["t"] if s["steps"] else "", "steps": s["steps"][-8:],
+        "agents": subs, "agents_working": [a for a in subs if a["state"] == "working"],
+        "folder": root.name or str(root), "project": room or root.name or str(root), "room": room,
+        "key": f"{root.name}/{room}", "home": str(home), "cwd": s["cwd"] or str(home),
+        "worktree": wt.group(1) if wt else "",
+        "files": _files_view(s["written"], root, 6), "tools": s["tools"], "prompts": s["prompts"],
+        "model": (s["model"] or "").replace("claude-", ""), "first": s["first"], "last": s["last"],
+        "day": _day(s["last"], settings),
+        "since": _duration((now - started).total_seconds()) if st == "working" and started else "",
+        "link": link, "resume": not link and bool(s["cwd"]),
+        "task": tasks.get(sid), "headless": s["entry"].startswith("sdk") or s["entry"] == "codex-exec",
+    }
+
+
+def _cards(settings: dict) -> tuple[list[dict], int]:
+    """Все сессии в папках «Офиса» за последние дни (кроме архива приложения Claude) и сколько их в архиве."""
+    from opsdash import agents
+
     days = int(settings["office"].get("days") or 7)
     now = datetime.now(timezone.utc)
+    since = now.timestamp() - days * 86400
+    roots = [config.resolve_path(f) for f in settings["office"].get("folders") or []]
+    hide = hidden(settings)
     app = desktop_sessions()
-    from opsdash.agents import task_of_sessions
-
-    tasks = task_of_sessions()  # сессии, запущенные из «Поручить агенту»: пометка «по задаче «…»»
-    found = []
-    for journal, s, room in sessions(root, now.timestamp() - days * 86400, hidden(settings)):
-        agents = _subagents(journal, root, now)
-        st = _state(s, now)
-        if st != "working" and any(a["state"] == "working" for a in agents):
-            st = "working"
-        title = s["title"] or (s["prompt"].splitlines()[0][:90] if s["prompt"] else "Без названия")
-        mine = app.get(journal.stem)  # сессия из приложения Claude — её можно открыть там же ссылкой
-        link = f"claude://code/continue?session={mine['id']}" if mine and not mine["archived"] else ""
-        if st == "waiting" and mine and (mine["seen"] or mine["status"] in ("completed", "review_ready")):
-            st = "rest"  # приложение знает лучше: всё готово или вы уже открывали сессию после ответа
-        found.append({"id": journal.stem, "title": title, "room": room, "state": st, "state_title": STATES[st], "link": link,
-                      "needs": mine["needs"] if mine else "",
-                      "first": s["first"], "last": s["last"], "steps": s["steps"][-6:], "tools": s["tools"],
-                      "prompts": s["prompts"], "model": s["model"], "cwd": s["cwd"],
-                      "files": _files_view(s["written"], root), "agents": agents, "task": tasks.get(journal.stem)})
-    rooms: dict[str, list] = {}
-    for s in sorted(found, key=lambda x: x["last"] or "", reverse=True):
-        rooms.setdefault(s["room"], []).append(s)
-    out = []
-    for name, items in rooms.items():
-        home = root / name if name else root
-        passport = next((home / n for n in ("about project.md", "README.md") if (home / n).exists()), None)
-        out.append({"name": name or "Общее", "path": str(home), "passport": str(passport) if passport else "",
-                    "sessions": items, "working": sum(s["state"] == "working" for s in items)})
-    agents = [a for s in found for a in s["agents"]]
-    return {"name": root.name, "path": str(root), "exists": root.exists(), "days": days, "rooms": out,
-            "counts": {"sessions": len(found), "working": sum(s["state"] == "working" for s in found),
-                       "waiting": sum(s["state"] in ("waiting", "blocked") for s in found),
-                       "agents": len(agents), "agents_working": sum(a["state"] == "working" for a in agents),
-                       "tools": sum(s["tools"] for s in found)}}
+    tasks = agents.task_of_sessions()
+    chatgpt = agents.chatgpt_app()
+    gone = store.get_state("office_dismissed") or {}
+    cards, taken, archived = [], set(), 0
+    found = [(j, s, room, root, "claude") for root in roots for j, s, room in sessions(root, since, hide)]
+    found += [(j, s, room, root, "codex") for j, s, room, root in agents.codex_sessions(roots, since, hide)]
+    for journal, s, room, root, engine in found:
+        sid = agents._sid(journal)
+        if sid in taken:  # папки вложены друг в друга — сессию уже взяли
+            continue
+        taken.add(sid)
+        mine = app.get(journal.stem) if engine == "claude" else None
+        if mine and mine["archived"]:
+            archived += 1
+            continue
+        c = _card(journal, s, root, room, mine, now, tasks, settings, engine, chatgpt)
+        if c["headless"] and c["lane"] != "now":
+            continue  # запуск без человека (claude -p, codex exec): после работы ему ничего не нужно
+        c["dismissed"] = c["lane"] == "done" and bool(c["last"]) and gone.get(sid) == c["last"]
+        cards.append(c)
+    return cards, archived
 
 
-def offices(settings: dict | None = None) -> list[dict]:
-    """Вкладки раздела: PULSE и папки из настроек."""
+def _new_links(path: str, chatgpt: bool) -> dict:
+    """Ссылки «новая сессия в этой папке»: приложение Claude (вкладка Code) и, если есть, Codex в приложении ChatGPT."""
+    return {"claude": "claude://code/new?" + urlencode([("folder", path)], quote_via=quote),
+            "codex": "codex://threads/new?" + urlencode([("path", path)], quote_via=quote) if chatgpt else ""}
+
+
+def board(settings: dict | None = None, project: str = "") -> dict:
+    """Доска «Офиса»: сессии Claude Code и Codex в папках из настроек за последние дни — что работает, что ждёт
+    вас, что закончилось. Сессии из архива приложения Claude и убранные с доски (пока в них нет нового хода) не
+    показываем, только считаем. project — показать один проект (ключ «папка/проект»)."""
+    from opsdash import agents
+
     settings = settings or config.load_settings()
-    tabs = [{"key": "pulse", "title": "PULSE"}]
-    for i, p in enumerate(settings["office"].get("folders") or []):
-        tabs.append({"key": f"f{i}", "title": config.resolve_path(p).name or p, "path": p})
-    return tabs
+    cards, archived = _cards(settings)
+    chatgpt = agents.chatgpt_app()
+    projects: dict[str, dict] = {}
+    for c in cards:
+        p = projects.setdefault(c["key"], {"key": c["key"], "name": c["project"], "folder": c["folder"],
+                                           "path": c["home"], "now": 0, "you": 0, "done": 0, "last": "",
+                                           "new": _new_links(c["home"], chatgpt)})
+        if not c["dismissed"]:
+            p[c["lane"]] += 1
+        p["last"] = max(p["last"], c["last"] or "")
+    project = project if project in projects else ""
+    shown = [c for c in cards if not project or c["key"] == project]
+    lanes = {lane: [c for c in shown if c["lane"] == lane and not c["dismissed"]] for lane in LANES}
+    lanes["now"].sort(key=lambda c: c["last"] or "", reverse=True)
+    for lane in ("you", "done"):  # новое, чего вы ещё не открывали, — сверху
+        lanes[lane].sort(key=lambda c: (not c["seen"], c["last"] or ""), reverse=True)
+    order = sorted(projects.values(), key=lambda p: (p["you"], p["now"], p["last"]), reverse=True)
+    roots = [config.resolve_path(f) for f in settings["office"].get("folders") or []]
+    folders = [{"name": r.name or str(r), "path": str(r), "exists": r.exists(), "new": _new_links(str(r), chatgpt)}
+               for r in roots]
+    places = []  # «Новая сессия»: проекты, где работали недавно, потом сами папки «Офиса»
+    for p in sorted(projects.values(), key=lambda p: p["last"], reverse=True)[:8] + [f for f in folders if f["exists"]]:
+        if all(x["path"] != p["path"] for x in places):
+            places.append({"name": p["name"], "path": p["path"], "new": p["new"]})
+    return {"lanes": lanes, "titles": LANES, "projects": order, "project": project, "folders": folders, "places": places,
+            "days": int(settings["office"].get("days") or 7),
+            "counts": {**{lane: len(v) for lane, v in lanes.items()}, "archived": archived,
+                       "dismissed": sum(c["dismissed"] for c in shown),
+                       "unseen": sum(not c["seen"] for c in lanes["done"]), "all": sum(not c["dismissed"] for c in cards)}}
 
 
-def snapshot(key: str, settings: dict | None = None) -> dict:
-    """Всё, что показывает офис в одной вкладке настроек (и /api/office); scene — для картинки (static/office.js)."""
+def find_card(sid: str, settings: dict | None = None) -> dict | None:
+    """Сессия доски по номеру — для действий с ней (только из папок «Офиса»)."""
+    cards, _ = _cards(settings or config.load_settings())
+    return next((c for c in cards if c["id"] == sid), None)
+
+
+def dismiss(sid: str, settings: dict | None = None) -> dict:
+    """«Убрать» закончившую сессию с доски. Вернётся сама, как только в ней появится новый ход: помним, каким был
+    последний. В приложении Claude сессия остаётся как была."""
+    c = find_card(sid, settings)
+    if not c or c["lane"] != "done":
+        raise ValueError("Этой сессии уже нет среди закончивших")
+    cutoff = (datetime.now(timezone.utc) - DISMISS_KEEP).isoformat()
+    gone = {k: v for k, v in (store.get_state("office_dismissed") or {}).items() if (v or "") >= cutoff}
+    gone[sid] = c["last"]
+    store.set_state("office_dismissed", gone)
+    return c
+
+
+def restore() -> int:
+    """Вернуть на доску всё, что убрали. Сколько было убрано."""
+    n = len(store.get_state("office_dismissed") or {})
+    store.set_state("office_dismissed", {})
+    return n
+
+
+def resume(sid: str, settings: dict | None = None) -> str:
+    """«Продолжить в Терминале»: окно Терминала в папке сессии, в нём `claude --resume <сессия>` (Codex —
+    `codex resume <тред>`). Для сессий без ссылки в приложение: начатых в терминале. Отправляет вопросы человек."""
+    from opsdash import brain, codex
+
     settings = settings or config.load_settings()
-    tab = next((t for t in offices(settings) if t["key"] == key), None)
-    if not tab or key == "pulse":
-        snap = {"key": "pulse", "kind": "pulse", "name": "PULSE", "desks": pulse(settings)}
+    c = find_card(sid, settings)
+    if not c:
+        raise ValueError("Такой сессии нет в папках «Офиса»")
+    if c["engine"] == "codex":
+        exe, args = codex.find(settings), ["resume", sid.removeprefix("codex-")]
     else:
-        snap = {"key": key, "kind": "folder", **folder(tab["path"], settings)}
-    snap["scene"] = scene(snap)
-    return snap
+        exe, args = brain.find_claude(settings), ["--resume", sid]
+    if not exe:
+        raise ValueError(f"не нашла {'Codex CLI' if c['engine'] == 'codex' else 'Claude Code'} на этом компьютере")
+    if not Path(c["cwd"]).is_dir():
+        raise ValueError(f"папки сессии больше нет: {c['cwd']}")
+    _terminal(c["cwd"], [exe, *args])
+    return c["title"]
 
 
-def everything(settings: dict | None = None) -> list[dict]:
-    """Офис целиком: PULSE и папки из настроек — на одной картинке, списками под ней."""
-    settings = settings or config.load_settings()
-    return [snapshot(t["key"], settings) for t in offices(settings)]
-
-
-# --- картинка офиса -------------------------------------------------------------------------------
-
-SCENE_DESKS = 16           # столов офиса-папки на картинке; остальные сессии — в списке под ней
-SCENE_PER_ZONE = 4         # столов одного проекта
-SCENE_RECENT = timedelta(hours=24)  # на картинке — сессии за сутки; кто работает или ждёт ответа — всегда
-SAY = {"queued": "В очереди", "error": "Не получилось — нажмите", "waiting": "Жду ответа", "blocked": "Нужно разрешение?"}
-
-
-def scene(snap: dict) -> dict:
-    """Что рисует картинка офиса: столы, кто за ними и что говорит. Подробности — в карточках под ней
-    (id стола = data-obj карточки)."""
-    if snap["kind"] == "pulse":
-        desks = []
-        for d in snap["desks"]:
-            say = SAY.get(d["state"], "")
-            if d["state"] == "working":
-                steps = (d["current"] or {}).get("steps") or []
-                say = steps[-1]["t"] if steps else " — ".join(x for x in ((d["current"] or {}).get("what"), d["detail"]) if x)
-            desks.append({"id": f"desk:{d['key']}", "role": d["key"], "label": d["title"], "state": d["state"],
-                          "say": say, "hint": f"{d['title']}: {d['state_title']}"})
-        n = Counter(d["state"] for d in snap["desks"])
-        return {"kind": "pulse", "key": snap["key"], "name": "PULSE", "desks": desks,
-                "board": ["PULSE", f"работают: {n['working']}", f"в очереди: {n['queued']}", f"ошибок: {n['error']}"]}
-    rank = {"working": 0, "blocked": 1, "waiting": 2}
-    cutoff = datetime.now(timezone.utc) - SCENE_RECENT
-    sessions = [s for r in snap["rooms"] for s in r["sessions"]  # уже свежие сверху
-                if s["state"] in rank or (store.parse_ts(s["last"]) or cutoff) > cutoff]
-    shown = sorted(sessions, key=lambda s: rank.get(s["state"], 3))[:SCENE_DESKS]
-    ids = {s["id"] for s in shown}
-    zones = []
-    for i, r in enumerate(snap["rooms"]):
-        items = sorted((s for s in r["sessions"] if s["id"] in ids), key=lambda s: rank.get(s["state"], 3))
-        if items:
-            zones.append({"name": r["name"], "color": i, "desks": [_scene_session(s) for s in items[:SCENE_PER_ZONE]]})
-    c = snap["counts"]
-    more = c["sessions"] - sum(len(z["desks"]) for z in zones)
-    return {"kind": "folder", "key": snap["key"], "name": snap["name"], "zones": zones,
-            "board": [snap["name"][:18], f"работают: {c['working']}", f"ждут ответа: {c['waiting']}",
-                      f"субагенты: {c['agents_working']}", f"ещё в списке: {more}" if more else f"сессий: {c['sessions']}"]}
-
-
-def _scene_session(s: dict) -> dict:
-    agents = [a for a in s["agents"] if a["state"] == "working"]
-    say = SAY.get(s["state"], "")
-    if s["state"] == "working":
-        say = s["steps"][-1]["t"] if s["steps"] else "Работают субагенты" if agents else ""
-    elif s["state"] == "waiting" and s.get("needs"):
-        say = "Нужно от вас: " + s["needs"][:140]
-    return {"id": f"sess:{s['id']}", "label": s["title"][:32], "state": s["state"], "say": say,
-            "hint": f"{s['title']}: {s['state_title']}",
-            "agents": [{"label": a["title"][:32], "say": a["steps"][-1]["t"] if a["steps"] else ""} for a in agents[:2]],
-            "agents_more": max(0, len(agents) - 2)}
+def _terminal(folder: str, cmd: list[str]) -> None:
+    """Открыть окно терминала в папке и запустить в нём команду: Mac — файл .command, Windows — PowerShell."""
+    script = config.DATA_DIR / "office" / "resume"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        quoted = lambda x: "'" + str(x).replace("'", "''") + "'"  # noqa: E731
+        ps = script.with_suffix(".ps1")
+        ps.write_text(f"Set-Location -LiteralPath {quoted(folder)}\n& {' '.join(quoted(x) for x in cmd)}\n",
+                      encoding="utf-8-sig")  # Windows PowerShell читает UTF-8 только с BOM
+        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", str(ps)],
+                         creationflags=0x00000010)  # CREATE_NEW_CONSOLE
+        return
+    line = f"cd {shlex.quote(folder)} && {' '.join(shlex.quote(x) for x in cmd)}"
+    if sys.platform != "darwin":
+        raise ValueError(f"выполните в терминале: {line}")
+    command = script.with_suffix(".command")  # .command открывается в Терминале без лишних разрешений
+    command.write_text(f"#!/bin/bash\ncd {shlex.quote(folder)} || exit 1\nexec {' '.join(shlex.quote(x) for x in cmd)}\n",
+                       encoding="utf-8")
+    command.chmod(0o700)
+    subprocess.run(["open", str(command)], check=True, timeout=30)
 
 
 def can_open(path: str, settings: dict | None = None) -> bool:

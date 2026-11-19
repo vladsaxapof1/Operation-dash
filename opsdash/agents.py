@@ -169,10 +169,29 @@ def codex_titles() -> dict[str, str]:
     return out
 
 
+_codex: dict[str, tuple] = {}  # журнал Codex → ((размер, время), разбор): доска «Офиса» спрашивает каждые секунды
+
+
 def codex_session(journal: Path, titles: dict | None = None) -> dict | None:
     """Журнал Codex (rollout-*.jsonl) → разбор в том же виде, что у Claude Code (office._blank). Только сессии,
     которые начал человек: проверки-«guardian» и прочие субагенты — мимо. Формат официально не описан —
-    что не разобрали, пропускаем молча."""
+    что не разобрали, пропускаем молча. Неизменившийся журнал не перечитываем."""
+    try:
+        st = journal.stat()
+    except OSError:
+        return None
+    key, stamp = str(journal), (st.st_size, st.st_mtime)
+    c = _codex.get(key)
+    if not c or c[0] != stamp:
+        c = _codex[key] = (stamp, _codex_parse(journal))
+    s, meta_id = c[1] or (None, "")
+    if s is None:
+        return None
+    s["title"] = (titles if titles is not None else codex_titles()).get(meta_id, "")
+    return s
+
+
+def _codex_parse(journal: Path) -> tuple[dict, str] | None:
     s, meta = office._blank(), None
     try:
         f = journal.open(encoding="utf-8", errors="replace")
@@ -209,6 +228,7 @@ def codex_session(journal: Path, titles: dict | None = None) -> dict | None:
                         text = str((c or {}).get("text") or "").strip()
                         if text and not text.startswith("<"):  # <environment_context>, <external_context> — не человек
                             s["prompts"] += 1
+                            s["asked"] = at
                             s["prompt"] = s["prompt"] or text[:300]
                             if s["prompts"] == 1:
                                 s["first_prompt"] = text[:office.FIRST_PROMPT]
@@ -231,8 +251,7 @@ def codex_session(journal: Path, titles: dict | None = None) -> dict | None:
                         s["touched"][m.group(1)] += 1
     if not meta or meta.get("thread_source") != "user" or not isinstance(meta.get("source"), str):
         return None
-    s["title"] = (titles if titles is not None else codex_titles()).get(str(meta.get("id") or ""), "")
-    return s
+    return s, str(meta.get("id") or "")
 
 
 def codex_sessions(roots: list[Path], since: float, hide: set[str] = frozenset(), wanted=None):

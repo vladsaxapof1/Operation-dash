@@ -126,11 +126,11 @@
 {% elif tab == 'office' %}
 {#- ===== Офис ===== #}
 <form method="post" action="/settings/office" class="sy-form">
-  <section class="sy-sec" aria-label="Папки, где вы работаете с Claude Code">
-    {{ gh('Папки, где вы работаете с Claude Code', (settings.office.folders | length) ~ ' ' ~ plural(settings.office.folders | length, 'папка', 'папки', 'папок') ~ ' · у каждой свой open space в «Офисе»') }}
+  <section class="sy-sec" aria-label="Папки, где вы работаете с Claude Code и Codex">
+    {{ gh('Папки, где вы работаете с Claude Code и Codex', (settings.office.folders | length) ~ ' ' ~ plural(settings.office.folders | length, 'папка', 'папки', 'папок') ~ ', их сессии видны на доске «Офиса»') }}
     <div class="sy-card">
       <div class="sy-row top">
-        <div class="sy-lb"><label for="o-folders">Папки, по одной в строке</label><span>PULSE читает журналы сессий Claude Code на этом компьютере (.claude/projects в домашней папке): только читает, в сами папки ничего не ставит. Проекты это папки первого уровня внутри. Фоновые запуски самого PULSE в офис не попадают</span></div>
+        <div class="sy-lb"><label for="o-folders">Папки, по одной в строке</label><span>PULSE читает журналы сессий Claude Code и Codex на этом компьютере: только читает, в сами папки ничего не ставит. Проекты это папки первого уровня внутри, по ним на доске есть фильтр. Фоновые запуски самого PULSE на доску не попадают</span></div>
         <div class="sy-ct wide"><textarea id="o-folders" class="sy-mono" name="folders" rows="3" placeholder="~/Проекты">{{ settings.office.folders | join('\n') }}</textarea></div>
       </div>
     </div>
@@ -139,7 +139,7 @@
     {{ gh('Что показывать в Офисе', 'влияет только на раздел «Офис»') }}
     <div class="sy-card">
       <div class="sy-row top">
-        <div class="sy-lb"><label for="o-hide">Не показывать проекты</label><span>Имена папок, по одному в строке. Например, личную работу, если показываете офис коллегам</span></div>
+        <div class="sy-lb"><label for="o-hide">Не показывать проекты</label><span>Имена папок, по одному в строке. Например, личную работу, если показываете «Офис» коллегам</span></div>
         <div class="sy-ct"><textarea id="o-hide" name="hide" rows="2">{{ settings.office.hide | join('\n') }}</textarea></div>
       </div>
       {% call row('Показывать сессии за', 'Сессии старше уходят из «Офиса»', 'o-days') %}<div class="sy-ct"><input class="n" type="number" id="o-days" name="days" value="{{ settings.office.days }}" min="1" max="60"><span class="sy-u">дней</span></div>{% endcall %}

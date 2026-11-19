@@ -313,87 +313,144 @@ body.d3 .sy-form-src table.t td { border-color: var(--line); background: transpa
 body.d3 .sy-form-src .check-result.ok { color: var(--ok-text); }
 body.d3 .sy-form-src .check-result.bad { color: var(--bad-text); }
 
-/* ---------- Офис ---------- */
-body.d3 .sy-office { display: flex; flex-direction: column; gap: 20px; }
-body.d3 .sy-office .office-scene { margin: 0; display: flex; flex-direction: column; gap: 16px; }
-body.d3 .sy-office .office-scene-wrap { border-radius: 16px; background: var(--sunken); border: 1px solid var(--line); overflow: hidden; }
-body.d3 .sy-office .office-scene.off .office-scene-wrap { display: none; }
-body.d3 .sy-office .office-zoom-b { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--panel-2); color: var(--text-2); }
-body.d3 .sy-office .office-panel { background: var(--window); border-left: 1px solid var(--dlg-line); border-radius: 0; }
-body.d3 .sy-office .office-hint { color: var(--muted); font-size: 13px; background: var(--window); border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; }
-body.d3 .sy-sps { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
-body.d3 .sy-sp { display: inline-flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; box-sizing: border-box; border: 1px solid var(--line-card);
-  border-radius: 12px; background: var(--sunken); color: var(--text-2); min-width: 0; max-width: 100%; }
-body.d3 .sy-sp:hover { text-decoration: none; color: var(--text); border-color: var(--line-strong); }
-body.d3 .sy-sp.active { background: var(--panel-2); border-color: var(--line-strong); color: var(--text); }
-body.d3 .sy-sp b { font-weight: 500; white-space: nowrap; }
-body.d3 .sy-sp > span { font-size: 13px; color: var(--cap); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-body.d3 .sy-sp.add { background: transparent; border-style: dashed; color: var(--muted); }
-body.d3 .sy-sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
-body.d3 .sy-sh h2 { margin: 0; font-size: 18px; font-weight: 600; }
-body.d3 .sy-sh .p { font-size: 13px; color: var(--cap); font-family: ui-monospace, Menlo, Consolas, monospace; }
-body.d3 .sy-sh > span { font-size: 13px; color: var(--cap); }
-body.d3 .sy-office .office-group-b { display: flex; flex-direction: column; gap: 12px; }
-body.d3 .sy-box { border: 1px solid var(--line); border-radius: 16px; background: var(--sunken); overflow-x: auto; }
-body.d3 .sy-box table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; margin: 0; }
-body.d3 .sy-box th { text-align: left; font-weight: 400; font-size: 12px; color: var(--cap); padding: 10px 16px; border-bottom: 1px solid var(--line); background: transparent; }
-body.d3 .sy-box td { padding: 11px 16px; border-bottom: 1px solid var(--line); border-top: 0; vertical-align: middle; background: transparent; }
-body.d3 .sy-box tr:last-child td { border-bottom: 0; }
-body.d3 .sy-box tr:hover td { background: transparent; }
-body.d3 .sy-box td.nm { font-weight: 500; white-space: nowrap; }
-body.d3 .sy-box td.right { text-align: right; white-space: nowrap; }
-body.d3 .sy-box td.right .btn { width: 140px; }
-body.d3 .sy-box td form { margin: 0; }
-body.d3 .sy-tg { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; white-space: nowrap;
-  flex: none; background: var(--panel-2); color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-body.d3 .sy-tg > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-body.d3 .sy-tg.acc { background: var(--accent-soft); color: var(--accent); }
-body.d3 .sy-tg.warn { background: var(--warn-soft); color: var(--warn-text); }
-body.d3 .sy-tg.ok { background: var(--ok-soft); color: var(--ok-text); }
-body.d3 .sy-tg.bad { background: var(--bad-soft); color: var(--bad-text); }
-body.d3 .sy-hist { margin-top: 4px; font-size: 13px; }
-body.d3 .sy-hist > summary { cursor: pointer; color: var(--cap); font-size: 12px; }
-body.d3 .sy-hist ul { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; color: var(--text-2); }
-body.d3 .sy-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
-body.d3 .sy-room { min-width: 0; box-sizing: border-box; padding: 16px; border-radius: 16px; background: var(--sunken); border: 1px solid var(--line);
-  display: flex; flex-direction: column; gap: 12px; }
-body.d3 .sy-rh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-body.d3 .sy-rh h3 { margin: 0; font-size: 15px; font-weight: 600; flex: 1 1 160px; min-width: 0; }
-body.d3 .sy-rh h3 span { font-size: 13px; font-weight: 400; color: var(--muted); }
-body.d3 .sy-rh form { margin: 0; }
-body.d3 .sy-ss { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-card); min-width: 0; }
-body.d3 .sy-ss.sess-working { border-color: var(--acc-line-2); }
-body.d3 .sy-ss.sess-waiting, body.d3 .sy-ss.sess-blocked { border-color: var(--warn-line); }
-body.d3 .sy-ss-h { display: flex; align-items: flex-start; gap: 10px; }
-body.d3 .sy-ss-h b { flex: 1 1 0; min-width: 0; font-weight: 500; }
-body.d3 .sy-ss .m { font-size: 13px; color: var(--muted); }
-body.d3 .sy-need { padding: 10px 12px; border-radius: 10px; background: var(--warn-deep); border: 1px solid var(--warn-line); font-size: 14px; color: var(--text-2); }
-body.d3 .sy-need b { color: var(--warn-text); font-weight: 600; }
+/* ---------- Офис: доска сессий агентов (v3/office.html, v3/_office_body.html) ---------- */
+body.d3 .of { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+body.d3 .of-new .menu-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 300px; max-width: min(380px, calc(100vw - 32px)); }
+body.d3 .of-new-i { display: flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 4px 0 10px; font-size: 14px; color: var(--text-2); }
+body.d3 .of-new-i > span { flex: 1 1 auto; }
+body.d3 .of-new-l { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 13px; color: var(--accent); flex: none; }
+body.d3 .of-new-l:hover { background: var(--panel-2); text-decoration: none; }
+/* фильтр по проектам: прокручивается вбок, страница — нет */
+body.d3 .of-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-bottom: 20px; }
+body.d3 .of-chips::-webkit-scrollbar { display: none; }
+body.d3 .of-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-card);
+  background: var(--panel); color: var(--text-2); font-size: 13px; white-space: nowrap; flex: none; }
+body.d3 .of-chip:hover { text-decoration: none; border-color: var(--line-strong); color: var(--text); }
+body.d3 .of-chip.on { background: var(--text); border-color: var(--text); color: var(--bg); }
+body.d3 .of-chip .n { color: var(--cap); }
+body.d3 .of-chip .w { color: var(--warn-text); font-weight: 600; }
+body.d3 .of-chip .a { color: var(--accent); font-weight: 600; }
+body.d3 .of-chip.on .n, body.d3 .of-chip.on .w, body.d3 .of-chip.on .a { color: inherit; opacity: .75; }
+/* слева три очереди, справа PULSE в фоне */
+body.d3 .of-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+body.d3 .of-main { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+body.d3 .of-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+body.d3 .of-h { display: flex; align-items: baseline; gap: 10px; }
+body.d3 .of-h h2 { margin: 0; font-size: 16px; font-weight: 600; }
+body.d3 .of-h .c { font-size: 14px; color: var(--cap); }
+body.d3 .of-h .c.w { color: var(--warn-text); font-weight: 600; }
+body.d3 .of-h .c.a { color: var(--accent); }
+body.d3 .of-box { border-radius: 16px; background: var(--panel); border: 1px solid var(--line-card); overflow: hidden; }
+body.d3 .of-box.you { border-color: var(--warn-line); }
+body.d3 .of-box.now { border-color: var(--acc-line-2); }
+body.d3 .of-box details > summary { list-style: none; cursor: pointer; }
+body.d3 .of-box details > summary::-webkit-details-marker { display: none; }
+body.d3 .of-box details > summary:hover, body.d3 .of-box details[open] > summary { background: var(--panel-2); }
+body.d3 .of-box details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+body.d3 .of-t { font-weight: 500; font-size: 15px; color: var(--text); overflow-wrap: anywhere; }
+body.d3 .of-m { font-size: 13px; color: var(--cap); min-width: 0; }
+body.d3 .of-wt { display: inline-block; padding: 0 6px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 12px; line-height: 18px; }
+body.d3 .of-said { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+body.d3 .of-k { color: var(--warn-text); font-weight: 600; }
+/* ждут вас: просьба агента — главное на странице */
+body.d3 .of-ask { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 24px; align-items: center; padding: 16px 18px; }
+body.d3 .of-ask + .of-ask { border-top: 1px solid var(--line-card); }
+body.d3 .of-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+body.d3 .of-q { margin: 6px 0 0; font-size: 16px; line-height: 1.45; color: var(--text); max-width: 76ch; overflow-wrap: anywhere; }
+body.d3 .of-task { display: inline-block; margin-top: 6px; color: var(--accent); }
+body.d3 .of-ask-a { display: flex; flex-direction: column; gap: 6px; }
+body.d3 .of-ask-a form { margin: 0; }
+/* работают сейчас: живой шаг */
+body.d3 .of-run + .of-run { border-top: 1px solid var(--line-card); }
+body.d3 .of-run > summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 6px 20px; align-items: center; padding: 14px 18px; }
+body.d3 .of-rt, body.d3 .of-rs { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+body.d3 .of-live { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); min-width: 0; }
+body.d3 .of-live > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+body.d3 .of-live > i, body.d3 .of-desk.working .of-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--acc-dot); flex: none; animation: of-pulse 1.6s ease-out infinite; }
+@keyframes of-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acc-dot) 45%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+@media (prefers-reduced-motion: reduce) { body.d3:not(.motion-normal):not(.motion-fast) .of-live > i, body.d3:not(.motion-normal):not(.motion-fast) .of-desk.working .of-dot { animation: none; } }
+body.d3 .of-ra { display: inline-flex; align-items: center; gap: 2px; justify-content: flex-end; }
+body.d3 .of-ra form { margin: 0; display: inline-flex; }
+body.d3 .of-more-b { display: flex; flex-direction: column; gap: 10px; padding: 4px 18px 16px; }
+body.d3 .of-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.d3 .of-acts form { margin: 0; }
+body.d3 .of-acts .sy-cap { flex: 1 1 220px; }
+/* закончили: плотные строки по дням, новое — сверху */
+body.d3 .of-day { padding: 14px 18px 6px; font-size: 13px; color: var(--cap); }
+body.d3 .of-day + .of-row > summary { border-top: 0; }
+body.d3 .of-row > summary { display: grid; grid-template-columns: 8px minmax(0, 1.25fr) minmax(0, 1.4fr) 84px auto; gap: 14px; align-items: center;
+  padding: 9px 18px; border-top: 1px solid var(--line-card); }
+body.d3 .of-row:first-child > summary { border-top: 0; }
+body.d3 .of-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+body.d3 .of-row .of-dot { background: var(--accent); }
+body.d3 .of-row.seen .of-dot { background: transparent; }
+body.d3 .of-row .of-rt b { font-size: 14px; font-weight: 500; color: var(--text); }
+body.d3 .of-row.seen .of-rt b { font-weight: 400; color: var(--text-2); }
+body.d3 .of-rr { font-size: 13px; color: var(--text-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+body.d3 .of-rr .of-k { color: var(--text); font-weight: 500; }
+body.d3 .of-rtm { font-size: 13px; color: var(--cap); text-align: right; white-space: nowrap; }
+body.d3 .of-row .of-ra { opacity: .55; }
+body.d3 .of-row > summary:hover .of-ra, body.d3 .of-row > summary:focus-within .of-ra, body.d3 .of-row[open] .of-ra { opacity: 1; }
+@media (hover: none) { body.d3 .of-row .of-ra { opacity: 1; } }
+body.d3 .of-row .of-more-b { padding-left: 40px; }
+body.d3 .of-ghost { display: inline-flex; align-items: center; height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--muted);
+  font: inherit; font-size: 13px; cursor: pointer; }
+body.d3 .of-ghost:hover { background: var(--g-seg-on); color: var(--text); text-decoration: none; }
+body.d3 .of-rest > summary { padding: 12px 18px; border-top: 1px solid var(--line-card); color: var(--accent); font-size: 13px; }
+body.d3 .of-foot { margin: 0; font-size: 13px; color: var(--cap); }
+body.d3 .of-foot form { display: inline; margin: 0 8px 0 0; }
+body.d3 .of-link { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; }
+body.d3 .of-link:hover { text-decoration: underline; }
+body.d3 .of-empty { padding: 14px 18px; border-radius: 14px; border: 1px dashed var(--line-strong); color: var(--cap); font-size: 14px; }
+body.d3 .of-empty.big { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 24px; border-style: solid; border-color: var(--line-card);
+  background: var(--panel); color: var(--text-2); }
+body.d3 .of-empty.big b { font-size: 16px; font-weight: 600; color: var(--text); }
+/* PULSE в фоне: рабочие места одной колонкой, раскрываются */
+body.d3 .of-side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 16px; min-width: 0; }
+body.d3 .of-desk + .of-desk { border-top: 1px solid var(--line-card); }
+body.d3 .of-desk > summary { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 14px; }
+body.d3 .of-desk .of-dot { margin-top: 7px; background: var(--faint); }
+body.d3 .of-desk.error .of-dot { background: var(--bad); }
+body.d3 .of-desk.queued .of-dot { background: var(--warn); }
+body.d3 .of-desk.off .of-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--faint); }
+body.d3 .of-dt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+body.d3 .of-dt b { font-size: 14px; font-weight: 500; }
+body.d3 .of-dt .of-m { font-size: 12px; overflow-wrap: anywhere; }
+body.d3 .of-desk.error .of-dt .of-m { color: var(--bad-text); }
+body.d3 .of-desk-b { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px 32px; font-size: 14px; }
+body.d3 .of-desk-b p { margin: 0; }
+body.d3 .of-last { display: flex; flex-direction: column; gap: 2px; }
+body.d3 .of-hist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); }
+body.d3 .of-desk-b .btn.sm[disabled] { opacity: .5; }
+/* шаги, сделанные файлы, субагенты */
 body.d3 .sy-steps-l { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
-body.d3 .sy-steps-l li { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--text-2); }
+body.d3 .sy-steps-l li { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
 body.d3 .sy-steps-l li::before { content: ""; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: var(--ok-soft); border: 1.5px solid var(--ok-line); flex: none; margin-top: 2px; }
 body.d3 .sy-steps-l li.last::before { background: transparent; border-color: var(--acc-dot); box-shadow: inset 0 0 0 3px var(--window), inset 0 0 0 7px var(--acc-dot); }
 body.d3 .sy-files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 body.d3 .sy-files form { margin: 0; display: inline-flex; }
-body.d3 .sy-files .office-file, body.d3 .sy-fl { display: inline-flex; height: 22px; align-items: center; padding: 0 8px; border-radius: 6px; border: 0;
+body.d3 .sy-files .office-file { display: inline-flex; height: 22px; align-items: center; padding: 0 8px; border-radius: 6px; border: 0;
   background: var(--panel-2); font-size: 12px; color: var(--text-2); font-family: ui-monospace, Menlo, Consolas, monospace; cursor: pointer; max-width: 240px;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 body.d3 .sy-files .office-file:hover { color: var(--text); background: var(--g-seg-on); }
-body.d3 .sy-ss-ft { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line-card); }
-body.d3 .sy-ss-ft > span { flex: 1 1 200px; font-size: 13px; color: var(--cap); }
 body.d3 .sy-agents { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); }
-body.d3 .sy-office .office-more > summary { cursor: pointer; font-size: 13px; color: var(--accent); }
-body.d3 .sy-office .office-more[open] > summary { margin-bottom: 8px; }
-body.d3 .sy-office .room-rest { display: flex; flex-direction: column; gap: 12px; }
 body.d3 .sy-empty { padding: 16px; border-radius: 12px; border: 1px dashed var(--line-strong); color: var(--muted); font-size: 14px; }
-/* карточки сотрудников PULSE — скрыты, их копирует панель справа от картинки (office.js) */
-body.d3 .sy-office .office-panel .desk { background: transparent; border: 0; padding: 0; box-shadow: none; display: flex; flex-direction: column; gap: 12px; }
-body.d3 .sy-office .office-panel .desk-h { display: flex; align-items: flex-start; gap: 10px; }
-body.d3 .sy-office .office-panel .desk-title { font-size: 20px; font-weight: 600; }
-body.d3 .sy-office .office-panel .desk-now { padding: 14px 16px; border-radius: 12px; background: var(--acc-deep); border: 1px solid var(--acc-line); }
-body.d3 .sy-office .office-panel .desk-hist { border: 1px solid var(--line-card); border-radius: 12px; background: var(--panel); padding: 10px 14px; }
-body.d3 .sy-office .office-panel .desk-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); }
-body.d3 .sy-office .office-panel .desk-actions { display: flex; gap: 8px; margin-left: auto; }
+@media (max-width: 1100px) {
+  body.d3 .of-grid { grid-template-columns: minmax(0, 1fr); }
+  body.d3 .of-side { position: static; }
+}
+@media (max-width: 700px) {
+  body.d3 .of-ask { grid-template-columns: minmax(0, 1fr); }
+  body.d3 .of-ask-a { flex-direction: row; flex-wrap: wrap; }
+  body.d3 .of-q { font-size: 15px; }
+  body.d3 .of-run > summary { grid-template-columns: minmax(0, 1fr); }
+  body.d3 .of-run .of-ra { justify-content: flex-start; }
+  body.d3 .of-row > summary { grid-template-columns: 8px minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 16px; }
+  body.d3 .of-row .of-rr { grid-column: 2 / -1; grid-row: 2; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  body.d3 .of-row .of-ra { display: none; }
+  body.d3 .of-row .of-more-b { padding: 4px 16px 14px 36px; }
+  body.d3 .of-ask, body.d3 .of-run > summary { padding: 14px 16px; }
+}
 
 /* ---------- Навыки ---------- */
 body.d3 .sy-sk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
@@ -622,7 +679,6 @@ body.d3 .sy-act form { margin: 0; }
   body.d3 .sy-wz-pane { padding: 20px 16px; }
   body.d3 .sy-toc { display: none; }
   body.d3 .sy-sub { flex: 1 1 100%; }
-  body.d3 .sy-rooms { grid-template-columns: 1fr; }
   body.d3 .sy-dl { grid-template-columns: 1fr; gap: 2px; }
   body.d3 .sy-dl dd { margin-bottom: 8px; }
 }
