@@ -485,3 +485,112 @@ def test_cause_fragment_is_not_made_a_fact():
     r = memory.import_facts(batch(F("Отгрузки со склада перенесли на утро", because="Новые правила")))
     assert store.scalar("SELECT COUNT(*) FROM facts") == 1 and not r["causes"]
     assert len(r["hints"]) == 1 and "целой фразой" in r["hints"][0]
+
+
+# --- словарь псевдонимов и перевязка без блокировки базы (2.0.62) ------------------------------------------------
+
+def _plain_matcher():
+    """Словарь так, как его собирали до 2.0.62: «псевдоним1|псевдоним2|…», начало слова — в каждом. Эталон для сверки."""
+    import re
+
+    groups, parts, owner = {}, [], memory._owner_entity()
+    for e in memory._entity_rows():
+        if e["id"] == owner:
+            continue
+        for n, alias in enumerate(dict.fromkeys([e["name"], *e["aliases"]])):
+            pat = memory._alias_pattern(alias)
+            if pat:
+                groups[f"e{e['id']}_{n}"] = e["id"]
+                parts.append(f"(?P<e{e['id']}_{n}>{pat})")
+    return re.compile("|".join(parts)), groups
+
+
+def test_grouped_matcher_finds_exactly_what_plain_one_did():
+    records.upsert_person("Олег Петров", aliases=["Олег"])
+    memory.ensure_entity("Олег Петров")
+    memory.ensure_entity("Озон", "company", ["OZON", "Озон Селлер"])
+    memory.ensure_entity("ОРК", "project", ["отдел работы с клиентами"])
+    memory.ensure_entity("Склад", "project", ["складской учёт", "склад №2"])
+    memory.ensure_entity("Kaiten", "company", ["kaiten api"])
+    memory.ensure_entity("1С", "company", ["1С:Бухгалтерия"])
+    memory.ensure_entity("Ромашка", "company", ["ООО «Ромашка»"])
+    texts = [
+        "Спроси у Олега и у Олега Петрова про Озон, OZON и Озон-Селлер.",
+        "Складской учёт и склад №2: ОРК передал в отдел работы с клиентами.",
+        "kaiten api упал, Kaiten-карточка ждёт; в 1С:Бухгалтерии всё сходится, 1С обновили.",
+        "ООО «Ромашка» и ромашке, Ромашкой; не путать с ромашковым чаем и озоновым слоем.",
+        "Переозонирование, подсклад, олеговский — не должны находиться, как и раньше.",
+        "", None, "ё и е: Олёг — нет; ОРКестр — нет; орк — да.",
+    ]
+    old = _plain_matcher()
+    new = memory._matcher()
+    assert new[0] is not None and new[1] == old[1]
+    for t in texts:
+        assert memory.entities_in(t, matcher=new) == memory.entities_in(t, matcher=old), t
+        assert [m.lastgroup for m in new[0].finditer(memory.norm(t))] == \
+               [m.lastgroup for m in old[0].finditer(memory.norm(t))], t  # те же совпадения в том же порядке
+
+
+def test_full_relink_keeps_database_writable_while_matching(monkeypatch):
+    import sqlite3
+
+    from opsdash import config
+
+    records.upsert_person("Олег Петров", aliases=["Олег"])
+    memory.ensure_entity("Олег Петров")
+    memory.ensure_entity("Склад", "project")
+    meeting("m1", transcript="[00:01:00] Анна: спроси у Олега про склад\n[00:02:00] Анна: склад в марте\n")
+    recall.refresh()
+    before = store.rows("SELECT chunk_id, entity_id FROM chunk_entities ORDER BY 1, 2")
+    store.set_state("memory_dict_changed", "9999")  # словарь поменялся — перевязка всех фрагментов
+    writes = []
+    real = memory.entities_in
+
+    def probe(*texts, matcher=None):  # пока ищем совпадения, другой процесс (клик в интерфейсе) пишет без ожидания
+        c = sqlite3.connect(str(config.DB_FILE), timeout=0)
+        try:
+            c.execute("INSERT OR REPLACE INTO state(key, value) VALUES('probe', '1')")
+            c.commit()
+            writes.append("ok")
+        except sqlite3.OperationalError as e:
+            writes.append(str(e))
+        finally:
+            c.close()
+        return real(*texts, matcher=matcher)
+
+    monkeypatch.setattr(memory, "entities_in", probe)
+    memory.link_chunks()
+    assert writes and set(writes) == {"ok"}
+    assert store.rows("SELECT chunk_id, entity_id FROM chunk_entities ORDER BY 1, 2") == before and before
+
+
+def test_relink_skips_chunk_removed_meanwhile(monkeypatch):
+    memory.ensure_entity("Склад", "project")
+    meeting("m1", transcript="[00:01:00] Анна: склад в марте\n")
+    recall.refresh()
+    gone = store.scalar("SELECT MIN(chunk_id) FROM chunk_entities")
+    store.set_state("memory_dict_changed", "9999")
+    real = memory.entities_in
+
+    def drop_first(*texts, matcher=None):  # «Вспомнить» убрал фрагмент, пока шёл поиск
+        store.execute("DELETE FROM memory_chunks WHERE id=?", (gone,))
+        return real(*texts, matcher=matcher)
+
+    monkeypatch.setattr(memory, "entities_in", drop_first)
+    memory.link_chunks()
+    assert not store.scalar("SELECT COUNT(*) FROM chunk_entities c WHERE NOT EXISTS "
+                            "(SELECT 1 FROM memory_chunks m WHERE m.id=c.chunk_id)")
+
+
+def test_assistant_name_reads_settings_without_copy(monkeypatch):
+    from opsdash import brain, config
+
+    def no_copy():
+        raise AssertionError("подпись помощника не должна копировать настройки")
+
+    monkeypatch.setattr(config, "load_settings", no_copy)
+    assert brain.name() == "Claude"
+    monkeypatch.undo()
+    config.update_settings("ai", {"engine": "chatgpt"})
+    monkeypatch.setattr(config, "load_settings", no_copy)
+    assert brain.name() == "ChatGPT"  # смена в настройках видна сразу

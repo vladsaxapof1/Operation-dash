@@ -39,8 +39,9 @@ class BrainError(Exception):
 
 
 def engine(settings: dict | None = None) -> str:
-    """Кто сейчас работает в PULSE: claude или chatgpt."""
-    chosen = ((settings or config.load_settings()).get("ai") or {}).get("engine")
+    """Кто сейчас работает в PULSE: claude или chatgpt. Настройки только читаем — без копии: подпись «Claude» стоит
+    в каждом окне задачи, и копия всех настроек на каждую добавляла к странице «Задачи» ~40 мс (2.0.62)."""
+    chosen = ((settings or config._settings_shared()).get("ai") or {}).get("engine")
     return chosen if chosen in ENGINES else "claude"
 
 

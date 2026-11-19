@@ -329,7 +329,12 @@ def _dictionary_changed() -> None:
     store.set_state("memory_dict_changed", store.utcnow())
 
 
-def _alias_pattern(alias: str) -> str | None:
+_WORD_START = r"(?<!\w)"
+
+
+def _alias_body(alias: str) -> str | None:
+    """Шаблон псевдонима без проверки начала слова: первая буква в нём всегда буквально (слова — \\w+, re.escape
+    их не трогает), по ней _matcher раскладывает псевдонимы."""
     from opsdash import recall
 
     words = re.findall(r"\w+", norm(alias))
@@ -341,24 +346,35 @@ def _alias_pattern(alias: str) -> str | None:
             parts.append(re.escape(recall.stem(w)) + r"\w{0,3}")
         else:
             parts.append(re.escape(w))
-    return r"(?<!\w)" + r"\W{1,3}".join(parts) + r"(?!\w)"
+    return r"\W{1,3}".join(parts) + r"(?!\w)"
+
+
+def _alias_pattern(alias: str) -> str | None:
+    body = _alias_body(alias)
+    return _WORD_START + body if body else None
 
 
 def _matcher() -> tuple[re.Pattern | None, dict[str, int]]:
+    """Одно выражение на весь словарь. Прежде это было «псевдоним1|псевдоним2|…» с проверкой начала слова в каждом:
+    в каждой позиции текста движок перебирал все ~260 вариантов, и полная перевязка фрагментов шла полминуты
+    (2.0.62). Теперь начало слова проверяется один раз, а варианты разложены по первой букве — в позиции пробуются
+    только те, что с неё начинаются. Порядок внутри буквы прежний, поэтому совпадения те же, что раньше."""
     groups, owner = {}, _owner_entity()
-    parts = []
+    by_first: dict[str, list[str]] = {}
     for e in _entity_rows():
         if e["id"] == owner:  # директор — в каждом втором сообщении: связь со страницей ничего не даёт
             continue
         for n, alias in enumerate(dict.fromkeys([e["name"], *e["aliases"]])):
-            pat = _alias_pattern(alias)
-            if pat:
+            body = _alias_body(alias)
+            if body:
                 g = f"e{e['id']}_{n}"
                 groups[g] = e["id"]
-                parts.append(f"(?P<{g}>{pat})")
-    if not parts:
+                first = body[1] if body.startswith("\\") else body[0]
+                by_first.setdefault(first, []).append(f"(?P<{g}>{body})")
+    if not by_first:
         return None, {}
-    return re.compile("|".join(parts)), groups
+    alts = [f"(?={re.escape(ch)})(?:{'|'.join(parts)})" for ch, parts in by_first.items()]
+    return re.compile(_WORD_START + "(?:" + "|".join(alts) + ")"), groups
 
 
 def entities_in(*texts: str | None, matcher=None) -> set[int]:
@@ -387,17 +403,18 @@ def link_chunks() -> int:
         store.set_state("memory_linked_chunk", top)
         store.set_state("memory_linked_at", store.utcnow())
         return 0
-    n = 0
+    # совпадения ищем без открытой транзакции: раньше поиск шёл внутри записи, и всё это время PULSE не мог записать
+    # в базу ничего (клики в интерфейсе ждали по 30 с и падали «database is locked»). Пишем одной короткой транзакцией;
+    # фрагмент, который за это время убрал «Вспомнить», не связываем
+    rows = store.rows("SELECT id, title, text FROM memory_chunks" + ("" if full else " WHERE id > ?"),
+                      () if full else (last,))
+    pairs = [(r["id"], eid, r["id"]) for r in rows for eid in entities_in(r["title"], r["text"], matcher=(rx, groups))]
     with store.db() as conn:
         if full:
             conn.execute("DELETE FROM chunk_entities")
-            rows = conn.execute("SELECT id, title, text FROM memory_chunks").fetchall()
-        else:
-            rows = conn.execute("SELECT id, title, text FROM memory_chunks WHERE id > ?", (last,)).fetchall()
-        for r in rows:
-            for eid in entities_in(r["title"], r["text"], matcher=(rx, groups)):
-                conn.execute("INSERT OR IGNORE INTO chunk_entities(chunk_id, entity_id) VALUES(?,?)", (r["id"], eid))
-                n += 1
+        conn.executemany("INSERT OR IGNORE INTO chunk_entities(chunk_id, entity_id) SELECT ?, ? "
+                         "WHERE EXISTS (SELECT 1 FROM memory_chunks WHERE id=?)", pairs)
+    n = len(pairs)
     store.set_state("memory_linked_chunk", top)
     store.set_state("memory_linked_at", store.utcnow())
     return n
